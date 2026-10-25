@@ -213,7 +213,8 @@ impl Emitter<'_, '_> {
             "call ptr @imre_value_repr(i64 {word}, i32 {})",
             representation_kind(value.ty, &self.module.types)
         ));
-        self.check_error();
+        let failed = self.instruction(format!("icmp eq ptr {operand}, null"));
+        self.check_failed(&failed);
         self.owned(Value {
             ty: Type::Str,
             operand,
@@ -225,6 +226,23 @@ impl Emitter<'_, '_> {
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn repr_checks_for_failure_before_using_the_result() {
+        let source = "from collections import Counter\ncounts: Counter[int] = Counter()\ntry:\n    print(len(repr(counts)))\nexcept MemoryError:\n    print(0)\n";
+        let ir = compile(source, &CompileOptions::default()).unwrap();
+        let mut lines = ir
+            .lines()
+            .skip_while(|line| !line.contains(" = call ptr @imre_value_repr("));
+        let result = lines.next().unwrap().trim().split_once(" = ").unwrap().0;
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains(&format!("icmp eq ptr {result}, null"))
+        );
+        assert!(lines.next().unwrap().trim_start().starts_with("br i1 "));
+    }
 
     #[test]
     fn loop_record_replacement_requires_only_resource_free_field_stores() {

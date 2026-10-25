@@ -42,7 +42,10 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !block(&function.body, &functions, targets) {
+            if functions[id]
+                && !module.source_frames.get(id).is_some_and(Option::is_some)
+                && !block(&function.body, &functions, targets)
+            {
                 functions[id] = false;
                 changed = true;
             }
@@ -312,6 +315,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             entry: function(Vec::new()),
         };
         assert_eq!(analyze(&module).functions, [true, true, false, false]);
@@ -366,6 +370,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Return(integer())]),
@@ -426,6 +431,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -484,6 +490,7 @@ def conversion(values: list[str]) -> bool:
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),

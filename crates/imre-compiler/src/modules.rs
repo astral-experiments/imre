@@ -109,6 +109,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     Collections,
+    CollectionsNative,
     CollectionsAbc,
     Copy,
     Itertools,
@@ -252,6 +253,9 @@ pub(crate) enum Intrinsic {
     SysEncoding(&'static str),
     SysIntern { query: bool },
     SysException,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
@@ -300,6 +304,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     CodecLookup,
+    CodecGetWriter,
     CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
@@ -329,6 +334,7 @@ pub(crate) enum Intrinsic {
     OrderedDict,
     NamedTuple,
     Counter,
+    CountElements,
     Deque,
     Repeat,
     LengthHint,
@@ -420,7 +426,10 @@ impl IntrinsicModule {
     /// Ty resolves these builtin names solely against its bundled stdlib. Only
     /// the exact import proved by the closed checker needs an import diagnostic.
     pub(crate) fn lacks_builtin_stub(self) -> bool {
-        matches!(self, Self::Opcode | Self::StringFormatting)
+        matches!(
+            self,
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+        )
     }
 
     fn named(name: &str) -> Option<Self> {
@@ -472,6 +481,7 @@ impl IntrinsicModule {
             "importlib.machinery" => Some(Self::ImportlibMachinery),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
+            "_collections" => Some(Self::CollectionsNative),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
@@ -676,6 +686,9 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
+            (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
+            (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
@@ -793,6 +806,7 @@ impl IntrinsicModule {
 
                 _ => return None,
             }),
+            (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -822,9 +836,12 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
-            (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "_count_elements") => {
+                Intrinsic::CountElements
+            }
+            (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
-            (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -1157,6 +1174,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
+    /// Lowering checked this exact operand against the native integer protocol.
+    pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ArgumentType(argument));
+    }
+
     pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DeferredName(name));
     }
@@ -1191,6 +1214,12 @@ impl SourceGraph {
     /// Target headers decide whether an errno from-import succeeds or raises ImportError.
     pub(crate) fn checked_builtin_import(&self, module: ModuleId, alias: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
+    }
+
+    /// A sealed module exports this exact member even when typeshed omits it.
+    pub(crate) fn checked_builtin_attribute(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::BuiltinAttribute(name));
     }
 
     /// Record an integer access with a proved native indexing implementation.
@@ -2148,6 +2177,11 @@ impl<'a> Loader<'a> {
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        if module == IntrinsicModule::Collections
+                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
+                        {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
                     if module.lacks_builtin_stub()

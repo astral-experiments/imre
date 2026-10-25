@@ -31,6 +31,8 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 ```
 
 - `test_sys_exception_no_exception`: the complete method queries native handler state and compares the result to `None`. A separate program checks object identity across nested handlers, calls and handler exit.
+- `test_setrecursionlimit`: the complete unchanged method runs in Imre. It sets the limit to 10,005, checks the new value and both argument errors, then restores the original limit in its `finally` block. CPython runs the original `SysModuleTest` teardown.
+- `test_getrecursionlimit`: the complete body and assertions run in Imre. The native getter returns an integer greater than one and rejects the extra argument. The sys fixture checks the real class operand and requires two swapped-class assertions to fail while shared `assertIsInstance` is unavailable. CPython runs the original teardown. Separate native controls compare frame depth, unwinding and integer conversion against stock. `test_recursionlimit_recovery` still needs recursive source calls; `test_setrecursionlimit_to_depth` needs real frame depth, including `test.support.get_recursion_depth`'s `_getframe`/`f_back` fallback.
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
 - `test_intern`: the gate tries the complete native method before running the original parent with one child for string handles. Each call observes that same table, and the parent compares the returned identities. For the local class `S(str)`, the fixture compiles the original class and its `__hash__` in a separate child. At O0 and O3, four argument errors and five string identity or status checks reached Imre. The compiler rejected the original subclass before the tenth call. Both occurrences remain blocked.
 - `test_getdefaultencoding`: the complete method runs both the callable `assertRaises` and the result type assertion in Imre. CPython runs the original fixture and teardown. When the shared TestCase lacks `assertIsInstance`, the [encoding fixture](encoding_methods.py) checks the requested native class and compares its failure paths with CPython.
@@ -61,6 +63,7 @@ The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) e
 
 The [combined encoding run](https://github.com/astral-sh/imre/actions/runs/40223343057/job/121259456818) ran both original encoding methods and their assertions natively. CPython supplied their fixtures.
 The blocked `test_intern` rows retain the [intern run](https://github.com/astral-sh/imre/actions/runs/40179084540) on source `d583f2dd2cc78051c053d93d9765135dafaeb049`.
+The recursion-limit getter and setter also ran as complete native bodies under their original CPython fixtures. [Earlier Linux run](https://github.com/astral-sh/imre/actions/runs/40184296027)
 
 The 30 native operations in `test_implementation` were measured at `dc0ea48199b4afbef27eeeca5aeb4f85224acabe`. The metadata record exposes five PEP 421 fields with distinct native types. Arbitrary namespace attributes and the Python dictionary interface are not measured here.
 
@@ -86,6 +89,17 @@ Publish the commit to this repository, then supply its full SHA as the
 `sys_source` input. The job builds that commit and runs the same sys commands
 as pull request CI. Its `sys-evidence-linux` artifact records the tested Git
 commit and tree alongside both reports. Pull request checks run separately.
+
+## Native stack introspection
+
+`test_getframemodulename` remains blocked at native unittest equality between a
+string and an optional string; the later loop needs real frame objects and their
+`f_back` links. A [separate program](frame_names.py) and its [imported functions](frame_names_owner.py)
+compare native and stock module names for nested calls, index conversion and exception
+unwinding. They also alternate limits 2 and 3 across a named call and check the
+caller's module identity after each return or rejected entry. On [source 92c7e5e](https://github.com/astral-sh/imre/commit/92c7e5e5d447a5e02d6ab879c8ff48849da48696),
+all 20 output lines matched pinned CPython at O0 and O3. Each blocked occurrence
+records the separate control and zero operations in the unchanged method.
 
 ## Two process-boundary cases
 
