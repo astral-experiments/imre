@@ -2,6 +2,19 @@
 use super::Intrinsic;
 use crate::ir::FdOperation;
 
+/// Positional binding and protocol discovery use the same POSIX signature.
+pub(crate) fn credential_arity(name: &str) -> usize {
+    if name.starts_with("get") {
+        0
+    } else if name.starts_with("setres") {
+        3
+    } else if name.starts_with("setre") {
+        2
+    } else {
+        1
+    }
+}
+
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     if cfg!(unix) {
         let common = [

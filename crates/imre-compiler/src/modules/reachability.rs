@@ -28,6 +28,32 @@ struct References<'a> {
     found: &'a mut Reachable,
 }
 
+impl References<'_> {
+    /// Root an implicit index method only if argument binding can reach conversion.
+    fn invokes_index(&self, call: &ast::ExprCall) -> bool {
+        if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) =
+            self.graph.resolve(self.module, &call.func)
+        {
+            let arity = super::credential_arity(name);
+            return arity != 0
+                && call.arguments.keywords.is_empty()
+                && (call.arguments.args.len() == arity
+                    || call
+                        .arguments
+                        .args
+                        .iter()
+                        .any(|arg| matches!(arg, ast::Expr::Starred(_))));
+        }
+        matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "expandtabs")
+            && call.arguments.args.len() + call.arguments.keywords.len() == 1
+            && call
+                .arguments
+                .keywords
+                .first()
+                .is_none_or(|kw| kw.arg.as_deref() == Some("tabsize"))
+    }
+}
+
 impl<'a> Visitor<'a> for References<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         if !self
@@ -47,6 +73,14 @@ impl<'a> Visitor<'a> for References<'_> {
         {
             self.found.attributes.insert("__copy__".to_owned());
             self.found.instance_attributes.insert("__copy__".to_owned());
+        }
+        if let ast::Expr::Call(call) = expr
+            && self.invokes_index(call)
+        {
+            self.found.attributes.insert("__index__".to_owned());
+            self.found
+                .instance_attributes
+                .insert("__index__".to_owned());
         }
         if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
             && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
@@ -95,6 +129,25 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.instance_attributes.insert(name.clone());
                 self.found.attributes.insert(name);
             }
+        }
+        match self.graph.resolve(self.module, expr) {
+            Some(Binding::Intrinsic(Intrinsic::DocExecute)) => {
+                if let Some(runner) = self.graph.doctest_runner() {
+                    self.found.definitions.insert(runner);
+                }
+            }
+            Some(Binding::Module(_) | Binding::IntrinsicModule(_)) => {
+                if let Some(Binding::Definition(docs)) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|module| module.bundled && module.name == "doctest")
+                    .and_then(|module| module.bindings.get("_module_docs"))
+                {
+                    self.found.definitions.insert(*docs);
+                }
+            }
+            _ => {}
         }
         walk_expr(self, expr);
     }
@@ -257,7 +310,6 @@ impl Reachable {
                                     "__init__"
                                         | "__post_init__"
                                         | "__hash__"
-                                        | "__index__"
                                         | "__bool__"
                                         | "__fspath__"
                                         | "__iter__"

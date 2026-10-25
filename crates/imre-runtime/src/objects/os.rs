@@ -3,7 +3,7 @@
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
-use super::{Bytes, Int, Str};
+use super::{Bytes, Int, Str, c_int};
 use num_traits::ToPrimitive;
 use std::ffi::CString;
 use std::io;
@@ -136,19 +136,6 @@ unsafe fn directory_fd(fd: usize) -> Result<libc::c_int> {
             )
         })?
     })
-}
-
-// All C ints fit in the immediate representation. Heap integers cannot fit.
-pub(super) fn c_int(word: usize) -> Result<libc::c_int> {
-    (word & 1 != 0)
-        .then_some((word as i64) >> 1)
-        .and_then(|n| libc::c_int::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })
 }
 
 fn checked(ret: libc::c_int) -> Result<libc::c_int> {

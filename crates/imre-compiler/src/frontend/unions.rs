@@ -4,6 +4,49 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// Store a protocol operand once, then provide the test and exact values for
+    /// its two possible layouts. The caller assigns the operand to the returned slot.
+    pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
+            return None;
+        }
+        let slot = self.hidden(ty);
+        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+                },
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(self.local(slot))),
+                },
+            )
+        } else {
+            let members = self.types.members(ty).unwrap();
+            let project = |ty| Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+            };
+            (
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        vec![self.local(slot)],
+                    ),
+                },
+                project(members[0]),
+                project(members[1]),
+            )
+        };
+        Some((slot, test, first, second))
+    }
+
     /// Reads a proved member through explicit ownership-preserving projection.
     /// Optional members keep zero intact until a separate non-None proof exists.
     pub(super) fn read_local(&self, slot: usize) -> Expr {

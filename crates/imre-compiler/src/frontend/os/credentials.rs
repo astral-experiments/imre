@@ -8,17 +8,8 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         name: &'static str,
     ) -> Result<Expr, String> {
-        let getter = name.starts_with("get");
-        let size = if getter {
-            0
-        } else if name.starts_with("setres") {
-            3
-        } else if name.starts_with("setre") {
-            2
-        } else {
-            1
-        };
-        let returns = if !getter {
+        let size = crate::modules::credential_arity(name);
+        let returns = if size != 0 {
             Type::None
         } else if name.starts_with("getres") {
             self.types.tuple(vec![Type::Int; 3])
@@ -81,58 +72,30 @@ impl Checker<'_> {
         at: &ast::Expr,
         index_owner: Option<&str>,
     ) -> Result<Expr, String> {
-        let payload = self.types.payload(value.ty);
-        let variants = self.types.members(value.ty);
-        if payload.is_some() || variants.is_some() {
-            let slot = self.hidden(value.ty);
-            let mut cases = Vec::new();
-            if let Some(payload) = payload {
-                let condition = Expr {
+        if let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) {
+            let yes = self.credential_index(first, group, at, index_owner)?;
+            let mut no = self.credential_index(second, group, at, index_owner)?;
+            // Each additional layout needs its own type name in the converter's
+            // error; in particular, str | bytes | Path can reach its third arm.
+            for member in self.types.members(value.ty).into_iter().flatten().skip(2) {
+                let actual = self.local(slot);
+                let test = Expr {
                     ty: Type::Bool,
-                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(slot)]),
+                    kind: ExprKind::Builtin(
+                        Builtin::IsInstance(vec![ir::InstanceType::Exact(member)]),
+                        vec![actual.clone()],
+                    ),
                 };
-                cases.push((
-                    Some(condition),
-                    Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    },
-                ));
-                cases.push((
-                    None,
-                    Expr {
-                        ty: payload,
-                        kind: ExprKind::Unwrap(Box::new(self.local(slot))),
-                    },
-                ));
-            } else if let Some(types) = variants {
-                for (i, &ty) in types.iter().enumerate() {
-                    let condition = (i + 1 < types.len()).then(|| Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(
-                            Builtin::IsInstance(vec![ir::InstanceType::Exact(ty)]),
-                            vec![self.local(slot)],
-                        ),
-                    });
-                    cases.push((
-                        condition,
-                        Expr {
-                            ty,
-                            kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
-                        },
-                    ));
-                }
-            }
-            let mut arms = cases.into_iter().rev();
-            let (_, last) = arms.next().expect("a checked union has members");
-            let mut result = self.credential_index(last, group, at, index_owner)?;
-            for (condition, arg) in arms {
-                result = Expr {
+                let arm = Expr {
+                    ty: member,
+                    kind: ExprKind::Builtin(Builtin::UnionProject, vec![actual]),
+                };
+                no = Expr {
                     ty: Type::Int,
                     kind: ExprKind::Conditional(
-                        Box::new(condition.unwrap()),
-                        Box::new(self.credential_index(arg, group, at, index_owner)?),
-                        Box::new(result),
+                        Box::new(test),
+                        Box::new(self.credential_index(arm, group, at, index_owner)?),
+                        Box::new(no),
                     ),
                 };
             }
@@ -140,7 +103,10 @@ impl Checker<'_> {
                 ty: Type::Int,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Assign(slot, value)],
-                    value: Box::new(result),
+                    value: Box::new(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+                    }),
                     clear: vec![slot],
                 },
             });
