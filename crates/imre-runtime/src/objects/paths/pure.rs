@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
+use crate::objects::text::lowercase;
 
 pub(in crate::objects) struct PurePath {
     pub(super) windows: bool,
@@ -54,12 +55,19 @@ fn win_split(s: &str) -> (&str, &str, &str) {
     ("", "", s)
 }
 
+/// Normalize a Windows path comparison key with the same Unicode data as `str.lower()`.
+fn windows_lower(source: &str) -> Str {
+    lowercase(source).expect("failed to allocate lowercase Windows path")
+}
+
 fn win_join(raw: &[Rc<Str>]) -> String {
     let (mut drive, mut root, mut tail) = (String::new(), "", String::new());
     for part in raw {
         let input = part.replace('/', "\\");
         let (d, r, t) = win_split(&input);
-        if !r.is_empty() || (!d.is_empty() && d.to_lowercase() != drive.to_lowercase()) {
+        if !r.is_empty()
+            || (!d.is_empty() && d != drive && windows_lower(d) != windows_lower(&drive))
+        {
             if !d.is_empty() || drive.is_empty() {
                 drive = d.to_owned();
             }
@@ -248,7 +256,7 @@ impl PurePath {
 impl Storage {
     pub(in crate::objects) fn path_key(&self) -> &str {
         match self {
-            Self::PurePath(p) if p.windows => p.folded.get_or_init(|| p.text.to_lowercase()),
+            Self::PurePath(p) if p.windows => p.folded.get_or_init(|| windows_lower(&p.text)),
             _ => self.path(),
         }
     }
