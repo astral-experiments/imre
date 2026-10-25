@@ -9,8 +9,8 @@
   "distinct_ids": 81,
   "counts": {
     "fully-native": 6,
-    "host-driven-native-operation": 3,
-    "reference-only": 72
+    "host-driven-native-operation": 4,
+    "reference-only": 71
   },
   "records": [
     {"id": "test.test_copy.MiscTestCase.test__all__", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.MiscTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -64,7 +64,7 @@
     {"id": "test.test_copy.TestCopy.test_deepcopy_keepalive", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_list", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_list_subclass", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_copy.TestCopy.test_deepcopy_memo", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_copy.TestCopy.test_deepcopy_memo", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "copy.deepcopy on a list of integer lists", "native_calls": 1, "opt_level": 0, "method_sha256": "35e5c33f12ae279e41dfcdc022b8c1009bf7986cbaa6cedad2b921a2cfaa519c", "fixture": "CPython provides the original object graph. The native process returns integer values, both roots' identities, and every child reference.", "assertions": "All four original TestCase assertions execute against the rehydrated graph.", "calibration_rejections": {"return the input": "self.assertIsNot(y, x)", "share the input leaves": "self.assertIsNot(y[0], x[0])", "duplicate the shared child": "self.assertIs(y[0], y[1])"}}, "outcome": "pass", "classification": "host-driven-native-operation"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reduce", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reduce_ex", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reflexive_dict", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -106,8 +106,8 @@
   "distinct_ids": 81,
   "counts": {
     "fully-native": 6,
-    "host-driven-native-operation": 3,
-    "reference-only": 72
+    "host-driven-native-operation": 4,
+    "reference-only": 71
   },
   "records": [
     {"id": "test.test_copy.MiscTestCase.test__all__", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.MiscTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -161,7 +161,7 @@
     {"id": "test.test_copy.TestCopy.test_deepcopy_keepalive", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_list", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_list_subclass", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_copy.TestCopy.test_deepcopy_memo", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
+    {"id": "test.test_copy.TestCopy.test_deepcopy_memo", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "roles": {"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"}, "evidence": {"operation": "copy.deepcopy on a list of integer lists", "native_calls": 1, "opt_level": 3, "method_sha256": "35e5c33f12ae279e41dfcdc022b8c1009bf7986cbaa6cedad2b921a2cfaa519c", "fixture": "CPython provides the original object graph. The native process returns integer values, both roots' identities, and every child reference.", "assertions": "All four original TestCase assertions execute against the rehydrated graph.", "calibration_rejections": {"return the input": "self.assertIsNot(y, x)", "share the input leaves": "self.assertIsNot(y[0], x[0])", "duplicate the shared child": "self.assertIs(y[0], y[1])"}}, "outcome": "pass", "classification": "host-driven-native-operation"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reduce", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reduce_ex", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_copy.TestCopy.test_deepcopy_reflexive_dict", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_copy.TestCopy", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
