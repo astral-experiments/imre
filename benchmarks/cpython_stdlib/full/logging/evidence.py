@@ -21,6 +21,7 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_filters
 import native_formatters
+import native_hierarchy
 import native_levels
 import native_logging
 import native_records
@@ -148,6 +149,7 @@ def known_cases(toolchain, work, original):
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
+    executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
     executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
     executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))
