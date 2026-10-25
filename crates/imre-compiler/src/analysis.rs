@@ -682,8 +682,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
-/// already checked the exact open slots before requesting these diagnostics.
+/// ty 0.0.14 counts functools.Placeholder as occupied and can leave bound
+/// tuple fields open. Imre has already checked the exact remaining signature.
 /// The zero-argument constructor also has a native runtime TypeError. Match
 /// only the diagnosed invocation; unrelated binding errors remain diagnostics.
 fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
@@ -719,7 +719,8 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
         )
     };
     if is_partial(callee) {
-        return rule == "too-many-positional-arguments";
+        return rule == "too-many-positional-arguments"
+            || (rule == "missing-argument" && call.range() == range);
     }
     if !matches!(callee, Type::ClassLiteral(_)) {
         return false;

@@ -49,6 +49,27 @@ fn raised(ty: Type, mut arguments: Vec<Expr>, message: &str) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Retain each element of a tuple display without storing its callable in a public tuple.
+    fn partial_spread(
+        &mut self,
+        scope: &mut calls::ArgumentScope,
+        star: &ast::ExprStarred,
+    ) -> Result<Vec<Expr>, String> {
+        let ast::Expr::Tuple(tuple) = &*star.value else {
+            return scope.spread(self, star);
+        };
+        let mut fields = Vec::with_capacity(tuple.elts.len());
+        for item in &tuple.elts {
+            if let ast::Expr::Starred(nested) = item {
+                fields.extend(self.partial_spread(scope, nested)?);
+            } else {
+                let value = self.expr(item)?;
+                fields.push(scope.hold(self, value));
+            }
+        }
+        Ok(fields)
+    }
+
     /// The constructor accepts no arguments; ordinary operands are still evaluated before an error.
     pub(super) fn placeholder_call(
         &mut self,
@@ -108,10 +129,31 @@ impl Checker<'_> {
                 "partial requires named keyword operands",
             ));
         }
-        let Some((function, bound)) = call.arguments.args.split_first() else {
-            return self.partial_error(call, None, "type 'partial' takes at least one argument");
+        let mut scope = calls::ArgumentScope::default();
+        let mut operands = call.arguments.args.iter();
+        // The target can itself be the first item of an unpacked tuple.
+        let (function, callable, leading) = loop {
+            let Some(operand) = operands.next() else {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                return self.partial_error(
+                    call,
+                    scope,
+                    &[],
+                    None,
+                    "type 'partial' takes at least one argument",
+                );
+            };
+            if let ast::Expr::Starred(star) = operand {
+                let mut items = self.partial_spread(&mut scope, star)?.into_iter();
+                if let Some(first) = items.next() {
+                    break (operand, first, items.collect::<Vec<_>>());
+                }
+            } else {
+                break (operand, self.expr(operand)?, Vec::new());
+            }
         };
-        let callable = self.expr(function)?;
+        let bound = operands.as_slice();
         let Some((parameters, returns)) = self.types.signature(callable.ty) else {
             if matches!(
                 callable.ty,
@@ -130,6 +172,8 @@ impl Checker<'_> {
             ) {
                 return self.partial_error(
                     call,
+                    scope,
+                    bound,
                     Some(callable),
                     "the first argument must be callable",
                 );
@@ -140,19 +184,9 @@ impl Checker<'_> {
                 "partial requires a callable with a known signature",
             ));
         };
-        if bound.is_empty()
-            && call.arguments.keywords.is_empty()
-            && !matches!(returns, Type::Coroutine(_))
-        {
-            // The call interface is unchanged. An indirect wrapper with this same
-            // signature would appear to call itself in the closed target set.
-            return Ok(callable);
-        }
-
         // A known definition uses its direct ABI. For a bound method, capture
         // the receiver before any bound arguments; a dynamic target owns the
         // callable itself in position zero of the private, immutable frame.
-        let mut scope = calls::ArgumentScope::default();
         let mut captured = Vec::new();
         let (target, receiver) = match callable.kind {
             ExprKind::Callable { function, receiver } => {
@@ -168,13 +202,21 @@ impl Checker<'_> {
             }
         };
         let marker = Type::Placeholder(PlaceholderKind::Value);
-        let mut evaluated = Vec::with_capacity(bound.len());
-        for (index, arg) in bound.iter().enumerate() {
-            let value = match parameters.get(index) {
+        let mut evaluated: Vec<_> = leading.into_iter().map(|value| (value, function)).collect();
+        for arg in bound {
+            if let ast::Expr::Starred(star) = arg {
+                evaluated.extend(
+                    self.partial_spread(&mut scope, star)?
+                        .into_iter()
+                        .map(|value| (value, arg)),
+                );
+                continue;
+            }
+            let value = match parameters.get(evaluated.len()) {
                 Some(&ty) => self.expr_expected_or(arg, ty, Some(marker))?,
                 None => self.expr(arg)?,
             };
-            evaluated.push(scope.hold(self, value));
+            evaluated.push((scope.hold(self, value), arg));
         }
         let mut keyword_marker = false;
         for kw in &call.arguments.keywords {
@@ -182,7 +224,10 @@ impl Checker<'_> {
             keyword_marker |= value.ty == marker;
             scope.hold(self, value);
         }
-        let message = if evaluated.last().is_some_and(|value| value.ty == marker) {
+        let message = if evaluated
+            .last()
+            .is_some_and(|(value, _)| value.ty == marker)
+        {
             Some("trailing Placeholders are not allowed")
         } else if keyword_marker {
             Some("Placeholder cannot be passed as a keyword argument")
@@ -194,21 +239,26 @@ impl Checker<'_> {
             return Ok(scope.finish(raised(ty, vec![], message)));
         }
         self.reject_builtin_keywords(call)?;
-        if matches!(returns, Type::Coroutine(_)) || bound.len() > parameters.len() {
+        if matches!(returns, Type::Coroutine(_)) || evaluated.len() > parameters.len() {
             return Err(error(
                 self.source,
                 call,
                 "partial requires a synchronous target with enough positional parameters",
             ));
         }
+        if evaluated.is_empty() && matches!(target, Target::Indirect) {
+            // An indirect wrapper with this same signature would include itself in its
+            // closed target set. Retain the existing target after evaluating empty spreads.
+            return Ok(scope.finish(captured[0].clone()));
+        }
         let mut slots = Vec::with_capacity(parameters.len());
         let mut remaining = Vec::new();
         for (index, &ty) in parameters.iter().enumerate() {
-            if let Some(value) = evaluated.get(index)
+            if let Some((value, site)) = evaluated.get(index)
                 && value.ty != marker
             {
                 slots.push((true, captured.len(), ty));
-                captured.push(value.clone());
+                captured.push(self.coerce(value.clone(), ty, *site)?);
             } else {
                 remaining.push(ty);
                 slots.push((false, remaining.len(), ty));
@@ -290,21 +340,30 @@ impl Checker<'_> {
     fn partial_error(
         &mut self,
         call: &ast::ExprCall,
+        mut scope: calls::ArgumentScope,
+        bound: &[ast::Expr],
         callable: Option<Expr>,
         message: &str,
     ) -> Result<Expr, String> {
-        let skip = usize::from(callable.is_some());
-        let mut args = Vec::from_iter(callable);
-        for value in call.arguments.args[skip..]
-            .iter()
-            .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
-        {
-            args.push(self.expr(value)?);
+        if let Some(callable) = callable {
+            scope.hold(self, callable);
         }
-        Ok(raised(
+        for arg in bound {
+            if let ast::Expr::Starred(star) = arg {
+                self.partial_spread(&mut scope, star)?;
+            } else {
+                let value = self.expr(arg)?;
+                scope.hold(self, value);
+            }
+        }
+        for kw in &call.arguments.keywords {
+            let value = self.expr(&kw.value)?;
+            scope.hold(self, value);
+        }
+        Ok(scope.finish(raised(
             self.types.callable(vec![], Type::None),
-            args,
+            vec![],
             message,
-        ))
+        )))
     }
 }

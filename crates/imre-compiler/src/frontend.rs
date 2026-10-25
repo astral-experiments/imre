@@ -7762,6 +7762,9 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
+            return self.partial(call);
+        }
         if calls::starred(call) {
             match self.resolve(&call.func) {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
@@ -7967,7 +7970,6 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
                 return self.placeholder_call(
                     call,
