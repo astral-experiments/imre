@@ -19,6 +19,11 @@ control](observations/699212be/flags-linux.json) matched the pinned
 interpreter at O0 and O3 in both definition scopes, including evaluation order,
 integer overflow and invalid kernel flags. This control adds no upstream ID.
 
+The [tuple controls](observations/20a42eac/tuple-flags-linux.json) also check
+an empty tuple, one flag (including `__index__`), and two operands with visible
+side effects. All 81 output lines matched CPython in each mode on the combined
+pipe2 and iterator-repair source. Both original method reports were unchanged.
+
 The [verification](observations/699212be/verification-linux.json) identifies
 the compiler, runtime and 44 distinct original methods rerun at each level.
 Only the two POSIX rows above change; the denominators remain 375 OS, 179
