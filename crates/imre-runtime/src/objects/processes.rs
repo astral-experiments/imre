@@ -25,6 +25,7 @@ mod argv;
 mod asynchronous;
 mod launch_error;
 mod pass_fds;
+mod pipe_size;
 mod popen;
 pub(super) use asynchronous::AsyncProcess;
 pub(super) use popen::Popen;
@@ -421,6 +422,8 @@ struct ChildAttributes {
     group: libc::pid_t,
     mask: Option<libc::mode_t>,
     keep: Vec<RawFd>,
+    // Requested for the child's streams, but set on new pipes before fork.
+    pipe_capacity: Option<u32>,
 }
 
 impl Default for ChildAttributes {
@@ -430,6 +433,7 @@ impl Default for ChildAttributes {
             group: -1,
             mask: None,
             keep: Vec::new(),
+            pipe_capacity: None,
         }
     }
 }
@@ -632,10 +636,21 @@ impl Launch {
             .unwrap_or_else(|| &self.argv.strings[0]);
         let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
+        let mut parent_ends = [None, None, None];
+        let mut stdio = |index: usize, mode| {
+            if mode == 1
+                && let Some((parent, child)) =
+                    pipe_size::pair(attributes.pipe_capacity, index == 0)?
+            {
+                parent_ends[index] = Some(parent);
+                return Ok(child);
+            }
+            output(mode, descriptors[index])
+        };
         command
-            .stdin(output((streams >> 12) & 15, descriptors[0])?)
-            .stdout(output(streams & 15, descriptors[1])?)
-            .stderr(output(stderr, descriptors[2])?);
+            .stdin(stdio(0, (streams >> 12) & 15)?)
+            .stdout(stdio(1, streams & 15)?)
+            .stderr(stdio(2, stderr)?);
         let cwd = cwd.cloned();
         let inherited_pipe = if streams & (1 << 20) != 0 {
             let mut action = std::mem::MaybeUninit::uninit();
@@ -675,7 +690,18 @@ impl Launch {
                 )
             })
         };
-        command.spawn()
+        let mut child = command.spawn()?;
+        let [stdin, stdout, stderr] = parent_ends;
+        if let Some(fd) = stdin {
+            child.stdin = Some(fd.into());
+        }
+        if let Some(fd) = stdout {
+            child.stdout = Some(fd.into());
+        }
+        if let Some(fd) = stderr {
+            child.stderr = Some(fd.into());
+        }
+        Ok(child)
     }
 }
 

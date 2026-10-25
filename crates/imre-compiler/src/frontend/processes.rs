@@ -918,9 +918,15 @@ impl Checker<'_> {
             }
         }
         let child_options = params.len();
-        if ["process_group", "umask", "start_new_session", "pass_fds"]
-            .iter()
-            .any(|name| keyword(name).is_some())
+        if [
+            "process_group",
+            "umask",
+            "start_new_session",
+            "pass_fds",
+            "pipesize",
+        ]
+        .iter()
+        .any(|name| keyword(name).is_some())
         {
             streams |= 1 << 18; // native LaunchConfig includes the child settings trailer
             for (name, ty, default) in [
@@ -947,6 +953,16 @@ impl Checker<'_> {
                 kind: ParameterKind::KeywordOnly,
             });
         }
+        if keyword("pipesize").is_some() {
+            streams |= 1 << 21;
+            params.push(Parameter {
+                name: "pipesize".into(),
+                ty: Type::Int,
+                default: None,
+                sign_only: false,
+                kind: ParameterKind::KeywordOnly,
+            });
+        }
         if keyword("restore_signals").is_some() {
             // The emitter packs this final boolean into the existing stream word.
             streams |= 1 << 20;
@@ -961,6 +977,10 @@ impl Checker<'_> {
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index >= child_options {
                 let name = params[index].name.as_str();
+                if name == "pipesize" {
+                    // Popen validates the original value, including None and bool.
+                    return checker.expr(arg);
+                }
                 if name == "pass_fds" {
                     let value = checker.expr(arg)?;
                     let fd = |ty| matches!(ty, Type::Int | Type::Bool);

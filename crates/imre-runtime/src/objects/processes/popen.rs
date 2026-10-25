@@ -184,11 +184,20 @@ struct PassFdsConfig {
     kind: u32,
 }
 
+/// Bit 21 appends the original pipesize word and its exact representation.
+#[repr(C)]
+struct SizedPipeConfig {
+    pass: PassFdsConfig,
+    size: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
+    pipe_size: Option<(usize, u32)>,
 }
 
 /// # Safety
@@ -220,6 +229,11 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let pipe_size = (streams & (1 << 21) != 0).then(|| {
+                // SAFETY: bit 21 promises the complete sized pipe trailer.
+                let full = unsafe { &*config.cast::<SizedPipeConfig>() };
+                (full.size, full.kind)
+            });
             let keep = (streams & (1 << 19) != 0).then(|| {
                 // SAFETY: bit 19 promises the complete pass_fds trailer.
                 let full = unsafe { &*config.cast::<PassFdsConfig>() };
@@ -231,6 +245,7 @@ impl LaunchConfig {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
                 keep,
+                pipe_size,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
@@ -238,6 +253,7 @@ impl LaunchConfig {
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
                 keep: None,
+                pipe_size: None,
             }
         } else {
             LaunchExtras::default()
@@ -366,6 +382,10 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             Kind::ValueError,
             "STDOUT can only be used for stderr",
         ));
+    }
+    if let Some((word, kind)) = extras.pipe_size {
+        // SAFETY: the launch argument stays rooted until spawn returns.
+        child.pipe_capacity = unsafe { super::pipe_size::capacity(word, WordKind::new(kind)) }?;
     }
     if (streams >> 12) & 15 == 5 {
         return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
