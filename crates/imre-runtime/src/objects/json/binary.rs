@@ -56,8 +56,11 @@ fn decode(bytes: &Rc<Bytes>) -> Result<Cow<'_, str>, Error> {
         } else {
             format!("bytes in position {start}-{}", end - 1)
         };
-        Error::new(
-            Kind::UnicodeDecodeError,
+        Error::unicode_decode(
+            codec,
+            bytes.clone(),
+            start..end,
+            reason,
             format!("'{codec}' codec can't decode {location}: {reason}"),
         )
     };
@@ -131,6 +134,7 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::exceptions::{imre_error_take, imre_exception_repr};
 
     #[test]
     fn invalid_utf8_retains_the_original_bytes() {
@@ -139,5 +143,27 @@ mod tests {
         assert_eq!(Rc::strong_count(&bytes), 2);
         drop(error);
         assert_eq!(Rc::strong_count(&bytes), 1);
+    }
+
+    #[test]
+    fn wide_decode_error_retains_the_original_bytes() {
+        let bytes = Rc::new(vec![0xff, 0xfe, b'"', 0, 3]);
+        let original = Rc::downgrade(&bytes);
+        // SAFETY: bytes roots its exact runtime handle throughout the decode.
+        assert!(unsafe { imre_json_loads_bytes(Rc::as_ptr(&bytes)) }.is_null());
+        drop(bytes);
+        // SAFETY: take and repr each transfer one owner, and the exception stays rooted.
+        let (error, repr) = unsafe {
+            let error = Rc::from_raw(imre_error_take());
+            let repr = Rc::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            (error, repr)
+        };
+        assert_eq!(
+            repr.as_str(),
+            r#"UnicodeDecodeError('utf-16-le', b'\xff\xfe"\x00\x03', 4, 5, 'truncated data')"#
+        );
+        assert!(original.upgrade().is_some());
+        drop(error);
+        assert!(original.upgrade().is_none());
     }
 }

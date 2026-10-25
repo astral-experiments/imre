@@ -878,6 +878,49 @@ pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
         .filter_map(move |(name, _)| seen.insert(name).then_some(name))
 }
 
+/// Collect the first occurrence of each key in insertion order. Typed
+/// mapping iteration returns strings; unknown JSON containers yield views.
+fn collect_keys<const STRINGS: bool>(fields: &ObjectFields) -> Result<*const Object, Error> {
+    let mut items = Words::new(if STRINGS { 3 } else { 5 });
+    let mut seen = std::collections::HashSet::new();
+    for (name, _) in fields.iter() {
+        if seen.contains(name) {
+            continue;
+        }
+        seen.try_reserve(1).map_err(|_| Error::allocation())?;
+        seen.insert(name);
+        items
+            .values
+            .try_reserve(1)
+            .map_err(|_| Error::allocation())?;
+        let owner = fields.owner(name)?;
+        items.values.push(if STRINGS {
+            Rc::into_raw(owner) as usize
+        } else {
+            View::single(Node::String(owner)).into_handle() as usize
+        });
+    }
+    Ok(Rc::into_raw(items.into_object()))
+}
+
+/// # Safety
+/// The caller roots an immutable JSON object view whose keys are strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_object_keys(value: *const Object) -> *const Object {
+    // SAFETY: the source is a rooted JSON view. Array element types can
+    // be projected lazily, so check the mapping before exposing string keys.
+    let result = unsafe {
+        with_view(value, |view| match &view.nodes[view.index] {
+            Node::Object(fields) => collect_keys::<true>(fields),
+            node => Err(Error::new(
+                Kind::TypeError,
+                format!("expected dict, got {} from JSON", node.kind()),
+            )),
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
 /// # Safety
 /// The caller roots the checked document. Iteration transfers an owned list.
 #[unsafe(no_mangle)]
@@ -889,18 +932,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
-                Node::Object(fields) => {
-                    for name in keys(fields) {
-                        items
-                            .values
-                            .try_reserve(1)
-                            .map_err(|_| Error::allocation())?;
-                        let key = fields.owner(name)?;
-                        items
-                            .values
-                            .push(View::single(Node::String(key)).into_handle() as usize);
-                    }
-                }
+                Node::Object(fields) => return collect_keys::<false>(fields),
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
                     View::single(Node::String(Rc::new(Str::new(ch.encode_utf8(&mut [0; 4])))))
                         .into_handle() as usize
