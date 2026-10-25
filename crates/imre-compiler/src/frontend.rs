@@ -52,6 +52,7 @@ mod sys;
 mod text;
 mod timed_handlers;
 mod truthiness;
+mod unbound_locals;
 mod unions;
 mod unpacking;
 mod zip_sums;
@@ -331,8 +332,11 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
-    if name == "NotImplementedError" {
-        return Some(37);
+    match name {
+        "NotImplementedError" => return Some(37),
+        "NameError" => return Some(39),
+        "UnboundLocalError" => return Some(40),
+        _ => {}
     }
     if name == "StopIteration" {
         return Some(35);
@@ -1629,6 +1633,7 @@ struct Checker<'a> {
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
     nullable_assignments: HashMap<String, Type>,
+    bound_flags: HashMap<String, usize>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
@@ -1684,6 +1689,7 @@ impl<'a> Checker<'a> {
             captured_process_errors: Vec::new(),
             returns: Type::None,
             nullable_assignments: HashMap::new(),
+            bound_flags: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
@@ -3154,6 +3160,20 @@ impl<'a> Checker<'a> {
         if self.block_depth == 0 && !self.module_scope {
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
+            let mut names: Vec<_> = unbound_locals::candidates(statements).into_iter().collect();
+            names.sort_unstable();
+            for name in names {
+                // Arguments enter already bound; deletion and nonordinary stores were excluded.
+                if self
+                    .names
+                    .get(&name)
+                    .is_some_and(|slot| self.assigned.contains(slot))
+                {
+                    continue;
+                }
+                let flag = self.hidden(Type::Bool);
+                self.bound_flags.insert(name, flag);
+            }
         }
         self.block_depth += 1;
         let mut body = Vec::new();
@@ -3212,6 +3232,17 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let (mut lowered, continues) = self.statement(statement)?;
             self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
+            if let Some(flag) =
+                unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
+            {
+                lowered.push(Statement::Assign(
+                    *flag,
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(true),
+                    },
+                ));
+            }
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -4361,6 +4392,9 @@ impl<'a> Checker<'a> {
                 }
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
+                    if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
+                        return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
+                    }
                     return Err(error(
                         self.source,
                         expression,
