@@ -710,6 +710,17 @@ impl Error {
         }
     }
 
+    /// Installs a constant diagnostic, preserving a catchable error if either owner cannot grow.
+    pub(crate) fn return_static_message<T>(kind: Kind, message: &'static str, sentinel: T) -> T {
+        let error = StrOwner::try_new(Str::const_new(message))
+            .and_then(|message| {
+                crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
+            })
+            .unwrap_or_else(|_| Self::memory_error().into_object());
+        replace_pending(Some(error));
+        sentinel
+    }
+
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
     pub(crate) fn memory_error() -> Self {
         Self {
@@ -964,7 +975,11 @@ fn exception_with_cause(
     payload: Payload,
     cause: Option<crate::ObjectOwner>,
 ) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(Exception {
+    crate::ObjectOwner::new(exception_object(kind, payload, cause))
+}
+
+fn exception_object(kind: Kind, payload: Payload, cause: Option<crate::ObjectOwner>) -> Object {
+    Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         payload,
         suppress_context: cause.is_some(),
@@ -974,7 +989,7 @@ fn exception_with_cause(
                 ..Default::default()
             })
         }),
-    }))))
+    })))
 }
 
 pub(super) fn kind_of(error: &Object) -> Kind {
