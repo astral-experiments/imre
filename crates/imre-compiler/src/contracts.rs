@@ -225,6 +225,11 @@ impl Builtin {
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
+                        | crate::ir::LogOperation::LockAcquire
+                        | crate::ir::LogOperation::LockAcquireInt
+                        | crate::ir::LogOperation::LockEnter
+                        | crate::ir::LogOperation::LockExit
+                        | crate::ir::LogOperation::LockRelease
                 ),
                 PreservesLists,
             ),
@@ -875,6 +880,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"
+                | "imre_log_lock_acquire"
+                | "imre_log_lock_acquire_int"
+                | "imre_log_lock_enter"
+                | "imre_log_lock_exit"
+                | "imre_log_lock_release"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_unquote"
