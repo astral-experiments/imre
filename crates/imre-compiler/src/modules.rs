@@ -903,6 +903,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ArgumentType(argument));
     }
 
+    /// This keyword names a positional-only parameter and native lowering raises TypeError.
+    pub(crate) fn checked_positional_only_keyword(&self, module: ModuleId, keyword: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PositionalOnlyKeyword(keyword));
+    }
+
     pub(crate) fn checked_keywords(
         &self,
         module: ModuleId,

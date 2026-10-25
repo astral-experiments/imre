@@ -161,6 +161,12 @@ impl Checker<'_> {
         if !args.keywords.is_empty() {
             self.graph
                 .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+            for keyword in &args.keywords {
+                if keyword.arg.as_deref() == Some("limit") {
+                    self.graph
+                        .checked_positional_only_keyword(self.module, keyword.range());
+                }
+            }
             if args.args.is_empty() {
                 self.graph
                     .checked_missing_argument(self.module, call.range());
