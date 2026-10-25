@@ -584,6 +584,19 @@ pub unsafe extern "C" fn imre_async_permit(handle: *const Object, acquire: bool)
     }
 }
 
+/// Keeps the partial gather output on success and releases its only owner on failure.
+///
+/// # Safety
+/// `output` transfers one exact list owner when `status` is zero.
+unsafe fn finish_gather_append(output: *const (), status: i32) -> bool {
+    if status != 0 {
+        return true;
+    }
+    // SAFETY: gather has not transferred or registered this fresh output owner.
+    unsafe { imre_object_release(output.cast()) };
+    false
+}
+
 /// # Safety
 /// The input list roots typed task handles, all returning the same kind. For
 /// a closed record/exception union, success is tag 4 and error is tag 3.
@@ -658,12 +671,18 @@ pub unsafe extern "C" fn imre_async_gather(
         };
         // SAFETY: the outcome roots its word and the exact list acquires a
         // reference for the returned sequence before that owner is released.
-        unsafe {
+        let status = unsafe {
             if kind == 2 {
                 crate::imre_list_append(output.cast(), word);
+                1
             } else {
-                imre_seq_append(output.cast(), word, kind);
+                imre_seq_append(output.cast(), word, kind)
             }
+        };
+        // SAFETY: output still owns every element acquired so far. Failure consumes
+        // that one partial owner while preserving the pending allocation error.
+        if unsafe { !finish_gather_append(output, status) } {
+            return std::ptr::null();
         }
     }
     output
@@ -680,4 +699,27 @@ pub unsafe extern "C" fn imre_async_cancel(handle: *const Object) -> u32 {
     }
     task.cancelled.set(true);
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_gather_append_releases_partial_output() {
+        let text = Rc::new(Str::new("owned by the partial result"));
+        // SAFETY: the exact list and string remain rooted until failure consumes
+        // the list's only raw owner.
+        unsafe {
+            let output = Rc::<Object>::from_raw(imre_seq_new(3));
+            assert_eq!(
+                imre_seq_append(Rc::as_ptr(&output), Rc::as_ptr(&text) as usize, 3),
+                1,
+            );
+            assert_eq!(Rc::strong_count(&text), 2);
+            let output: *const () = Rc::into_raw(output).cast();
+            assert!(!finish_gather_append(output, 0));
+        }
+        assert_eq!(Rc::strong_count(&text), 1);
+    }
 }

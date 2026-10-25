@@ -13,6 +13,7 @@ pub(super) struct Field {
     ready: usize,
     value: usize,
     ty: Type,
+    pub(super) shared: Option<class_data::Shadow>,
 }
 
 pub(super) type Slots = Vec<HashMap<String, Field>>;
@@ -191,14 +192,42 @@ pub(super) fn slots(
             }) {
                 continue;
             }
+            // A setup write and an ordinary instance write must publish the same
+            // value. A base helper can also read a sibling without a default.
+            let mut ty = ty;
+            let mut overlaps = false;
+            for &id in group {
+                let Some(crate::classes::ClassValue::Runtime { owner, ordinal }) =
+                    classes.definitions[id].static_bindings.get(name)
+                else {
+                    continue;
+                };
+                overlaps = true;
+                let ast::Stmt::Assign(assign) =
+                    &classes.definitions[classes.ids[owner]].node.body[*ordinal]
+                else {
+                    unreachable!()
+                };
+                if let Some(default) =
+                    value_type(graph, owner.module, classes, types, &assign.value)
+                {
+                    if ty == Type::None || types.payload(default) == Some(ty) {
+                        ty = types.optional(default);
+                    } else if default == Type::None {
+                        ty = types.optional(ty);
+                    }
+                }
+            }
+            let shared = overlaps.then(|| class_data::Shadow::new(end, end + 1, ty, types));
             let field = Field {
                 ready: end,
                 value: end + 1,
                 ty,
+                shared,
             };
             for &id in group {
                 fields[id].resize(end, Type::Bool);
-                fields[id].extend([Type::Bool, ty]);
+                fields[id].extend([Type::Bool, if overlaps { types.optional(ty) } else { ty }]);
                 slots[id].insert(name.to_owned(), field);
             }
             end += 2;
@@ -270,7 +299,12 @@ impl Checker<'_> {
                     Statement::Assign(object, receiver),
                     Statement::If(
                         load(field.ready, Type::Bool),
-                        vec![Statement::Assign(result, load(field.value, field.ty))],
+                        vec![Statement::Assign(
+                            result,
+                            field
+                                .shared
+                                .map_or_else(|| load(field.value, field.ty), |s| s.payload(&local)),
+                        )],
                         vec![missing],
                     ),
                 ],
@@ -288,7 +322,13 @@ impl Checker<'_> {
         field: Field,
     ) -> Result<Statement, String> {
         let value = self.coerce(value, field.ty, at)?;
-        let (rhs, object) = (self.hidden(field.ty), self.hidden(receiver.ty));
+        let stored = if field.shared.is_some() {
+            self.types.optional(field.ty)
+        } else {
+            field.ty
+        };
+        let value = self.coerce(value, stored, at)?;
+        let (rhs, object) = (self.hidden(stored), self.hidden(receiver.ty));
         Ok(Statement::Scope {
             body: vec![
                 Statement::Assign(rhs, value),

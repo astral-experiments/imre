@@ -63,6 +63,14 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -155,6 +163,9 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
             }
@@ -172,6 +183,22 @@ impl Checker<'_> {
         }
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
+        }
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
@@ -515,6 +542,17 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {

@@ -144,7 +144,12 @@ def main():
                     return name, False, proof
                 check_result([sys.executable, "-I", "-B", path / "case.py"], owner, fn)
                 check_result([binary], owner, fn)
-                if owner in ("FilterTestCase", "FilterFalseTestCase") and fn != "test_mix_bytes_str":
+                if fn == "test_mix_bytes_str":
+                    # Make the first call accept its pattern: the original assertRaises must fail.
+                    wrong = entry.replace(b", b'*')", b", '*')", 1)
+                    assert wrong != entry
+                    check_result([tool.build(wrong, path)], owner, fn, wrong=True)
+                elif owner in ("FilterTestCase", "FilterFalseTestCase"):
                     # Swap the public operations while leaving the original assertions intact.
                     wrong = entry.replace(b"translate, filter, filterfalse\n",
                                           b"translate, filterfalse as filter, filter as filterfalse\n", 1)
