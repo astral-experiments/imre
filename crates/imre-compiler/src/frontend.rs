@@ -3508,7 +3508,10 @@ impl<'a> Checker<'a> {
                     if !matches!(
                         raised.kind,
                         ExprKind::Exception { .. }
-                            | ExprKind::Builtin(Builtin::NamedException { .. }, _)
+                            | ExprKind::Builtin(
+                                Builtin::NamedException { .. } | Builtin::ExceptionArgument(_),
+                                _
+                            )
                     ) && !matches!(&raised.kind,ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args) if matches!(args[0].kind,ExprKind::Builtin(Builtin::NamedException{..},_)))
                     {
                         return Err(error(
@@ -3644,6 +3647,71 @@ impl<'a> Checker<'a> {
     /// Imported exception aliases resolve by identity; a spelling alone cannot
     /// turn an arbitrary first-party definition into a builtin category.
     /// Class-form raises construct a new instance, just like an explicit call.
+    fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+        if kind == 32 {
+            return self.system_exit(call, false);
+        }
+        if matches!(kind, 0 | 18 | 25..=31 | 34) {
+            return Err(error(
+                self.source,
+                call,
+                "this exception category is catch-only",
+            ));
+        }
+        if !call.arguments.keywords.is_empty() || call.arguments.args.len() > 1 {
+            return Err(error(
+                self.source,
+                call,
+                "builtin exceptions accept zero arguments or one typed argument",
+            ));
+        }
+        let arg = call
+            .arguments
+            .args
+            .first()
+            .map(|v| self.expr(v))
+            .transpose()?;
+        let arg = match arg {
+            Some(v) if matches!(v.ty, Type::StrLiteral(_)) => {
+                Some(self.coerce(v, Type::Str, call)?)
+            }
+            other => other,
+        };
+        if arg.as_ref().is_some_and(|v| v.ty != Type::Str) {
+            let v = arg.unwrap();
+            if !matches!(
+                v.ty,
+                Type::Bool
+                    | Type::Int
+                    | Type::Float
+                    | Type::Bytes
+                    | Type::None
+                    | Type::List(_)
+                    | Type::Tuple(_)
+                    | Type::Dict(_)
+                    | Type::Set(_)
+            ) || !dataclass_values::can_format(v.ty, self.types, self.classes)
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exception argument has no supported Python representation",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Builtin(Builtin::ExceptionArgument(kind), vec![v]),
+            });
+        }
+        Ok(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind,
+                message: arg.map(Box::new),
+            },
+        })
+    }
+
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
             if self.class_reference(value).is_some() {
@@ -5383,34 +5451,7 @@ impl<'a> Checker<'a> {
             return self.isinstance(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
-            self.reject_builtin_keywords(call)?;
-            if kind == 32 {
-                return self.system_exit(call, false);
-            }
-            if matches!(kind, 0 | 18 | 25..=31 | 34) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "this exception category is catch-only",
-                ));
-            }
-            if call.arguments.args.len() > 1 {
-                return Err(error(
-                    self.source,
-                    call,
-                    "builtin exceptions accept zero arguments or one string message",
-                ));
-            }
-            let message = call
-                .arguments
-                .args
-                .first()
-                .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
-                .transpose()?;
-            return Ok(Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception { kind, message },
-            });
+            return self.simple_exception(call, kind);
         }
         if let Some(binding) = self.resolve(&call.func) {
             let Binding::Definition(definition) = binding else {
@@ -5444,6 +5485,9 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             if let Some(class) = self.class_reference(&attribute.value) {
+                if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
+                    return Ok(e);
+                }
                 return self.class_method_call(call, attribute, class, None);
             }
             let receiver = match receiver {
@@ -5461,21 +5505,13 @@ impl<'a> Checker<'a> {
             }
             let receiver = Self::exception_record(receiver);
             if let Type::Class(class) = receiver.ty {
-                if let Some(target) = self.classes.declarations.definitions[class]
+                if self.classes.declarations.definitions[class]
                     .exception_aliases
-                    .get(attribute.attr.as_str())
-                    .and_then(|def| self.classes.declarations.ids.get(def))
-                    .copied()
+                    .contains_key(attribute.attr.as_str())
                 {
-                    let made = self.construct(call, target)?;
-                    return Ok(Expr {
-                        ty: made.ty,
-                        kind: ExprKind::Scope {
-                            body: vec![Statement::Expr(receiver)],
-                            value: Box::new(made),
-                            clear: Vec::new(),
-                        },
-                    });
+                    return self
+                        .exception_alias_call(call, attribute, class, Some(receiver))
+                        .map(Option::unwrap);
                 }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }

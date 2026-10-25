@@ -1043,6 +1043,38 @@ pub unsafe extern "C" fn imre_named_exception_new(
     }
 }
 
+/// Construct an error with a single non-string argument. Formatting happens
+/// when observed, so mutation of a retained container remains visible.
+///
+/// # Safety
+/// The word and optional static subtype descriptor have their exact declared kinds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_argument(
+    kind: u32,
+    descriptor: *const NamedDescriptor,
+    word: usize,
+    representation: u32,
+) -> *const Object {
+    // SAFETY: the caller roots the argument until this error owns its reference.
+    unsafe {
+        let named = descriptor.as_ref();
+        let kind = Kind::from_raw(named.map_or(kind, |d| d.base));
+        let value = new_exception(
+            kind,
+            Payload::Key(WordKind::new(representation).acquire(word)),
+        );
+        if let Some(named) = named {
+            value.0.with_mut(|s| {
+                let Storage::Exception(e) = s else {
+                    unreachable!()
+                };
+                e.details_mut().named = Some(named);
+            });
+        }
+        Rc::into_raw(value)
+    }
+}
+
 /// Attach the completed Python field layout to the canonical exception object.
 ///
 /// # Safety

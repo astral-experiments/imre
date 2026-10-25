@@ -9,6 +9,47 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "classvar_exception_constructor": """
+from typing import ClassVar
+
+class ValidationProblem(ValueError):
+    def __init__(self, issues: list[str]) -> None:
+        super().__init__("failed")
+        self.issues = issues
+    def __repr__(self) -> str:
+        return f"ValidationProblem(issues={self.issues!r})"
+
+class Reader:
+    error: ClassVar[type[Exception]] = ValueError
+    def fail(self, issues: list[str]) -> None:
+        raise self.error(issues)
+
+class Child(Reader):
+    error = ValidationProblem
+
+def check(reader: Reader) -> None:
+    values = ["a"]
+    try:
+        reader.fail(values)
+    except ValueError as err:
+        values.append("b")
+        print(str(err))
+        print(repr(err))
+        print(isinstance(err, ValidationProblem))
+
+class ExitPolicy:
+    error: ClassVar[type[BaseException]] = SystemExit
+
+check(Reader())
+check(Child())
+try:
+    raise ExitPolicy.error(7)
+except SystemExit as error:
+    print(error.code == 7)
+
+print(repr(Reader.error(1)))
+print(str(Child.error(["x"])))
+""",
     "exception_record_fields_and_mro": """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -855,7 +896,6 @@ try:
 finally:
     print(value + 1)
 """,
-    "integer_message": "raise ValueError(1)",
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
     "existing_exception_cause": 'error = ValueError("error")\nraise error from None',

@@ -5,6 +5,43 @@ use crate::types::NamedException;
 
 pub(crate) const FIRST_USER_EXCEPTION: u32 = 256;
 
+pub(super) fn alias(
+    graph: &SourceGraph,
+    module: usize,
+    value: &ast::Expr,
+    ids: &HashMap<DefinitionId, u32>,
+) -> Option<ExceptionAlias> {
+    match graph.resolve(module, value) {
+        Some(Binding::Definition(def)) if ids.contains_key(&def) => {
+            Some(ExceptionAlias::Named(def))
+        }
+        None => value
+            .as_name_expr()
+            .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
+            .map(ExceptionAlias::Builtin),
+        _ => None,
+    }
+}
+
+/// Only a resolved ClassVar[type[Exception]] represents this static alias;
+/// ordinary annotated fields remain part of the instance layout.
+pub(super) fn constructor_annotation(graph: &SourceGraph, module: usize, ann: &ast::Expr) -> bool {
+    let ast::Expr::Subscript(outer) = ann else {
+        return false;
+    };
+    let ast::Expr::Subscript(inner) = outer.slice.as_ref() else {
+        return false;
+    };
+    graph.resolve_type(module, &outer.value) == Some(Binding::Intrinsic(Intrinsic::ClassVar))
+        && inner.value.as_name_expr().is_some_and(|v| v.id == "type")
+        && graph.resolve_type(module, &inner.value).is_none()
+        && inner
+            .slice
+            .as_name_expr()
+            .is_some_and(|v| v.id == "Exception" || v.id == "BaseException")
+        && graph.resolve_type(module, &inner.slice).is_none()
+}
+
 fn marker(node: &ast::StmtClassDef) -> bool {
     node.decorator_list.is_empty() && node.body.iter().all(|line| {
         matches!(line, ast::Stmt::Pass(_))

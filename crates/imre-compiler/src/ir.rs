@@ -488,6 +488,8 @@ pub(crate) enum Builtin {
     },
     /// Borrowing a payload from its exception returns one owned record reference.
     ExceptionRecord,
+    /// A single non-string Python argument, retained for str/repr.
+    ExceptionArgument(u32),
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,

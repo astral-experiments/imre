@@ -601,9 +601,10 @@ impl Checker<'_> {
         }
         if let ast::Expr::Attribute(a) = expression
             && let Some(class) = self.class_reference(&a.value)
-            && let Some(def) = self.classes.declarations.definitions[class]
-                .exception_aliases
-                .get(a.attr.as_str())
+            && let Some(crate::classes::ExceptionAlias::Named(def)) =
+                self.classes.declarations.definitions[class]
+                    .exception_aliases
+                    .get(a.attr.as_str())
         {
             return self.classes.declarations.ids.get(def).copied();
         }
@@ -613,6 +614,52 @@ impl Checker<'_> {
             }
             _ => None,
         }
+    }
+
+    /// Class-valued exception attributes bind as constructors, never as methods.
+    /// An upcast receiver selects the override on its concrete record layout.
+    pub(super) fn exception_alias_call(
+        &mut self,
+        call: &ast::ExprCall,
+        attr: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+    ) -> Result<Option<Expr>, String> {
+        if !self.classes.declarations.definitions[class]
+            .exception_aliases
+            .contains_key(attr.attr.as_str())
+        {
+            return Ok(None);
+        }
+        let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
+            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            {
+                crate::classes::ExceptionAlias::Builtin(kind) => {
+                    checker.simple_exception(call, kind)
+                }
+                crate::classes::ExceptionAlias::Named(def) => {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                        checker.construct(call, layout)
+                    } else {
+                        checker
+                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                    }
+                }
+            }
+        };
+        if let Some(receiver) = receiver {
+            if self.classes.has_concrete_subclasses(class) {
+                return self
+                    .dispatch_record(class, receiver, call, |checker, id, _| {
+                        let e = direct(checker, id)?;
+                        checker.coerce(e, Type::Exception, call)
+                    })
+                    .map(Some);
+            }
+            let result = direct(self, class)?;
+            return Ok(Some(self.evaluated_receiver(Some(receiver), result)));
+        }
+        direct(self, class).map(Some)
     }
 
     /// Instance access still evaluates the receiver for class/static methods,

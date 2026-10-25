@@ -4167,6 +4167,20 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ExceptionArgument(kind) => {
+                let arg = &args[0].value;
+                let word = self.word(arg);
+                let rep = representation_kind(arg.ty, &self.module.types);
+                let desc = if *kind >= 256 {
+                    format!(
+                        "@{}",
+                        self.output.global_ref(format!("exception_type_{kind}"))
+                    )
+                } else {
+                    "null".into()
+                };
+                Value{ty:Type::Exception,operand:self.instruction(format!("call ptr @imre_exception_argument(i32 {kind}, ptr {desc}, i64 {word}, i32 {rep})")),small_integer:false}
+            }
             Builtin::NamedException {
                 kind,
                 message_field,
@@ -5955,6 +5969,7 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)

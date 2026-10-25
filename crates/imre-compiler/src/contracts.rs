@@ -65,7 +65,9 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
-            Self::NamedException { .. } => Contract::new(false, PreservesLists),
+            Self::ExceptionArgument(_) | Self::NamedException { .. } => {
+                Contract::new(false, PreservesLists)
+            }
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(

@@ -31,6 +31,12 @@ pub(crate) struct Classes {
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ExceptionAlias {
+    Builtin(u32),
+    Named(DefinitionId),
+}
+
 pub(crate) struct Class {
     pub(crate) definition: DefinitionId,
     pub(crate) name: String,
@@ -47,7 +53,7 @@ pub(crate) struct Class {
     pub(crate) toml_hash: bool,
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
-    pub(crate) exception_aliases: HashMap<String, DefinitionId>,
+    pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -211,6 +217,23 @@ fn collect_class(
                 class_bindings.insert(name);
             }
             ast::Stmt::AnnAssign(field)
+                if let (Some(name), Some(value)) =
+                    (field.target.as_name_expr(), field.value.as_deref())
+                    && exceptions::constructor_annotation(
+                        graph,
+                        definition.module,
+                        &field.annotation,
+                    )
+                    && let Some(target) =
+                        exceptions::alias(graph, definition.module, value, exceptions) =>
+            {
+                if !names.insert(name.id.to_string()) {
+                    return Err(module.error(name, "duplicate class binding"));
+                }
+                class_bindings.insert(name.id.to_string());
+                exception_aliases.insert(name.id.to_string(), target);
+            }
+            ast::Stmt::AnnAssign(field)
                 if !is_enum && (field.value.is_none() || dataclass.is_some()) =>
             {
                 if dataclass.is_some() && !field.simple {
@@ -365,9 +388,8 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
-                    && let Some(Binding::Definition(target)) =
-                        graph.resolve(definition.module, &assign.value)
-                    && exceptions.contains_key(&target) =>
+                    && let Some(target) =
+                        exceptions::alias(graph, definition.module, &assign.value, exceptions) =>
             {
                 if !names.insert(name.id.to_string()) {
                     return Err(module.error(name, "duplicate class binding"));
