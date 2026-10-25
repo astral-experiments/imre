@@ -168,7 +168,10 @@ pub(super) fn process_error_view(
                 tree_issue = Some(*issue);
                 return;
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::Copy(_)), _) => {
+            ExprKind::Builtin(
+                Builtin::Process(ProcessOperation::Copy(_) | ProcessOperation::Move(_)),
+                _,
+            ) => {
                 other_shutil = true;
                 return;
             }

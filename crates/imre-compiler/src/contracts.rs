@@ -65,6 +65,9 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::Str if args.first().is_some_and(|e| e.ty == Type::ObjectValue) => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::Linecache(..) => Contract::new(true, Unknown),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
@@ -72,9 +75,9 @@ impl Builtin {
             | Self::ImportErrorField(_)
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
-            Self::ExceptionTupleView | Self::ExceptionFieldRepr => {
-                Contract::new(false, PreservesOwners)
-            }
+            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::BoxValue | Self::ExceptionTupleView => Contract::new(false, PreservesOwners),
+            Self::ExceptionFieldRepr => Contract::new(true, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -266,6 +269,8 @@ impl Builtin {
                 | ProcessOperation::Which
                 | ProcessOperation::RmTree
                 | ProcessOperation::CopyTree(_)
+                | ProcessOperation::Move(_)
+                | ProcessOperation::DestInSrc
                 | ProcessOperation::IgnorePatterns
                 | ProcessOperation::TreeErrorArgs
                 | ProcessOperation::Copy(_)
@@ -311,6 +316,7 @@ impl Builtin {
             | Self::KeyIntersection
             | Self::KeyDifference
             | Self::RegexGroupDict
+            | Self::RegexFindIter
             | Self::Errno(_)
             | Self::DictGet
             | Self::NamespaceWrap
@@ -386,6 +392,7 @@ impl Builtin {
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::IsNone
+            | Self::MockCallList { .. }
             | Self::JsonIsInt
             | Self::Len
             | Self::JsonEmptyObject
@@ -845,6 +852,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines"
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
+                | "imre_mapping_object_get"
+                | "imre_exception_field_repr"
+                | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"

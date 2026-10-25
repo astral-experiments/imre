@@ -5,7 +5,54 @@ use crate::ir::ProcessOperation;
 
 mod descriptors;
 
+fn shutil_tag(ty: Type) -> u32 {
+    match ty {
+        Type::Str => 0,
+        Type::Bytes => 1,
+        Type::Path => 2,
+        _ => unreachable!(),
+    }
+}
+
 impl Emitter<'_, '_> {
+    /// Keep the callee, bound context, return ownership, and parameter ABI together.
+    fn shutil_copier(&mut self, copy: &Operand) -> (String, String, String, u32, u32) {
+        if copy.value.ty == Type::Str {
+            return (
+                "0".into(),
+                "@imre_shutil_noncallable".into(),
+                copy.value.operand.clone(),
+                0,
+                0,
+            );
+        }
+        if copy.value.ty == Type::Bool {
+            return (
+                self.instruction(format!("zext i1 {} to i32", copy.value.operand)),
+                "null".into(),
+                "null".into(),
+                0,
+                0,
+            );
+        }
+        let (params, result) = self.module.types.signature(copy.value.ty).unwrap();
+        let target = self.instruction(format!("load ptr, ptr {}", copy.value.operand));
+        let slot = self.instruction(format!(
+            "getelementptr %callable, ptr {}, i32 0, i32 1",
+            copy.value.operand
+        ));
+        let context = self.instruction(format!("load ptr, ptr {}", slot));
+        let tagged = u32::from(matches!(params[0], Type::Union(_)))
+            | (u32::from(matches!(params[1], Type::Union(_))) << 1);
+        (
+            "0".into(),
+            target,
+            context,
+            representation_kind(result, &self.module.types),
+            tagged,
+        )
+    }
+
     pub(super) fn process_builtin(
         &mut self,
         operation: ProcessOperation,
@@ -559,34 +606,8 @@ impl Emitter<'_, '_> {
                 let [src, dst, links, ignore, stat, dangling, existing] = args else {
                     unreachable!()
                 };
-                let tag = |ty| match ty {
-                    Type::Str => 0,
-                    Type::Bytes => 1,
-                    Type::Path => 2,
-                    _ => unreachable!(),
-                };
-                let (stat, target, context, repr) = if stat.value.ty == Type::Bool {
-                    (
-                        self.instruction(format!("zext i1 {} to i32", stat.value.operand)),
-                        "null".into(),
-                        "null".into(),
-                        0,
-                    )
-                } else {
-                    let (_, result) = self.module.types.signature(stat.value.ty).unwrap();
-                    let target = self.instruction(format!("load ptr, ptr {}", stat.value.operand));
-                    let slot = self.instruction(format!(
-                        "getelementptr %callable, ptr {}, i32 0, i32 1",
-                        stat.value.operand
-                    ));
-                    let context = self.instruction(format!("load ptr, ptr {slot}"));
-                    (
-                        "0".into(),
-                        target,
-                        context,
-                        representation_kind(result, &self.module.types),
-                    )
-                };
+                let (stat, target, context, repr, tagged) = self.shutil_copier(stat);
+                debug_assert_eq!(tagged, 0);
                 let [links, dangling, existing] = [links, dangling, existing]
                     .map(|arg| self.instruction(format!("zext i1 {} to i32", arg.value.operand)));
                 let (ignore_target, ignore_context, ignore_set) = if ignore.value.ty == Type::None {
@@ -611,16 +632,38 @@ impl Emitter<'_, '_> {
                     .global_ref(format!("layout_{}", record_name(issue)));
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_shutil_copytree(ptr {}, i32 {}, ptr {}, i32 {}, i32 {links}, i32 {stat}, i32 {dangling}, i32 {existing}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, ptr {ignore_target}, ptr {ignore_context}, i32 {ignore_set})",
-                    src.value.operand, tag(src.value.ty), dst.value.operand, tag(dst.value.ty)));
+                    src.value.operand, shutil_tag(src.value.ty), dst.value.operand, shutil_tag(dst.value.ty)));
                 self.unpack_word(operand, returns)
             }
-            ProcessOperation::Copy(op) => {
-                let tag = |ty| match ty {
-                    Type::Str => 0,
-                    Type::Bytes => 1,
-                    Type::Path => 2,
-                    _ => unreachable!(),
+            ProcessOperation::Move(issue) => {
+                let [src, dst, copy] = args else {
+                    unreachable!()
                 };
+                let (stat, target, context, repr, tagged) = self.shutil_copier(copy);
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(issue)));
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_shutil_move(ptr {}, i32 {}, ptr {}, i32 {}, i32 {stat}, ptr @{layout}, ptr {target}, ptr {context}, i32 {repr}, i32 {tagged})",
+                    src.value.operand,shutil_tag(src.value.ty),dst.value.operand,shutil_tag(dst.value.ty)));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::DestInSrc => {
+                let [src, dst] = args else { unreachable!() };
+                let byte = self.checked_instruction(format!(
+                    "call i32 @imre_shutil_destinsrc(ptr {}, i32 {}, ptr {}, i32 {})",
+                    src.value.operand,
+                    shutil_tag(src.value.ty),
+                    dst.value.operand,
+                    shutil_tag(dst.value.ty)
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::Copy(op) => {
                 let [src, dst, follow] = args else {
                     unreachable!()
                 };
@@ -629,9 +672,9 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
                     op as u32,
                     src.value.operand,
-                    tag(src.value.ty),
+                    shutil_tag(src.value.ty),
                     dst.value.operand,
-                    tag(dst.value.ty)
+                    shutil_tag(dst.value.ty)
                 ));
                 self.unpack_word(operand, returns)
             }

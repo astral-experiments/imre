@@ -218,3 +218,6 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/subprocess/reference-linux.json \
     benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
 ```
+
+[Stopped child status](STOPPED.md) distinguishes a real kernel stop from the
+unchanged test's waitpid mock and records both optimization levels.

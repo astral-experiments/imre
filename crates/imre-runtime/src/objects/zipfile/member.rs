@@ -368,6 +368,9 @@ impl Member {
             let cached = out.is_empty() && self.pos < self.buffer.len();
             if self.pos == self.buffer.len() {
                 if self.eof {
+                    // The buffered readline fallback reads past the cached newline.
+                    self.buffer.clear();
+                    self.pos = 0;
                     break;
                 }
                 self.refill(1)?;
