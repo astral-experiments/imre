@@ -518,6 +518,7 @@ pub(crate) enum CheckedDiagnostic {
     TupleListRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    ExcessArgument(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -529,6 +530,7 @@ impl CheckedDiagnostic {
             Self::TupleListRead(range) => (range, 3),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::ExcessArgument(range) => (range, 6),
         };
         (range.start(), range.end(), kind)
     }
@@ -543,6 +545,9 @@ impl CheckedDiagnostic {
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ExcessArgument(arg) => {
+                diagnostic == "too-many-positional-arguments" && arg == range
+            }
         }
     }
 }
