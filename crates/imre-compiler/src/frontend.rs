@@ -47,6 +47,7 @@ mod os;
 mod paths;
 mod pipelines;
 mod posixpath;
+mod powers;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -320,6 +321,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "abs",
+    "pow",
     "chr",
     "sorted",
     "divmod",
@@ -4323,6 +4325,16 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::PercentInteger, vec![left, right]),
             });
         }
+        if op == ast::Operator::Pow {
+            let (operation, ty) = self.integer_power(&left, &right, false, node)?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(
+                    operation,
+                    vec![powers::integer(left), powers::integer(right)],
+                ),
+            });
+        }
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
@@ -6400,6 +6412,7 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "pow" => return self.pow_call(call),
             "next" => return self.next_cursor(call),
             "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),

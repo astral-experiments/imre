@@ -529,6 +529,9 @@ pub(crate) enum Builtin {
     Formatter(FormatterOperation),
     Input,
     Chr,
+    IntegerPower,
+    ModularPower,
+    NegativeIntegerPower,
     Int,
     Float,
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
