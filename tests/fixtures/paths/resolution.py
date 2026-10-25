@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 
 
@@ -61,6 +62,19 @@ for raw in [
     "\0", "missing/\0", "input.txt/\0",
 ]:
     print(repr((repr(raw), failure(raw, False), failure(raw, True))))
+
+for raw, component, code in [
+    ("missing/child", "missing", errno.ENOENT),
+    ("dangling-link/child", "missing", errno.ENOENT),
+    ("file-link/child", "input.txt", errno.ENOTDIR),
+    ("loop-a/child", "loop-a", errno.ELOOP),
+]:
+    try:
+        Path(raw).resolve(strict=True)
+    except OSError as error:
+        filename = error.filename
+        assert isinstance(filename, str)
+        print(repr((error.errno == code, filename == str(base / component), error.filename2 is None)))
 
 events: list[int] = []
 print(repr((receiver(events).resolve(strict=choose_strict(events)) == base / "input.txt", events)))

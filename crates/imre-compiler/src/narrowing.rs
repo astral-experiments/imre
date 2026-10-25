@@ -5,6 +5,21 @@ use std::collections::{HashMap, HashSet};
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
 
+/// Return the other operand of a single identity test with None and whether it is present.
+pub(crate) fn none_identity(compare: &ast::ExprCompare, truth: bool) -> Option<(&ast::Expr, bool)> {
+    let present = match compare.ops.as_ref() {
+        [ast::CmpOp::Is] => !truth,
+        [ast::CmpOp::IsNot] => truth,
+        _ => return None,
+    };
+    match compare.operands.as_ref() {
+        [value, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), value] => {
+            Some((value, present))
+        }
+        _ => None,
+    }
+}
+
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
 /// subscript values can change through aliases without rebinding the receiver.
@@ -29,15 +44,9 @@ pub(crate) fn facts(
         {
             facts(&call.arguments.args[0], truth, always_truthy)
         }
-        ast::Expr::Compare(compare) if compare.ops.len() == 1 => {
-            let present = match compare.ops[0] {
-                ast::CmpOp::Is => !truth,
-                ast::CmpOp::IsNot => truth,
-                _ => return HashMap::new(),
-            };
-            let value = match compare.operands.as_ref() {
-                [value, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), value] => value,
-                _ => return HashMap::new(),
+        ast::Expr::Compare(compare) => {
+            let Some((value, present)) = none_identity(compare, truth) else {
+                return HashMap::new();
             };
             let name = match value {
                 ast::Expr::Name(name) => Some(name),
@@ -247,11 +256,28 @@ impl<'a> Visitor<'a> for Assignments {
     }
 }
 
-/// Handler targets are deleted on exit, even when the name previously existed.
+/// Explicit local deletions and the implicit deletion of handler targets can
+/// invalidate a binding that existed on entry.
 /// An outer handler cannot assume such a local survived the protected body.
 pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
     struct Deletions(HashSet<String>);
     impl<'a> Visitor<'a> for Deletions {
+        fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+            if let ast::Stmt::Delete(delete) = statement {
+                self.0.extend(
+                    delete
+                        .targets
+                        .iter()
+                        .filter_map(|target| target.as_name_expr().map(|name| name.id.to_string())),
+                );
+            } else if !matches!(
+                statement,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
+            ) {
+                walk_stmt(self, statement);
+            }
+        }
+
         fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
             let ast::ExceptHandler::ExceptHandler(handler_) = handler;
             if let Some(name) = &handler_.name {

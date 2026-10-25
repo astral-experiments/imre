@@ -261,7 +261,7 @@ unsafe fn with_archive<T>(archive: *const Object, f: impl FnOnce(&Archive) -> T)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_zip_open(path: *const Str) -> *const Object {
     // SAFETY: the path is a live string owner for the entire open operation.
-    let path: StrOwner = unsafe { StrOwner::acquire_word(path as usize) };
+    let path: StrOwner = unsafe { crate::StrOwner::acquire_word(path as usize) };
     opened(
         files::open_file(&path, 0)
             .and_then(|(file, _)| Archive::open(Source::Owned(Rc::new(file)), Some(path))),

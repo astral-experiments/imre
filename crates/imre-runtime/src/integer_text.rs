@@ -67,6 +67,9 @@ pub(super) fn newer_printable(value: char) -> bool {
         (0x2cea2, 0x2ceae), (0x323b0, 0x3347a),
     ];
     let codepoint = u32::from(value);
+    if codepoint < RANGES[0].0 {
+        return false;
+    }
     let end = RANGES.partition_point(|(start, _)| *start <= codepoint);
     end != 0 && codepoint < RANGES[end - 1].1
 }
@@ -84,19 +87,8 @@ fn literal_repr_prefix(value: &str) -> Str {
                 if self.remaining == 0 {
                     return Err(fmt::Error);
                 }
-                if newer_printable(character) {
-                    // Ruff's newer Unicode tables print these characters literally.
-                    // The ASCII escape goes through the same code-point limit.
-                    let code = u32::from(character);
-                    if code <= 0xffff {
-                        write!(self, "\\u{code:04x}")?;
-                    } else {
-                        write!(self, "\\U{code:08x}")?;
-                    }
-                } else {
-                    self.text.push(character);
-                    self.remaining -= 1;
-                }
+                self.text.push(character);
+                self.remaining -= 1;
             }
             Ok(())
         }

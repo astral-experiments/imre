@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "ffd7dd844095bab0f43e2aafc3e698a1c363880c414c1fc33a5f0a03d9446837",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_shutil",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:18:1: Imre: unsupported sealed standard-library export shutil.make_archive"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:18:1: Imre: unsupported sealed standard-library export shutil.make_archive"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:18:1: Imre: unsupported sealed standard-library export shutil.make_archive"
+    },
+    {
+      "suite": "test.test_shutil",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_shutil.py:18:1: Imre: unsupported sealed standard-library export shutil.make_archive"
+    }
+  ]
+}
