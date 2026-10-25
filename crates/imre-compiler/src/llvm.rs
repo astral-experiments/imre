@@ -3932,12 +3932,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::SysExit => {
+            Builtin::RaiseException => {
                 self.checked_line(format!(
                     "call void @imre_error_set(ptr {})",
-                    args[0].value.operand
+                    args.last().unwrap().value.operand
                 ));
-                none()
+                // The runtime always transfers control to the exception handler.
+                Value {
+                    ty: returns,
+                    operand: returns.initial().to_owned(),
+                    small_integer: false,
+                }
             }
             Builtin::ParseArgs(children) => {
                 let Type::Class(class) = returns else {

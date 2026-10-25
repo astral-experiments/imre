@@ -4789,6 +4789,16 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
+                if attribute.attr.as_str() == "encoding"
+                    && matches!(
+                        self.resolve(&attribute.value),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
+                        ))
+                    )
+                {
+                    return Ok(unpacking::string("utf-8"));
+                }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
                         return Ok(member);
