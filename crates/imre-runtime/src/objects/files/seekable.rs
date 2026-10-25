@@ -72,6 +72,7 @@ impl FileState {
         Self {
             fd: None,
             name: None,
+            fields: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
         }
@@ -82,6 +83,7 @@ impl FileState {
         Self {
             fd: None,
             name: Some(member.name().clone()),
+            fields: None,
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
         }
@@ -168,7 +170,7 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) | Stream::TextMemory(_) => {
+            Stream::Standard(_) | Stream::Write(_) | Stream::TextMemory(_) => {
                 Err(Error::new(Kind::UnsupportedOperation, "seek"))
             }
         }
@@ -188,7 +190,7 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Write(_) | Stream::TextMemory(_) => {
+            Stream::Standard(_) | Stream::Write(_) | Stream::TextMemory(_) => {
                 Err(Error::new(Kind::UnsupportedOperation, "read"))
             }
         }
@@ -238,25 +240,14 @@ pub unsafe extern "C" fn imre_binary_seek(
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("seek on closed file.")?;
+            if let Some(Stream::Member(member)) = &mut f.stream {
+                return member.seek_offset(&offset, Int::borrow(whence).as_small().unwrap_or(-1));
+            }
             if f.kind == FileKind::GzipBinaryRead {
                 f.stream()?;
             }
-            let whence = if f.kind == FileKind::Member {
-                Int::borrow(whence).as_small().unwrap_or(-1)
-            } else {
-                i64::from(c_int(whence)?)
-            };
+            let whence = i64::from(c_int(whence)?);
             let off = match f.kind {
-                FileKind::Member => offset
-                    .as_small()
-                    .or_else(|| offset.big().to_i64())
-                    .unwrap_or_else(|| {
-                        if offset.big().sign() == num_bigint::Sign::Minus {
-                            i64::MIN
-                        } else {
-                            i64::MAX
-                        }
-                    }),
                 FileKind::Memory => {
                     let off = offset
                         .as_small()
@@ -295,12 +286,6 @@ pub unsafe extern "C" fn imre_binary_seek(
                 0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
                 1 => SeekFrom::Current(off),
                 2 => SeekFrom::End(off),
-                _ if f.kind == FileKind::Member => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "whence must be os.SEEK_SET (0), os.SEEK_CUR (1), or os.SEEK_END (2)",
-                    ));
-                }
                 _ if f.kind == FileKind::Memory => {
                     return Err(Error::new(
                         Kind::ValueError,

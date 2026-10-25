@@ -75,6 +75,9 @@ def level_report(tools, source):
         work = Path(tmp)
         for label, code, settings in (
             ("metadata", META, (None, "", ":", ":ignore", "utf-8", "ascii:", "latin1", "ascii:no-such", "utf-8-sig")),
+            ("saved wrappers and original displayhook", Path(__file__).with_name("stdout_saved.py").read_text(),
+             (None, "ascii", "ascii:replace", "ascii:backslashreplace", "latin1", "utf-8-sig",
+              "ascii:unknown-policy")),
             ("writes and failures", WRITES, (None, "ascii:replace", "ascii", "latin1", "ascii:unknown-policy",
                                               "ascii:backslashreplace", "utf-8-sig")),
         ):

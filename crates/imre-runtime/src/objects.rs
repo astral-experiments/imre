@@ -13,6 +13,7 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod chainmap;
 mod codecs;
 pub(crate) use codecs::Codec;
 mod contexts;
@@ -25,6 +26,7 @@ mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
+mod format_cursors;
 mod hashlib;
 mod inspect;
 mod itertools;
@@ -41,6 +43,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+pub(crate) mod stdio;
 mod stdlib;
 mod string_enums;
 mod tempdirs;
@@ -90,6 +93,7 @@ enum Storage {
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
+    ChainMap(Rc<Object>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
@@ -206,6 +210,25 @@ pub unsafe extern "C" fn imre_object_release(value: *const Object) {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Words::new(kind).into_object())
+}
+
+/// Remember a mock history's `_CallList` identity across aliases and resets.
+/// Copies get the ordinary list representation from their fresh sequence storage.
+///
+/// # Safety
+/// The caller roots a native sequence of recorded mock calls.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_mock_call_list(value: *const Object, mark: bool) -> bool {
+    // SAFETY: the caller roots the list and only the copied flag escapes the borrow.
+    unsafe {
+        object(value).0.with(|storage| {
+            let flag = &storage.sequence_storage().mock_call_list;
+            if mark {
+                flag.set(true);
+            }
+            flag.get()
+        })
+    }
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.
@@ -513,6 +536,24 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
         result.map(|values| Rc::into_raw(values.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Concatenate two Python strings after both optional operands have been evaluated.
+///
+/// # Safety
+/// Nonzero words are rooted, immutable strings. Zero represents Python None.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_optional_str_concat(left: usize, right: usize) -> *const Str {
+    let reason = match (left == 0, right == 0) {
+        (true, true) => "unsupported operand type(s) for +: 'NoneType' and 'NoneType'",
+        (true, false) => "unsupported operand type(s) for +: 'NoneType' and 'str'",
+        (false, true) => "can only concatenate str (not \"NoneType\") to str",
+        (false, false) => {
+            // SAFETY: both non-null string owners are retained by the caller.
+            return unsafe { imre_str_concat(left as *const Str, right as *const Str) };
+        }
+    };
+    Error::new(Kind::TypeError, reason).returning(std::ptr::null())
 }
 
 /// # Safety

@@ -25,6 +25,8 @@ pub(crate) enum Type {
     Class(usize),
     List(usize),
     Dict(usize),
+    /// A ChainMap owner, parameterized by the exact dictionary shape of its maps.
+    ChainMap(usize),
     Set(usize),
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
@@ -179,6 +181,7 @@ impl std::fmt::Display for Type {
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
+            Self::ChainMap(id) => return write!(f, "ChainMap#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
@@ -258,6 +261,7 @@ impl std::fmt::Display for Type {
             | Self::Cursor(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::Tuple(_)
@@ -329,6 +333,18 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    pub(crate) fn changes_stdout(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |e| {
+                used |= matches!(
+                    e.kind,
+                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
+                );
+            });
+        }
+        used
+    }
     /// Only programs that can own a display value need to clear the namespace at shutdown.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
@@ -609,6 +625,18 @@ pub(crate) enum Builtin {
     Islice,
     Tee,
     Cycle,
+    SysStdout,
+    SysHasStdout,
+    SysOriginalOutput {
+        stderr: bool,
+    },
+    SysStdoutSet,
+    SysStdoutDelete,
+    OptionalStrConcat,
+    TextOptionalReceiver,
+    TextField {
+        errors: bool,
+    },
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsHasLast,
@@ -671,6 +699,9 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     DocAscii,
+    MockCallList {
+        mark: bool,
+    },
     SystemExitNew {
         omit_none: bool,
     },
@@ -734,6 +765,7 @@ pub(crate) enum Builtin {
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
+    LengthResult,
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
@@ -891,6 +923,9 @@ pub(crate) enum Builtin {
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
+    FormatCursor {
+        split: bool,
+    },
     ExactRecord(usize),
     CsvReader {
         delimiter: char,
@@ -958,7 +993,12 @@ pub(crate) enum Builtin {
     BinaryOpen(u32),
     GzipOpen,
     /// The compile-time validated pattern is independent of the source spelling.
-    RegexCompile(String),
+    RegexCompile {
+        source: String,
+        spelling: String,
+    },
+    RegexSpelling,
+    UnittestCompilePattern,
     RegexSearch,
     RegexSub(Vec<u8>),
     RegexGroupDict,
@@ -1007,6 +1047,9 @@ pub(crate) enum Builtin {
         reverse: bool,
     },
     CounterNew,
+    ChainMapNew,
+    ChainMapMaps,
+    ChainMapSetMaps,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1249,6 +1292,12 @@ pub(crate) enum PathOperation {
     Resolve,
     Info,
     InfoRepr,
+    CheckStatPath,
+    Stat {
+        lstat: bool,
+    },
+    StatTime(u32),
+    StatExtraInt(u32),
     Query(PathQuery),
     ReadText,
     ReadBytes,
@@ -1365,6 +1414,7 @@ pub(crate) enum LogOperation {
     Get,
     HandlerRename,
     HandlerLookup,
+    PrintActiveException,
     AddLevel,
     LevelName,
     LevelForName,

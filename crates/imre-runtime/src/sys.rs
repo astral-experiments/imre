@@ -54,8 +54,7 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
 
 /// Each standard stream retains its own metadata. Single-character names share the
 /// same Latin-1 owners as other Python strings.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
+pub(crate) fn stream_field(descriptor: u32, errors: bool) -> Rc<Str> {
     thread_local! {
         static FIELDS: [(Rc<Str>, Rc<Str>); 3] = {
             let settings = encoding::settings(false, None);
@@ -68,8 +67,14 @@ pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const S
     }
     FIELDS.with(|fields| {
         let (name, handler) = &fields[descriptor as usize];
-        Rc::into_raw(Rc::clone(if errors != 0 { handler } else { name }))
+        Rc::clone(if errors { handler } else { name })
     })
+}
+
+/// Transfer one owned reference to a field of the original wrapper.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
+    Rc::into_raw(stream_field(descriptor, errors != 0))
 }
 
 // Preserve the ABI of earlier generated stream accesses.
@@ -123,6 +128,23 @@ fn write_stream<W: Write>(stream: &Mutex<W>, text: &str, newline: bool) -> io::R
     Ok(())
 }
 
+/// Write through a retained original text wrapper using its startup encoder.
+pub(crate) fn write_standard(stderr: bool, text: &str) -> super::Result<()> {
+    if stderr {
+        write_stderr(text, false).map_err(errno_error)
+    } else {
+        write_stdout(text, false)
+    }
+}
+
+pub(crate) fn flush_standard(stderr: bool) -> io::Result<()> {
+    if stderr {
+        flush_stderr()
+    } else {
+        flush_stdout()
+    }
+}
+
 pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
 }
@@ -141,9 +163,29 @@ pub(super) fn flush_stderr() -> io::Result<()> {
     Ok(())
 }
 
+/// Retry an unencodable repr on the binary buffer, preserving the pending text order.
+pub(crate) fn write_display_standard(stderr: bool, text: &str) -> super::Result<()> {
+    if stderr {
+        return write_stderr(text, true).map_err(errno_error);
+    }
+    let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
+    if let Err(error) = stdout_chunk(&mut out, text) {
+        if !error.is_kind(super::Kind::UnicodeEncodeError) {
+            return Err(error);
+        }
+        let encoded = encoding::settings(false, None)
+            .codec
+            .encode(text, Some("backslashreplace"))?;
+        out.raw.write_all(&encoded).map_err(errno_error)?;
+    }
+    stdout_chunk(&mut out, "\n")
+}
+
 /// Write the default display hook's repr followed by a newline to stdout.
 pub(super) fn write_display_line(text: &str) -> bool {
-    match write_stdout(text, true) {
+    let result = crate::objects::stdio::write_line(text, true)
+        .unwrap_or_else(|| write_display_standard(false, text));
+    match result {
         Ok(()) => true,
         Err(error) => error.returning(false),
     }

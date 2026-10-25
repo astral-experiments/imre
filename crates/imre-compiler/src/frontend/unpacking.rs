@@ -243,6 +243,22 @@ impl Checker<'_> {
                         vec![logging::number(mask), value],
                     )));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                    if !matches!(
+                        self.types.payload(value.ty).unwrap_or(value.ty),
+                        Type::TextIO | Type::StringIO | Type::None
+                    ) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "sys.stdout requires None or a native text stream",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
@@ -296,6 +312,15 @@ impl Checker<'_> {
                     return Ok(Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
+                    }));
+                }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
                     }));
                 }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
