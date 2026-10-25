@@ -13,6 +13,8 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+mod matching;
+
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
@@ -1021,8 +1023,12 @@ impl Pattern {
                 "glob requires a nonrecursive single-component pattern",
             ));
         }
+        Ok(Self::component(pattern))
+    }
+
+    fn component(pattern: &str) -> Self {
         if !pattern.contains(['*', '?', '[']) {
-            return Ok(Self::Literal(Str::from(pattern)));
+            return Self::Literal(Str::from(pattern));
         }
         let chars: Vec<_> = pattern.chars().collect();
         let mut tokens = Vec::new();
@@ -1031,6 +1037,7 @@ impl Pattern {
             let character = chars[index];
             index += 1;
             match character {
+                '*' if matches!(tokens.last(), Some(Token::Star)) => {}
                 '*' => tokens.push(Token::Star),
                 '?' => tokens.push(Token::Any),
                 '[' => {
@@ -1049,7 +1056,7 @@ impl Pattern {
                 character => tokens.push(Token::Literal(character)),
             }
         }
-        Ok(Self::Wildcard(tokens))
+        Self::Wildcard(tokens)
     }
 
     /// Greedy star matching remembers the most recent star and advances its

@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_os",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/mapping_tests.py": "20306e1526d7b84819a6dbf2f224f6da1a0e45fd",
+    "Lib/test/test_os.py": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+  }
+}
