@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod csv;
 mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
@@ -20,6 +21,7 @@ mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod os;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
@@ -55,14 +57,18 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
+    IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
+    CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
+    ExceptionField(OwnedWord),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),
     ZipInfo(Rc<zipfile::Info>),
+    Popen(Box<processes::Popen>),
     AsyncProcess(Box<processes::AsyncProcess>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
@@ -81,6 +87,8 @@ enum Storage {
     Logger(Rc<Str>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    LogRecord(Box<logging::record::Record>),
+    LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

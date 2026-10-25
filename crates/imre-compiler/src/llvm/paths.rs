@@ -37,6 +37,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::WriteTypeError => self.call(
+                "imre_path_write_type_error",
+                Type::Int,
+                &[&args.last().unwrap().value],
+            ),
             PathOperation::Match { full } => {
                 let name = if args[1].value.ty.is_path() {
                     "imre_path_match_object"
@@ -167,30 +172,21 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            PathOperation::Iterdir | PathOperation::Glob => {
-                let pattern = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
-                let call = format!(
-                    "call ptr @imre_path_iter(ptr {}, ptr {pattern})",
-                    args[0].value.operand
-                );
-                // iterdir scans now; validated glob scans only on its first pull.
-                let operand = if matches!(operation, PathOperation::Iterdir) {
-                    self.checked_instruction(call)
+            PathOperation::Iterdir | PathOperation::Glob { .. } => {
+                let path = &args[0].value.operand;
+                let call = if let PathOperation::Glob { recursive } = operation {
+                    let follow =
+                        self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    format!(
+                        "call ptr @imre_path_glob(ptr {path}, ptr {}, i64 {}, i32 {follow}, i32 {})",
+                        args[1].value.operand,
+                        args[2].value.operand,
+                        u32::from(recursive)
+                    )
                 } else {
-                    self.instruction(call)
+                    format!("call ptr @imre_path_iter(ptr {path}, ptr null)")
                 };
-                self.owned(Value {
-                    ty: Type::Iterator,
-                    operand,
-                    small_integer: false,
-                })
-            }
-            PathOperation::Next => {
-                let pointer = self.checked_instruction(format!(
-                    "call ptr @imre_path_next(ptr {})",
-                    args[0].value.operand
-                ));
-                let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
+                let operand = self.checked_instruction(call);
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -208,12 +204,16 @@ impl Emitter<'_, '_> {
                     PathOperation::WithName => "imre_path_with_name",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Name => "imre_path_name",
+                    PathOperation::CountPart => "imre_path_count_part",
                     PathOperation::Stem => "imre_path_stem",
                     PathOperation::Suffix => "imre_path_suffix",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
-                    PathOperation::ReadText => "imre_path_read_text",
-                    PathOperation::WriteText => "imre_path_write_text",
+                    PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",
+                    PathOperation::ReadText => "imre_path_read_text_options",
+                    PathOperation::WriteText => "imre_path_write_text_options",
+                    PathOperation::WriteUnion { binary: true } => "imre_path_write_bytes_union",
+                    PathOperation::WriteUnion { binary: false } => "imre_path_write_text_union",
                     PathOperation::WriteBytes => "imre_path_write_bytes",
                     PathOperation::Replace => "imre_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),

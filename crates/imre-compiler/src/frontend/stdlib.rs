@@ -528,6 +528,42 @@ impl Checker<'_> {
             };
         }
         if !specification.is_empty() {
+            if let Some(digits) = specification.strip_suffix(['x', 'X'])
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && let Some(width) = if digits.is_empty() {
+                    Some(0)
+                } else {
+                    digits.parse::<u32>().ok()
+                }
+                && width <= 1000
+            {
+                if field.conversion != ast::ConversionFlag::None
+                    || !matches!(value.ty, Type::Int | Type::Bool)
+                {
+                    return Err(error(
+                        self.source,
+                        field,
+                        "hexadecimal formats require an unconverted int or bool",
+                    ));
+                }
+                if value.ty == Type::Bool {
+                    value = Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    };
+                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::HexFormat {
+                            width,
+                            zero: digits.starts_with('0'),
+                            upper: specification.ends_with('X'),
+                        },
+                        vec![value],
+                    ),
+                });
+            }
             let sign = specification.strip_suffix('d').unwrap_or(&specification);
             if matches!(sign, "" | "-" | "+" | " ") {
                 if field.conversion != ast::ConversionFlag::None
@@ -580,7 +616,10 @@ impl Checker<'_> {
                 ),
             });
         }
-        if matches!(value.ty, Type::Exception | Type::NamedException(_)) {
+        if matches!(
+            value.ty,
+            Type::Exception | Type::ImportException | Type::NamedException(_)
+        ) {
             let op = if field.conversion == ast::ConversionFlag::Repr {
                 Builtin::ExceptionRepr
             } else {
@@ -595,6 +634,12 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(_))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ExceptionField {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
+            });
         }
         if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
@@ -662,7 +707,8 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ExitCode
+                | Type::ExceptionField
+                | Type::ImportException
                 | Type::TimeoutExpired
         ) {
             return Err(error(

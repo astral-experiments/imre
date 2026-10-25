@@ -15,10 +15,13 @@ pub(super) fn alias(
         Some(Binding::Definition(def)) if ids.contains_key(&def) => {
             Some(ExceptionAlias::Named(def))
         }
-        None => value
-            .as_name_expr()
-            .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
-            .map(ExceptionAlias::Builtin),
+        None => value.as_name_expr().and_then(|n| {
+            let kind = crate::frontend::exception_kind(n.id.as_str())?;
+            Some(ExceptionAlias::Builtin {
+                kind,
+                name: n.id.to_string(),
+            })
+        }),
         _ => None,
     }
 }
@@ -59,6 +62,8 @@ fn builtin_mro(kind: u32) -> Vec<u32> {
         18 => 17,
         20..=24 => 12,
         37 => 10,
+        40 => 39, // UnboundLocalError derives from NameError.
+        42 => 41,
         _ => 1,
     };
     let mut out = vec![kind];
@@ -207,6 +212,12 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                 let mut ancestors = vec![id];
                 ancestors.extend(mro);
                 if !marker(node) {
+                    if matches!(base, 41 | 42) {
+                        return Err(module.error(
+                            node,
+                            "custom import exception payload layouts are unsupported",
+                        ));
+                    }
                     validate_layout(module, node)?;
                     layouts.insert(def);
                 }

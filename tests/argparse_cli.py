@@ -9,6 +9,17 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "numbers": [
+        [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
+        ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],
+        ["-i", "bad", "-i", "1"], ["-i", "bad", "--help"], ["--help", "-i", "bad"],
+        ["--scale=-0.0"], ["--scale", "1e-1000"], ["--scale=inf"], ["--scale=nan"],
+        ["--scale", "1", "--scale", "bad"],
+        ["--ids", "-02", "0_4"], ["--ids", "3", "bad"], ["--ids", "3", "2"],
+        ["--choice=0.0"], ["--choice=2"], ["--maybe"], ["--maybe=01"], ["--maybe=42"],
+        ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
+        ["--note", "red"], ["--note=42"],
+    ],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
         ["--", "a", "b"], ["a", "--", "--", "b"], ["a", "b", "-v", "c"],
@@ -29,6 +40,7 @@ CASES = {
         ["--items", "red", "green"],
         ["--items=red", "green"],
         ["--items", "-0.125", "-.９", "--verbose"],
+        ["--items", "-\U00011de0"],
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
@@ -93,7 +105,17 @@ CASES = {
         ["one", "-v", "two"], ["one", "--", "-v", "--"], ["--", "--", "tail"],
         ["one", "--unknown", "two"], ["--unknown", "one"], ["one", "--help"],
     ],
+    "method_args": [[]],
+    "numeric_defaults": [[], ["--help"], ["word"], ["--amount", "2"], ["--amount=2", "word"],
+                         ["--amount", "bad", "--help"], ["--help", "--amount", "bad"],
+                         ["range", "--big", "4999", "100000000000000000001"],
+                         ["radix", str(2**80)], ["radix", str(2**80 + 3)], ["radix", "--help"]],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+    "spellings": [[], ["+h"], ["++help"], ["++hel"], ["--help"], ["++value=x"], ["/v", "v"],
+                  ["+xz"], ["+x+z"], ["+xZ"], ["+"], ["++v", "x"], ["--", "++value"],
+                  ["abbrev"], ["abbrev", "-h"], ["abbrev", "-foo"], ["abbrev", "-foob=x"],
+                  ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
+                  ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
@@ -101,7 +123,7 @@ REJECTED = {
     "invalid_arity": 'parser.add_argument("input", nargs="bad")',
     "zero_arity": 'parser.add_argument("input", nargs=0)',
     "mixed_positionals": 'parser.add_argument("input", "--other")',
-    "foreign_converter": 'parser.add_argument("--number", type=int)',
+    "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",
@@ -149,6 +171,8 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+                if name == "spellings":
+                    samples.extend(([mode, "--unknown"], width, color) for mode in ("bare", "pos") for color in (False, True))
                 if name == "groups":
                     samples.extend((["foo", "check", "--help"], width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
@@ -181,6 +205,25 @@ def main():
                             (name, arguments, width, color, expected, actual)
                         )
                     checks += 1
+        # An integer written in the source is already a value. A large hex
+        # default/const remains usable even when decimal argv conversion is limited.
+        source = Path(directory) / "literal_default.py"
+        literal = "0x" + "f" * 560
+        source.write_text(
+            "import argparse\ndef read():\n    parser = argparse.ArgumentParser()\n"
+            f"    parser.add_argument('-n', nargs='?', type=int, default={literal}, const={literal})\n"
+            f"    return parser.parse_args()\nprint(read().n == {literal})\n"
+        )
+        native = source.with_suffix("")
+        env = {**os.environ, "PYTHONINTMAXSTRDIGITS": "640", "PYTHON_COLORS": "0"}
+        for level in args.opt_levels:
+            subprocess.run([args.compiler, "build", source, "-o", native, "--opt-level", level, *compile_flags], check=True)
+            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650]):
+                expected = result([args.python, source, *arguments], env)
+                actual = result([native, *arguments], env)
+                if actual != expected:
+                    raise AssertionError(("literal_default", arguments, level, expected, actual))
+                checks += 1
         for name, declaration in REJECTED.items():
             source = Path(directory) / (name + ".py")
             source.write_text(
