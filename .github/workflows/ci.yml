@@ -13,6 +13,8 @@ on:
           - 'b65213dfe9d6fdd4b429bd079ae52cb302530f25'
           - '4568c9ddf08b7666251cc718f8c7e9e74d72a57c'
           - '4c68a78174db25c6db1efb6293d6be6dccdd42ef'
+          - 'dd3d22a86a1a7072292ac7e7f73895f3f768a0ac'
+          - '033cb48f08e3877cc0003866086fd4a947109d36'
 permissions:
   contents: read
 jobs:
