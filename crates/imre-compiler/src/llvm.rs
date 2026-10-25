@@ -1746,6 +1746,7 @@ impl Emitter<'_, '_> {
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
             self.line("call void @imre_record_error_init()");
+            self.line("call void @imre_stdio_init()");
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_linecache {
@@ -4449,6 +4450,17 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::Ord => {
+                let value = &args[0].value;
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                Value {
+                    ty: Type::Int,
+                    operand: self
+                        .checked_instruction(format!("call i64 @imre_ord(i64 {word}, i32 {kind})")),
+                    small_integer: true,
+                }
+            }
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
             Builtin::BuiltinsHasLast => {
                 let bit = self.instruction("call i32 @imre_builtins_has_last()");
@@ -4496,6 +4508,18 @@ impl Emitter<'_, '_> {
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysVersionInfo { implementation } => {
+                let root = if *implementation {
+                    "sys_implementation_version"
+                } else {
+                    "sys_language_version"
+                };
+                self.tuple(
+                    returns,
+                    &crate::version::tuple_items(*implementation),
+                    Some(root),
+                )
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
@@ -7302,6 +7326,9 @@ declare ptr @imre_shutil_os_defpath()
 declare void @imre_shutil_rmtree(ptr, i32, i32, i64, i32, ptr, ptr, ptr, ptr)
 declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare i64 @imre_shutil_copytree(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, ptr, ptr, i32, ptr, ptr, i32)
+declare i64 @imre_shutil_move(ptr, i32, ptr, i32, i32, ptr, ptr, ptr, i32, i32)
+declare i32 @imre_shutil_destinsrc(ptr, i32, ptr, i32)
+declare i8 @imre_shutil_noncallable(ptr, ptr, ptr)
 declare ptr @imre_shutil_tree_error_args(ptr, ptr)
 declare ptr @imre_shutil_ignore_patterns_call(ptr, ptr, ptr)
 declare void @imre_os_unlink(ptr, i32, i64, i32)
@@ -7508,6 +7535,7 @@ declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
+declare void @imre_stdio_init()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
@@ -7881,6 +7909,7 @@ declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
+declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)
 declare i64 @imre_int_modpow(i64, i64, i64)
