@@ -1,7 +1,7 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
 mod lowercase;
-pub(super) use lowercase::lowercase;
+pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
 use std::mem::ManuallyDrop;
