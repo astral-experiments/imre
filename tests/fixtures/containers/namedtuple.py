@@ -16,6 +16,16 @@ def make_pair(log: list[int]) -> tuple[int, str]:
     return 7, "seven"
 
 
+def empty_fields(log: list[int]) -> tuple[()]:
+    log.append(4)
+    return ()
+
+
+def failing_fields(log: list[int]) -> tuple[int, str]:
+    log.append(5)
+    raise ValueError("cannot read fields")
+
+
 def label(log: list[int], event: int) -> int:
     log.append(event)
     return event
@@ -47,4 +57,9 @@ print(repr(Pair(right=label(log, 2), left=label(log, 3))))
 print(repr(make(log)._fields))
 print(Pair.__name__)
 print(repr(Pair.__match_args__))
+print(repr(Zero(*empty_fields(log))))
+try:
+    Pair(*failing_fields(log), *empty_fields(log))
+except ValueError as error:
+    print(str(error))
 print(repr(log))
