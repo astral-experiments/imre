@@ -415,8 +415,8 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn setdefault(&mut self, word: usize, default: V) -> Result<(V, bool), Error> {
         // SAFETY: the caller roots an exact key of this table's representation.
         let key = unsafe { K::borrow(word) };
-        let hash = HASHER.hash_one(&*key);
-        if let Some(index) = self.position(hash, &*key) {
+        let hash = key.try_hash()?;
+        if let Some(index) = self.key_position(hash, &key)? {
             return Ok((self.entries[index].as_ref().unwrap().value, false));
         }
         self.insert_absent(hash, (*key).clone(), default)?;
