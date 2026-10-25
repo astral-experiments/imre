@@ -6,6 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
@@ -197,7 +199,14 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                         let (left, left_kind) = super::unions::member(left);
                         let (right, right_kind) = super::unions::member(right);
                         if left_kind != right_kind {
-                            Comparison::Done(false)
+                            let numbers = match (left_kind.base(), right_kind.base()) {
+                                (1, 2) => Some((left, right)),
+                                (2, 1) => Some((right, left)),
+                                _ => None,
+                            };
+                            Comparison::Done(numbers.is_some_and(|(flag, integer)| {
+                                Int::borrow(integer).big().to_usize() == Some(flag)
+                            }))
                         } else {
                             Comparison::Child {
                                 left,
@@ -453,7 +462,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         Storage::PurePath(path) => {
                             output.push_str(path.class());
                             output.push('(');
-                            super::exceptions::push_string_repr(&storage.posix_spelling(), output);
+                            path.push_posix_repr(output);
                             output.push(')');
                             None
                         }

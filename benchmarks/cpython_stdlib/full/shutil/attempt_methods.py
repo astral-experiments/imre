@@ -17,6 +17,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
+import native_copy
 import which_cases
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures, testcase_fixture
@@ -63,6 +64,15 @@ def fixture(case, suite, node):
         return which_cases.which_fixture(case)
     if isinstance(case, suite.TestCopy) and node.name == copyfile.NATIVE_CASE:
         return copyfile.copy_fixture(case)
+    if isinstance(case, suite.TestCopy) and node.name == native_copy.NATIVE_RETURN_VALUE:
+        return native_copy.return_value_fixture(case)
+    if isinstance(case, suite.TestCopy):
+        if node.name in {"test_copy_dir", "test_copy2_dir"}:
+            return native_copy.native_path_fixture(case, 2) + source(CLASSES["TestCopy"]["_test_copy_dir"]).decode()
+        if node.name in {"test_copyfile_same_file", "test_copyfile_copy_dir"}:
+            return native_copy.native_path_fixture(case, 1 if node.name == "test_copyfile_same_file" else 2)
+    if isinstance(case, suite.TestCopyTree) and node.name in {"test_copytree_return_value", "test_copytree_subdirectory"}:
+        return native_copy.native_path_fixture(case, 1)
     helpers, globals_, values = {}, {}, {}
     needs_mock = False
     seen = set()
