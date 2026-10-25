@@ -250,6 +250,7 @@ impl Builtin {
             | Self::Sha256Update
             | Self::Sha256Digest { .. }
             | Self::Sha256Copy
+            | Self::ActiveException
             | Self::ExceptionRecord
             | Self::ExceptionCause
             | Self::ExceptionSuppressContext

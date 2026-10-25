@@ -155,7 +155,7 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_) | Type::None
                 )
             })
             || types == [Type::Logger; 2]
@@ -164,7 +164,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, enum members, loggers, or hash objects",
+                "identity comparisons require None, exceptions, enum members, loggers, or hash objects",
             ));
         }
         Ok(Self::identity_result(

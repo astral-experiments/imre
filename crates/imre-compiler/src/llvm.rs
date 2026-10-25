@@ -4239,14 +4239,18 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::ExceptionCause => {
-                let cause = self.instruction(format!(
-                    "call ptr @imre_exception_cause(ptr {})",
-                    args[0].value.operand
-                ));
+            Builtin::ExceptionCause | Builtin::ActiveException => {
+                let pointer = if matches!(builtin, Builtin::ActiveException) {
+                    self.instruction("call ptr @imre_exception_current()")
+                } else {
+                    self.instruction(format!(
+                        "call ptr @imre_exception_cause(ptr {})",
+                        args[0].value.operand
+                    ))
+                };
                 Value {
                     ty: returns,
-                    operand: self.instruction(format!("ptrtoint ptr {cause} to i64")),
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
             }
