@@ -1507,6 +1507,15 @@ fn textwrap_implementation(name: &str) -> Option<&'static str> {
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    if module == IntrinsicModule::Selectors
+        && matches!(
+            name,
+            "PollSelector" | "DefaultSelector" | "SelectorKey" | "EVENT_READ" | "EVENT_WRITE"
+        )
+        && let Some(source) = modules.iter().find(|source| source.is_bundled("selectors"))
+    {
+        return source.export(name);
+    }
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -2175,6 +2184,11 @@ impl<'a> Loader<'a> {
         });
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
+        }
+        if module == Some(IntrinsicModule::Selectors)
+            && cfg!(any(target_os = "linux", target_os = "macos"))
+        {
+            self.load_module(name)?;
         }
         let needs_textwrap = |implementation| {
             matches!(module, Some(IntrinsicModule::Textwrap))

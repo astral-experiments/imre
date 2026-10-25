@@ -5327,14 +5327,21 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        if let Some(Binding::Intrinsic(
-            intrinsic @ (Intrinsic::PopenSelector | Intrinsic::SelectorClass(_)),
-        )) = self.resolve(expression)
-        {
-            let mode = match intrinsic {
-                Intrinsic::SelectorClass(select) => Some(select),
-                _ => None,
-            };
+        let selector = match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::PopenSelector)) => Some(None),
+            Some(Binding::Intrinsic(Intrinsic::SelectorClass(select))) => Some(Some(select)),
+            Some(binding @ Binding::Definition(def))
+                if self.graph.modules[def.module].is_bundled("selectors")
+                    && self.graph.modules[def.module].bindings.get("PollSelector")
+                        == Some(&binding) =>
+            {
+                // As a value this class selects the poll backend for Popen. Calls
+                // still construct the bundled PollSelector with its own fd map.
+                Some(Some(false))
+            }
+            _ => None,
+        };
+        if let Some(mode) = selector {
             return Ok(Expr {
                 ty: Type::ProcessSelectorClass,
                 kind: ExprKind::Builtin(
@@ -6246,6 +6253,7 @@ impl<'a> Checker<'a> {
                         | Type::PathInfo
                         | Type::Poll
                         | Type::Socket
+                        | Type::ProcessSelectorClass
                         | Type::Sha256
                         | Type::JsonDecoder
                         | Type::ZipFile
