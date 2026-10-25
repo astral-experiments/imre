@@ -17,6 +17,7 @@ mod assignments;
 mod asyncio;
 mod bytes;
 mod cached_properties;
+mod calendar;
 mod call_binding_errors;
 mod callables;
 mod calls;
@@ -1536,6 +1537,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
+        Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => return Ok(Type::Calendar(kind)),
         Some(Binding::Intrinsic(Intrinsic::ModuleType)) => return Ok(Type::NativeModule),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
@@ -4771,6 +4773,9 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            return calendar::binary(first, second, left, right, binary, self.source);
+        }
         if binary.op == ast::Operator::Mod
             && matches!(left.ty, Type::Str | Type::StrLiteral(_))
             && matches!(right.ty, Type::Str | Type::StrLiteral(_))
@@ -4947,6 +4952,9 @@ impl<'a> Checker<'a> {
                 expression,
                 &format!("no native implementation for {symbol}"),
             ));
+        }
+        if let Some(value) = self.calendar_constant(expression) {
+            return Ok(value);
         }
         if let Some(target) = self.resolve(expression) {
             if matches!(target, Binding::Module(_) | Binding::IntrinsicModule(_))
@@ -5302,6 +5310,11 @@ impl<'a> Checker<'a> {
                         )
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
+                        if value.ty == Type::Calendar(ir::CalendarType::Delta)
+                            && unary.op == ast::UnaryOp::USub
+                        {
+                            return Ok(calendar::op(ir::CalendarOp::Negate, value.ty, vec![value]));
+                        }
                         if self.types.is_counter(value.ty) {
                             let op = if unary.op == ast::UnaryOp::UAdd {
                                 ir::CounterOp::Positive
@@ -5467,6 +5480,33 @@ impl<'a> Checker<'a> {
                     });
                 }
                 let mut values = self.numeric_union_comparison(values);
+                if let ([a, b], [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)]) =
+                    (values.as_slice(), compare.ops.as_ref())
+                    && [a.ty, b.ty].into_iter().all(|t| {
+                        matches!(t, Type::None | Type::Calendar(_))
+                            || self
+                                .types
+                                .payload(t)
+                                .is_some_and(|p| matches!(p, Type::Calendar(_)))
+                    })
+                    && [a.ty, b.ty].into_iter().any(|t| {
+                        matches!(t, Type::Calendar(_))
+                            || self
+                                .types
+                                .payload(t)
+                                .is_some_and(|p| matches!(p, Type::Calendar(_)))
+                    })
+                {
+                    let equal = calendar::op(ir::CalendarOp::NullableEqual, Type::Bool, values);
+                    return Ok(if *op == ast::CmpOp::NotEq {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(equal)),
+                        }
+                    } else {
+                        equal
+                    });
+                }
                 if let ([left, right], [op]) = (values.as_slice(), compare.ops.as_ref())
                     && let Some(result) = inspect::equality(left, right, *op)
                 {
@@ -5606,7 +5646,14 @@ impl<'a> Checker<'a> {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
-                        || matches!(ty, Type::Bytes | Type::ClockTime)
+                        || matches!(
+                            ty,
+                            Type::Bytes
+                                | Type::ClockTime
+                                | Type::Calendar(
+                                    ir::CalendarType::Delta | ir::CalendarType::DateTime
+                                )
+                        )
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
@@ -5995,6 +6042,9 @@ impl<'a> Checker<'a> {
                         ty: self.types.dict(Type::Str, Type::Str),
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
+                }
+                if let Type::Calendar(kind) = receiver.ty {
+                    return self.calendar_attribute(kind, receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::TimedFileHandler | Type::ClockTime) {
                     return self.timed_attribute(receiver, attribute);
@@ -6783,6 +6833,9 @@ impl<'a> Checker<'a> {
                 return self.timed_handler(call);
             }
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return self.clock_time(call),
+            Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
+                return self.calendar_constructor(kind, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }
@@ -6916,6 +6969,15 @@ impl<'a> Checker<'a> {
             )
         {
             return self.environ_method(attribute, call);
+        }
+        if let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && self.resolve(&attr.value)
+                == Some(Binding::Intrinsic(Intrinsic::Calendar(
+                    ir::CalendarType::DateTime,
+                )))
+            && attr.attr.as_str() == "now"
+        {
+            return self.calendar_now(call);
         }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
@@ -7160,6 +7222,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
+            }
+            if let Type::Calendar(kind) = receiver.ty {
+                return self.calendar_method(kind, receiver, attribute, call);
             }
             if receiver.ty == Type::TimedFileHandler {
                 return self.timed_method(receiver, attribute, call);
@@ -7644,6 +7709,27 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if args.len() == 1
+            && matches!(args[0].ty, Type::Calendar(_))
+            && matches!(name.id.as_str(), "str" | "print" | "repr")
+        {
+            let text = if name.id == "repr" {
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Repr, args),
+                }
+            } else {
+                calendar::op(ir::CalendarOp::Text { iso: false }, Type::Str, args)
+            };
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            } else {
+                text
+            });
+        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));

@@ -175,6 +175,7 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo
@@ -538,6 +539,7 @@ impl Types {
     pub(crate) fn truthiness(&self, ty: Type) -> Option<bool> {
         match ty {
             Type::None => Some(false),
+            Type::Calendar(crate::ir::CalendarType::Delta) => None,
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
             Type::SimpleNamespace(_) => Some(true),
@@ -573,6 +575,7 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::Calendar(_)
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::PathInfo

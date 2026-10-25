@@ -12,6 +12,7 @@ mod args;
 mod asyncio;
 mod boxed_values;
 mod bytes;
+mod calendar;
 mod contexts;
 mod copying;
 mod csv;
@@ -128,6 +129,7 @@ enum Storage {
     Logger(Rc<Str>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    Calendar(Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
