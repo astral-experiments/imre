@@ -1,6 +1,8 @@
 //! Native text operations preserve Python's Unicode-scalar and error semantics.
 
+mod expandtabs;
 mod lowercase;
+mod translate;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
@@ -72,6 +74,38 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive and no character reference escapes.
     let value = unsafe { &*value };
     u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
+/// Return true when text contains a cased character and every cased character is uppercase.
+///
+/// # Safety
+/// The caller roots an immutable native string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
+    use icu_properties::{
+        CodePointSetData,
+        props::{Cased, Uppercase},
+    };
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    let text = unsafe { &*value };
+    let mut seen = false;
+    for c in text.chars() {
+        if c.is_ascii_uppercase() {
+            seen = true;
+        } else if c.is_ascii_lowercase() || c == '\u{295}' {
+            // U+0295 was lowercase in Unicode 16, uncased in newer ICU data.
+            return 0;
+        } else if !c.is_ascii()
+            && CodePointSetData::new::<Cased>().contains(c)
+            && !crate::integer_text::newer_printable(c)
+        {
+            if !CodePointSetData::new::<Uppercase>().contains(c) {
+                return 0;
+            }
+            seen = true;
+        }
+    }
+    u32::from(seen)
 }
 
 /// Removes the common space/tab prefix after the caller has evaluated its text.

@@ -1,4 +1,6 @@
 //! ImportError retains its positional arguments separately from its named attributes.
+mod suggestions;
+
 use super::*;
 use crate::objects::{records, values};
 use crate::{Bytes, Int};
@@ -11,12 +13,27 @@ pub(super) struct Import {
 }
 
 impl Import {
-    pub(super) fn message(&self) -> Rc<Str> {
+    pub(super) fn message(&self) -> Rendered {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
         } else {
             self.args.message()
         }
+    }
+
+    /// A live native module supplies candidates just before uncaught display.
+    pub(super) fn suggestion(&self) -> Option<&'static str> {
+        let text = |field: &OwnedWord| {
+            (field.kind == WordKind::new(3)).then(|| {
+                // SAFETY: the concrete field owns this exact string through the lookup.
+                unsafe { &*(field.word as *const Str) }.as_str()
+            })
+        };
+        if text(&self.fields[0])? != "errno" {
+            return None;
+        }
+        let wrong = text(&self.fields[2])?;
+        suggestions::closest(wrong, crate::objects::errno::exported_names())
     }
 }
 
@@ -35,9 +52,9 @@ impl Positional {
         unsafe { tuple_item(self.0.word, index) }
     }
 
-    pub(super) fn message(&self) -> Rc<Str> {
+    pub(super) fn message(&self) -> Rendered {
         match self.len() {
-            0 => Rc::new(Str::new("")),
+            0 => Ok(Rc::new(Str::new(""))),
             1 => {
                 let (kind, word) = self.item(0);
                 word_text(kind, word, false)
@@ -46,19 +63,19 @@ impl Positional {
         }
     }
 
-    pub(super) fn repr_args(&self) -> Str {
-        let mut result = String::new();
+    pub(super) fn write_repr_args(&self, output: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        use std::fmt::Write as _;
         for i in 0..self.len() {
             if i != 0 {
-                result.push_str(", ");
+                output.write_str(", ")?;
             }
             let (kind, word) = self.item(i);
             // SAFETY: each argument stays rooted by the immutable tuple.
             unsafe {
-                values::write_repr(&mut result, word, kind);
+                values::try_write_repr(output, word, kind)?;
             }
         }
-        result.into()
+        Ok(())
     }
 }
 
@@ -72,17 +89,17 @@ unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize) {
     }
 }
 
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rc<Str> {
+pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
     if kind.raw() == 3 && !repr {
         // SAFETY: the owning field roots the exact string.
-        return unsafe { acquire_rc(word) };
+        return Ok(unsafe { acquire_rc(word) });
     }
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
-        values::write_repr(&mut result, word, kind);
+        values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind)?;
     }
-    Rc::new(result.into())
+    Ok(Rc::new(result.into()))
 }
 
 // A tuple may store an optional scalar in its nullable representation. Views
@@ -140,8 +157,10 @@ pub unsafe extern "C" fn imre_import_error_new(
         let payload = Import {
             args: Positional(WordKind::new(6).acquire(args as usize)),
             msg: msg_kind.acquire(msg),
-            fields: [(name_kind, name), (path_kind, path), (from_kind, from)]
-                .map(|(k, w)| WordKind::new(k).acquire(w)),
+            fields: [(name_kind, name), (path_kind, path), (from_kind, from)].map(|(k, w)| {
+                let (kind, word) = concrete(WordKind::new(k), w);
+                kind.acquire(word)
+            }),
         };
         let err = new_exception(
             Kind::from_raw(named.map_or(kind, |d| d.base)),
@@ -232,7 +251,7 @@ pub unsafe extern "C" fn imre_import_error_reject_reset(
 pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *const Str {
     // SAFETY: the view retains the original value.
     let (kind, word) = unsafe { exit_word(value) };
-    Rc::into_raw(word_text(kind, word, true))
+    finish_display(word_text(kind, word, true))
 }
 
 fn type_name(kind: WordKind) -> &'static str {

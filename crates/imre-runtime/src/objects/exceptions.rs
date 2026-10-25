@@ -6,6 +6,8 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+mod tree;
+pub(super) use tree::append_tree_entries;
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -301,6 +303,7 @@ enum Payload {
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
     Json(Rc<JsonError>),
+    Tree(Rc<tree::Errors>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Import(Box<imports::Import>),
@@ -475,14 +478,12 @@ impl Error {
         filename: Option<Filename>,
         filename2: Option<Filename>,
     ) -> Self {
-        let mut message = format!("[Errno {errno}] {description}");
+        let message = format!("[Errno {errno}] {description}");
         let os_paths = filename.map(|first| {
-            let paths = Box::new(os::Filenames {
+            Box::new(os::Filenames {
                 first,
                 second: filename2,
-            });
-            paths.append_message(&mut message);
-            paths
+            })
         });
         Self::errno_arguments(kind, errno, description, message, os_paths)
     }
@@ -570,6 +571,15 @@ impl Error {
         }
     }
 
+    /// Use Python's argument-free MemoryError when an operation exhausts memory.
+    pub(super) fn memory_error() -> Self {
+        Self {
+            kind: Kind::MemoryError,
+            payload: Some(Payload::Empty),
+            cause: None,
+        }
+    }
+
     pub(super) fn key(key: OwnedWord) -> Self {
         Self {
             kind: Kind::KeyError,
@@ -588,6 +598,16 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Copytree aggregates only OS failures; language errors still escape intact.
+    pub(super) fn into_os_message(self) -> Result<Rc<Str>> {
+        if !self.kind.matches(Kind::OSError) {
+            return Err(self);
+        }
+        let error = self.into_object();
+        // SAFETY: this fresh exception owns its payload throughout the read.
+        unsafe { error.0.with(Storage::exception_message) }.map_err(|_| Error::allocation())
+    }
+
     /// Retain the original exception when a native operation translates an error.
     pub(super) fn with_cause(mut self, cause: Self) -> Self {
         self.cause = Some(cause.into_object());
@@ -596,6 +616,9 @@ impl Error {
 
     fn into_object(self) -> Rc<Object> {
         match self.payload {
+            Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
+                MEMORY_ERROR.with_borrow(Rc::clone)
+            }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(Rc::clone),
         }
@@ -626,6 +649,8 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static MEMORY_ERROR: RefCell<Rc<Object>> =
+        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
     static RECORD_ALLOCATION_ERROR: RefCell<Rc<Object>> = RefCell::new(new_exception(
         Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
     ));
@@ -645,6 +670,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
+    MEMORY_ERROR.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -745,9 +771,13 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [&RECORD_ALLOCATION_ERROR, &SEQUENCE_ALLOCATION_ERROR]
-            .into_iter()
-            .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
+        if let Some(template) = [
+            &RECORD_ALLOCATION_ERROR,
+            &SEQUENCE_ALLOCATION_ERROR,
+            &MEMORY_ERROR,
+        ]
+        .into_iter()
+        .find(|template| template.with_borrow(|cached| Rc::ptr_eq(cached, pending)))
         {
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
@@ -1113,30 +1143,26 @@ impl Storage {
         self.exception().kind
     }
 
-    fn exception_message(&self) -> Rc<Str> {
-        match &self.exception().payload {
-            Payload::Import(err) => err.message(),
-            Payload::Positional(args) => args.message(),
-            Payload::Exit(code) => exit_text(code.as_ref(), ""),
+    fn exception_message(&self) -> Rendered {
+        Ok(match &self.exception().payload {
+            Payload::Import(err) => err.message()?,
+            Payload::Positional(args) => args.message()?,
+            Payload::Exit(Some(code)) => imports::word_text(code.kind, code.word, false)?,
+            Payload::Exit(None) => Rc::new(Str::new("")),
             Payload::Empty => Rc::new(Str::new("")),
             Payload::Message(message) => Rc::clone(message),
-            Payload::Arguments(arguments) => Rc::clone(&arguments.message),
+            Payload::Arguments(arguments) => match &arguments.os_paths {
+                Some(paths) => paths.message(&arguments.message)?,
+                None => Rc::clone(&arguments.message),
+            },
             Payload::Json(e) => Rc::new(Str::from(format!(
                 "{}: line {} column {} (char {})",
                 e.msg, e.lineno, e.colno, e.pos
             ))),
-            Payload::Process(process) => Rc::new(process.message()),
-            Payload::Timeout(timeout) => Rc::new(timeout.message()),
-            Payload::Key(key) if key.kind == WordKind::new(3) => {
-                // SAFETY: this owned kind-3 word is a live string.
-                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
-            }
-            Payload::Key(key) => {
-                let mut message = String::new();
-                // SAFETY: the exception owns the immutable key and its exact kind.
-                unsafe { super::values::write_repr(&mut message, key.word, key.kind) };
-                Rc::new(Str::from(message))
-            }
+            Payload::Process(process) => Rc::new(process.message()?),
+            Payload::Timeout(timeout) => Rc::new(timeout.message()?),
+            Payload::Key(key) => imports::word_text(key.kind, key.word, true)?,
+            Payload::Tree(errors) => errors.message()?,
             Payload::Group(members) => {
                 let count = members.len();
                 let suffix = if count == 1 { "" } else { "s" };
@@ -1144,7 +1170,7 @@ impl Storage {
                     "unhandled errors in a TaskGroup ({count} sub-exception{suffix})"
                 )))
             }
-        }
+        })
     }
 }
 
@@ -1175,20 +1201,6 @@ pub unsafe extern "C" fn imre_json_error_field(value: *const Object, field: u32)
         })
     };
     finish(result, 0)
-}
-
-fn exit_text(code: Option<&OwnedWord>, missing: &str) -> Rc<Str> {
-    let Some(code) = code else {
-        return Rc::new(Str::new(missing));
-    };
-    if code.kind == WordKind::new(3) {
-        // SAFETY: the exit payload roots this string.
-        return unsafe { acquire_rc(code.word) };
-    }
-    let mut text = String::new();
-    // SAFETY: the payload owns a scalar with this exact word kind.
-    unsafe { super::values::write_repr(&mut text, code.word, code.kind) };
-    Rc::new(Str::from(text))
 }
 
 /// Construct SystemExit with its original code. Kind 4 denotes an omitted
@@ -1258,7 +1270,7 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
         let (kind, word) = exit_word(value);
-        Rc::into_raw(imports::word_text(kind, word, false))
+        finish_display(imports::word_text(kind, word, false))
     }
 }
 
@@ -1517,6 +1529,15 @@ pub unsafe extern "C" fn imre_named_exception_record(value: *const Object) -> *c
     }
 }
 
+type Rendered = std::result::Result<Rc<Str>, std::fmt::Error>;
+
+fn finish_display(result: Rendered) -> *const Str {
+    finish(
+        result.map(Rc::into_raw).map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
+}
+
 /// Format after the storage borrow ends: a Python display method may read aliases,
 /// mutate its fields, or raise. The payload stays live through the callback.
 unsafe fn display(value: *const Object, repr: bool) -> *const Str {
@@ -1545,43 +1566,41 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             return unsafe { super::values::imre_value_repr(layout.record.word, 6) };
         }
     }
+    use std::fmt::Write as _;
     // SAFETY: base message formatting uses only sealed immutable builtin payloads.
-    unsafe {
+    let result = unsafe {
         object(value).0.with(|s| {
             if !repr {
-                return Rc::into_raw(s.exception_message());
+                return s.exception_message();
             }
-            let e = s.exception();
-            let arg = match &e.payload {
-                Payload::Import(err) => err.args.repr_args(),
-                Payload::Positional(args) => args.repr_args(),
-                Payload::Empty => Str::new(""),
+            let exception = s.exception();
+            let mut result = String::new();
+            let mut output = super::values::ReprWriter(&mut result);
+            output.write_str(exception.name())?;
+            output.write_char('(')?;
+            match &exception.payload {
+                Payload::Import(err) => err.args.write_repr_args(&mut output)?,
+                Payload::Positional(args) => args.write_repr_args(&mut output)?,
+                Payload::Tree(errors) => errors.write_message(&mut output)?,
+                Payload::Empty | Payload::Exit(None) => {}
                 Payload::Arguments(arguments) => {
-                    let mut result = String::new();
                     for (index, arg) in arguments.args.iter().enumerate() {
                         if index != 0 {
-                            result.push_str(", ");
+                            output.write_str(", ")?;
                         }
-                        super::values::write_repr(&mut result, arg.word, arg.kind);
+                        super::values::try_write_repr(&mut output, arg.word, arg.kind)?;
                     }
-                    result.into()
                 }
-                Payload::Key(k) => {
-                    let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
-                    s.into()
+                Payload::Key(key) | Payload::Exit(Some(key)) => {
+                    super::values::try_write_repr(&mut output, key.word, key.kind)?;
                 }
-                Payload::Exit(None) => Str::new(""),
-                Payload::Exit(Some(k)) => {
-                    let mut s = String::new();
-                    super::values::write_repr(&mut s, k.word, k.kind);
-                    s.into()
-                }
-                _ => string_repr(&s.exception_message()),
-            };
-            Rc::into_raw(Rc::new(format!("{}({})", e.name(), arg).into()))
+                _ => write_quoted_repr(s.exception_message()?.as_str(), &mut output)?,
+            }
+            output.write_char(')')?;
+            Ok(Rc::new(Str::from(result)))
         })
-    }
+    };
+    finish_display(result)
 }
 
 /// Return the current repr of a nominal exception's fields or builtin arguments.
@@ -1812,18 +1831,19 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                     let integer = crate::Int::borrow(code.word);
                     (integer.big().to_i64().unwrap_or(-1) as i32, None)
                 }
-                Some(code) => (1, Some(exit_text(Some(code), ""))),
+                Some(code) => (1, Some(imports::word_text(code.kind, code.word, false))),
             };
             Some((status, message))
         })
     };
+    let stderr = crate::sys::flush_stderr();
+    let stdout = crate::flush_stdout();
     if let Some((status, message)) = exit {
-        let _ = crate::flush_stdout();
-        let _ = crate::sys::flush_stderr();
-        if let Some(text) = message {
-            let _ = writeln!(io::stderr().lock(), "{text}");
+        if let Some(message) = message {
+            let text = message.as_deref().map_or("", Str::as_str);
+            let _ = crate::sys::write_stderr(text, true);
         }
-        return status;
+        return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
     let mut chain = Vec::new();
     let mut current = Some(pending.clone());
@@ -1844,27 +1864,75 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             // SAFETY: display transfers one owned string.
             unsafe { Rc::from_raw(message) }
         };
-        chain.push((name, message));
+        // Traceback suggestions decorate only uncaught output. The owned exception's
+        // message, positional arguments, str() and repr() stay independent.
+        // SAFETY: the owned exception stays live; this read does not invoke callbacks.
+        let suggestion = unsafe {
+            exception
+                .0
+                .with(|storage| match &storage.exception().payload {
+                    Payload::Import(fields) => fields.suggestion(),
+                    _ => None,
+                })
+        };
+        chain.push((name, message, suggestion));
         current = cause;
     }
     drop(pending);
-    let _ = crate::flush_stdout();
-    let _ = crate::sys::flush_stderr();
-    let mut stderr = io::stderr().lock();
-    for (index, (name, message)) in chain.into_iter().rev().enumerate() {
+    let mut diagnostic = crate::sys::stderr_writer();
+    for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
-                stderr,
+                diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
-        if message.is_empty() {
-            let _ = writeln!(stderr, "{name}");
+        if let Some(hint) = suggestion {
+            let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
+        } else if message.is_empty() {
+            let _ = writeln!(diagnostic, "{name}");
         } else {
-            let _ = writeln!(stderr, "{name}: {message}");
+            let _ = writeln!(diagnostic, "{name}: {message}");
         }
     }
-    1
+    drop(diagnostic);
+    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+}
+
+/// CPython reports a stdout flush error, silently records a stderr flush error,
+/// and uses status 120 if either stream could not be finalized.
+pub(crate) fn status_after_flush(
+    status: i32,
+    stdout: io::Result<()>,
+    stderr: io::Result<()>,
+) -> i32 {
+    if let Err(error) = stdout {
+        let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
+        let error = super::files::errno_error(error);
+        let name = if broken_pipe {
+            "BrokenPipeError"
+        } else {
+            error.kind.name()
+        };
+        let exception = error.into_object();
+        // SAFETY: the owned OS exception roots its arguments throughout formatting.
+        let message = unsafe { exception.0.with(Storage::exception_message) };
+        let message = message
+            .as_deref()
+            .map_or("<exception str() failed>", Str::as_str);
+        let mut diagnostic = io::stderr().lock();
+        let _ = writeln!(diagnostic, "Exception ignored while flushing sys.stdout:");
+        if message.is_empty() {
+            let _ = writeln!(diagnostic, "{name}");
+        } else {
+            let _ = writeln!(diagnostic, "{name}: {message}");
+        }
+        120
+    } else if stderr.is_err() {
+        120
+    } else {
+        status
+    }
 }
 
 #[cfg(test)]

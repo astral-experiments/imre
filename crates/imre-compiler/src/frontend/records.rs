@@ -688,9 +688,13 @@ impl Checker<'_> {
             *self.classes.declarations.ids.get(&id)?
         };
         let owner = &self.classes.declarations.definitions[class];
-        let binding = *owner.static_bindings.get(attr.attr.as_str())?;
+        let crate::classes::ClassValue::Binding(binding) =
+            owner.static_bindings.get(attr.attr.as_str())?
+        else {
+            return None;
+        };
         self.class_reads.borrow_mut().insert(owner.definition);
-        Some(binding)
+        Some(*binding)
     }
 
     /// The class binding is usable in static dispatch, never as a runtime value.
@@ -832,6 +836,27 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        let owner = &self.classes.declarations.definitions[class];
+        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
+            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(value.clone()),
+            }),
+            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
+                Some(self.globals.class_tuple(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
+                })?)
+            }
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            self.class_reads.borrow_mut().insert(owner.definition);
+            return Ok(self.evaluated_receiver(receiver, literal));
+        }
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
@@ -849,6 +874,13 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
@@ -925,6 +957,13 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if self.mock_implementation_method(class, attribute.attr.as_str()) {
+            return Err(error(
+                self.source,
+                attribute,
+                "private native mock operations cannot be accessed directly",
+            ));
+        }
         if call
             .arguments
             .keywords
@@ -962,6 +1001,31 @@ impl Checker<'_> {
             && let Some(context) = self.unittest_assert_raises(call, class, receiver)?
         {
             return Ok(context);
+        }
+        if self.native_mock(class)
+            && let Some(object) = &receiver
+        {
+            match attribute.attr.as_str() {
+                "assert_any_call" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_any_call");
+                }
+                "assert_called_with" => {
+                    return self.mock_arguments(call, class, object.clone(), "_assert_called_with");
+                }
+                "assert_called_once_with" => {
+                    return self.mock_arguments(
+                        call,
+                        class,
+                        object.clone(),
+                        "_assert_called_once_with",
+                    );
+                }
+                name if !self.classes.methods[class].contains_key(name) => {
+                    let child = self.mock_child(class, object.clone(), attribute)?;
+                    return self.mock_arguments(call, class, child, "_record");
+                }
+                _ => {}
+            }
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())

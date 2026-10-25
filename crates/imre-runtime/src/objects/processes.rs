@@ -5,6 +5,7 @@
 //! remain in the parent. All requested pipes are drained before decoding or check.
 
 use std::ffi::{CStr, CString, OsStr};
+use std::fmt::{self, Write as _};
 use std::fs;
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -18,6 +19,7 @@ use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeou
 use super::files::{decode_utf8_text, os_error};
 use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
+use super::values::ReprWriter;
 use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
@@ -66,25 +68,24 @@ impl ProcessError {
         }
     }
 
-    pub(super) fn message(&self) -> Str {
-        let cmd = argv::display(&self.cmd);
+    pub(super) fn message(&self) -> std::result::Result<Str, fmt::Error> {
+        let mut text = argv::message_prefix(&self.cmd)?;
+        let mut output = ReprWriter(&mut text);
         if self.returncode < 0 {
             let signal = -self.returncode;
             if let Some(name) = signal_name(signal) {
-                Str::from(format!(
-                    "Command '{cmd}' died with <Signals.{name}: {signal}>."
-                ))
+                write!(output, " died with <Signals.{name}: {signal}>.")?;
             } else {
-                Str::from(format!(
-                    "Command '{cmd}' died with unknown signal {signal}."
-                ))
+                write!(output, " died with unknown signal {signal}.")?;
             }
         } else {
-            Str::from(format!(
-                "Command '{cmd}' returned non-zero exit status {}.",
+            write!(
+                output,
+                " returned non-zero exit status {}.",
                 self.returncode
-            ))
+            )?;
         }
+        Ok(text.into())
     }
 }
 
@@ -149,13 +150,20 @@ impl TimeoutError {
     }
 
     /// Formatting observes later mutations of the same rooted argv list.
-    pub(super) fn message(&self) -> Str {
-        let cmd = argv::display(&self.cmd);
-        let seconds = match &self.timeout {
-            Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
-            Deadline::Float(seconds) => crate::floats::render(*seconds),
-        };
-        Str::from(format!("Command '{cmd}' timed out after {seconds} seconds"))
+    pub(super) fn message(&self) -> std::result::Result<Str, fmt::Error> {
+        let mut text = argv::message_prefix(&self.cmd)?;
+        let mut output = ReprWriter(&mut text);
+        match &self.timeout {
+            Deadline::Integer(seconds) => {
+                write!(output, " timed out after {} seconds", seconds.big())?
+            }
+            Deadline::Float(seconds) => write!(
+                output,
+                " timed out after {} seconds",
+                crate::floats::render(*seconds)
+            )?,
+        }
+        Ok(text.into())
     }
 }
 
@@ -211,6 +219,17 @@ fn signal_name(signal: i32) -> Option<&'static str> {
         #[cfg(target_os = "linux")]
         value if value == libc::SIGRTMAX() => "SIGRTMAX",
         _ => return None,
+    })
+}
+
+/// A traced stop can be reported by waitpid without WUNTRACED. Popen
+/// exposes the negative stop signal just as it exposes a terminating signal.
+fn returncode(status: ExitStatus) -> i32 {
+    status.code().unwrap_or_else(|| {
+        -status
+            .stopped_signal()
+            .or_else(|| status.signal())
+            .unwrap_or(0)
     })
 }
 
@@ -1167,9 +1186,7 @@ pub unsafe extern "C" fn imre_subprocess_check_output(args: *const Object) -> *c
             raise_process(ProcessError {
                 // SAFETY: the exception acquires the original rooted argv.
                 cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-                returncode: status
-                    .code()
-                    .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+                returncode: returncode(status),
                 // SAFETY: each field transfers one decoded string or no owner.
                 stdout: unsafe {
                     OwnedWord::from_owned(Rc::into_raw(stdout) as usize, WordKind::new(3))
@@ -1209,9 +1226,7 @@ pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u
         Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
             // SAFETY: the original list remains rooted while acquiring our owner.
             cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-            returncode: status
-                .code()
-                .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+            returncode: returncode(status),
             stdout: absent(),
             stderr: absent(),
         }),
@@ -1377,9 +1392,7 @@ unsafe fn run_process(
         Err(error) => return error.returning(std::ptr::null_mut()),
     };
     let result: Result<_> = (|| {
-        let returncode = status
-            .code()
-            .unwrap_or_else(|| -status.signal().unwrap_or(0));
+        let returncode = returncode(status);
         // SAFETY: the compiler’s four-field descriptor outlives this run.
         let kinds = unsafe { [*(*descriptor).kinds.add(2), *(*descriptor).kinds.add(3)] };
         // Python decodes stdout before stderr, even when check=True would fail.
@@ -1559,6 +1572,25 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn decode_a_real_stopped_child() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "kill -STOP $$; exit 7"])
+            .spawn()
+            .unwrap();
+        let pid = child.id() as libc::pid_t;
+        let mut raw = 0;
+        // SAFETY: this test owns the child, and waitpid writes one int to raw.
+        let stopped = unsafe { libc::waitpid(pid, &mut raw, libc::WUNTRACED) };
+        // Resume and reap before checking the decoded result.
+        // SAFETY: the stopped child has not exited and its PID is still owned.
+        let resumed = unsafe { libc::kill(pid, libc::SIGCONT) };
+        assert_eq!(resumed, 0);
+        assert_eq!(child.wait().unwrap().code(), Some(7));
+        assert_eq!(stopped, pid);
+        assert_eq!(returncode(ExitStatus::from_raw(raw)), -libc::SIGSTOP);
     }
 
     #[test]
