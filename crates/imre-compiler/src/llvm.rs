@@ -345,6 +345,7 @@ fn emit_program(
         uses_sys_argv,
         uses_orig_argv,
         uses_linecache,
+        uses_builtins_last: module.uses_builtins_last(),
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
@@ -531,6 +532,7 @@ struct Emitter<'a, 'module> {
     uses_sys_argv: bool,
     uses_orig_argv: bool,
     uses_linecache: bool,
+    uses_builtins_last: bool,
     has_extensions: bool,
 }
 
@@ -1770,6 +1772,9 @@ impl Emitter<'_, '_> {
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
             }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
+            }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
@@ -1804,6 +1809,9 @@ impl Emitter<'_, '_> {
             self.cleanup_globals();
             if self.uses_linecache {
                 self.line("call void @imre_linecache_clear()");
+            }
+            if self.uses_builtins_last {
+                self.line("call void @imre_builtins_clear()");
             }
             self.line("call void @imre_clear_literals()");
             if self.uses_sys_argv {
@@ -4477,6 +4485,38 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsHasLast => {
+                let bit = self.instruction("call i32 @imre_builtins_has_last()");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::BuiltinsDeleteLast => {
+                self.void_call("imre_builtins_del_last", &[]);
+                none()
+            }
+            Builtin::BuiltinsSetLast | Builtin::SysDisplayHook => {
+                let value = &args[0].value;
+                let kind = if value.ty == Type::ObjectValue {
+                    u32::MAX
+                } else {
+                    representation_kind(value.ty, &self.module.types)
+                };
+                let word = self.word(value);
+                if matches!(builtin, Builtin::SysDisplayHook) {
+                    self.checked_line(format!(
+                        "call void @imre_sys_displayhook(i32 {kind}, i64 {word})"
+                    ));
+                } else {
+                    self.line(format!(
+                        "call void @imre_builtins_set_last(i32 {kind}, i64 {word})"
+                    ));
+                }
+                none()
+            }
             Builtin::IntegerPower => {
                 self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
             }
@@ -4567,7 +4607,7 @@ impl Emitter<'_, '_> {
                     representation_kind(other.ty, &self.module.types)
                 };
                 let word = self.word(other);
-                let bit = self.instruction(format!(
+                let bit = self.checked_instruction(format!(
                     "call i32 @imre_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
@@ -7760,6 +7800,12 @@ declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_builtins_last()
+declare i32 @imre_builtins_has_last()
+declare void @imre_builtins_set_last(i32, i64)
+declare void @imre_builtins_del_last()
+declare void @imre_builtins_clear()
+declare void @imre_sys_displayhook(i32, i64)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_orig_argv()
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
@@ -8248,6 +8294,18 @@ mod tests {
                 .0
                 .contains("call void @imre_object_release(")
         );
+    }
+
+    #[test]
+    fn boxed_equality_checks_errors_before_using_the_result() {
+        let body = function_body(
+            "from collections.abc import Mapping\n\ndef check(left: Mapping[str, object], right: Mapping[str, object]) -> None:\n    print(left['x'] == right['x'])\ncheck({'x': (1, 2)}, {'x': (3, 4)})\n",
+        );
+        let (_, result) = body
+            .split_once("call i32 @imre_system_exit_code_equal(")
+            .unwrap();
+        let (before_test, _) = result.split_once("icmp ne i32").unwrap();
+        assert!(before_test.contains("call i32 @imre_error_pending()"));
     }
 
     #[test]
