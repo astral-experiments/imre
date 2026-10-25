@@ -1734,13 +1734,13 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             Some((status, message))
         })
     };
+    let stderr = crate::sys::flush_stderr();
+    let stdout = crate::flush_stdout();
     if let Some((status, message)) = exit {
-        let _ = crate::flush_stdout();
-        let _ = crate::sys::flush_stderr();
         if let Some(text) = message {
-            let _ = writeln!(io::stderr().lock(), "{text}");
+            let _ = crate::sys::write_stderr(&text, true);
         }
-        return status;
+        return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
     let mut chain = Vec::new();
     let mut current = Some(pending.clone());
@@ -1765,23 +1765,51 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         current = cause;
     }
     drop(pending);
-    let _ = crate::flush_stdout();
-    let _ = crate::sys::flush_stderr();
-    let mut stderr = io::stderr().lock();
+    let mut diagnostic = crate::sys::stderr_writer();
     for (index, (name, message)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
-                stderr,
+                diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
         }
         if message.is_empty() {
-            let _ = writeln!(stderr, "{name}");
+            let _ = writeln!(diagnostic, "{name}");
         } else {
-            let _ = writeln!(stderr, "{name}: {message}");
+            let _ = writeln!(diagnostic, "{name}: {message}");
         }
     }
-    1
+    drop(diagnostic);
+    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+}
+
+/// CPython reports a stdout flush error, silently records a stderr flush error,
+/// and uses status 120 if either stream could not be finalized.
+pub(crate) fn status_after_flush(
+    status: i32,
+    stdout: io::Result<()>,
+    stderr: io::Result<()>,
+) -> i32 {
+    if let Err(error) = stdout {
+        let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
+        let error = super::files::errno_error(error);
+        if let Payload::Message(message) = error.payload {
+            let name = if broken_pipe {
+                "BrokenPipeError"
+            } else {
+                error.kind.name()
+            };
+            let _ = writeln!(
+                io::stderr().lock(),
+                "Exception ignored while flushing sys.stdout:\n{name}: {message}"
+            );
+        }
+        120
+    } else if stderr.is_err() {
+        120
+    } else {
+        status
+    }
 }
 
 #[cfg(test)]
