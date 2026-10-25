@@ -69,6 +69,18 @@ impl Builtin {
                 Contract::new(true, Unknown)
             }
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
+            Self::Calendar(op) => Contract::new(
+                matches!(
+                    op,
+                    crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::Delta
+                        | crate::ir::CalendarOp::Zone
+                        | crate::ir::CalendarOp::Now
+                        | crate::ir::CalendarOp::Shift { .. }
+                        | crate::ir::CalendarOp::Negate
+                ),
+                PreservesOwners,
+            ),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -135,6 +147,15 @@ impl Builtin {
             | Self::DictGetDefault
             | Self::DictTryGet(_)
             | Self::SetContains => Contract::new(true, PreservesLists),
+            Self::Socket(op) => Contract::new(
+                !matches!(
+                    op,
+                    crate::ir::SocketOp::Constant(_)
+                        | crate::ir::SocketOp::Fileno
+                        | crate::ir::SocketOp::GetBlocking
+                ),
+                PreservesLists,
+            ),
             Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
@@ -461,6 +482,8 @@ impl Builtin {
             | Self::StringListFilter(_)
             | Self::StringListNonempty
             | Self::Str
+            | Self::SourceModule
+            | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
@@ -834,7 +857,9 @@ pub(crate) const LIST_COPY_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
 /// arithmetic, ownership operations, lookup-with-default, lengths and hashing
 /// remain infallible; allocation failure and invalid ABI use are fatal.
 pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
-    name.starts_with("fn_")
+    (name.starts_with("imre_socket_")
+        && !matches!(name, "imre_socket_fileno" | "imre_socket_getblocking"))
+        || name.starts_with("fn_")
         || matches!(
             name,
             "int_floordiv"
@@ -849,6 +874,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
+                | "imre_json_object_keys"
                 | "imre_json_len"
                 | "imre_json_get_receiver"
                 | "imre_json_add"
@@ -870,6 +896,13 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_float"
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
+                | "imre_calendar_datetime"
+                | "imre_calendar_delta"
+                | "imre_calendar_zone"
+                | "imre_calendar_now"
+                | "imre_calendar_shift"
+                | "imre_calendar_negate"
+                | "imre_calendar_compare"
                 | "imre_log_file_close"
                 | "imre_log_file_flush"
                 | "imre_log_file_compute_int"

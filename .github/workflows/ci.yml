@@ -469,6 +469,12 @@ jobs:
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+      - name: Compare fixed-offset datetime operations and original methods with CPython
+        run: |
+          suite=benchmarks/cpython_stdlib/full/datetime
+          python3 "$suite/focused.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/test-datetime.json"
+          cmp "$suite/native-linux.json" "$RUNNER_TEMP/test-datetime.json"
       - name: Check CSV reader behavior with vendored CPython methods
         run: |
           python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -481,8 +487,9 @@ jobs:
           cmp benchmarks/cpython_stdlib/full/warnings/native-linux.json "$RUNNER_TEMP/test-warnings.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites socket_tcp errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+          cat /tmp/imre-suites-ordinary/socket_tcp.log
       - name: Run original string core methods in native Imre
         run: |
           python3 benchmarks/cpython_stdlib/full/string/native_core.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -550,6 +557,11 @@ jobs:
           target/release/imre build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
           python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/imre-manifest-reference --target-dir target/incremental-reference
           python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/imre-manifest-reference/planner-manifest-bigint --output /tmp/imre-manifest-reference/validation.json
+      - name: Verify task board requests and journal recovery
+        run: |
+          target/release/imre build examples/task_board/app.py --module-root examples/task_board --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o "$RUNNER_TEMP/task-board"
+          python3 examples/task_board/verify.py --python python3
+          python3 examples/task_board/verify.py --binary "$RUNNER_TEMP/task-board"
       - name: Validate inventory reconciliation against CPython and Rust
         run: |
           target/release/imre build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation
