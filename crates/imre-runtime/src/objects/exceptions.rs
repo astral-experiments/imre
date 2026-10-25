@@ -1887,8 +1887,24 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         }
         return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
     }
+    write_exception_chain(pending);
+    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
+}
+
+/// Print the handled exception without changing the active handler or the process exit status.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_log_print_active_exception() {
+    if let Some(exception) = active_exception() {
+        write_exception_chain(exception);
+    } else {
+        let _ = crate::sys::write_stderr("NoneType: None", true);
+    }
+}
+
+/// Render the exception and its explicit causes without retaining any native frames.
+fn write_exception_chain(exception: Rc<Object>) {
     let mut chain = Vec::new();
-    let mut current = Some(pending.clone());
+    let mut current = Some(exception.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
         let (name, cause) = unsafe {
@@ -1920,7 +1936,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         chain.push((name, message, suggestion));
         current = cause;
     }
-    drop(pending);
+    drop(exception);
     let mut diagnostic = crate::sys::stderr_writer();
     for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
@@ -1937,8 +1953,6 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             let _ = writeln!(diagnostic, "{name}: {message}");
         }
     }
-    drop(diagnostic);
-    status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()))
 }
 
 /// CPython reports a stdout flush error, silently records a stderr flush error,

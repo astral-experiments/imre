@@ -3963,6 +3963,7 @@ impl Emitter<'_, '_> {
                     Get => "imre_log_get",
                     HandlerRename => "imre_log_handler_rename",
                     HandlerLookup => "imre_log_handler_lookup",
+                    PrintActiveException => "imre_log_print_active_exception",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -7827,6 +7828,7 @@ declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_handler_rename(ptr, i64, i64)
 declare i64 @imre_log_handler_lookup(ptr)
+declare void @imre_log_print_active_exception()
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
