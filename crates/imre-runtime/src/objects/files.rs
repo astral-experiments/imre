@@ -288,7 +288,7 @@ pub(super) fn errno_with_paths(error: io::Error, paths: impl FnOnce(&mut String)
     let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
     let mut message = format!("[Errno {errno}] {description}");
     paths(&mut message);
-    Error::new(os_error_kind(error.kind()), message)
+    Error::from_errno(os_error_kind(error.kind()), errno, &description, message)
 }
 
 /// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.

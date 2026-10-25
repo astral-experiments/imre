@@ -59,6 +59,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `values.sort(key=callback, reverse=condition)` accepts the same keys and updates the list in place. It returns `None`. Aliases observe the new order. During key evaluation the list appears empty until a callback adds elements. If a key raises, the list regains its original membership and order and the exception propagates. If keys succeed after a callback appends to the list, the sorted original elements are restored and the sort raises `ValueError`.
 
+`functools.reduce(function, iterable[, initial])` folds a native iterable from left to right. The optional seed can also be passed as `initial=`. Without it, the first item becomes the accumulator and an empty input raises `TypeError`. The binary callback can be an exact function, bound method, or noncapturing lambda. Its return value must fit the accumulator's layout on every step.
+
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. An immediate generator may also yield exact booleans. For example, `sum(file.passes for file in files)` counts the true values. The generator acquires its outer iterator before `start` runs, then evaluates each projection once. The start and the result are exact, arbitrary-precision integers, including for an empty generator.
 
 `map(str, source)` supports scalar values, paths, and records with a checked string conversion. Conversion happens as each item is pulled.
@@ -158,8 +160,9 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 ## Typed JSON boundaries
 
 `json.loads(text)` and `json.load(stream)` accept JSON arrays, objects, and
-scalars. `json.load` reads a native UTF-8 text stream from its current
-position, including streams opened with `open(path)`. A document supports literal string keys, integer indices, length,
+scalars. `json.loads` accepts strings and bytes; `json.load` reads a text or
+binary stream from its current position. Binary input detects UTF-8, UTF-16,
+and UTF-32 with or without a byte order mark. A document supports literal string keys, integer indices, length,
 truth tests, and iteration. Array iteration yields values and object iteration
 yields keys in insertion order. Select a value into a concrete scalar or
 `dict[str, Any]` at a checked boundary. The latter is a read-only JSON view,
@@ -491,7 +494,7 @@ def describe(name: str, quantity: int) -> str:
     return f"{name}: {quantity} units"
 ```
 
-The default conversion and `!s` use scalar conversion or the fixed record’s `__str__` method. Records without that method use their generated representation. A list renders each element with its repr, including for `f"{rows[:5]}"` and `f"{rows!s}"`. `!r` and `repr(value)` additionally format supported containers, tuples, unions, and optional data, recursively composing generated dataclass repr. Strings use Python quoting and escaping. Resources, exceptions, and callables have no supported repr. The existing restriction against rebinding builtin names still applies. An absent or explicitly empty format specification, as in `f"{quantity:}"`, is supported.
+The default conversion and `!s` use scalar conversion or the fixed record’s `__str__` method. Records without that method use their generated representation. A list renders each element with its repr, including for `f"{rows[:5]}"` and `f"{rows!s}"`. `!r` and `repr(value)` additionally format supported containers, tuples, unions, and optional data, recursively composing generated dataclass repr. Strings use Python quoting and escaping. For exceptions, the default conversion and `!s` call their string formatter, and `!r` calls the same formatter as `repr(error)`. This preserves user overrides even in a builtin handler. File-open errors show errno and strerror in repr; UTF-8 decode errors show the encoding, original bytes, half-open bounds, and reason. Resources and callables have no supported repr. The existing restriction against rebinding builtin names still applies. An absent or explicitly empty format specification, as in `f"{quantity:}"`, is supported.
 
 Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specifications, with decimal precision `N` from 0 through 1000. Omitted precision is six. All four forms accept a leading `+`, `-`, or space sign option, as in `f"{change:+.2%}"`. Integer and boolean values convert to binary64 using the ordinary checked conversion, so an oversized integer raises `OverflowError` before any later field runs. Fixed-point formatting rounds ties to even and preserves signed zero. Percentage formatting first multiplies the binary64 value by 100 and appends `%`; infinities and NaNs use lowercase spellings. For example, `f"{ratio:.2%}"` and `f"{bytes_used / 1024:.2f}"` are supported. Numeric specifications cannot follow `!s` or `!r`.
 
