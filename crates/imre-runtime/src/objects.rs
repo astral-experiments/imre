@@ -24,6 +24,7 @@ mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod namespaces;
 mod os;
 mod paths;
 pub(crate) mod posixpath;
@@ -67,6 +68,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),

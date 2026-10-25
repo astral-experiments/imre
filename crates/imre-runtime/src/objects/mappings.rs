@@ -704,6 +704,34 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
+    pub(super) fn namespace_repr_entry(
+        &self,
+        output: &mut String,
+        position: usize,
+    ) -> Option<(usize, usize, WordKind)> {
+        if position == 0 {
+            output.push_str("namespace(");
+        }
+        let mut cursor = position;
+        while let Some((next, key, value)) = self.tables.next(cursor) {
+            cursor = next;
+            // SAFETY: namespace constructors only accept exact string keys.
+            let label = unsafe { (&*(key.word as *const Str)).as_str() };
+            if label.is_empty() {
+                continue;
+            }
+            if position != 0 {
+                output.push_str(", ");
+            }
+            output.push_str(label);
+            output.push('=');
+            return Some((next, value, self.value_kind));
+        }
+        output.push(')');
+        None
+    }
+
     /// Copies entries in insertion order, retains immutable keys, and lets the
     /// caller choose whether each value is shared or copied through a memo.
     pub(super) fn copy_values(
