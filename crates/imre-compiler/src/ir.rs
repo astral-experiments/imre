@@ -122,6 +122,8 @@ pub(crate) enum Type {
     CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     Poll,
     JsonDecoder,
@@ -354,6 +356,8 @@ impl std::fmt::Display for Type {
             Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -388,6 +392,12 @@ impl std::fmt::Display for Type {
     }
 }
 
+/// The information an actual Python call must keep until it returns or unwinds.
+pub(crate) enum SourceFrame {
+    Depth,
+    Module(String),
+}
+
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
@@ -404,6 +414,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
+    /// Source functions and entry in emission order. Synthetic helpers have no frame.
+    pub source_frames: Vec<Option<SourceFrame>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -1037,6 +1049,7 @@ pub(crate) enum Builtin {
     CodecEncode,
     CodecDecode,
     Socket(SocketOp),
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -1051,6 +1064,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     ContextVar(ContextOperation),
     BinarySeek,
@@ -1103,6 +1117,9 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         namespace: usize,
@@ -1679,6 +1696,21 @@ pub(crate) enum LogRecordOperation {
     Repr,
     Flag,
     SetFlag,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
 }
 
 /// Operations on the native logging registry and its named loggers.
