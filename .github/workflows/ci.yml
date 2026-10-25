@@ -92,6 +92,8 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
+      - name: Run pinned unittest methods against native Imre
+        run: python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
       - name: Check sys streams and exits with vendored CPython methods
         run: python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Check subprocess.run with vendored CPython methods
