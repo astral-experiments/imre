@@ -1072,6 +1072,7 @@ impl StrDescriptor {
 pub(crate) enum TextOperation {
     IsSpace,
     SplitLineEnds,
+    ExpandTabs,
     Lower,
     Capitalize,
     /// True splits from the right.
