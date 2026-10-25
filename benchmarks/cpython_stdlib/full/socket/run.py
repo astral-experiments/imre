@@ -1,10 +1,8 @@
 """Run selected original test_socket methods and their companion senders over TCP."""
 import argparse
 import ast
-from contextlib import ExitStack, contextmanager
 import json
 from pathlib import Path
-import select
 import shutil
 import subprocess
 import sys
@@ -45,43 +43,51 @@ def source():
             .replace(b"# UPSTREAM_BACKLOG", bodies[BACKLOG])), bodies
 
 
-@contextmanager
-def receiver(command):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        assert select.select([process.stdout], [], [], TIMEOUT)[0], "listener did not report its port"
-        line = process.stdout.readline()
-        assert line, process.communicate(timeout=TIMEOUT)
-        yield process, str(int(line))
-    finally:
-        if process.poll() is None:
-            process.kill()
-        process.communicate(timeout=TIMEOUT)
-
-
 def observe(command):
     from test import test_socket as upstream
-    with ExitStack() as fixture:
-        upstream.setUpModule()
-        fixture.callback(unittest.doModuleCleanups)
-        observe_bodies(command)
+
+    def run(*args, fd=None, wrong=False):
+        p = subprocess.run([*command, *args], pass_fds=() if fd is None else (fd,),
+                           timeout=TIMEOUT, capture_output=True)
+        if wrong:
+            assert p.returncode != 0 and b"AssertionError" in p.stderr, (args, p)
+        else:
+            assert (p.returncode, p.stdout, p.stderr) == (0, b"", b""), (args, p)
+
+    def in_fixture(case):
+        result = unittest.TestResult()
+        unittest.TestSuite([case]).run(result)
+        assert result.testsRun == 1 and result.wasSuccessful() and not result.skipped, vars(result)
+
+    backlog = upstream.GeneralModuleTests(BACKLOG)
+    setattr(backlog, BACKLOG, lambda: run("backlog"))
+    in_fixture(backlog)
+
+    def run_tcp(owner, method, wrong):
+        case = owner(method)
+        entered = []
+
+        def sender():
+            fd = case.serv_conn.fileno()
+            run("wrong" if wrong else "sender", method, str(fd), fd=fd)
+            entered.append("sender")
+
+        def receiver():
+            fd = case.cli_conn.fileno()
+            run("receiver", method, str(fd), fd=fd, wrong=wrong)
+            entered.append("receiver")
+
+        # ThreadableTest looks up the companion before starting its thread.
+        setattr(case, "_" + method, sender)
+        setattr(case, method, receiver)
+        in_fixture(case)
+        assert sorted(entered) == ["receiver", "sender"], (case.id(), entered)
+
+    for owner in (upstream.BasicTCPTest, upstream.BasicTCPTest2):
+        for method in TCP:
+            for wrong in (False, True):
+                run_tcp(owner, method, wrong)
     observe_options(command)
-
-
-def observe_bodies(command):
-    def run(*args):
-        p = subprocess.run([*command, *args], timeout=TIMEOUT, capture_output=True)
-        assert (p.returncode, p.stdout, p.stderr) == (0, b"", b""), (args, p)
-    run("backlog")
-    for method in TCP:
-        for sender in ("sender", "wrong"):
-            with receiver([*command, "receiver", method]) as (server, port):
-                run(sender, method, port)
-                out, err = server.communicate(timeout=TIMEOUT)
-                if sender == "wrong":
-                    assert server.returncode != 0 and b"AssertionError" in err, (method, out, err)
-                else:
-                    assert (server.returncode, out, err) == (0, b"", b""), (method, out, err)
 
 
 def main():
@@ -111,12 +117,12 @@ def main():
         script.write_bytes(entry.replace(b"# NATIVE_BYTES_EQUALITY", b""))
         native = entry.replace(b"# NATIVE_BYTES_EQUALITY", NATIVE_BYTES_EQUALITY)
         observe([sys.executable, "-E", script])
-        print("CPython: four original bodies, two host-driven options; five negative controls rejected", flush=True)
+        print("CPython: seven original bodies, two host-driven options; eight negative controls rejected", flush=True)
         for level in (0, 3):
             binary = Toolchain(args.compiler, args.runtime, clang, level).build(native, work)
             observe([binary])
             reports.append(report(reference, UP, bodies, TCP, BACKLOG, OPTIONS, level))
-            print(f"O{level}: four original bodies, two host-driven options; five negative controls rejected", flush=True)
+            print(f"O{level}: seven original bodies, two host-driven options; eight negative controls rejected", flush=True)
 
     if args.output:
         write_reports(args.output, reports, reference)

@@ -9,19 +9,24 @@ each one to its upstream decorator or runtime condition.
 | At both O0 and O3 | Methods | What ran |
 | --- | ---: | --- |
 | Native body, host fixture | 4 | `BasicTCPTest.testRecv`, `testOverFlowRecv`, `testSendAll` and `GeneralModuleTests.test_listen_backlog`. |
+| Native body, mixed operations | 3 | The same three TCP methods under `BasicTCPTest2`; its defining `socket.create_connection` call runs on CPython. |
 | Host body, native operations | 2 | `GeneralModuleTests.testGetSockOpt` and `testSetSockOpt`. |
-| Reference only | 675 | Stock CPython passed; no Imre execution is claimed. |
+| Reference only | 672 | Stock CPython passed; no Imre execution is claimed. |
 | Reference skip | 65 | Stock CPython skipped on this host; these are not Imre exclusions. |
 
-The three TCP receiving methods and their original sending methods compile from
-complete, unedited definitions. Both peers use native sockets; the host starts
-the processes, reads the ephemeral port, and runs the upstream module setup and
-cleanup. Two processes replace the suite's threaded class fixture. The child
-uses strict bytes equality in place of Imre's integer-typed TestCase.assertEqual;
-the CPython child uses its stock assertion. Each unchanged receiving method
-must fail its assertion when a peer sends incorrect bytes. A paired sender is
-evidence for the same method, never an additional occurrence. The backlog method
-runs its three binds and listens, including context cleanup, in one process.
+The receiving methods and their original senders compile from complete,
+unedited definitions. The stock module, threaded class setup and cleanup run
+on CPython. Each peer gets its fixture's connected fd via subprocess inheritance;
+`os.dup2` gives a native socket a copy while the host keeps the original fd.
+Both method bodies perform the real send/recv/sendall on Imre. `BasicTCPTest2`
+also runs its original `NetworkConnectionTest.clientSetUp`, which calls stock
+`socket.create_connection`, so its three occurrences have mixed operations.
+The native children use strict bytes equality in place of Imre's integer-typed
+TestCase.assertEqual; the CPython children use the stock assertion. Each of
+the six receiving occurrences must fail its own assertion on a corrupt wire.
+A paired sender is evidence for the same occurrence, never an additional
+method. The backlog method runs its original three binds, listens and context
+cleanups under the stock module fixture.
 
 For the two option methods, stock unittest executes the unchanged test and
 registered cleanup. A pipe forwards each constructor/method call to one native

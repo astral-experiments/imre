@@ -57,17 +57,20 @@ def report(reference, path, bodies, tcp, backlog, options, level):
                 "reason": reason, "condition": condition, "source": f"Lib/test/test_socket.py:{line}",
             }
     observations = {}
-    for method in (*tcp, backlog, *options):
-        owner = "BasicTCPTest" if method in tcp else "GeneralModuleTests"
+    selected = [(owner, method) for owner in ("BasicTCPTest", "BasicTCPTest2") for method in tcp]
+    selected += [("GeneralModuleTests", method) for method in (backlog, *options)]
+    for owner, method in selected:
         name = f"{reference['module']}.{owner}.{method}"
         host = method in options
         if host:
             fixture = "Original CPython TestCase, module lifecycle and addCleanup; pipe forwards calls to one native socket."
             operation = "Native AF_INET socket, SO_REUSEADDR and close; incorrect initial/write value rejected by stock assertion."
         elif method in tcp:
-            fixture = ("Original host module setup/cleanup; host schedules two native processes on an ephemeral TCP port, "
-                       "substituting for ThreadableTest. Both peer methods and strict bytes equality run natively.")
+            fixture = ("Original CPython module, threaded class setup/teardown, connected endpoints and cleanups. "
+                       "Each child duplicates its fixture fd; both original peer methods and bytes equality run natively.")
             operation = "Original sender and receiver call native TCP send/recv/sendall; corrupt peer tripped the original assertion."
+            if owner == "BasicTCPTest2":
+                operation += " Its NetworkConnectionTest variant specifically exercises socket.create_connection on CPython."
         else:
             fixture = "Original host module setup/cleanup; native TestCase instance and context managers."
             operation = "Original body creates, binds, listens and closes native sockets at backlogs zero, negative one and default."
@@ -79,6 +82,6 @@ def report(reference, path, bodies, tcp, backlog, options, level):
             "outcome": "pass", "evidence": proof,
             "roles": roles(body="cpython" if host else "imre",
                            assertions="cpython" if host else "none" if method == backlog else "imre",
-                           operation="imre", fixture="mixed"),
+                           operation="mixed" if owner == "BasicTCPTest2" else "imre", fixture="mixed"),
         }
     return build_report(reference, level, variants, observations, exceptions=exceptions)

@@ -1,3 +1,4 @@
+import os
 import socket
 import sys
 import unittest
@@ -49,33 +50,27 @@ def main() -> None:
         GeneralModuleTests().test_listen_backlog()
         return
     method = sys.argv[2]
+    inherited = int(sys.argv[3])
+    # Keep all ownership in this process. The original host fixture still owns its fd.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
+        os.dup2(inherited, endpoint.fileno(), False)
+        os.close(inherited)
+        case = NativeCase(endpoint)
         if role == "receiver":
-            endpoint.bind((HOST, 0))
-            endpoint.listen()
-            print(endpoint.getsockname()[1])
-            sys.stdout.flush()
-            conn, addr = endpoint.accept()
-            with conn:
-                case = NativeCase(conn)
-                if method == "testRecv":
-                    case.testRecv()
-                elif method == "testOverFlowRecv":
-                    case.testOverFlowRecv()
-                else:
-                    case.testSendAll()
-        else:
-            endpoint.connect((HOST, int(sys.argv[3])))
-            if role == "wrong":
-                endpoint.sendall(b'wrong')
-                return
-            case = NativeCase(endpoint)
             if method == "testRecv":
-                case._testRecv()
+                case.testRecv()
             elif method == "testOverFlowRecv":
-                case._testOverFlowRecv()
+                case.testOverFlowRecv()
             else:
-                case._testSendAll()
+                case.testSendAll()
+        elif role == "wrong":
+            endpoint.sendall(b'wrong')
+        elif method == "testRecv":
+            case._testRecv()
+        elif method == "testOverFlowRecv":
+            case._testOverFlowRecv()
+        else:
+            case._testSendAll()
 
 
 main()
