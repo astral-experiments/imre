@@ -166,6 +166,8 @@ pub(crate) enum Intrinsic {
     Stderr,
     Stdout,
     SysExecutable,
+    SysFlags,
+    SysDontWriteBytecode,
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
@@ -424,6 +426,8 @@ impl IntrinsicModule {
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "flags") => Intrinsic::SysFlags,
+            (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
@@ -607,6 +611,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
@@ -843,6 +848,29 @@ impl SourceGraph {
         )?;
         loader.scan(entry)?;
         loader.finish(entry, filename, reachable_only, None)
+    }
+
+    /// Parse command bytes as __main__; only a non-safe command sees the working directory.
+    pub(crate) fn command(
+        command: &crate::PythonCommand,
+        extension_paths: &[PathBuf],
+        fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let root = std::env::current_dir().map_err(|e| e.to_string())?;
+        let mut loader = Loader::new(root.clone(), extension_paths, fs)?;
+        loader.allow_imports = !command.flags.safe_path;
+        let filename = root.join("<string>.py");
+        let entry = loader.add(
+            filename.clone(),
+            filename.clone(),
+            "__main__".into(),
+            false,
+            &command.source,
+        )?;
+        loader.scan(entry)?;
+        let mut graph = loader.finish(entry, filename, false, None)?;
+        graph.command_startup = Some((command.flags, command.executable.clone()));
+        Ok(graph)
     }
 
     #[cfg(test)]
@@ -1178,6 +1206,7 @@ impl<'a> Loader<'a> {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            command_startup: None,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),

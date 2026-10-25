@@ -61,6 +61,17 @@ impl BuildOptions {
         Ok(options)
     }
 
+    /// Code generation and linker flags stay separate from Python's environment and arguments.
+    pub(super) fn for_command(command: imre_compiler::PythonCommand) -> Result<Self, String> {
+        let mut options = Self::parse(OsStr::new("run"), &mut std::iter::empty())?;
+        options.source_path = Some("-c".into());
+        options.verbosity = Verbosity::Quiet;
+        // The command's source is not a file and has no filesystem cache identity.
+        options.no_cache = true;
+        options.compile.command = Some(command);
+        Ok(options)
+    }
+
     fn read(
         &mut self,
         command: &OsStr,

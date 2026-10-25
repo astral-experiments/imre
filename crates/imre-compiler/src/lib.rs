@@ -28,8 +28,27 @@ mod watch;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Startup choices made before a native Python command executes.
+#[derive(Clone, Copy)]
+pub struct CommandFlags {
+    pub isolated: bool,
+    pub safe_path: bool,
+    pub no_user_site: bool,
+    pub dont_write_bytecode: bool,
+    pub utf8_mode: bool,
+}
+
+/// The in-memory entry and launcher used by a Python-style `-c` invocation.
+pub struct PythonCommand {
+    pub source: String,
+    pub flags: CommandFlags,
+    pub executable: String,
+}
+
 #[derive(Default)]
 pub struct CompileOptions {
+    /// Compile the supplied command without creating a script in the caller's working directory.
+    pub command: Option<PythonCommand>,
     /// A file describing the branches to include in a closed executable.
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
@@ -47,6 +66,9 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
     ) -> Result<modules::SourceGraph, String> {
+        if let Some(command) = &self.command {
+            return modules::SourceGraph::command(command, &self.extension_paths, filesystem);
+        }
         modules::SourceGraph::load_with(
             path,
             module_root,
