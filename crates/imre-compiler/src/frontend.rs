@@ -2757,6 +2757,9 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
+        if self.types.is_len_argument(expected) {
+            return self.pack_len_argument(expression);
+        }
         if self.types.is_unread_argument(expected) {
             return self.unread_argument(expression, expected);
         }
@@ -5534,6 +5537,9 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_len(expression) {
+            return Ok(self.builtin_len());
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
             return Ok(Expr {
                 ty: self.types.list(Type::ActivePopen),
@@ -5723,6 +5729,7 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
                         ty: Type::Bytes,
@@ -7401,6 +7408,12 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+            || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
+        {
+            let callable = self.builtin_len();
+            return self.invoke(call, callable);
+        }
         if receiver.is_none()
             && let ast::Expr::Call(config) = &*call.func
             && self.resolve(&config.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
