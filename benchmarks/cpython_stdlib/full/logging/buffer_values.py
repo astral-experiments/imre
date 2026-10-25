@@ -3,6 +3,35 @@ import logging.handlers
 from logging import handlers
 from logging.handlers import BufferingHandler
 
+
+class Selective(BufferingHandler):
+    flushes: int
+
+    def __init__(self) -> None:
+        super().__init__(1)
+        self.flushes = 0
+
+    def shouldFlush(self, value: logging.LogRecord | None) -> bool:
+        return value is not None and value.levelno >= logging.WARNING
+
+    def flush(self) -> None:
+        self.flushes += 1
+        super().flush()
+
+
+class FailingFlush(BufferingHandler):
+    fail: bool
+
+    def __init__(self) -> None:
+        super().__init__(2)
+        self.fail = True
+
+    def flush(self) -> None:
+        if self.fail:
+            raise RuntimeError("flush did not finish")
+        super().flush()
+
+
 record = logging.LogRecord("buffer", logging.INFO, "", 1, "line", (), None)
 urgent = logging.LogRecord("buffer", logging.WARNING, "", 2, "flush", (), None)
 empty = handlers.BufferingHandler(0)
@@ -13,7 +42,6 @@ empty.close()
 one = logging.handlers.BufferingHandler(1)
 print(one.shouldFlush(record))
 one.close()
-
 handler = BufferingHandler(2)
 other = BufferingHandler(2)
 saved = handler.buffer
@@ -34,23 +62,6 @@ handler.emit(record)
 handler.close()
 print(len(saved))
 print(handler._closed)
-
-
-class Selective(BufferingHandler):
-    flushes: int
-
-    def __init__(self) -> None:
-        super().__init__(1)
-        self.flushes = 0
-
-    def shouldFlush(self, value: logging.LogRecord | None) -> bool:
-        return value is not None and value.levelno >= logging.WARNING
-
-    def flush(self) -> None:
-        self.flushes += 1
-        super().flush()
-
-
 custom = Selective()
 custom.emit(record)
 print(custom.flushes)
@@ -60,21 +71,6 @@ print(custom.flushes)
 print(len(custom.buffer))
 custom.close()
 print(custom.flushes)
-
-
-class FailingFlush(BufferingHandler):
-    fail: bool
-
-    def __init__(self) -> None:
-        super().__init__(2)
-        self.fail = True
-
-    def flush(self) -> None:
-        if self.fail:
-            raise RuntimeError("flush did not finish")
-        super().flush()
-
-
 broken = FailingFlush()
 broken.name = "failing flush"
 broken.emit(record)
