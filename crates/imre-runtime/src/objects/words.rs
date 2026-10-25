@@ -331,26 +331,27 @@ impl Words {
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
     /// Bulk producers build initialized, owned record words before publication.
     /// Convert homogeneous struct outputs too, including schema-decoded lists.
-    pub(super) fn pack_structs(&mut self) {
+    pub(super) fn pack_structs(&mut self) -> super::exceptions::Result<()> {
         if self.kind.raw() != 6 || self.values.is_empty() {
-            return;
+            return Ok(());
         }
         // SAFETY: kind six guarantees initialized, rooted native record payloads.
         let layout = unsafe { records::descriptor(self.values[0] as *const usize) };
         if !layout.is_value_struct() {
-            return;
+            return Ok(());
         }
         let mut rows = super::structs::Rows::new(layout);
         for &word in &self.values {
             // SAFETY: all words share the immutable exact class and are rooted by self.
-            rows.append(unsafe { rows.payload(word as *const usize) })
-                .unwrap_or_else(|_| fail("MemoryError", "struct list allocation failed"));
+            rows.append(unsafe { rows.payload(word as *const usize) })?;
         }
         *self = Self::from_rows(rows);
+        Ok(())
     }
 
     pub(super) fn into_object(mut self) -> Rc<Object> {
-        self.pack_structs();
+        // The original boxed list remains usable if optional packing cannot allocate.
+        let _ = self.pack_structs();
         if self.kind != WordKind::DEFERRED {
             self.update_header();
         }

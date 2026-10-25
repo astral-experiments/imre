@@ -309,6 +309,7 @@ impl Checker<'_> {
             ));
         }
         let id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -318,6 +319,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
         helper.class = self.class;

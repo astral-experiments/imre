@@ -399,7 +399,11 @@ impl Checker<'_> {
                     .iter()
                     .any(|ty| self.types.library_tuple_fields(*ty).is_some()))
             || types == [Type::Logger; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
             || types == [Type::StringIO; 2]
+            || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types.iter().all(|&t| {
