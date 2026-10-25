@@ -93,6 +93,9 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
+            return Ok(vec![InstanceType::IoBase(base)]);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
         }
@@ -235,6 +238,14 @@ impl Checker<'_> {
         }
         let mut unknown = false;
         for &class in classes {
+            if let InstanceType::IoBase(base) = class {
+                match base.matches(ty) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => unknown = true,
+                }
+                continue;
+            }
             if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
                 && self.classes.declarations.definitions[derived]
                     .bases
