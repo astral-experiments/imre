@@ -873,12 +873,7 @@ mod tests {
                 [first.as_bytes(), second.as_bytes()].concat()
             };
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                false,
-                gzip,
-            )
+            let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, false, gzip)
                 .ok()
                 .unwrap();
             let input = state.input().ok().unwrap();
@@ -897,12 +892,7 @@ mod tests {
         bytes.resize(8191, b'a');
         bytes.extend(b"\xf0\x9f\xff");
         std::fs::write(&path, bytes).unwrap();
-        let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                false,
-                false,
-            )
+        let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, false, false)
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -927,12 +917,7 @@ mod tests {
         .concat();
         gzip.splice(10..10, metadata);
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                true,
-                true,
-            )
+        let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, true, true)
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -947,12 +932,7 @@ mod tests {
         let end = gzip.len();
         gzip[end - 8] ^= 1;
         std::fs::write(&path, &gzip).unwrap();
-        let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                true,
-                true,
-            )
+        let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, true, true)
             .ok()
             .unwrap();
         let input = state.input().ok().unwrap();
@@ -976,12 +956,7 @@ mod tests {
             ),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                true,
-                true,
-            )
+            let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, true, true)
                 .ok()
                 .unwrap();
             let input = state.input().ok().unwrap();
@@ -999,12 +974,7 @@ mod tests {
         invalid.resize(invalid.len() + 9000, b'a');
         invalid.push(7);
         std::fs::write(&path, invalid).unwrap();
-        let mut state = open_state(
-                &Rc::new(Str::from(path.to_str().unwrap())),
-                0,
-                true,
-                true,
-            )
+        let mut state = open_state(&Rc::new(Str::from(path.to_str().unwrap())), 0, true, true)
             .ok()
             .unwrap();
         state
