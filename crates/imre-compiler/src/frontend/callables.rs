@@ -218,6 +218,11 @@ impl Checker<'_> {
                 signature.returns
             },
         );
+        let ty = if receiver.is_none() && self.classes.cached.contains_key(&signature.id) {
+            self.types.declared_cache(ty, signature.id)
+        } else {
+            ty
+        };
         Ok(Expr {
             ty,
             kind: ExprKind::Callable {

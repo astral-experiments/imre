@@ -20,6 +20,7 @@ enum Shape {
     Tuple(Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
+    DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
     Awaitable(Type),
     DirectoryContext(Type),
@@ -34,6 +35,13 @@ pub(crate) struct CachedFunction {
     pub callable: Type,
     pub frame: Type,
     pub table: Type,
+    pub capacity: i64,
+    pub parameters: CachePolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CachePolicy {
+    /// Negative represents an unbounded cache; negative Python sizes normalize to zero.
     pub capacity: i64,
     pub typed: bool,
 }
@@ -86,7 +94,7 @@ impl Types {
             ),
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Callable(..) | Shape::CachedCallable(_))
+                Some(Shape::Callable(..) | Shape::DeclaredCache(..) | Shape::CachedCallable(_))
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
@@ -165,6 +173,7 @@ impl Types {
                 Shape::Tuple(fields) | Shape::PartialFrame(fields) | Shape::Union(fields) => {
                     fields.clone()
                 }
+                Shape::DeclaredCache(callable, _) => vec![*callable],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
@@ -580,6 +589,19 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    /// A module cache keeps its declaration's identity when bound to another name.
+    pub(crate) fn declared_cache(&self, callable: Type, id: usize) -> Type {
+        Type::Callable(self.intern(Shape::DeclaredCache(callable, id)))
+    }
+
+    pub(crate) fn cache_declaration(&self, ty: Type) -> Option<(Type, usize)> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::DeclaredCache(callable, declaration)) => Some((*callable, *declaration)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn cached_callable(&self, layout: CachedFunction) -> Type {
         Type::Callable(self.intern(Shape::CachedCallable(layout)))
     }
@@ -596,6 +618,7 @@ impl Types {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
@@ -837,6 +860,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
