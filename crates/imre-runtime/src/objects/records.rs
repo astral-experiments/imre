@@ -11,6 +11,7 @@ pub(super) mod strings;
 enum Release {
     Record(*const usize),
     Object(Rc<Object>),
+    Sequence(WordKind, Vec<usize>),
 }
 
 thread_local! {
@@ -308,6 +309,33 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
     record
 }
 
+/// Shallow-copies a plain class instance without evaluating Python code.
+///
+/// # Safety
+/// The caller roots a live record throughout the call. Its immutable descriptor
+/// describes all public fields and any cached-property storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_shallow_copy(source: *const usize) -> *mut usize {
+    // SAFETY: the source descriptor outlives these allocations. The allocation
+    // helper reports MemoryError before we acquire any field references.
+    unsafe {
+        let layout = descriptor(source);
+        let copy = imre_record_try_new(layout);
+        if copy.is_null() {
+            return copy;
+        }
+        for i in 0..layout.length {
+            let kind = WordKind::new(layout.kinds.add(i).read());
+            // A cold cached property may carry a zero, uninitialized owner.
+            kind.retain(kind.read_record_field(source.add(i)));
+        }
+        // Byte-copy the original scalar and pointer representations, including
+        // their provenance. Private hash-cache storage starts cold in the copy.
+        std::ptr::copy_nonoverlapping(source, copy, layout.length);
+        copy
+    }
+}
+
 /// Returns a record with zeroed fields, or null on allocation failure.
 ///
 /// # Safety
@@ -418,6 +446,11 @@ pub(super) fn release_object_word(object: Rc<Object>) {
     release(Release::Object(object));
 }
 
+/// Transfers the sequence's existing heap buffer and all of its owned words.
+pub(super) fn release_sequence_words(kind: WordKind, values: Vec<usize>) {
+    release(Release::Sequence(kind, values));
+}
+
 fn release(owner: Release) {
     PENDING_RELEASES.with(|slot| {
         // SAFETY: a non-null pointer belongs to the enclosing release on this
@@ -441,6 +474,16 @@ fn release(owner: Release) {
                 // SAFETY: each entry transfers one live owner of this record.
                 Release::Record(record) => unsafe { release_record_owner(record) },
                 Release::Object(object) => drop(object),
+                Release::Sequence(kind, mut values) => {
+                    if let Some(word) = values.pop() {
+                        // SAFETY: the sequence transferred this independently owned word.
+                        unsafe { kind.release(word) };
+                    }
+                    if !values.is_empty() {
+                        // Visit the child before resuming the remaining words.
+                        pending.borrow_mut().push(Release::Sequence(kind, values));
+                    }
+                }
             }
             let mut pending = pending.borrow_mut();
             // Children were enqueued in field or container order. Finish this

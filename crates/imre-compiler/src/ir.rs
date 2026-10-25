@@ -7,6 +7,8 @@ pub(crate) enum Type {
     Int,
     Float,
     Bool,
+    /// A builtin class object. Its name is interned; the handle is never a Python string.
+    BuiltinClass,
     Str,
     /// A closed domain of strings with ordinary string storage and ownership.
     StrLiteral(usize),
@@ -56,7 +58,7 @@ pub(crate) enum Type {
     Path,
     PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
-    CompletedProcess(ProcessCapture),
+    CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
     Popen(ProcessCapture, bool, usize),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -171,6 +173,7 @@ impl std::fmt::Display for Type {
             Self::Int => "int",
             Self::Float => "float",
             Self::Bool => "bool",
+            Self::BuiltinClass => "type",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -189,8 +192,10 @@ impl std::fmt::Display for Type {
             Self::Path => "pathlib.Path",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
-            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
-            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
+            Self::CompletedProcess(capture, _) if capture.text => {
+                "subprocess.CompletedProcess[str]"
+            }
+            Self::CompletedProcess(..) => "subprocess.CompletedProcess[bytes]",
             Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
@@ -494,6 +499,15 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub(crate) enum ArgparseOutput {
+    Return,
+    Stdout,
+    Stderr,
+    File,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
@@ -520,6 +534,7 @@ pub(crate) enum Builtin {
         member: usize,
     },
     StrEnumName,
+    ClassNameView,
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
@@ -529,6 +544,10 @@ pub(crate) enum Builtin {
     LiteralStringView,
     StringListContains,
     StringContains,
+    /// Immutable byte subsequence; operands are evaluated needle first.
+    BytesContains,
+    /// Integer byte membership validates 0..=255 before searching.
+    BytesContainsInt,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -554,7 +573,7 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     TimeSleep,
-    PercentInteger,
+    PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),
@@ -735,6 +754,11 @@ pub(crate) enum Builtin {
         children: Vec<usize>,
         process_argv: bool,
     },
+    /// Format parser text or print it to the requested stream.
+    ArgparseText {
+        usage: bool,
+        output: ArgparseOutput,
+    },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
     ExactRecord(usize),
@@ -793,6 +817,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -822,6 +847,8 @@ pub(crate) enum Builtin {
     FileFileno,
     DictGet,
     DictCopy,
+    DeepCopy,
+    RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
     CounterNew,
@@ -863,6 +890,7 @@ pub(crate) enum Builtin {
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
+    DictClear,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
@@ -947,6 +975,7 @@ pub(crate) enum RegexCapture {
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
     Lower,
+    Capitalize,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -958,6 +987,7 @@ pub(crate) enum TextOperation {
     Unquote,
     Dedent,
     ShlexSplit,
+    ShlexQuote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -978,6 +1008,11 @@ pub(crate) enum PathOperation {
         full: bool,
     },
     WithName,
+    WithStem,
+    WithSuffix,
+    Suffixes,
+    IsRelativeTo,
+    RelativeTo,
     Text,
     Name,
     Stem,
@@ -1016,8 +1051,17 @@ pub(crate) enum PathOperation {
     },
 }
 
-/// POSIX lexical operations preserve raw str or bytes spellings.
+/// Shell filename operations do not interpret path separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FnmatchOperation {
+    Match { normcase: bool },
+    Filter { inverse: bool },
+    Translate,
+    Parts,
+}
+
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },
@@ -1099,6 +1143,11 @@ pub(crate) enum LogOperation {
     NamesCopy,
     Configure,
     ConfigureName,
+    DictConfig,
+    DictConfigTyped,
+    FileConfig,
+    Disabled,
+    Propagate,
     Name,
     Level,
     Root,
@@ -1114,6 +1163,7 @@ pub(crate) enum LogOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     Open,
+    Seek,
     Pipe,
     Dup2,
     Close,
@@ -1142,9 +1192,17 @@ pub(crate) enum CopyOperation {
 pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
-    CheckOutput,
+    CheckOutput {
+        streams: u32,
+        validation: u32,
+        errors: u8,
+        capture: ProcessCapture,
+    },
     Run {
         streams: u32,
+        validation: u32,
+        errors: u8,
+        timed: bool,
     },
     Popen {
         streams: u32,
@@ -1221,8 +1279,9 @@ pub(crate) enum ProcessOperation {
     Fd(FdOperation),
     OsErrorField(u32),
     Strerror,
-    OpenFlag(&'static str),
+    DescriptorConstant(&'static str),
     Which,
+    RmTree,
     Copy(CopyOperation),
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
@@ -1249,7 +1308,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
-            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
+            Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))

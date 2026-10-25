@@ -267,7 +267,10 @@ impl Emitter<'_, '_> {
                 self.checked_line(instruction);
                 none()
             }
-            ProcessOperation::Popen { streams } | ProcessOperation::Call { streams, .. } => {
+            ProcessOperation::Popen { streams }
+            | ProcessOperation::Call { streams, .. }
+            | ProcessOperation::CheckOutput { streams, .. }
+            | ProcessOperation::Run { streams, .. } => {
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let env =
@@ -315,8 +318,29 @@ impl Emitter<'_, '_> {
                     ));
                     return self.unpack_word(word, returns);
                 }
-                let operand =
-                    self.checked_instruction(format!("call ptr @imre_popen_config(ptr {config})"));
+                let operand = match operation {
+                    ProcessOperation::Run {
+                        validation, errors, ..
+                    }
+                    | ProcessOperation::CheckOutput {
+                        validation, errors, ..
+                    } => {
+                        let timeout = &args[12].value;
+                        let kind = if timeout.ty == Type::Int { 2 } else { 7 };
+                        let (checked, descriptor) =
+                            if matches!(operation, ProcessOperation::Run { .. }) {
+                                let name = self
+                                    .output
+                                    .global_ref(format!("layout_{}", record_name(returns)));
+                                (args[14].value.operand.as_str(), format!("@{name}"))
+                            } else {
+                                ("true", "null".to_owned())
+                            };
+                        self.checked_instruction(format!("call ptr @imre_run_config(ptr {config}, i32 {kind}, i64 {}, i64 {}, i32 {validation}, i32 {errors}, i1 {checked}, ptr {descriptor})", timeout.operand, args[13].value.operand))
+                    }
+                    _ => self
+                        .checked_instruction(format!("call ptr @imre_popen_config(ptr {config})")),
+                };
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -421,17 +445,6 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
-            ProcessOperation::CheckOutput => {
-                let operand = self.checked_instruction(format!(
-                    "call ptr @imre_subprocess_check_output(ptr {})",
-                    args[0].value.operand
-                ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
-            }
             ProcessOperation::RunToStderr => {
                 let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 self.checked_line(format!(
@@ -439,32 +452,6 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 none()
-            }
-            ProcessOperation::Run { streams } => {
-                let layout = self
-                    .output
-                    .global_ref(format!("layout_{}", record_name(returns)));
-                let cwd =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
-                let environment =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
-                let check = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
-                let (kind, timeout) = match args.get(4) {
-                    Some(arg) => (
-                        if arg.value.ty == Type::Int { 2 } else { 7 },
-                        arg.value.operand.as_str(),
-                    ),
-                    None => (0, "0"),
-                };
-                let operand = self.checked_instruction(format!(
-                    "call ptr @imre_subprocess_run_modes(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i32 {streams}, i32 {kind}, i64 {timeout}, ptr @{layout})",
-                    args[0].value.operand
-                ));
-                self.owned(Value {
-                    ty: returns,
-                    operand,
-                    small_integer: false,
-                })
             }
             ProcessOperation::EnvironGet if returns == Type::Str => self.call(
                 "imre_environ_get",
@@ -485,9 +472,27 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::OpenFlag(name) => self.os_open_flag(name),
+            ProcessOperation::DescriptorConstant(name) => self.os_descriptor_constant(name),
             ProcessOperation::Fd(operation) => self.os_descriptor(operation, args, returns),
             ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::RmTree => {
+                let [path, ignore, _, _, fd] = args else {
+                    unreachable!()
+                };
+                let (ptr, tag) = match path.value.ty {
+                    Type::None => ("null", 2),
+                    Type::Bytes => (path.value.operand.as_str(), 1),
+                    _ => (path.value.operand.as_str(), 0),
+                };
+                let (fd, fd_kind) = match fd.value.ty {
+                    Type::Str => ("0", 2),
+                    Type::None => ("0", 0),
+                    _ => (fd.value.operand.as_str(), 1),
+                };
+                let ignore = self.instruction(format!("zext i1 {} to i32", ignore.value.operand));
+                self.checked_line(format!("call void @imre_shutil_rmtree(ptr {ptr}, i32 {tag}, i32 {ignore}, i64 {fd}, i32 {fd_kind}, ptr null, ptr null, ptr null, ptr null)"));
+                none()
+            }
             ProcessOperation::Copy(op) => {
                 let tag = |ty| match ty {
                     Type::Str => 0,
@@ -515,7 +520,7 @@ impl Emitter<'_, '_> {
                 let bytes = u8::from(args[0].value.ty == Type::Bytes);
                 let path_bytes =
                     u8::from(self.module.types.payload(args[2].value.ty) == Some(Type::Bytes));
-                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes})", args[0].value.operand, args[1].value.operand));
+                let pointer = self.checked_instruction(format!("call ptr @imre_shutil_which(ptr {}, i64 {}, ptr {path}, i32 {bytes}, i32 {path_bytes}, ptr @imre_shutil_confstr_cs_path, ptr @imre_shutil_os_defpath)", args[0].value.operand, args[1].value.operand));
                 let operand = self.instruction(format!("ptrtoint ptr {pointer} to i64"));
                 self.owned(Value {
                     ty: returns,

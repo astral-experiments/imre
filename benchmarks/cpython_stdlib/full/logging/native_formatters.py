@@ -17,10 +17,45 @@ STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
 from suite_inventory import cases, load_suite, verify_files
 from suite_evidence import roles
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 PRECISION = "test.test_logging.FormatterTest.test_issue_89047"
+
+
+def buffering_cases(toolchain, work):
+    fixture = """def NativeCase() -> BufferCase:
+    case = BufferCase()
+    case.setUp()
+    return case
+
+
+class BufferCase:
+    records: list[logging.LogRecord]
+
+    def __init__(self) -> None:
+        self.records = []
+
+    def assertEqual(self, expected: str, actual: str) -> None:
+        if expected != actual:
+            raise AssertionError(f"{expected!r} != {actual!r}")
+"""
+    owner = "BufferingFormatterTest"
+    fixture += "\n" + method_bytes(SOURCE, owner, "setUp").decode()
+    callbacks = {}
+    for name in ("test_default", "test_custom"):
+        support = "import logging\n\n"
+        if name == "test_custom":
+            support += "class TestBufferingFormatter(logging.BufferingFormatter):\n"
+            for helper in ("formatHeader", "formatFooter"):
+                support += method_bytes(SOURCE, "TestBufferingFormatter", helper).decode() + "\n"
+        dest = work / name
+        dest.mkdir()
+        case_id = f"test.test_logging.{owner}.{name}"
+        callbacks[case_id] = native_method(
+            toolchain, dest, SOURCE, owner, case_id, support + fixture,
+            operation=("imre", "Native buffered record formatting; original record setup also runs in the child"))
+    return callbacks
 
 
 def optional(value):
@@ -176,6 +211,11 @@ def main():
         if failures or skips or set(native) != {PRECISION}:
             raise AssertionError((failures, skips))
         evidence[PRECISION].extend(native[PRECISION])
+        buffering = buffering_cases(tools, Path(work))
+        native, failures, skips = run_in_fixtures(load_suite("test.test_logging"), buffering)
+        if failures or skips or set(native) != set(buffering):
+            raise AssertionError((failures, skips))
+        evidence.update(native)
     data = json.dumps({"optimization": args.opt_level, "reference_denominator": 272, "evidence": evidence},
                       indent=2, sort_keys=True) + "\n"
     if args.result:

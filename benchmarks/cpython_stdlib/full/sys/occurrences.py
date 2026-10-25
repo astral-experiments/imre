@@ -1,9 +1,6 @@
 """Evidence for unsuccessful and platform-specific test_sys occurrences."""
 import ast
 from pathlib import Path
-import subprocess
-from types import SimpleNamespace
-from unittest.mock import patch
 
 from exit_case import exit_observation
 from suite_evidence import roles
@@ -25,7 +22,7 @@ SKIPS = {
     "test_sys_getwindowsversion_no_instantiation": (881, 'not hasattr(sys, "getwindowsversion")',
                                                      "Linux, no Windows version API"),
     "test_ioencoding_nonascii": (937, "sys.getfilesystemencoding() != locale.getpreferredencoding(False)",
-                                 "reference Linux locale; the native gate runs the host with -X utf8"),
+                                 "CPython 3.14.5, LC_CTYPE=C.UTF-8, UTF-8 mode 0; filesystem utf-8, preferred UTF-8"),
     "test_pystats": (1325, 'not hasattr(sys, "_stats_on")', "release build without Py_STATS"),
 }
 
@@ -41,33 +38,6 @@ def reference_skips(reference, level):
             "reason": reference["reference"][test_id]["skipped"], "source": f"Lib/test/test_sys.py:{line}",
         }
     return result
-
-
-def argv_invocation(module, toolchain):
-    """Run the full original method and record the actual native command-line failure."""
-    test_id = MODULE + ".SysModuleTest.test_orig_argv"
-
-    def execute(case, original):
-        with patch.object(module, "sys", SimpleNamespace(executable=str(toolchain.imre.resolve()))):
-            try:
-                original()
-            except subprocess.CalledProcessError as exc:
-                error = exc.stderr.splitlines()[0] if exc.stderr else "no diagnostic"
-                return {"result": exc.returncode, "diagnostic": error, "arguments": exc.cmd[1:]}
-        return {"result": 0}
-
-    data, failures, skips = run_in_fixtures(load_suite(MODULE), {test_id: execute})
-    if failures or skips:
-        raise AssertionError((failures, skips))
-    observation, = data[test_id]
-    if not observation["result"]:
-        raise AssertionError("native Python command invocation now succeeds; register its complete passing adapter")
-    return {"outcome": "error",
-            "roles": roles(body="cpython", assertions="unobserved", operation="unobserved", fixture="cpython"),
-            "reason": f"Imre exited {observation['result']} before executing the -c child: {observation['diagnostic']}",
-            "evidence": {"stage": "native program invocation", "arguments": observation["arguments"],
-                         "returncode": observation["result"], "opt_level": toolchain.level,
-                         "fixture": "upstream CPython SysModuleTest lifecycle and subprocess.run(check=True)"}}
 
 
 def blocked_methods(toolchain, root, source, reference, selected, module):
@@ -96,9 +66,6 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
             continue
         key = (name, 1)
         state, reason = notes[name]
-        if state == "failed" and name.endswith(".test_orig_argv"):
-            results[key] = argv_invocation(module, toolchain)
-            continue
         cls, method = name.split(".")[-2:]
         node = methods[cls, method]
         folder = root / (cls + "." + method)
