@@ -1723,6 +1723,49 @@ pub unsafe extern "C" fn imre_counter_update(target: *const Object, source: *con
     crate::finish(updated, ());
 }
 
+/// Update a bound mapping without changing the position of existing keys.
+///
+/// # Safety
+/// The caller roots dictionaries with the same closed key and value types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_update(target: *const Object, source: *const Object) {
+    // SAFETY: a Counter can arrive through a plain dict annotation. Its bound
+    // method adds counts, even when the two arguments are the same object.
+    if unsafe {
+        object(target)
+            .0
+            .with(|s| s.dictionary().missing == Missing::Zero)
+    } {
+        // SAFETY: this policy guarantees integer values, and both rooted
+        // dictionaries have the same key and value representations.
+        unsafe { imre_counter_update(target, source) };
+        return;
+    }
+    if target == source {
+        return;
+    }
+    // SAFETY: each source pair acquires both owners before we borrow the
+    // destination. Displaced owners are released outside that mutable borrow.
+    let result = (|| unsafe {
+        let mut position = 0;
+        while let Some((next, key, value)) = object(source).0.with(|storage| {
+            let mapping = storage.dictionary();
+            mapping
+                .tables
+                .next(position)
+                .map(|(next, key, word)| (next, key, mapping.value_kind.acquire(word)))
+        }) {
+            let old = object(target)
+                .0
+                .with_mut(|s| s.dictionary_mut().insert(key, value))?;
+            drop(old);
+            position = next;
+        }
+        Ok(())
+    })();
+    crate::finish(result, ());
+}
+
 /// Sums exact integers after evaluating the dictionary and the start value.
 ///
 /// # Safety
