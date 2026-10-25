@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+from collections import Counter
 from functools import cache
 import fcntl
 import hashlib
@@ -13,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import unittest
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -21,13 +21,52 @@ sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import run_in_fixtures
 PIPE, STDOUT, DEVNULL = subprocess.PIPE, subprocess.STDOUT, subprocess.DEVNULL
+# Minimum observed native operations for the assertions in each original.
+# Repetitions matter: a success after a timeout must use the same child.
 METHODS = {
+    "ContextManagerTests": {
+        "test_communicate_stdin": "communicate returncode exit",
+        "test_invalid_args": "Popen:FileNotFoundError",
+        "test_pipe": "stdout.read stderr.read exit stdout.closed stderr.closed",
+        "test_returncode": "exit returncode",
+    },
+    "POSIXProcessTestCase": {
+        "test_communicate_repeated_call_after_stdout_close": "communicate:timeout communicate",
+        "test_kill": "stdout.read_size kill communicate wait",
+        "test_kill_dead": "stdout.read_size kill communicate",
+        "test_run_abort": "wait returncode",
+        "test_terminate": "stdout.read_size terminate communicate wait",
+        "test_terminate_dead": "stdout.read_size terminate communicate",
+    },
     "ProcessTestCase": {
-        "test_wait": {"wait"},
-        "test_wait_timeout": {"wait:timeout", "wait"},
-        "test_communicate": {"communicate", "stdout.close", "stderr.close", "stdin.close"},
-        "test_post_timeout_communicate_sends_input": {"communicate:timeout", "communicate", "exit", "returncode"},
-    }
+        "test_communicate": "communicate stdout.close stderr.close stdin.close",
+        "test_communicate_epipe": "communicate",
+        "test_communicate_epipe_only_stdin": "communicate wait",
+        "test_communicate_pipe_buf": "communicate",
+        "test_communicate_pipe_fd_leak": "communicate stdin.closed stdout.closed stderr.closed",
+        "test_communicate_returns": "communicate",
+        "test_communicate_stderr": "communicate",
+        "test_communicate_stdin": "communicate returncode",
+        "test_communicate_stdin_closed_before_call": "stdin.close communicate returncode exit",
+        "test_communicate_stdout": "communicate",
+        "test_communicate_timeout_large_output": "communicate:timeout communicate",
+        "test_cwd": "stdout.read wait returncode",
+        "test_cwd_with_absolute_arg": "Popen:FileNotFoundError stdout.read wait returncode",
+        "test_cwd_with_relative_arg": "Popen:FileNotFoundError Popen:FileNotFoundError stdout.read wait returncode",
+        "test_post_timeout_communicate_sends_input": "communicate:timeout communicate exit returncode",
+        "test_stderr_devnull": "streams wait",
+        "test_stderr_none": "streams wait",
+        "test_stderr_pipe": "stderr.read exit",
+        "test_stdin_devnull": "streams wait",
+        "test_stdin_none": "streams wait",
+        "test_stdin_pipe": "stdin.write stdin.close wait returncode",
+        "test_stdout_devnull": "streams wait",
+        "test_stdout_pipe": "stdout.read exit",
+        "test_stdout_stderr_pipe": "stdout.read exit",
+        "test_wait": "wait wait",
+        "test_wait_timeout": "wait:timeout wait",
+        "test_writes_before_communicate": "stdin.write communicate",
+    },
 }
 
 
@@ -194,7 +233,7 @@ class Remote:
         line, _, self.buffer = self.buffer.partition(b"\n")
         status, raw = line.decode().split(" ", 1)
         value = ast.literal_eval(raw)
-        self.harness.calls.append(name + (":timeout" if status == "timeout" else ""))
+        self.harness.calls.append(name if status == "ok" else name + ":" + status)
         if status == "ok":
             return value
         if status == "timeout":
@@ -362,7 +401,12 @@ def one(args, name, work):
         if ".ProcessTestCaseNoPoll." in name:
             return {"status": "blocked", "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
                     "operation_calls": harness.calls}
-        return {"status": "observed", "operation_calls": harness.calls}
+        cls = name.rsplit(".", 2)[1]
+        required = METHODS.get(cls, {}).get(method)
+        if not required or not Counter(required.split()) <= Counter(harness.calls):
+            return {"status": "blocked", "reason": "native trace did not verify the operations asserted by this ID",
+                    "operation_calls": harness.calls}
+        return {"status": "host-driven-native", "operation_calls": harness.calls}
     finally:
         for parent in harness.parents:
             parent.finish()
@@ -389,7 +433,7 @@ def main():
             for method, required in methods.items():
                 name = f"test.test_subprocess.{cls}.{method}"
                 result = one(args, name, work)
-                if result["status"] != "observed" or not required.issubset(result["operation_calls"]):
+                if result["status"] != "host-driven-native":
                     raise AssertionError((name, required, result))
                 traces[name] = result["operation_calls"]
     args.result.write_text(json.dumps({"opt_level": args.opt_level, "host_driven_native": traces}, indent=2) + "\n")

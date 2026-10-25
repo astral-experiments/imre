@@ -1,4 +1,4 @@
-"""Compile unchanged subprocess test methods with native fixtures and assertions."""
+"""Run unchanged native subprocess methods and assertions under CPython fixtures."""
 
 import argparse
 import json
