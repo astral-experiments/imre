@@ -16,7 +16,31 @@ def observed_mask(events: list[tuple[int, int]], fd: int) -> int:
     return events[0][1]
 
 
+def temporary_interest(fd: int) -> None:
+    p = select.poll()
+    p.register(fd, select.POLLOUT)
+    assert observed_mask(p.poll(0), fd) == select.POLLOUT
+
+
+def borrowed_descriptors() -> None:
+    reader, writer = os.pipe()
+    replacement_reader, replacement_writer = os.pipe()
+    p = select.poll()
+    p.register(reader, select.POLLOUT)
+    os.close(reader)
+    os.dup2(replacement_writer, reader)
+    assert observed_mask(p.poll(0), reader) == select.POLLOUT, "poll did not follow fd reuse"
+    temporary_interest(reader)
+    assert observed_mask(p.poll(0), reader) == select.POLLOUT, "dropping a poller closed its fd"
+    p.unregister(reader)
+    os.close(reader)
+    os.close(writer)
+    os.close(replacement_reader)
+    os.close(replacement_writer)
+
+
 def state() -> None:
+    borrowed_descriptors()
     r, w = os.pipe()
     r2, w2 = os.pipe()
     p = select.poll()
