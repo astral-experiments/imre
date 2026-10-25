@@ -6,6 +6,7 @@ use std::thread;
 
 use super::*;
 use crate::StorageCell;
+use crate::objects::acquire_rc;
 
 type Captured = (ExitStatus, Vec<u8>, Vec<u8>);
 

@@ -41,33 +41,47 @@ pub(super) fn launch(
     let mut child = program.spawn()?;
     drop(peer);
     let started = wait_for_start(&mut control, &mut child);
-    let cleanup = if matches!(started, Ok(true)) {
+    let cleanup = if matches!(started, Ok(Some(_))) {
         directory.close()
     } else {
         // A custom launcher or an older runtime can still use the original path.
+        Ok(())
+    };
+    // Older runtimes only acknowledge startup. New ones request the original
+    // vector when sys.orig_argv is reachable; argv[0] in the child remains source.
+    let sent = if matches!(started, Ok(Some(2))) {
+        let mut writer = io::BufWriter::new(&control);
+        std::env::args_os()
+            .try_for_each(|arg| {
+                writer.write_all(arg.as_encoded_bytes())?;
+                writer.write_all(&[0])
+            })
+            .and_then(|()| writer.flush())
+    } else {
         Ok(())
     };
     drop(control); // EOF releases the runtime after removal.
     let status = child.wait();
     cleanup?;
     started?;
+    sent?;
     status
 }
 
-fn wait_for_start(control: &mut UnixStream, child: &mut Child) -> io::Result<bool> {
+fn wait_for_start(control: &mut UnixStream, child: &mut Child) -> io::Result<Option<u8>> {
     let mut ready = [0];
     loop {
         match control.read(&mut ready) {
-            Ok(n) => return Ok(n == 1 && ready[0] == 1),
+            Ok(n) => return Ok((n == 1 && matches!(ready[0], 1 | 2)).then_some(ready[0])),
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                 // A nonparticipating executable can leave its socket with a
                 // grandchild. Its own exit must still finish imre run.
                 if child.try_wait()?.is_some() {
-                    return Ok(false);
+                    return Ok(None);
                 }
             }
-            Err(e) if e.kind() == ErrorKind::ConnectionReset => return Ok(false),
+            Err(e) if e.kind() == ErrorKind::ConnectionReset => return Ok(None),
             Err(e) => return Err(e),
         }
     }

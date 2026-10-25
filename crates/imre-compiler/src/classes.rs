@@ -54,6 +54,7 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
+    pub(crate) static_bindings: HashMap<String, Binding>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -193,6 +194,7 @@ fn collect_class(
         .unwrap_or_default();
     let mut exception_aliases =
         base.map_or_else(HashMap::new, |(_, b)| b.exception_aliases.clone());
+    let mut static_bindings = base.map_or_else(HashMap::new, |(_, b)| b.static_bindings.clone());
     let mut hash = None;
     let mut fields = base
         .map(|(_, base)| base.fields.clone())
@@ -209,6 +211,23 @@ fn collect_class(
     let mut method_kinds = Vec::new();
     let mut initializer = None;
     for statement in &node.body {
+        // A call through an upcast uses its declared layout. Do not erase an
+        // override which could select a different callable at runtime.
+        let member = match statement {
+            ast::Stmt::FunctionDef(f) => Some(f.name.as_str()),
+            ast::Stmt::AnnAssign(a) => a.target.as_name_expr().map(|n| n.id.as_str()),
+            ast::Stmt::Assign(a) => a
+                .targets
+                .first()
+                .and_then(ast::Expr::as_name_expr)
+                .map(|n| n.id.as_str()),
+            _ => None,
+        };
+        if member
+            .is_some_and(|name| base.is_some_and(|(_, b)| b.static_bindings.contains_key(name)))
+        {
+            return Err(module.error(statement, "overriding a fixed class binding is unsupported"));
+        }
         match statement {
             ast::Stmt::Assign(member) if let Some(members) = &mut enum_members => {
                 let name =
@@ -388,6 +407,30 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
+                    && let Some(binding) = class_static_binding(
+                        graph,
+                        definition.module,
+                        &assign.value,
+                        &class_bindings,
+                    ) =>
+            {
+                if !names.insert(name.id.to_string())
+                    || name.id.starts_with("__")
+                    || base.is_some_and(|(_, b)| {
+                        b.fields.iter().any(|f| f.name == name.id.as_str())
+                            || b.methods
+                                .iter()
+                                .any(|m| m.name.as_str() == name.id.as_str())
+                            || b.exception_aliases.contains_key(name.id.as_str())
+                    })
+                {
+                    return Err(module.error(name, "duplicate or reserved static class binding"));
+                }
+                class_bindings.insert(name.id.to_string());
+                static_bindings.insert(name.id.to_string(), binding);
+            }
+            ast::Stmt::Assign(assign)
+                if let [ast::Expr::Name(name)] = assign.targets.as_slice()
                     && let Some(target) =
                         exceptions::alias(graph, definition.module, &assign.value, exceptions) =>
             {
@@ -511,9 +554,55 @@ fn collect_class(
         dataclass,
         enum_members,
         exception_aliases,
+        static_bindings,
         generated_initializer,
         initializer,
     })
+}
+
+/// Resolve declarations whose descriptor cannot bind an instance: a sealed
+/// module or an explicit staticmethod over a known function.
+fn class_static_binding(
+    graph: &SourceGraph,
+    module: usize,
+    expr: &ast::Expr,
+    locals: &HashSet<String>,
+) -> Option<Binding> {
+    let (value, wrapped) = if let ast::Expr::Call(c) = expr {
+        if !matches!(&*c.func, ast::Expr::Name(n) if n.id == "staticmethod")
+            || locals.contains("staticmethod")
+            || graph.resolve(module, &c.func).is_some()
+            || !c.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [value] = c.arguments.args.as_slice() else {
+            return None;
+        };
+        (value, true)
+    } else {
+        (expr, false)
+    };
+    let mut root = value;
+    while let ast::Expr::Attribute(a) = root {
+        root = &a.value;
+    }
+    if !matches!(root, ast::Expr::Name(n) if !locals.contains(n.id.as_str())) {
+        return None;
+    }
+    let binding = graph.resolve(module, value)?;
+    match (wrapped, binding) {
+        (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
+        (true, Binding::Definition(id))
+            if matches!(
+                graph.modules[id.module].parsed.syntax().body[id.statement],
+                ast::Stmt::FunctionDef(_)
+            ) =>
+        {
+            Some(binding)
+        }
+        _ => None,
+    }
 }
 
 /// Only these sealed descriptors affect binding; arbitrary decorators still cannot run.
