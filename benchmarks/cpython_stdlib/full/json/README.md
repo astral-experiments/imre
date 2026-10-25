@@ -19,7 +19,7 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 ## Full native evidence
 
-The [v1 report](evidence-linux.json) covers all 216 occurrences at each optimization level, including the package submodules, both backend fixtures and both CLI variants. On the iterative decoder, 12 complete native methods ran under 24 host fixture IDs; 42 additional fixture IDs called native operations from host methods. The other 150 occurrences are 98 blocked, two failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, exact native recursion exceptions, concrete diagnostics and source locations.
+The [v1 report](evidence-linux.json) covers all 216 occurrences at each optimization level, including the package submodules, both backend fixtures and both CLI variants. With the iterative parser and reusable decoder, 12 complete native methods ran under 24 host fixture IDs; 44 additional fixture IDs called native operations from host methods. The other 148 occurrences are 98 blocked, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, native key owners, exact recursion exceptions, concrete diagnostics and source locations.
 
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
@@ -29,7 +29,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
     benchmarks/cpython_stdlib/full/json/reference-linux.json /tmp/json-evidence.json
 ```
 
-The two remaining failed fixture occurrences exercise key identity through the repr transport. The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
+The [doctest handoff](DOCTEST.md) identifies the first shared intact-package import blocker.
 
 The [first key identity rerun](key-identity-linux.json) distinguished native key owners from the strings reconstructed by the repr transport and reached the missing `JSONDecoder` constructor. With a [live native decoder](decoder-keys-linux.json), both original `test_keys_reuse` fixture IDs complete at O0 and O3. Each executes `json.loads`, constructs a native `json.decoder.JSONDecoder`, calls its `decode` and reads the same instance's `memo`. The host preserves the observed native owners for the original `sorted` and identity assertions. The ordinary repr transport still fails the first assertion. Run `key_identity.py` with the same options as `evidence.py` to reproduce both paths.
 

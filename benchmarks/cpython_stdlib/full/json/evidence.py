@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
+from key_identity import METHOD as KEY_METHOD, owner_fixture
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
 sys.path.insert(0, str(BENCH))
@@ -140,6 +141,23 @@ def run(tools, directory, reference):
                              "native_calls": {"loads": len(calls)}, "native_exceptions": calls}}
 
     executions.update(dict.fromkeys(ids[DEEP_METHOD], native_depth))
+    key_dir = directory / "decoder-key-owners"
+    key_dir.mkdir()
+    keys_method = owner_fixture(tools, key_dir)
+
+    def native_keys(case, original):
+        result = keys_method(case, original)
+        obs = {"outcome": "pass" if result["outcome"] == "pass" else "failure",
+               "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+               "evidence": {"source": KEY_METHOD, "method_sha256": definition(KEY_METHOD)[1], "opt_level": tools.level,
+                            "fixture": "original CPython lifecycle, method, sort and identity assertions",
+                            "operation": ", ".join(result["native_operations"]),
+                            "native_key_owners": result["native_key_owners"]}}
+        if result["reason"]:
+            obs["reason"] = result["reason"]
+        return obs
+
+    executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
     for key, case, (_, variant) in zip(keys, instances, discovered, strict=True):
         if key[0] in executions:
             continue

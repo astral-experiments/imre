@@ -123,60 +123,74 @@ class DecoderSession:
             self.child.communicate(timeout=30)
 
 
-def run(tools, work):
-    plain_directory = work / "ordinary"
-    plain_directory.mkdir()
-    plain = tools.build((BENCH / "json_values_driver.py").read_bytes(), plain_directory)
+def owner_fixture(tools, work):
+    """Bind the original operations to a decoder and return the observed key owners."""
     owner_directory = work / "owners"
     owner_directory.mkdir()
     owners = tools.build(DRIVER, owner_directory)
     decoder_directory = work / "decoder"
     decoder_directory.mkdir()
     decoder = tools.build(DECODER, decoder_directory)
+
+    def execute(case, original):
+        traces, ops, sessions = [], [], []
+
+        def loads(document):
+            (owner_directory / "keys.txt").write_text(document)
+            output = subprocess.run([owners], cwd=owner_directory, capture_output=True, check=True, timeout=30)
+            if output.stderr:
+                raise ValueError(output.stderr)
+            value, tokens = project(output.stdout.decode())
+            traces.append(tokens)
+            ops.append("json.loads")
+            return value
+
+        def constructor():
+            session = DecoderSession(decoder, decoder_directory, ops, traces)
+            sessions.append(session)
+            return session
+
+        case.json = SimpleNamespace(decoder=SimpleNamespace(JSONDecoder=constructor))
+        case.loads = loads
+        try:
+            original()
+        except AssertionError as exc:
+            outcome, detail = "failed", str(exc)
+        else:
+            outcome, detail = "pass", None
+        finally:
+            for session in sessions:
+                session.close()
+        if outcome == "pass" and ops != ["json.loads", "json.decoder.JSONDecoder", "JSONDecoder.decode", "JSONDecoder.memo"]:
+            raise ValueError(("missing native operation", ops))
+        return {"outcome": outcome, "reason": detail, "repr_calls": [],
+                "native_operations": ops, "native_key_owners": traces}
+    return execute
+
+
+def run(tools, work):
+    plain_directory = work / "ordinary"
+    plain_directory.mkdir()
+    plain = tools.build((BENCH / "json_values_driver.py").read_bytes(), plain_directory)
+
+    def ordinary(case, original):
+        native = Native(plain, plain_directory, case.JSONDecodeError)
+        case.json = Probe(native)
+        case.loads = case.json.loads
+        try:
+            original()
+        except (AssertionError, Boundary) as exc:
+            outcome, reason = ("blocked" if isinstance(exc, Boundary) else "failed"), str(exc)
+        else:
+            outcome, reason = "pass", None
+        return {"outcome": outcome, "reason": reason, "repr_calls": native.calls,
+                "native_operations": [], "native_key_owners": []}
+
     ids = [case.id() for case in cases(load_suite("test.test_json")) if routine(case) == METHOD]
     if len(ids) != 2:
         raise ValueError(ids)
     results = {}
-    for mode in ("repr", "native-owners"):
-        def execute(case, original):
-            native = Native(plain, plain_directory, case.JSONDecodeError)
-            proxy = Probe(native)
-            traces, ops, sessions = [], [], []
-
-            def loads(document):
-                (owner_directory / "keys.txt").write_text(document)
-                output = subprocess.run([owners], cwd=owner_directory, capture_output=True, check=True)
-                if output.stderr:
-                    raise ValueError(output.stderr)
-                value, tokens = project(output.stdout.decode())
-                traces.append(tokens)
-                ops.append("json.loads")
-                return value
-
-            def constructor():
-                session = DecoderSession(decoder, decoder_directory, ops, traces)
-                sessions.append(session)
-                return session
-
-            case.json = proxy
-            if mode == "native-owners":
-                proxy.decoder = SimpleNamespace(JSONDecoder=constructor)
-            case.loads = proxy.loads if mode == "repr" else loads
-            try:
-                original()
-            except (AssertionError, Boundary) as exc:
-                outcome = "blocked" if isinstance(exc, Boundary) else "failed"
-                detail = str(exc)
-            else:
-                outcome, detail = "pass", None
-            finally:
-                for session in sessions:
-                    session.close()
-            if outcome == "pass" and ops != ["json.loads", "json.decoder.JSONDecoder", "JSONDecoder.decode", "JSONDecoder.memo"]:
-                raise ValueError(("missing native operation", ops))
-            return {"outcome": outcome, "reason": detail, "repr_calls": native.calls,
-                    "native_operations": ops, "native_key_owners": traces}
-
+    for mode, execute in (("repr", ordinary), ("native-owners", owner_fixture(tools, work))):
         complete, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, execute))
         if failed or skipped or set(complete) != set(ids):
             raise ValueError((failed, skipped, complete))
