@@ -92,6 +92,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -153,6 +154,7 @@ impl Type {
             | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::SimpleNamespace(_)
+            | Self::PathInfo
             | Self::Sha256
             | Self::ZipFile
             | Self::ZipInfo
@@ -746,6 +748,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -1748,8 +1751,8 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
-            self.void_call("imre_flush_stdout", &[]);
-            self.line("ret i32 0");
+            let status = self.instruction("call i32 @imre_finish_stdio()");
+            self.line(format!("ret i32 {status}"));
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
@@ -3346,6 +3349,7 @@ impl Emitter<'_, '_> {
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
                 | Type::PlainObject
+                | Type::PathInfo
                 | Type::Sha256
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -5611,6 +5615,15 @@ impl Emitter<'_, '_> {
                 self.release_operand(&args[0]);
                 return none();
             }
+            Builtin::ListClear => {
+                let symbol = if args[0].value.ty == Type::ListInt {
+                    "imre_list_clear"
+                } else {
+                    "imre_seq_clear"
+                };
+                self.void_call(symbol, &[&args[0].value]);
+                none()
+            }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
                     self.runtime_call(&LIST_POP, [&args[0].value])
@@ -5773,6 +5786,7 @@ impl Emitter<'_, '_> {
                     | Type::StrDescriptor(_)
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
+                    | Type::PathInfo
                     | Type::Sha256
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -6022,6 +6036,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6097,6 +6112,7 @@ impl Emitter<'_, '_> {
             | Type::StrDescriptor(_)
             | Type::PlainObject
             | Type::SimpleNamespace(_)
+            | Type::PathInfo
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -6685,6 +6701,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::StrDescriptor(_)
         | Type::PlainObject
         | Type::SimpleNamespace(_)
+        | Type::PathInfo
         | Type::Sha256
         | Type::ZipFile
         | Type::ZipInfo
@@ -6970,8 +6987,9 @@ declare void @imre_directory_context_exit(ptr)
 declare ptr @imre_union_path_text(i64)
 declare ptr @imre_sysconfig_scripts()
 declare i32 @imre_path_text_exists(ptr)
-declare i32 @imre_path_exists(ptr)
-declare i32 @imre_path_is_file(ptr)
+declare ptr @imre_path_info(ptr)
+declare ptr @imre_path_info_repr(ptr)
+declare i32 @imre_path_query(ptr, i32, i32)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
 declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
 declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
@@ -6983,7 +7001,6 @@ declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)
 declare ptr @imre_path_prefix(ptr, i32)
 declare ptr @imre_path_as_posix(ptr)
-declare i32 @imre_path_is_dir(ptr)
 declare i32 @imre_path_equal(ptr, ptr)
 declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
@@ -7127,7 +7144,7 @@ declare ptr @imre_exception_current()
 declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
-declare void @imre_flush_stdout()
+declare i32 @imre_finish_stdio()
 declare void @imre_record_error_init()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
@@ -7170,6 +7187,8 @@ declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
 declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
+declare void @imre_list_clear(ptr)
+declare void @imre_seq_clear(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
 ; The entry bootstrap can wait for imre run before it returns the layout.
