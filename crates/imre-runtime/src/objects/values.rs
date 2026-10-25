@@ -104,13 +104,28 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
-    if !std::ptr::eq(left_layout, right_layout) {
-        return Comparison::Done(false);
-    }
     // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
         return Comparison::Done(false);
     };
+    if !std::ptr::eq(left_layout, right_layout) {
+        // Named tuples compare structurally with other tuple layouts. Both
+        // descriptors must agree on how to read every word before traversing.
+        // SAFETY: the immutable descriptors cover each initialized field.
+        let compatible = unsafe {
+            semantics.kind == TUPLE
+                && right_layout
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|other| other.kind == TUPLE)
+                && left_layout.length == right_layout.length
+                && (0..left_layout.length)
+                    .all(|i| *left_layout.kinds.add(i) == *right_layout.kinds.add(i))
+        };
+        if !compatible {
+            return Comparison::Done(false);
+        }
+    }
     if semantics.kind != TUPLE && semantics.flags & GENERATED_EQ == 0 {
         return Comparison::Done(false);
     }
@@ -566,14 +581,15 @@ unsafe fn record_field_repr(
             .unwrap();
             return None;
         }
+        let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();
         if position == 0 {
-            if semantics.kind != TUPLE {
+            if !plain_tuple {
                 output.push_str(text(semantics.name, semantics.name_len));
             }
             output.push('(');
         }
         for index in position..layout.length {
-            let field = if semantics.kind == TUPLE {
+            let field = if plain_tuple {
                 None
             } else {
                 Some(&*semantics.fields.add(index))
@@ -597,7 +613,7 @@ unsafe fn record_field_repr(
             }
             write_scalar(output, word, kind);
         }
-        if semantics.kind == TUPLE && written == 1 {
+        if plain_tuple && written == 1 {
             output.push(',');
         }
         output.push(')');

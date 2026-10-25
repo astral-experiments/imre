@@ -112,7 +112,8 @@ def main():
     parser.add_argument("--clang", default="clang")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--opt-levels", nargs="+", default=("0", "3"))
-    parser.add_argument("--real-wheel", type=Path, help="defaults to the reference interpreter's bundled pip wheel")
+    parser.add_argument("--real-wheel", type=Path, default=os.environ.get("IMRE_REAL_WHEEL"),
+                        help="defaults to IMRE_REAL_WHEEL, then the reference interpreter's bundled pip wheel")
     parser.add_argument("--reference-only", action="store_true")
     args = parser.parse_args()
     if not args.reference_only and not (args.compiler and args.runtime):

@@ -2,8 +2,16 @@
 //! On a serde error at such a token, substitute same-width number spellings so
 //! every raw value still points to the corresponding span of the original text.
 
-pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Option<String> {
-    let line = text.split('\n').nth(error.line().checked_sub(1)?)?;
+use super::Error;
+
+pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Result<Option<String>, Error> {
+    let Some(line) = error
+        .line()
+        .checked_sub(1)
+        .and_then(|n| text.split('\n').nth(n))
+    else {
+        return Ok(None);
+    };
     let column = error.column().saturating_sub(1);
     let bytes = line.as_bytes();
     if ![column.saturating_sub(1), column, column + 1]
@@ -14,7 +22,7 @@ pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Option<String>
                 .is_some_and(|s| s.starts_with(b"NaN") || s.starts_with(b"Infinity"))
         })
     {
-        return None;
+        return Ok(None);
     }
     let bytes = text.as_bytes();
     let mut output = None;
@@ -58,10 +66,19 @@ pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Option<String>
                 at += token.len();
                 continue;
             }
-            let output = output.get_or_insert_with(|| bytes.to_vec());
+            let output = match &mut output {
+                Some(output) => output,
+                None => {
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(bytes.len())
+                        .map_err(|_| Error::allocation())?;
+                    copy.extend_from_slice(bytes);
+                    output.insert(copy)
+                }
+            };
             output[at..at + token.len()].copy_from_slice(token);
             at += token.len();
         }
     }
-    output.map(|bytes| String::from_utf8(bytes).expect("only ASCII bytes were substituted"))
+    Ok(output.map(|bytes| String::from_utf8(bytes).expect("only ASCII bytes were substituted")))
 }
