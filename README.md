@@ -88,7 +88,7 @@ Other projects make different trade-offs:
   [mypyc](https://mypyc.readthedocs.io/) use types to optimize code running
   within CPython, so compiled modules can interact with ordinary Python code.
 
-For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
+For module-by-module examples and CPython test coverage, see [standard library support](docs/stdlib.md). The [supported subset](docs/subset.md) and [design](docs/design.md) describe the language itself.
 
 ## Benchmarks
 

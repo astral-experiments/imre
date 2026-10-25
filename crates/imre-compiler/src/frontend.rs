@@ -4890,11 +4890,11 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -5793,7 +5793,7 @@ impl<'a> Checker<'a> {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if self.mapping_class(list.ty).is_some() {
                     let key = self.expr(&subscript.slice)?;
-                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                    return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
@@ -6609,6 +6609,10 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
+            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
+            {
+                return self.credential_call(call, name);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
             {
@@ -6879,6 +6883,9 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                return self.credential_call(call, name);
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -7345,7 +7352,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isspace" | "isupper"
+                "splitlines" | "isalnum" | "isspace" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(

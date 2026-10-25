@@ -43,6 +43,11 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     }
 }
 
+/// Check a fragment during lowering, when no callee is yet proven infallible.
+pub(crate) fn may_raise_locally(body: &[Statement]) -> bool {
+    block(body, &[], &Targets::default())
+}
+
 /// Any potentially failing path is enough; unreachable branches and caught
 /// errors deliberately remain conservative rather than requiring control flow.
 fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
