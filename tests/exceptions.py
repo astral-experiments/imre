@@ -30,7 +30,7 @@ ACCEPTED = {
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     **{
         name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
-        for name in ("generic_args", "generic_args_processes", "generic_args_groups")
+        for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
