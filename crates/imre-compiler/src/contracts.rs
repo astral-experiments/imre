@@ -192,6 +192,8 @@ impl Builtin {
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
+                        | crate::ir::LogOperation::InvalidLevel
+                        | crate::ir::LogOperation::Enabled
                 ),
                 PreservesLists,
             ),

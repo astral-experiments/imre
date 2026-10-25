@@ -58,10 +58,40 @@ class NativeCase(unittest.TestCase):
             "observed root handler presence used by this method")
         return result
 
+    caching = work / "caching"
+    caching.mkdir()
+    caching_id = "test.test_logging.LoggerTest.test_caching"
+    cache_fixture = """import logging
+import unittest
+
+def configured_root() -> logging.Logger:
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s -> %(levelname)s: %(message)s")
+    return logging.getLogger()
+
+class NativeCase(unittest.TestCase):
+    root_logger: logging.Logger
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.root_logger = configured_root()
+"""
+    cache_execute = native_method(toolchain, caching, SOURCE, "LoggerTest", caching_id, cache_fixture,
+        operation=("imre", "Populate native logger caches, invalidate all on setLevel and disable, and enforce manager suppression"))
+
+    def cached(case, method):
+        if case.root_logger.level != 10 or case.root_hdlr not in case.root_logger.handlers:
+            raise AssertionError("expected the original LoggerTest root at DEBUG with its handler")
+        result = cache_execute(case, method)
+        result["observation"]["evidence"]["fixture"] = (
+            "Original LoggerTest/BaseTest hooks on CPython; native basicConfig supplies an isolated "
+            "root at DEBUG. The complete method and all cache assertions run in Imre.")
+        return result
+
     return {
         case_id: native_method(toolchain, children, SOURCE, "ChildLoggerTest", case_id,
             FIXTURE, operation=("imre", "Enumerate direct logger children by identity, excluding missing ancestors")),
         stopped_id: stopped,
+        caching_id: cached,
     }
 
 
@@ -92,6 +122,9 @@ def main():
             return child.stdout, child.stderr
         if output([program]) != output([sys.executable, sample]):
             raise AssertionError("logger sets, dictionary keys, or parent changes differ from CPython")
+        cache_program = tools.build((HERE / "cache_values.py").read_bytes(), work)
+        if output([cache_program]) != output([sys.executable, "-I", "-B", HERE / "cache_values.py"]):
+            raise AssertionError("logging.disable, cache aliases, or invalidation differs from CPython")
         callbacks = hierarchy_cases(tools, work)
         observed, failures, skips = run_in_fixtures(suite, callbacks)
         if failures or skips or set(observed) != set(callbacks):

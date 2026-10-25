@@ -1,4 +1,5 @@
 //! Process-local logging state for the native single-threaded runtime.
+mod cache;
 mod config;
 mod hierarchy;
 mod levels;
@@ -20,6 +21,7 @@ struct Entry {
     handle: Rc<Object>,
     level: Int,
     creation_order: usize,
+    enabled: Rc<Object>,
 }
 
 impl Entry {
@@ -30,11 +32,13 @@ impl Entry {
             ))))),
             level: Int::small(level).unwrap(),
             creation_order,
+            enabled: cache::new(),
         }
     }
 }
 
 struct Registry {
+    disable: Int,
     entries: HashMap<String, Entry>,
     format: Option<Vec<Field>>,
     datefmt: Option<String>,
@@ -43,6 +47,7 @@ struct Registry {
 impl Registry {
     fn new() -> Self {
         Self {
+            disable: Int::small(0).unwrap(),
             entries: HashMap::from([("root".into(), Entry::new("root", 30, 0))]),
             format: None,
             datefmt: None,
@@ -263,6 +268,7 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
         if level != 0 {
             // SAFETY: obtain an independent owner of the supplied integer.
             logs.entries.get_mut("root").unwrap().level = (*unsafe { Int::borrow(level) }).clone();
+            logs.clear_enabled();
         }
         logs.format = Some(format);
         logs.datefmt = datefmt;
@@ -323,7 +329,8 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
     LOGGERS.with_borrow_mut(|logs| {
-        logs.entries.get_mut(name.as_str()).unwrap().level = (*value).clone()
+        logs.entries.get_mut(name.as_str()).unwrap().level = (*value).clone();
+        logs.clear_enabled();
     });
 }
 
@@ -333,13 +340,10 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
     let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow(|logs| {
-        let threshold = logs.effective(&name);
-        match (value.as_small(), threshold.as_small()) {
-            (Some(level), Some(threshold)) => level > 0 && level >= threshold,
-            _ => value.big().sign() == num_bigint::Sign::Plus && value.big() >= threshold.big(),
-        }
-    })
+    finish(
+        LOGGERS.with_borrow(|logs| logs.enabled(&name, &value)),
+        false,
+    )
 }
 
 /// # Safety
@@ -405,7 +409,7 @@ pub unsafe extern "C" fn imre_logger_write(logger: *const Object, level: u32, me
     let level = Int::small(i64::from(level)).unwrap().into_raw();
     // SAFETY: the caller roots both objects and every u32 level fits in an immediate.
     unsafe {
-        if imre_log_enabled(logger, level) {
+        if config::imre_log_is_enabled(logger, level) {
             imre_log_emit(logger, level, message);
         }
     }
