@@ -150,6 +150,7 @@ pub extern "C" fn imre_sys_argv() -> *const Object {
 pub extern "C" fn imre_args_clear() {
     let previous = ARGV.with(RefCell::take);
     ARGUMENTS.set(None);
+    super::hashlib::clear_algorithms();
     drop(previous);
 }
 

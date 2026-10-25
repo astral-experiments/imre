@@ -40,6 +40,8 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
+      - name: Compare uv's upstream wheel checker with CPython
+        run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
@@ -92,6 +94,8 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
+      - name: Run pinned unittest methods against native Imre
+        run: python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
       - name: Check sys streams and exits with vendored CPython methods
         run: |
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -107,7 +111,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_zipfile.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-zipfile.json"
           python3 benchmarks/cpython_stdlib/native_paths.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
           for level in 0 3; do
-            python3 benchmarks/cpython_stdlib/full/pathlib/native_match.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-match-O$level.json"
+            python3 benchmarks/cpython_stdlib/full/pathlib/native_lexical.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-lexical-O$level.json"
           done
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
@@ -115,6 +119,7 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
           python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
@@ -131,6 +136,8 @@ jobs:
           done
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
+      - name: Compare uv's upstream wheel checker with CPython
+        run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"

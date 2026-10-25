@@ -34,6 +34,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// An exception object known to own the given fixed payload layout.
+    NamedException(usize),
     /// An owned view of the immutable None, bool, int or str in SystemExit.code.
     ExitCode,
     /// A proved catch-only timeout with readonly float and nullable bytes fields.
@@ -44,6 +46,7 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
+    PurePath(PathFlavor),
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
@@ -103,6 +106,18 @@ impl ProcessCapture {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PathFlavor {
+    Posix,
+    Windows,
+}
+
+impl Type {
+    pub(crate) fn is_path(self) -> bool {
+        matches!(self, Self::Path | Self::PurePath(_))
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::Class(id) = self {
@@ -132,12 +147,14 @@ impl std::fmt::Display for Type {
             Self::ByteOutput => "private byte output",
             Self::None => "None",
             Self::Iterator => "iterator",
-            Self::Exception => "Exception",
+            Self::Exception | Self::NamedException(_) => "Exception",
             Self::ExitCode => "SystemExit.code",
             Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
+            Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
@@ -477,6 +494,19 @@ pub(crate) enum Builtin {
     IntSignAsFloat,
     Bool,
     Str,
+    /// Wrap a fixed record after constructor/post-init, preserving exception identity.
+    NamedException {
+        kind: u32,
+        message_field: usize,
+        text: Option<usize>,
+        repr: Option<usize>,
+        dataclass_repr: bool,
+    },
+    /// Borrowing a payload from its exception returns one owned record reference.
+    ExceptionRecord,
+    /// A single non-string Python argument, retained for str/repr.
+    ExceptionArgument(u32),
+    ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
     Len,
@@ -555,6 +585,8 @@ pub(crate) enum Builtin {
     Decode,
     Sha256Hex,
     Sha256New,
+    HashNew,
+    HashAvailable,
     Sha256Update,
     Sha256Digest {
         hex: bool,
@@ -802,6 +834,12 @@ pub(crate) enum PathOperation {
     Scripts,
     OsExists,
     New,
+    PureNew(PathFlavor),
+    JoinObject,
+    Drive,
+    Root,
+    Anchor,
+    AsPosix,
     Join,
     Match {
         full: bool,
@@ -857,7 +895,15 @@ pub(crate) enum PosixPathOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    AddLevel,
+    LevelName,
+    LevelForName,
+    CheckLevel,
+    Names,
+    Numbers,
+    NamesCopy,
     Configure,
+    ConfigureName,
     Name,
     Level,
     Root,
@@ -964,7 +1010,10 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
-            Self::Exception(_) => matches!(ty, Type::Exception | Type::TimeoutExpired),
+            Self::Exception(_) => matches!(
+                ty,
+                Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+            ),
         }
     }
 }

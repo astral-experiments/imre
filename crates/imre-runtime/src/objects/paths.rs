@@ -15,6 +15,8 @@ use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod matching;
+mod pure;
+pub(super) use pure::PurePath;
 
 #[derive(Clone)]
 pub(super) enum PathText {
@@ -150,7 +152,17 @@ impl Storage {
         self.path_text()
     }
 
+    fn basename(&self) -> &str {
+        match self {
+            Self::PurePath(p) => p.basename(),
+            _ => name(self.path()),
+        }
+    }
+
     fn path_name(&self) -> &StrOwner {
+        if let Self::PurePath(p) = self {
+            return p.name();
+        }
         let Self::Path { name: cached, .. } = self else {
             fail("SystemError", "expected a path object");
         };
@@ -166,7 +178,10 @@ impl Storage {
     }
 
     fn path_text(&self) -> &StrOwner {
-        self.path_value().spelling()
+        match self {
+            Self::PurePath(p) => &p.text,
+            _ => self.path_value().spelling(),
+        }
     }
 
     fn path_value(&self) -> &PathText {
@@ -443,6 +458,11 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
     // and, for a relative component, its immutable parent spelling.
     unsafe {
         object(path).0.with(|storage| {
+            if let Storage::PurePath(p) = storage {
+                return p
+                    .join([StrOwner::acquire_word(child as usize)])
+                    .into_object();
+            }
             let parent = storage.path_value();
             let child_text = &*child;
             if matches!(child_text.as_str(), "" | ".") {
@@ -482,6 +502,9 @@ pub unsafe extern "C" fn imre_path_with_name(
     // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
         object(path).0.with(|storage| {
+            if let Storage::PurePath(p) = storage {
+                return p.with_name(&*replacement);
+            }
             let path = storage.path();
             let replacement = &*replacement;
             if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
@@ -514,7 +537,7 @@ pub unsafe extern "C" fn imre_path_equal(left: *const Object, right: *const Obje
         object(left).0.with(|left| {
             object(right)
                 .0
-                .with(|right| u32::from(left.path() == right.path()))
+                .with(|right| u32::from(left.path_equal(right)))
         })
     }
 }
@@ -554,7 +577,7 @@ pub unsafe extern "C" fn imre_path_stem(path: *const Object) -> *const Str {
     // SAFETY: the rooted path owns its spelling and cached basename.
     let stem = unsafe {
         object(path).0.with(|storage| {
-            let component = name(storage.path());
+            let component = storage.basename();
             match suffix_start(component) {
                 Some(end) => StrOwner::new(Str::from(&component[..end])),
                 None => StrOwner::clone(storage.path_name()),
@@ -571,7 +594,7 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
     // SAFETY: only an owned substring escapes this immutable storage access.
     let text = unsafe {
         object(path).0.with(|storage| {
-            let name = name(storage.path());
+            let name = storage.basename();
             Str::from(&name[suffix_start(name).unwrap_or(name.len())..])
         })
     };
@@ -586,15 +609,21 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
 pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object {
     // SAFETY: the rooted exact Path is accessed exclusively. Computing and
     // caching its lexical parent never invokes user code or borrows another Path.
-    let parent = unsafe {
+    unsafe {
         object(path).0.with_mut(|storage| {
+            if storage.basename().is_empty() {
+                Rc::increment_strong_count(path);
+                return path;
+            }
+            if let Storage::PurePath(p) = storage {
+                return p.parent().into_object();
+            }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");
             };
-            text.parent()
+            new_path(text.parent())
         })
-    };
-    new_path(parent)
+    }
 }
 
 /// # Safety
@@ -603,9 +632,12 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
 pub unsafe extern "C" fn imre_path_is_absolute(path: *const Object) -> u32 {
     // SAFETY: the immutable rooted path is borrowed only for the predicate.
     unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(storage.path_value().is_absolute()))
+        object(path).0.with(|storage| {
+            u32::from(match storage {
+                Storage::PurePath(p) => p.is_absolute(),
+                _ => storage.path_value().is_absolute(),
+            })
+        })
     }
 }
 

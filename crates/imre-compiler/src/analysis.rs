@@ -72,7 +72,7 @@ impl Session {
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
-                "from _hashlib import HASH as _Hash\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
             ),
             (
                 "tomli",
@@ -121,7 +121,7 @@ impl Session {
             "from os import PathLike\nfrom typing import TypeVar\n_S = TypeVar('_S', str, bytes)\ndef which(cmd: _S | PathLike[_S], mode: int = ..., path: str | bytes | PathLike[str] | None = ...) -> _S | None: ...\n",
         ).map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
-        settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
+        settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
         let mut roots = vec![SystemPathBuf::from(root)];
         for path in extension_roots {
             let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;
