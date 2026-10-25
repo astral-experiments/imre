@@ -91,22 +91,25 @@ class _Node:
         self._ancestors = []
 
     def _reset(self, nodes: list[_Node], reset_return: bool, reset_effect: bool) -> None:
-        self.called = False
-        self.call_count = 0
-        self.call_args = None
-        self.call_args_list = []
-        # Children retain this private list to report subsequent ancestor calls.
-        while len(self._history):
-            self._history.pop()
-        if reset_effect:
-            self.side_effect = None
-        if reset_return:
-            self._result = -1
-        for name in self._children:
-            nodes[self._children[name]]._reset(nodes, reset_return, reset_effect)
-        if self._result != -1:
-            # A retained return value resets its calls, but keeps its configuration.
-            nodes[self._result]._reset(nodes, False, False)
+        pending: list[tuple[_Node, bool, bool]] = [(self, reset_return, reset_effect)]
+        while len(pending):
+            node, clear_return, clear_effect = pending.pop()
+            node.called = False
+            node.call_count = 0
+            node.call_args = None
+            node.call_args_list = []
+            # Children retain this private list to report subsequent ancestor calls.
+            while len(node._history):
+                node._history.pop()
+            if clear_effect:
+                node.side_effect = None
+            if clear_return:
+                node._result = -1
+            for name in node._children:
+                pending.append((nodes[node._children[name]], clear_return, clear_effect))
+            if node._result != -1:
+                # A retained return value resets its calls, but keeps its configuration.
+                pending.append((nodes[node._result], False, False))
 
 
 class Mock:

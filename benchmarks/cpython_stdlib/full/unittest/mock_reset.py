@@ -24,12 +24,16 @@ def calls() -> None:
         print(str(e))
     print(repr(child.call_args))
     saved = child.call_args_list
-    print(repr(saved), repr(probe.call_args))
+    print(repr(saved))
+    print(repr(probe.call_args))
     result = child.return_value
     result.run(9)
     probe.reset_mock()
-    print(len(saved), len(child.call_args_list), child.call_args is None)
-    print(child is probe.which, result is child.return_value)
+    print(len(saved))
+    print(len(child.call_args_list))
+    print(child.call_args is None)
+    print(child is probe.which)
+    print(result is child.return_value)
     result.run.assert_not_called()
     child("new")
     child.assert_called_once_with("new")
@@ -43,13 +47,15 @@ def calls() -> None:
 def configs() -> None:
     root = Mock()
     child = root.child
-    child.side_effect = ValueError("child")
+    original = ValueError("child")
+    child.side_effect = original
     result = root.return_value
     result.side_effect = TypeError("result")
     try:
         child()
     except ValueError as e:
         print(str(e))
+        print(e is original)
     try:
         root()()
     except TypeError as e:
@@ -64,7 +70,9 @@ def configs() -> None:
     except TypeError as e:
         print(str(e))
     root.reset_mock(return_value=True)
-    print(result is root.return_value, child is root.child, result.call_count)
+    print(result is root.return_value)
+    print(child is root.child)
+    print(result.call_count)
     root.return_value.assert_not_called()
     root.return_value(5)
     root.return_value.assert_called_once_with(5)

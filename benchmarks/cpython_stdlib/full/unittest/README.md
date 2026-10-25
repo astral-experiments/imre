@@ -58,9 +58,9 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 11 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 3 compile blockers,
-1,065 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 0 fully native passes, 12 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+1,057 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 Three additional complete equality methods are attempted at each level.
@@ -85,8 +85,9 @@ These controls must compile, run, and match the reference; they contribute no up
 
 The unchanged [MockTest methods](upstream/Lib/test/test_unittest/testmock/testmock.py)
 `test_assert_not_called`, `test_assert_called` and `test_assert_called_once`
-exercise repeated child lookup, recording, and the positive and negative decisions of
-the native mock assertions. The [mock control](mock_protocol.py) additionally checks
+exercise repeated child lookup, call counts, and positive and negative assertion outcomes.
+`test_ordered_call_signature` uses the inherited string assertion to verify the
+representation of the recorded call, including keyword order. The [mock control](mock_protocol.py) checks
 call order, keyword order, nested return values, exception side effects, and complete
 failure text. Both the original method and the recording and assertion code execute
 in the native binary; the runner applies the original host fixture lifecycle.
@@ -97,5 +98,18 @@ For example, `stream.write(b"data")` followed by
 `stream.write.assert_called_once_with(b"data")` records and checks the actual
 argument. This is useful independently of installing a patch. The current recorder
 accepts None, bool, int, str, and bytes; an unsupported argument is a compile
-diagnostic. The subprocess and shutil owners retain their original suite evidence:
+diagnostic. `assert_any_call` searches the complete argument history for that mock;
+`assert_called_with` checks only its last call. The [reset control](mock_reset.py)
+checks both decisions after a reset, previously held call lists, child identity,
+and the different reset rules for children and cached return values. The mock
+tree can keep an exception instance as its `side_effect`.
+
+Seven additional original Mock methods have measured compile blockers. Three
+stop when `TestCase.assertRaises` receives a mock assertion as a callback. One
+reaches `TestCase.assertNotIn`. The three reset methods need constructor
+arguments (`parent` or `return_value`) or assign a mock as its own return value.
+The evidence records retain their original CPython passes, exact source lines,
+method hashes, and each native diagnostic. These are ordinary blockers.
+
+The subprocess and shutil owners retain their original suite evidence:
 an imported mock or an assertion control does not verify their product operations.
