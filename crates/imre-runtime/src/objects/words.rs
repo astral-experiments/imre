@@ -208,6 +208,7 @@ pub(super) struct Words {
     pub(super) kind: WordKind,
     // Fits beside the nine-bit word kind without growing a sequence handle.
     string_order: Cell<StringOrder>,
+    pub(super) mock_call_list: Cell<bool>,
     pub(super) values: SmallVec<[usize; 3]>,
 }
 
@@ -217,6 +218,7 @@ impl Words {
             header: 1,
             kind: WordKind::new(kind),
             string_order: Cell::new(StringOrder::Unknown),
+            mock_call_list: Cell::new(false),
             values: SmallVec::new(),
         }
     }
