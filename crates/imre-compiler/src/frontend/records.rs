@@ -890,6 +890,7 @@ impl Checker<'_> {
                 })
             }
             MethodKind::Instance => self.callable_value(&signature, receiver, expected, attribute),
+            MethodKind::PropertySetter => unreachable!("setters are resolved only on assignment"),
             MethodKind::Class | MethodKind::Static => {
                 let value = self.callable_value(&signature, None, expected, attribute)?;
                 Ok(self.evaluated_receiver(receiver, value))
