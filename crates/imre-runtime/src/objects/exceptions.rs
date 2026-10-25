@@ -487,15 +487,6 @@ impl Error {
         Self::errno_arguments(kind, errno, description, message, os_paths)
     }
 
-    pub(super) fn from_errno_message(
-        kind: Kind,
-        errno: i32,
-        description: &str,
-        message: String,
-    ) -> Self {
-        Self::errno_arguments(kind, errno, description, message, None)
-    }
-
     fn errno_arguments(
         kind: Kind,
         errno: i32,
