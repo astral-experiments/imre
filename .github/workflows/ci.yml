@@ -305,12 +305,13 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --result "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --links "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --segments "$RUNNER_TEMP/cpython-path-cohorts.json"
-          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options --fixture constructor_protocol --fixture path_protocol_descriptors
+          python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --samefile "$RUNNER_TEMP/cpython-path-cohorts.json"
+          python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --fixture metadata_views --fixture links --fixture link_protocols --fixture path_stat --fixture stat_options --fixture constructor_protocol --fixture path_protocol_descriptors --fixture samefile --fixture samefile_descriptors
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/pathlib/reference-linux.json benchmarks/cpython_stdlib/full/pathlib/evidence-linux.json
       - name: Account for every CPython itertools ID under its original fixtures
         run: |
