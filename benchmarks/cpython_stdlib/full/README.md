@@ -10,6 +10,10 @@ Run `python3.14 -B benchmarks/cpython_stdlib/full/inventory.py` using **CPython 
 
 ## When a module is complete
 
+Run `python3 benchmarks/cpython_stdlib/full/native_report.py` for coverage backed by [per-occurrence evidence](../NATIVE_EVIDENCE.md), or add `--json` for the role counts at each optimization level. The table lists the full reference denominator and the number of occurrences covered by a validated ledger. Only the same occurrence and fixture classified as fully native at **both** O0 and O3 earns paired credit. A dash means there is no validated ledger. The categories in a ledger may include unattempted cases and host-assisted work.
+
+Save the two reports beside their reference ledger, replacing the `reference` filename prefix with `evidence` (including any companion suite suffix). The existing versioned `native` filename is also supported; older method summaries do not establish occurrence coverage.
+
 1. Pin Python and tests to [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115). Vendor complete upstream test modules and their data, scripts and license; verify original blobs. Modifying an assertion or selecting only test methods the compiler can already handle changes the workload.
 2. Discover with the upstream loader, including package `load_tests`. Record both executions and distinct IDs: e.g. test_json registers four IDs twice. Include generated tests, resource configuration and companion suites in the record.
 3. Run the unchanged suite on reference CPython on the target. Keep each pass, failure and skip, including its original condition and reason. A reference failure or platform skip does not become a native pass.
