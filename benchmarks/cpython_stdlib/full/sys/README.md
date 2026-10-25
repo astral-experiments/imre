@@ -34,7 +34,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_43581`: the complete method reads both stream attributes and executes the shared native unittest string equality assertion. CPython runs the original fixture.
 - `test_getdefaultencoding` and `test_getfilesystemencoding`: all `sys` operations and the filesystem codec lookup execute in the native driver. The original method, helper, unittest assertions and lifecycle run on CPython. Compiling the original method and helper together is currently blocked by inference of the helper’s unannotated `expected=None` parameter.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
-- `test_executable`: the original decorated method remains on the host. Its adapter obtains each parent executable value from an Imre command and preserves the child's `argv[0]`, `executable=`, working directory and exact source. The stock child reports an empty path here. The versioned records change only when the integrated native run has been captured.
+- `test_executable`: all five parent executable reads come from Imre commands. The original child receives `argv[0]="nonexistent"`, a separate executable, the original working directory and the exact `-c` code. It reads and ASCII-encodes its own Imre path; the stock CPython control returns an empty path. The original permits either result. CPython runs the decorated parent, its path and expected-value conversions, and its assertions.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
 `test_subprocess` IDs and additional native program fixtures. Those are outside this
@@ -52,7 +52,7 @@ reference reasons even where UTF-8 mode also provides native evidence.
 
 [evidence-linux.json](evidence-linux.json) is the versioned [shared evidence
 contract](../../NATIVE_EVIDENCE.md): 97 distinct occurrences at each of O0 and O3.
-The filesystem codec rows were executed with Imre source `2da99d93a626b6b8d42a81936e86de89ee2c9ddf`; the builtins baseline including the original `-c` launch was rechecked at `1037084`. The pinned suite has no companion module. The two shorter `native-O*.json`
+All 194 rows were measured in [hosted Linux CI](https://github.com/astral-sh/imre/actions/runs/40178081396/job/121123019352) on source `e0d906866c8737e08e5193170e34edc233450b70`, tree `a17b77e6270742e63061afd7e8fe28be9c40e5e6`. Only the original `test_executable` row changed at each level. The pinned suite has no companion module. The two shorter `native-O*.json`
 files retain their original records and are not additional test occurrences.
 
 The versioned gate loads the original suite and runs its selected methods
