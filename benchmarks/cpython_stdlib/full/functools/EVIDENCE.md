@@ -15,13 +15,14 @@ observations byte for byte. Each record identifies its own compiler revision.
 
 | Pinned Linux suite | Reference | Native bodies with host fixtures | Host-driven native operations | Mixed | Failed | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [test.test_functools](evidence-linux.json) | 325 | 2 | 13 | 12 | 1 | 297 |
+| [test.test_functools](evidence-linux.json) | 325 | 2 | 13 | 13 | 0 | 297 |
 | [test.test_free_threading.test_functools](evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
 
 Counts are identical at -O0 and -O3. There are no fully native fixtures or
-reference-only rows in this observation. The ordinary failure is
-TestReducePy.test_reduce_with_kwargs (the pure variant's deprecated keyword
-binding). The two complete native bodies are the C and Python variants of
+reference-only rows in this observation. TestReducePy.test_reduce_with_kwargs
+now runs two native folds with two host bindings and two host warnings. The
+previous positional-only fixture rejected the first call before reaching Imre.
+The two complete native bodies are the C and Python variants of
 test_with_bound_and_unbound_methods. Imre constructs and calls both partials,
 performs both string comparisons and runs the test body. CPython supplies the
 original module/class/instance hooks; the child constructs its native instance.
@@ -42,7 +43,8 @@ the integration of the two public heads 7ebe2ff52c4d45bf5ac2b1a39143baf9709b2cac
 ([static bindings](https://github.com/astral-sh/imre/pull/567)).
 The [cache gate](https://github.com/astral-sh/imre/pull/535) was rerun at
 a8653f136ff14f3e6bc2b26e1e3f60179c329058. [Reduce](https://github.com/astral-sh/imre/pull/514)
-was measured at bced8ce69cfe682d5d6b9c237b1282ef1de0dfa7. Each row records
+was rerun before and after the fixture correction on the same merged compiler,
+9cda753cc587e542d67a79b5f5baf1cc3be1b926. Each row records
 the compiler used by its respective observation.
 
 **Companion evidence.** On a normal 3.14.5 Linux build the original
@@ -73,6 +75,6 @@ $PY ../../suite_evidence.py reference-linux.json evidence-linux.json
 $PYT ../../suite_evidence.py reference-free-threading-linux.json evidence-free-threading-linux.json
 ```
 
-The reduce runner returns nonzero while its ordinary failure remains; it
-still writes the individual results. The companion gate rejects a GIL-enabled
+The reduce runner writes each individual result and returns nonzero on a
+test failure. The companion gate rejects a GIL-enabled
 interpreter instead of treating the package-level skip as four executions.

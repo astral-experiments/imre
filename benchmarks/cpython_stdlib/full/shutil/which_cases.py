@@ -12,6 +12,7 @@ from native_shutil import driver_source, invoke
 from suite_inventory import cases, load_suite
 from suite_native import native_method
 from suite_evidence import roles
+import which_defaults
 
 
 def which_fixture(case):
@@ -34,10 +35,16 @@ def executors(tools, work, source, module):
     which_driver = work / "which_driver"
     which_driver.mkdir()
     binary = tools.build(driver_source().encode(), which_driver)
+    defaults = which_defaults.build(tools, which_driver)
+    which_defaults.controls(defaults)
 
     def host_which(case, original):
         name = case.id()
         calls[name] = 0
+        if case._testMethodName == "test_environ_path_missing":
+            def count_call():
+                calls[name] += 1
+            return which_defaults.observation(defaults, case, original, module, tools.level, count_call)
         def which(*args, **kwargs):
             calls[name] += 1
             return invoke(binary, *args, **kwargs)
