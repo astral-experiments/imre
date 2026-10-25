@@ -494,7 +494,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
-            recursion_frames: Vec::new(),
+            source_frames: Vec::new(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),
         }

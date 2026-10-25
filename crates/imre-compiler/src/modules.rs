@@ -196,6 +196,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysEncoding(&'static str),
     SysException,
+    SysGetFrameModuleName,
     SysGetRecursionLimit,
     SysSetRecursionLimit,
     SysJitPredicate(&'static str),
@@ -536,6 +537,7 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
@@ -883,6 +885,11 @@ impl SourceGraph {
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+    }
+
+    /// Record one argument whose binding error is raised by the native call.
+    pub(crate) fn checked_argument(&self, module: ModuleId, diagnostic: CheckedDiagnostic) {
+        self.checked_diagnostics.borrow_mut()[module].push(diagnostic);
     }
 
     /// Mark the precise call where lowering raises Python's missing-argument TypeError.

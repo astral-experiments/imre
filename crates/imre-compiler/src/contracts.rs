@@ -450,6 +450,7 @@ impl Builtin {
             | Self::StderrLine
             | Self::SysStreamWrite { .. }
             | Self::SysStreamFlush { .. }
+            | Self::SysGetFrameModuleName
             | Self::SysSetRecursionLimit
             | Self::RaiseException
             | Self::SystemExitNew { .. }
@@ -834,6 +835,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
+                | "imre_sys_getframemodulename"
                 | "imre_sys_setrecursionlimit"
                 | "imre_path_as_posix"
                 | "imre_path_join"

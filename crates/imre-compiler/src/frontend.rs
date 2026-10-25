@@ -1016,9 +1016,12 @@ pub(crate) fn lower_with_owners(
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
-    let mut recursion_frames = vec![true; functions.len()];
+    let mut python_frames: Vec<_> = owners
+        .iter()
+        .map(|&module| graph.modules[module].archive.is_none())
+        .collect();
     for helper in helpers.into_functions() {
-        recursion_frames.push(helper.source_frame);
+        python_frames.push(helper.source_frame);
         owners.push(helper.module);
         functions.push(helper.function);
         call_graph.push(helper.calls);
@@ -1051,23 +1054,39 @@ pub(crate) fn lower_with_owners(
             &callable_targets,
         )?;
     }
-    recursion_frames.push(true); // The program entry runs a Python module body.
-    // The call graph above is acyclic. If it cannot reach the default depth,
-    // only programs that can change the limit need to count their frames.
-    if recursion_frames.iter().filter(|&&frame| frame).count() <= 1000 {
-        let mut changes_limit = false;
-        for function in functions.iter().chain([&entry]) {
-            ir::walk_expressions(&function.body, &mut |value| {
-                changes_limit |= matches!(
-                    value.kind,
-                    ExprKind::Builtin(Builtin::SysSetRecursionLimit, _)
-                );
-            });
-        }
-        if !changes_limit {
-            recursion_frames.clear();
-        }
+    python_frames.push(true); // The program entry runs a Python module body.
+    let mut names = false;
+    let mut count = python_frames.iter().filter(|&&frame| frame).count() > 1000;
+    for function in functions.iter().chain([&entry]) {
+        ir::walk_expressions(&function.body, &mut |value| match value.kind {
+            ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
+            ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
+            _ => {}
+        });
     }
+    // The native call graph is acyclic. Programs that cannot inspect frames,
+    // lower their limit, or reach the default depth need no tracking at all.
+    let source_frames = if names || count {
+        python_frames
+            .into_iter()
+            .zip(owners.iter().copied().chain([graph.entry]))
+            .map(|(frame, module)| {
+                frame.then(|| {
+                    if names {
+                        ir::SourceFrame::Module(if module == graph.entry {
+                            "__main__".to_owned()
+                        } else {
+                            graph.modules[module].name.clone()
+                        })
+                    } else {
+                        ir::SourceFrame::Depth
+                    }
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
@@ -1079,7 +1098,7 @@ pub(crate) fn lower_with_owners(
             class_fields: classes.fields,
             json_records,
             globals: globals.into_types(),
-            recursion_frames,
+            source_frames,
             functions,
             entry,
         },

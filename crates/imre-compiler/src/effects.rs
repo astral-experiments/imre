@@ -33,7 +33,7 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
             if functions[id]
-                && !module.recursion_frames.get(id).copied().unwrap_or(false)
+                && !module.source_frames.get(id).is_some_and(Option::is_some)
                 && !block(&function.body, &functions, targets)
             {
                 functions[id] = false;
@@ -256,7 +256,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
-            recursion_frames: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Return(integer())]),
@@ -311,7 +311,7 @@ mod tests {
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
-            recursion_frames: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -368,7 +368,7 @@ def conversion(values: list[str]) -> bool:
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
-            recursion_frames: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),

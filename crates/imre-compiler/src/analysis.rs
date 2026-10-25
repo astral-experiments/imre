@@ -521,6 +521,7 @@ pub(crate) enum CheckedDiagnostic {
     ExcessArgument(TextRange),
     ArgumentType(TextRange),
     PositionalOnlyKeyword(TextRange),
+    RepeatedKeyword(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -535,6 +536,7 @@ impl CheckedDiagnostic {
             Self::ExcessArgument(range) => (range, 6),
             Self::ArgumentType(range) => (range, 7),
             Self::PositionalOnlyKeyword(range) => (range, 8),
+            Self::RepeatedKeyword(range) => (range, 9),
         };
         (range.start(), range.end(), kind)
     }
@@ -552,6 +554,9 @@ impl CheckedDiagnostic {
             Self::ArgumentType(arg) => diagnostic == "invalid-argument-type" && arg == range,
             Self::PositionalOnlyKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
+            }
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
             }
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range

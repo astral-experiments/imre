@@ -72,6 +72,15 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/fu
 ```
 
 
+## Native stack introspection
+
+`test_getframemodulename` remains blocked at native unittest equality between a
+string and an optional string; the later loop needs real frame objects and their
+`f_back` links. A [separate program](frame_names.py) and its [imported functions](frame_names_owner.py)
+compare native and stock module names for nested calls, index conversion and exception
+unwinding. Its output is recorded on the blocked occurrence without crediting any
+operation in the original method.
+
 ## Two process-boundary cases
 
 `test.test_sys.SysModuleTest.test_ioencoding_nonascii` compares the spelling of two codec names before it launches a child. The [locale audit](locale-audit-linux.json) runs the unchanged method against both subjects in each host configuration. Only the canonical row enters the 97-occurrence report.

@@ -102,6 +102,9 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::SysSetRecursionLimit)) => {
                 return self.set_recursion_limit(call).map(Some);
             }
+            Some(Binding::Intrinsic(Intrinsic::SysGetFrameModuleName)) => {
+                return self.frame_module_name(call).map(Some);
+            }
             Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
                 return self
                     .sys_no_args(call, name, unpacking::string("utf-8"))
@@ -200,6 +203,67 @@ impl Checker<'_> {
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::SysSetRecursionLimit, vec![index]),
+        })
+    }
+
+    /// Bind the optional index to the current native stack. CPython accepts `depth=` here.
+    fn frame_module_name(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let ty = self.types.optional(Type::Str);
+        let count = args.args.len() + args.keywords.len();
+        if count > 1 {
+            for arg in args.args.iter().skip(1) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            if !args.args.is_empty() {
+                for keyword in &args.keywords {
+                    if keyword.arg.as_deref() == Some("depth") {
+                        self.graph.checked_argument(
+                            self.module,
+                            crate::analysis::CheckedDiagnostic::RepeatedKeyword(keyword.range()),
+                        );
+                    }
+                }
+            }
+            self.graph
+                .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+            let kind = if args.args.is_empty() {
+                "keyword argument"
+            } else {
+                "argument"
+            };
+            return self.sys_type_error(
+                call,
+                ty,
+                format!("_getframemodulename() takes at most 1 {kind} ({count} given)"),
+            );
+        }
+        let arg = if let Some(keyword) = args.keywords.first() {
+            let name = keyword.arg.as_ref().expect("unpacking rejected above");
+            if name != "depth" {
+                self.graph
+                    .checked_keywords(self.module, std::iter::once(keyword.range()));
+                return self.sys_type_error(
+                    call,
+                    ty,
+                    format!("_getframemodulename() got an unexpected keyword argument '{name}'"),
+                );
+            }
+            Some(&keyword.value)
+        } else {
+            args.args.first()
+        };
+        let depth = if let Some(arg) = arg {
+            let value = self.expr(arg)?;
+            self.graph.checked_argument_type(self.module, arg.range());
+            self.index_word(value, arg, false)?
+        } else {
+            pipelines::integer(0)
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::SysGetFrameModuleName, vec![depth]),
         })
     }
 
