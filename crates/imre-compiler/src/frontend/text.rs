@@ -197,6 +197,17 @@ impl Checker<'_> {
             };
             return Ok(Expr { ty: returns, kind });
         }
+        // Typeshed limits keepends to bool; the runtime truth-tests any
+        // represented value. Defer only this resolved method's overload.
+        if split {
+            self.graph.checked_overload(self.module, call.range());
+        } else {
+            for arg in &args.args {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            self.graph
+                .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        }
         if split && count == 1 {
             let flag = match (args.args.as_ref(), args.keywords.as_ref()) {
                 ([flag], []) => Some(flag),
