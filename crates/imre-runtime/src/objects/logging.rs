@@ -33,7 +33,7 @@ impl Entry {
                 Str::from(name),
             ))))),
             level: Int::small(level).unwrap(),
-            handlers: super::Words::new(6).into_object(),
+            handlers: delivery::empty_handlers(),
             creation_order,
         }
     }
