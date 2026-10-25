@@ -34,17 +34,28 @@ try:
 except TestDidNotRun:
     raise AssertionError("sibling matched the child")
 except TestFailedWithDetails as child:
-    print(child is problem, child.errors is errors, child.failures is failures, child.stats is stats)
-    print(child.args[1] is errors, child.args[2] is failures, len(child.args))
+    print(child is problem)
+    print(child.errors is errors)
+    print(child.failures is failures)
+    print(child.stats is stats)
+    print(child.args[1] is errors)
+    print(child.args[2] is failures)
+    print(len(child.args))
     errors.append(("during", "changed"))
-    print(str(child), repr(child.args))
+    print(str(child))
+    print(repr(child.args))
 try:
     raise problem
 except TestFailed as parent:
-    print(parent is problem, parent.msg, parent.stats is stats)
+    print(parent is problem)
+    print(parent.msg)
+    print(parent.stats is stats)
 parent_error = TestFailed("parent", 17, "tail", stats=stats)
-print(str(parent_error), repr(parent_error.args), parent_error.stats is stats)
-print(repr(TestFailed("plain").args), TestFailed("plain").stats is None)
+print(str(parent_error))
+print(repr(parent_error.args))
+print(parent_error.stats is stats)
+print(repr(TestFailed("plain").args))
+print(TestFailed("plain").stats is None)
 '''
 
 

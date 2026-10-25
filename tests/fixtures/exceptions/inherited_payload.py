@@ -38,17 +38,36 @@ def exercise() -> None:
         raise AssertionError("crossed a sibling exception handler")
     except DetailedFailure as child:
         print(child is exc)
-        print(child.errors, child.failures, child.stats, child.message)
-        print(str(child), repr(child), repr(child.args))
+        print(child.errors)
+        print(child.failures)
+        stats = child.stats
+        assert stats is not None
+        print(stats)
+        print(child.message)
+        print(str(child))
+        print(repr(child))
+        print(repr(child.args))
     try:
         raise exc
     except RunFailure as parent:
-        print(parent is exc, isinstance(parent, Leaf), isinstance(parent, Unrelated))
-        print(parent.message, parent.stats, repr(parent.args))
+        print(parent is exc)
+        print(isinstance(parent, Leaf))
+        print(isinstance(parent, Unrelated))
+        print(parent.message)
+        stats = parent.stats
+        assert stats is not None
+        print(stats)
+        print(repr(parent.args))
     try:
         raise exc
     except Problem as marker:
-        print(marker is exc, str(marker), repr(marker.args))
+        print(marker is exc)
+        print(str(marker))
+        try:
+            raise marker
+        except RunFailure as reraised:
+            print(reraised is marker)
+            print(repr(reraised.args))
     print(repr(RunFailure("root", "one", "two").args))
 
 
