@@ -1,0 +1,791 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "0aa584a9b0d17f1c82963c3754d9a005c89db6494d2297625ef1c9ff18b5ad04",
+  "runtime_sha256": "c8ba14a4e6f24784970b5ddef0680524c39c31d7bda2ec93218292935da718fb",
+  "optimization_levels": {
+    "0": {
+      "test.test_shutil.TestArchives.test_make_archive": {
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "shutil.make_archive",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3"
+          }
+        }
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner"
+            ],
+            "in_original_cwd": false
+          }
+        ],
+        "native_chdir_calls": 2,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 0,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd_default": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner"
+            ],
+            "in_original_cwd": true
+          }
+        ],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 0,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner",
+              "root_dir"
+            ],
+            "in_original_cwd": true
+          }
+        ],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 0,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_owner_group": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_in_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 2,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 2
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_in_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 2,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 2
+      },
+      "test.test_shutil.TestArchives.test_register_archive_format": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 4,
+          "get_archive_formats": 2,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [
+          [
+            "TypeError",
+            "The 1 object is not callable"
+          ],
+          [
+            "TypeError",
+            "extra_args needs to be a sequence"
+          ],
+          [
+            "TypeError",
+            "extra_args elements are : (arg_name, value)"
+          ]
+        ],
+        "native_calls": 7,
+        "opt_level": 0,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_tarfile_root_owner": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_tarfile_vs_tar": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_bztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_gztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_tar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_xztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zip": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 9
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 6,
+        "host_path_types": {
+          "FakePath": 6
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 0,
+          "unpack_archive": 2
+        },
+        "guarded_native_calls": 0
+      },
+      "test.test_shutil.TestArchives.test_unpack_registry": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "get_unpack_formats": 4,
+          "register_unpack_format": 3,
+          "unpack_archive": 1,
+          "unregister_unpack_format": 2
+        },
+        "native_calls": 10,
+        "callback_argument_types": [
+          [
+            "str",
+            "str",
+            "int"
+          ]
+        ],
+        "opt_level": 0,
+        "fixture": "original CPython TestArchives fixture, callback closure and assertions; one native process owns the registry and suffix dispatch"
+      },
+      "test.test_shutil.TestArchives.test_unzip_zipfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_zipfile_vs_zip": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": {
+        "status": "reference_skip",
+        "reason": "requires zstd"
+      }
+    },
+    "3": {
+      "test.test_shutil.TestArchives.test_make_archive": {
+        "status": "native_body_host_fixture",
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "shutil.make_archive",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 3,
+            "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3"
+          }
+        }
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner"
+            ],
+            "in_original_cwd": false
+          }
+        ],
+        "native_chdir_calls": 2,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 3,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd_default": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner"
+            ],
+            "in_original_cwd": true
+          }
+        ],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 3,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 1,
+          "make_archive": 1,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [
+          {
+            "keywords": [
+              "dry_run",
+              "group",
+              "logger",
+              "owner",
+              "root_dir"
+            ],
+            "in_original_cwd": true
+          }
+        ],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [],
+        "native_calls": 3,
+        "opt_level": 3,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_make_archive_owner_group": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_in_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 2,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 2
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_in_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 0,
+        "root_errors": [
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ],
+          [
+            "FileNotFoundError",
+            2,
+            true,
+            true
+          ],
+          [
+            "NotADirectoryError",
+            20,
+            true,
+            true
+          ]
+        ]
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 2,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 2
+      },
+      "test.test_shutil.TestArchives.test_register_archive_format": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "register_archive_format": 4,
+          "get_archive_formats": 2,
+          "unregister_archive_format": 1
+        },
+        "callback_visits": [],
+        "native_chdir_calls": 0,
+        "native_registration_errors": [
+          [
+            "TypeError",
+            "The 1 object is not callable"
+          ],
+          [
+            "TypeError",
+            "extra_args needs to be a sequence"
+          ],
+          [
+            "TypeError",
+            "extra_args elements are : (arg_name, value)"
+          ]
+        ],
+        "native_calls": 7,
+        "opt_level": 3,
+        "fixture": "original host body, assertions and callbacks; integer tuple rows are transported as native lists; chdir events originate in the native process"
+      },
+      "test.test_shutil.TestArchives.test_tarfile_root_owner": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_tarfile_vs_tar": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 3
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_bztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_gztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_tar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_xztar": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 4,
+          "unpack_archive": 16
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 12,
+        "host_path_types": {
+          "FakePath": 12
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zip": {
+        "status": "mixed",
+        "operations": {
+          "make_archive": 3,
+          "unpack_archive": 9
+        },
+        "guarded_native_calls": 0,
+        "host_pathlike_conversions": 6,
+        "host_path_types": {
+          "FakePath": 6
+        },
+        "host": "CPython evaluated the path protocol before the native archive call"
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 0,
+          "unpack_archive": 2
+        },
+        "guarded_native_calls": 0
+      },
+      "test.test_shutil.TestArchives.test_unpack_registry": {
+        "status": "mixed",
+        "calls_by_operation": {
+          "get_unpack_formats": 4,
+          "register_unpack_format": 3,
+          "unpack_archive": 1,
+          "unregister_unpack_format": 2
+        },
+        "native_calls": 10,
+        "callback_argument_types": [
+          [
+            "str",
+            "str",
+            "int"
+          ]
+        ],
+        "opt_level": 3,
+        "fixture": "original CPython TestArchives fixture, callback closure and assertions; one native process owns the registry and suffix dispatch"
+      },
+      "test.test_shutil.TestArchives.test_unzip_zipfile": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_zipfile_vs_zip": {
+        "status": "host_driven_native",
+        "operations": {
+          "make_archive": 1,
+          "unpack_archive": 0
+        },
+        "guarded_native_calls": 1
+      },
+      "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": {
+        "status": "reference_skip",
+        "reason": "requires zstd"
+      }
+    }
+  }
+}
