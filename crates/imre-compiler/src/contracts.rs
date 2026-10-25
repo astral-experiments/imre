@@ -96,6 +96,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit

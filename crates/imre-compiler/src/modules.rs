@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedOverload, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{FnmatchOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -67,6 +67,7 @@ pub(crate) enum IntrinsicModule {
     Asyncio,
     Contextlib,
     Functools,
+    Fnmatch,
     Time,
     Tomli,
     TomliW,
@@ -251,6 +252,7 @@ pub(crate) enum Intrinsic {
     GetCwd,
     FsPath,
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Unquote,
 }
 
@@ -265,6 +267,7 @@ impl IntrinsicModule {
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "fnmatch" => Some(Self::Fnmatch),
             "time" => Some(Self::Time),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
@@ -363,6 +366,15 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Match)
+            }
+            (Self::Fnmatch, "filter" | "filterfalse") => {
+                Intrinsic::Fnmatch(FnmatchOperation::Filter {
+                    inverse: name == "filterfalse",
+                })
+            }
+            (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,

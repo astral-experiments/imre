@@ -3840,6 +3840,45 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
+            Builtin::Fnmatch(operation) => {
+                use crate::ir::FnmatchOperation;
+                let first = &args[0].value;
+                match operation {
+                    FnmatchOperation::Translate => {
+                        self.call("imre_fnmatch_translate", returns, &[first])
+                    }
+                    FnmatchOperation::Match => {
+                        let pat = &args[1].value;
+                        let value = self.checked_instruction(format!(
+                            "call i32 @imre_fnmatch(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(first.ty == Type::Bytes),
+                            u32::from(pat.ty == Type::Bytes)
+                        ));
+                        Value {
+                            ty: Type::Bool,
+                            operand: self.instruction(format!("icmp ne i32 {value}, 0")),
+                            small_integer: false,
+                        }
+                    }
+                    FnmatchOperation::Filter { inverse } => {
+                        let pat = &args[1].value;
+                        let operand = self.checked_instruction(format!(
+                            "call ptr @imre_fnmatch_filter(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(pat.ty == Type::Bytes),
+                            u32::from(*inverse)
+                        ));
+                        self.owned(Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        })
+                    }
+                }
+            }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::WallTime => self.call("imre_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("imre_json_empty_object", returns, &[]),
@@ -6254,6 +6293,9 @@ declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
+declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_translate(ptr)
 declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
 declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)

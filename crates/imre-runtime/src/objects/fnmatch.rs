@@ -1,0 +1,183 @@
+//! POSIX shell patterns treat path separators and leading dots as ordinary characters.
+use std::borrow::Cow;
+use std::rc::Rc;
+
+use super::exceptions::{Error, Kind, finish};
+use super::paths::{Pattern, class_characters, class_end};
+use super::words::Words;
+use super::{Bytes, Object, Str, object};
+
+/// Bytes patterns match single bytes, including values that also form valid UTF-8.
+unsafe fn spelling<'a>(raw: *const (), bytes: bool) -> Cow<'a, str> {
+    if bytes {
+        // SAFETY: the caller passes a rooted Bytes owner with the indicated tag.
+        let value = unsafe { &*raw.cast::<Bytes>() };
+        if value.is_ascii() {
+            return Cow::Borrowed(std::str::from_utf8(value).expect("ASCII is UTF-8"));
+        }
+        Cow::Owned(value.iter().copied().map(char::from).collect())
+    } else {
+        // SAFETY: the caller passes a rooted Str owner with the indicated tag.
+        Cow::Borrowed(unsafe { &*raw.cast::<Str>() }.as_str())
+    }
+}
+
+fn mixed(pattern_bytes: bool) -> Error {
+    Error::new(
+        Kind::TypeError,
+        if pattern_bytes {
+            "cannot use a bytes pattern on a string-like object"
+        } else {
+            "cannot use a string pattern on a bytes-like object"
+        },
+    )
+}
+
+/// # Safety
+/// Each input is an independently rooted Str or Bytes owner selected by its tag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch(
+    name: *const (),
+    pat: *const (),
+    name_bytes: u32,
+    pat_bytes: u32,
+) -> u32 {
+    if name_bytes != pat_bytes {
+        return mixed(pat_bytes != 0).returning(0);
+    }
+    // SAFETY: both tags choose the actual immutable owner representations.
+    let (name, pat) = unsafe {
+        (
+            spelling(name, name_bytes != 0),
+            spelling(pat, pat_bytes != 0),
+        )
+    };
+    u32::from(Pattern::component(&pat).matches(&name))
+}
+
+/// # Safety
+/// The sequence stores only rooted str (kind 3) or bytes (kind 8) owners.
+/// The pattern is an independently rooted immutable owner with the indicated tag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch_filter(
+    names: *const Object,
+    pat: *const (),
+    pat_bytes: u32,
+    inverse: u32,
+) -> *const Object {
+    // SAFETY: the pattern's tag and the list layout were checked at the call site.
+    let pattern = Pattern::component(&unsafe { spelling(pat, pat_bytes != 0) });
+    let result = unsafe { object(names) }.0.with(|storage| {
+        let source = storage.sequence();
+        let name_bytes = source.kind.raw() == 8;
+        let mut output = Words::new(source.kind.raw());
+        for &word in &source.values {
+            if name_bytes != (pat_bytes != 0) {
+                return Err(mixed(pat_bytes != 0));
+            }
+            // SAFETY: the immutable list roots every element throughout this scan.
+            let name = unsafe { spelling(word as *const (), name_bytes) };
+            if pattern.matches(&name) != (inverse != 0) {
+                output
+                    .values
+                    .try_reserve(1)
+                    .map_err(|_| Error::allocation())?;
+                // SAFETY: the fresh result acquires the very same Python object.
+                output
+                    .values
+                    .push(unsafe { source.kind.acquire(word) }.into_word());
+            }
+        }
+        Ok(Rc::into_raw(output.into_object()))
+    });
+    finish(result, std::ptr::null())
+}
+
+fn translate_class(chars: &[char]) -> String {
+    let characters = class_characters(chars);
+    match characters.as_slice() {
+        [] => return "(?!)".to_owned(),
+        [('!', _)] => return ".".to_owned(),
+        _ => {}
+    }
+    let mut text = String::from("[");
+    for (i, (c, range_hyphen)) in characters.into_iter().enumerate() {
+        if i == 0 && c == '!' {
+            text.push('^');
+            continue;
+        }
+        if matches!(c, '\\' | '&' | '~' | '|')
+            || (c == '-' && !range_hyphen)
+            || (i == 0 && matches!(c, '^' | '['))
+        {
+            text.push('\\');
+        }
+        text.push(c);
+    }
+    text.push(']');
+    text
+}
+
+fn translated_parts(pat: &str, star: &str, question: &str) -> (Vec<String>, Vec<usize>) {
+    let chars: Vec<_> = pat.chars().collect();
+    let (mut parts, mut stars) = (Vec::new(), Vec::new());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        i += 1;
+        let part = match c {
+            '*' => {
+                stars.push(parts.len());
+                while chars.get(i) == Some(&'*') {
+                    i += 1;
+                }
+                star.to_owned()
+            }
+            '?' => question.to_owned(),
+            '[' if let Some(end) = class_end(&chars, i) => {
+                let text = translate_class(&chars[i..end]);
+                i = end + 1;
+                text
+            }
+            c if "()[]{}?*+-|^$\\.&~# \t\n\r\x0b\x0c".contains(c) => format!("\\{c}"),
+            c => c.to_string(),
+        };
+        parts.push(part);
+    }
+    (parts, stars)
+}
+
+fn translate(pat: &str) -> String {
+    let (parts, stars) = translated_parts(pat, "*", ".");
+    let mut regex = String::from("(?s:");
+    let mut start = 0;
+    for (i, star) in stars.iter().copied().enumerate() {
+        for part in &parts[start..star] {
+            regex.push_str(part);
+        }
+        if i != 0 {
+            regex.push(')');
+        }
+        regex.push_str(if i + 1 == stars.len() { ".*" } else { "(?>.*?" });
+        start = star + 1;
+    }
+    for part in &parts[start..] {
+        regex.push_str(part);
+    }
+    regex.push_str(")\\z");
+    regex
+}
+
+/// # Safety
+/// The input borrows a live str. A successful return transfers a new str owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_fnmatch_translate(pat: *const Str) -> *const Str {
+    // SAFETY: the caller roots the checked string for the duration of the translation.
+    let regex = translate(unsafe { &*pat }.as_str());
+    finish(
+        Str::try_new(&regex)
+            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
+}

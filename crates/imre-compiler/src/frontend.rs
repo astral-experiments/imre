@@ -26,6 +26,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod functools;
 mod hashlib;
 mod inference;
@@ -5660,6 +5661,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
