@@ -6,14 +6,16 @@ use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
-/// Only a standalone append in this lexical scope supplies a list layout hint.
+/// A direct element insertion in this lexical scope can supply a container layout hint.
 /// The ordinary checker still checks its operand and every other use of the list.
-pub(super) fn first_append<'ast>(
+pub(super) fn first_insertion<'ast>(
     name: &str,
+    method: &str,
     statements: &'ast [ast::Stmt],
 ) -> Option<&'ast ast::Expr> {
     struct Appends<'name, 'ast> {
         name: &'name str,
+        method: &'name str,
         value: Option<&'ast ast::Expr>,
     }
 
@@ -27,7 +29,7 @@ pub(super) fn first_append<'ast>(
             if let ast::Stmt::Expr(stmt) = stmt
                 && let ast::Expr::Call(call) = &*stmt.value
                 && let ast::Expr::Attribute(method) = &*call.func
-                && method.attr.as_str() == "append"
+                && method.attr.as_str() == self.method
                 && matches!(&*method.value, ast::Expr::Name(name) if name.id == self.name)
                 && let [value] = call.arguments.args.as_ref()
                 && call.arguments.keywords.is_empty()
@@ -41,12 +43,67 @@ pub(super) fn first_append<'ast>(
         fn visit_expr(&mut self, _: &'ast ast::Expr) {}
     }
 
-    let mut appends = Appends { name, value: None };
+    let mut appends = Appends {
+        name,
+        method,
+        value: None,
+    };
     appends.visit_body(statements);
     appends.value
 }
 
 impl Checker<'_> {
+    /// In a truthy branch, an immediately repeated native dict lookup is present
+    /// until the first possible effect. An exact local list/set receiver and
+    /// a literal string key cannot execute Python code before reading the argument.
+    pub(super) fn immediate_present_subscript(
+        &self,
+        test: &ast::Expr,
+        body: &[ast::Stmt],
+    ) -> Option<ruff_text_size::TextRange> {
+        fn literal_lookup(expression: &ast::Expr) -> Option<(&str, &str)> {
+            let ast::Expr::Subscript(sub) = expression else {
+                return None;
+            };
+            let ast::Expr::Name(name) = &*sub.value else {
+                return None;
+            };
+            let ast::Expr::StringLiteral(key) = &*sub.slice else {
+                return None;
+            };
+            Some((name.id.as_str(), key.value.to_str()))
+        }
+        let (name, key) = literal_lookup(test)?;
+        let &dict = self.names.get(name)?;
+        let (key_type, value_type) = self.types.mapping(self.locals[dict])?;
+        if key_type != Type::Str || self.types.payload(value_type).is_none() {
+            return None;
+        }
+        let ast::Stmt::Expr(stmt) = body.first()? else {
+            return None;
+        };
+        let ast::Expr::Call(call) = &*stmt.value else {
+            return None;
+        };
+        let ast::Expr::Attribute(method) = &*call.func else {
+            return None;
+        };
+        let ast::Expr::Name(receiver) = &*method.value else {
+            return None;
+        };
+        let &owner = self.names.get(receiver.id.as_str())?;
+        let ty = self.locals[owner];
+        let intrinsic = (method.attr.as_str() == "add" && self.types.set_element(ty).is_some())
+            || (method.attr.as_str() == "append" && self.types.element(ty).is_some());
+        let [argument] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        (intrinsic
+            && call.arguments.keywords.is_empty()
+            && literal_lookup(argument) == Some((name, key)))
+        .then(|| argument.range())
+    }
+
     /// Join direct assignments across an exhaustive conditional before its first
     /// suite fixes a local's storage. This supplies a layout for empty-list arms
     /// and nullable scalar arms while retaining normal definite-assignment checks.
@@ -305,6 +362,12 @@ impl Inference {
                             checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                         checker.assigned.insert(slot);
                     }
+                    if let Some(keyword) = &function.parameters.kwarg {
+                        let parameter = signature.params.last().expect("keyword-rest signature");
+                        let slot =
+                            checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
+                        checker.assigned.insert(slot);
+                    }
                     checker.collect_local_functions(&function.body)?;
                     let (_, falls_through) = checker.block(&function.body)?;
                     if let Some(mut returns) = checker.inferred_returns.take() {
@@ -431,7 +494,12 @@ impl Checker<'_> {
             signature,
             receiver,
             skip,
-            calls::starred(call).then_some(&mut scope),
+            (calls::starred(call)
+                || signature
+                    .params
+                    .iter()
+                    .any(|p| p.kind == ParameterKind::KeywordRest))
+            .then_some(&mut scope),
         )?;
         Ok(scope.finish(self.call_value(signature, ty, args)))
     }
