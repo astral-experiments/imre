@@ -278,6 +278,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    if !config.close_fds
+        && let Some((word, kind)) = extras.keep
+        // SAFETY: the launch trailer retains the original collection.
+        && unsafe { super::pass_fds::nonempty(word, kind) }
+    {
+        crate::objects::warnings::pass_fds_override()?;
+    }
     let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];
     let mut oversized = false;
@@ -460,6 +467,7 @@ pub unsafe extern "C" fn imre_call_config(
                     kind: WordKind::new(0),
                 };
                 raise_process(ProcessError {
+                    positional_streams: false,
                     cmd: p.args.clone(),
                     returncode: code,
                     stdout: absent(),
@@ -472,6 +480,7 @@ pub unsafe extern "C" fn imre_call_config(
                 raise_timeout(TimeoutError {
                     cmd: p.args.clone(),
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });
@@ -561,6 +570,7 @@ pub unsafe extern "C" fn imre_child_wait(
                 raise_timeout(TimeoutError {
                     cmd,
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });

@@ -2,6 +2,36 @@
 
 use super::*;
 
+impl Checker<'_> {
+    /// An erased record keeps its concrete descriptor and owner. Admit only
+    /// closed classes with generated value operations and supported slot types.
+    /// Packed value structs cannot be given observable identity through erasure.
+    pub(super) fn boxed_dataclass(&self, class: usize) -> bool {
+        let all = &self.classes.declarations.definitions;
+        let decl = &all[class];
+        let special_name = |name: &str| name.starts_with("__") && name.ends_with("__");
+        decl.generated_initializer
+            && decl
+                .dataclass
+                .is_some_and(|d| !d.value_struct && d.slots && d.eq && d.repr)
+            && !decl.fields.iter().any(|f| special_name(&f.name))
+            && !decl.static_bindings.keys().any(|name| special_name(name))
+            && decl.bases.is_empty()
+            && !all.iter().any(|child| child.bases.contains(&class))
+            && !decl.node.body.iter().any(|stmt| {
+                matches!(stmt,
+                ast::Stmt::FunctionDef(f) if special_name(&f.name))
+            })
+            && self.classes.fields[class]
+                .iter()
+                .all(|ty| self.boxable_value(*ty))
+    }
+
+    pub(super) fn object_value_supported(&self, ty: Type) -> bool {
+        self.boxable_value(ty) || matches!(ty, Type::Class(class) if self.boxed_dataclass(class))
+    }
+}
+
 /// Container comparisons in CPython preserve the identity of boxed NaNs. Bare
 /// native floats intentionally have no such identity, so generated equality may
 /// compare them directly but cannot silently introduce value-only container
@@ -22,6 +52,30 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 /// subset. Excluding a field from generated repr keeps those records usable.
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
+        Type::ModuleSpec(id) => {
+            // A loader's custom __repr__ must run rather than being replaced by its storage.
+            fn loader(ty: Type, types: &Types) -> bool {
+                match ty {
+                    Type::None
+                    | Type::Bool
+                    | Type::Int
+                    | Type::Float
+                    | Type::Str
+                    | Type::StrLiteral(_)
+                    | Type::Bytes
+                    | Type::ListInt => true,
+                    Type::List(_)
+                    | Type::Tuple(_)
+                    | Type::Set(_)
+                    | Type::Dict(_)
+                    | Type::Optional(_) => {
+                        types.children(ty).into_iter().all(|ty| loader(ty, types))
+                    }
+                    _ => false,
+                }
+            }
+            loader(types.module_spec_fields(id)[1], types)
+        }
         Type::Exception
         | Type::NamedException(_)
         | Type::StringKeys
@@ -80,6 +134,9 @@ pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
                     .zip(&classes.fields[id])
                     .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
         }
+        if matches!(ty, Type::ModuleSpec(_)) {
+            return repr_supported(ty, types);
+        }
         repr_supported(ty, types)
             && types
                 .children(ty)
@@ -102,6 +159,12 @@ pub(super) fn validate(
         };
         for (field, &ty) in declaration.fields.iter().zip(&classes.fields[class]) {
             let module = &graph.modules[field.module];
+            if options.eq && field.compare && types.contains_module_spec(ty) {
+                return Err(module.error(
+                    &field.annotation,
+                    "generated equality for ModuleSpec requires dynamic attribute protocol support",
+                ));
+            }
             if options.eq && field.compare && has_container_float(ty, false, types) {
                 return Err(module.error(
                     &field.annotation,

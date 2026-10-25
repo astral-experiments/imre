@@ -7,6 +7,7 @@ from logging import Formatter, LogRecord, getLevelNamesMapping
 from imre._logging import _Level, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
+from logging import Logger as _AdapterLogger
 
 _default_formatter = Formatter()
 
@@ -59,6 +60,48 @@ def _handler_level(level: _Level) -> int:
             raise ValueError(f"Unknown level: {level!r}")
         return levels[level]
     return level
+
+
+class LoggerAdapter:
+    logger: _AdapterLogger
+    extra: dict[str, str] | None
+    merge_extra: bool
+
+    def __init__(self, logger: _AdapterLogger, extra: dict[str, str] | None = None, merge_extra: bool = False) -> None:
+        self.logger = logger
+        self.extra = extra
+        self.merge_extra = merge_extra
+
+    def process(self, msg: str, kwargs: dict[str, dict[str, str] | None]) -> tuple[str, dict[str, dict[str, str] | None]]:
+        incoming = kwargs.get("extra")
+        if self.merge_extra and incoming is not None:
+            defaults = self.extra
+            if defaults is not None:
+                merged: dict[str, str] = {}
+                for key in defaults:
+                    merged[key] = defaults[key]
+                for key in incoming:
+                    merged[key] = incoming[key]
+                kwargs["extra"] = merged
+        else:
+            kwargs["extra"] = self.extra
+        return msg, kwargs
+
+    def isEnabledFor(self, level: int) -> bool:
+        return self.logger.isEnabledFor(level)
+
+    def setLevel(self, level: _Level) -> None:
+        self.logger.setLevel(_handler_level(level))
+
+    def getEffectiveLevel(self) -> int:
+        return self.logger.getEffectiveLevel()
+
+    def hasHandlers(self) -> bool:
+        return self.logger.hasHandlers()
+
+    @property
+    def name(self) -> str:
+        return self.logger.name
 
 
 class Handler:

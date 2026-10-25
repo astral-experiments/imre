@@ -28,7 +28,7 @@ length = len
 
 
 class Snapshot(tuple):
-    """Transport native tuple values; named access is host work until CacheInfo is native."""
+    """Transport native tuple values; this adapter performs named access on the host."""
 
     def __new__(cls, values, counts):
         result = super().__new__(cls, values)
