@@ -21,6 +21,10 @@ def observe(name, level, body, body_rev, probes):
         elif name.endswith(".test_get_annotations"):
             operation = ("Imre creates an lru_cache wrapper, reads the original and wrapper annotations, "
                          "and compares both dictionaries with the expected builtin class objects.")
+        elif name.endswith(".test_lru_cache_parameters"):
+            operation = ("Imre executes both local lru_cache decorators and reads a fresh parameter "
+                         "dictionary from each wrapper. The native assertion fixture compares both "
+                         "dictionaries with the original expected values.")
         else:
             operation = f"Imre executed the product operations of the complete unchanged {name} method."
         proof.update(operation=operation,
@@ -52,6 +56,8 @@ def observe(name, level, body, body_rev, probes):
             native = counts.get("native_calls", 0)
             host = counts.get("host_binding", 0)
             detail = f"Imre evaluated {native} folds; {host} calls reached the host argument binder."
+            if warnings := counts.get("host_warnings"):
+                detail += f" The host emitted {warnings} deprecation warnings for the pure variant."
         else:
             native = sum(counts.get(field, 0) for field in ("lookups", "clears", "snapshots", "parameter_reads"))
             host = sum(v for k, v in counts.items() if k.startswith("host_"))
