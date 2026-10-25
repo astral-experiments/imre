@@ -30,6 +30,7 @@ mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
+mod functools;
 mod format_cursors;
 mod hashlib;
 mod inspect;
@@ -102,6 +103,9 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    FunctoolsPlaceholder {
+        class: bool,
+    },
     Context(Rc<contextvars::State>),
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),

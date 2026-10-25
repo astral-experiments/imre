@@ -1,6 +1,26 @@
 //! A partial retains its bound operands once, then fills the open positions at each call.
 
 use super::*;
+use ir::PlaceholderKind;
+
+/// Each load owns a reference to the same native singleton or its class object.
+pub(super) fn singleton(kind: PlaceholderKind) -> Expr {
+    Expr {
+        ty: Type::Placeholder(kind),
+        kind: ExprKind::Builtin(Builtin::Placeholder(kind), vec![]),
+    }
+}
+
+pub(super) fn after(value: Expr, result: Expr) -> Expr {
+    Expr {
+        ty: result.ty,
+        kind: ExprKind::Scope {
+            body: vec![Statement::Expr(value)],
+            value: Box::new(result),
+            clear: vec![],
+        },
+    }
+}
 
 enum Target {
     Direct(usize),
@@ -14,7 +34,72 @@ fn local(slot: usize, ty: Type) -> Expr {
     }
 }
 
+fn raised(ty: Type, mut arguments: Vec<Expr>, message: &str) -> Expr {
+    arguments.push(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("TypeError").unwrap(),
+            message: Some(Box::new(unpacking::string(message))),
+        },
+    });
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::RaiseException, arguments),
+    }
+}
+
 impl Checker<'_> {
+    /// The constructor accepts no arguments; ordinary operands are still evaluated before an error.
+    pub(super) fn placeholder_call(
+        &mut self,
+        call: &ast::ExprCall,
+        target: Expr,
+        kind: PlaceholderKind,
+    ) -> Result<Expr, String> {
+        if kind == PlaceholderKind::Class && call.arguments.is_empty() {
+            return Ok(after(target, singleton(PlaceholderKind::Value)));
+        }
+        if call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            || call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+        {
+            return Err(error(
+                self.source,
+                call,
+                "expanding arguments into a Placeholder call requires a dynamic call frame",
+            ));
+        }
+        match kind {
+            PlaceholderKind::Class => {
+                for arg in &call.arguments.args {
+                    self.graph.checked_excess_argument(self.module, arg.range());
+                }
+                self.graph.checked_keywords(
+                    self.module,
+                    call.arguments.keywords.iter().map(Ranged::range),
+                );
+            }
+            PlaceholderKind::Value => self.graph.checked_noncallable(self.module, call.range()),
+        }
+        let mut values = vec![target];
+        for argument in call
+            .arguments
+            .args
+            .iter()
+            .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+        {
+            values.push(self.expr(argument)?);
+        }
+        let message = match kind {
+            PlaceholderKind::Value => "'functools._PlaceholderType' object is not callable",
+            PlaceholderKind::Class => "PlaceholderType takes no arguments",
+        };
+        Ok(raised(
+            Type::Placeholder(PlaceholderKind::Value),
+            values,
+            message,
+        ))
+    }
+
     pub(super) fn partial(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
             return Err(error(
@@ -32,6 +117,7 @@ impl Checker<'_> {
                 callable.ty,
                 Type::None
                     | Type::Bool
+                    | Type::Placeholder(PlaceholderKind::Value)
                     | Type::Int
                     | Type::Float
                     | Type::Str
@@ -54,28 +140,58 @@ impl Checker<'_> {
                 "partial requires a callable with a known signature",
             ));
         };
-        let placeholder = Some(Binding::Intrinsic(Intrinsic::Placeholder));
-        if bound
-            .last()
-            .is_some_and(|arg| self.resolve(arg) == placeholder)
+        if bound.is_empty()
+            && call.arguments.keywords.is_empty()
+            && !matches!(returns, Type::Coroutine(_))
         {
-            return self.partial_error(
-                call,
-                Some(callable),
-                "trailing Placeholders are not allowed",
-            );
+            // The call interface is unchanged. An indirect wrapper with this same
+            // signature would appear to call itself in the closed target set.
+            return Ok(callable);
         }
-        if call
-            .arguments
-            .keywords
-            .iter()
-            .any(|kw| self.resolve(&kw.value) == placeholder)
-        {
-            return self.partial_error(
-                call,
-                Some(callable),
-                "Placeholder cannot be passed as a keyword argument",
-            );
+
+        // A known definition uses its direct ABI. For a bound method, capture
+        // the receiver before any bound arguments; a dynamic target owns the
+        // callable itself in position zero of the private, immutable frame.
+        let mut scope = calls::ArgumentScope::default();
+        let mut captured = Vec::new();
+        let (target, receiver) = match callable.kind {
+            ExprKind::Callable { function, receiver } => {
+                let has_receiver = receiver.is_some();
+                if let Some(receiver) = receiver {
+                    captured.push(scope.hold(self, *receiver));
+                }
+                (Target::Direct(function), has_receiver)
+            }
+            _ => {
+                captured.push(scope.hold(self, callable));
+                (Target::Indirect, false)
+            }
+        };
+        let marker = Type::Placeholder(PlaceholderKind::Value);
+        let mut evaluated = Vec::with_capacity(bound.len());
+        for (index, arg) in bound.iter().enumerate() {
+            let value = match parameters.get(index) {
+                Some(&ty) => self.expr_expected_or(arg, ty, Some(marker))?,
+                None => self.expr(arg)?,
+            };
+            evaluated.push(scope.hold(self, value));
+        }
+        let mut keyword_marker = false;
+        for kw in &call.arguments.keywords {
+            let value = self.expr(&kw.value)?;
+            keyword_marker |= value.ty == marker;
+            scope.hold(self, value);
+        }
+        let message = if evaluated.last().is_some_and(|value| value.ty == marker) {
+            Some("trailing Placeholders are not allowed")
+        } else if keyword_marker {
+            Some("Placeholder cannot be passed as a keyword argument")
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            let ty = self.types.callable(vec![], Type::None);
+            return Ok(scope.finish(raised(ty, vec![], message)));
         }
         self.reject_builtin_keywords(call)?;
         if matches!(returns, Type::Coroutine(_)) || bound.len() > parameters.len() {
@@ -85,37 +201,14 @@ impl Checker<'_> {
                 "partial requires a synchronous target with enough positional parameters",
             ));
         }
-        if bound.is_empty() {
-            // The call interface is unchanged. An indirect wrapper with this same
-            // signature would appear to call itself in the closed target set.
-            return Ok(callable);
-        }
-
-        // A known definition uses its direct ABI. For a bound method, capture
-        // the receiver before any bound arguments; a dynamic target owns the
-        // callable itself in position zero of the private, immutable frame.
-        let mut captured = Vec::new();
-        let (target, receiver) = match callable.kind {
-            ExprKind::Callable { function, receiver } => {
-                let has_receiver = receiver.is_some();
-                if let Some(receiver) = receiver {
-                    captured.push(*receiver);
-                }
-                (Target::Direct(function), has_receiver)
-            }
-            _ => {
-                captured.push(callable);
-                (Target::Indirect, false)
-            }
-        };
         let mut slots = Vec::with_capacity(parameters.len());
         let mut remaining = Vec::new();
         for (index, &ty) in parameters.iter().enumerate() {
-            if let Some(arg) = bound.get(index)
-                && self.resolve(arg) != placeholder
+            if let Some(value) = evaluated.get(index)
+                && value.ty != marker
             {
                 slots.push((true, captured.len(), ty));
-                captured.push(self.expr_expected(arg, ty)?);
+                captured.push(value.clone());
             } else {
                 remaining.push(ty);
                 slots.push((false, remaining.len(), ty));
@@ -184,13 +277,13 @@ impl Checker<'_> {
             ty: frame,
             kind: ExprKind::Tuple(captured),
         };
-        Ok(Expr {
+        Ok(scope.finish(Expr {
             ty,
             kind: ExprKind::Callable {
                 function: id,
                 receiver: Some(Box::new(context)),
             },
-        })
+        }))
     }
 
     /// Evaluate every supplied operand before reporting a proven constructor error.
@@ -206,20 +299,12 @@ impl Checker<'_> {
             .iter()
             .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
         {
-            if self.resolve(value) != Some(Binding::Intrinsic(Intrinsic::Placeholder)) {
-                args.push(self.expr(value)?);
-            }
+            args.push(self.expr(value)?);
         }
-        args.push(Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("TypeError").unwrap(),
-                message: Some(Box::new(unpacking::string(message))),
-            },
-        });
-        Ok(Expr {
-            ty: self.types.callable(vec![], Type::None),
-            kind: ExprKind::Builtin(Builtin::RaiseException, args),
-        })
+        Ok(raised(
+            self.types.callable(vec![], Type::None),
+            args,
+            message,
+        ))
     }
 }

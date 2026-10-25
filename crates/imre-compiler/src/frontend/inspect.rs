@@ -33,7 +33,12 @@ fn evaluated(value: Expr, result: Expr) -> Expr {
 
 /// Plain object instances and builtin method descriptors do not override equality.
 pub(super) fn equality(left: &Expr, right: &Expr, op: ast::CmpOp) -> Option<Expr> {
-    let identity = |ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_));
+    let identity = |ty| {
+        matches!(
+            ty,
+            Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+        )
+    };
     if !matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
         || !(identity(left.ty) && (identity(right.ty) || right.ty == Type::None)
             || identity(right.ty) && left.ty == Type::None)

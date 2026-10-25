@@ -2737,6 +2737,17 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        self.expr_expected_or(expression, expected, None)
+    }
+
+    /// A partial can accept a sentinel in place of a parameter. Preserve its type
+    /// while checking ordinary operands in the declared parameter's context.
+    fn expr_expected_or(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: Option<Type>,
+    ) -> Result<Expr, String> {
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -2756,11 +2767,17 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) {
-            return self.pack_len_argument(expression);
-        }
-        if self.types.is_unread_argument(expected) {
-            return self.unread_argument(expression, expected);
+        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+            let value = self.expr(expression)?;
+            // A partial consumes its marker before the target's own argument ABI.
+            // Keep the evaluated value so a lookup or callback runs exactly once.
+            return if alternative == Some(value.ty) {
+                Ok(value)
+            } else if self.types.is_len_argument(expected) {
+                self.pack_len_value(value, expression)
+            } else {
+                self.pack_unread_value(value, expression, expected)
+            };
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -3114,6 +3131,9 @@ impl<'a> Checker<'a> {
             }
             _ => self.typed_expr(expression)?,
         };
+        if alternative == Some(value.ty) {
+            return Ok(value);
+        }
         self.coerce(value, expected, expression)
     }
 
@@ -5774,6 +5794,9 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::Placeholder => {
+                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
+                }
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -6967,6 +6990,30 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
+                if let Type::Placeholder(kind) = receiver.ty {
+                    let result = match (kind, attribute.attr.as_str()) {
+                        (ir::PlaceholderKind::Value, "__class__") => {
+                            partials::singleton(ir::PlaceholderKind::Class)
+                        }
+                        (ir::PlaceholderKind::Class, "__class__") => {
+                            annotations::builtin_type("type").unwrap()
+                        }
+                        (ir::PlaceholderKind::Class, "__name__" | "__qualname__") => {
+                            unpacking::string("_PlaceholderType")
+                        }
+                        (ir::PlaceholderKind::Class, "__module__") => {
+                            unpacking::string("functools")
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported Placeholder attribute",
+                            ));
+                        }
+                    };
+                    return Ok(partials::after(receiver, result));
+                }
                 if let Type::CmpKey(frame, bound) = receiver.ty
                     && attribute.attr.as_str() == "obj"
                 {
@@ -7954,6 +8001,13 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
+                return self.placeholder_call(
+                    call,
+                    partials::singleton(ir::PlaceholderKind::Value),
+                    ir::PlaceholderKind::Value,
+                );
+            }
             Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
                 return self.single_dispatch(call);
             }
@@ -9100,6 +9154,24 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [value] = args.as_slice()
+            && let Type::Placeholder(kind) = value.ty
+        {
+            let result = match name.id.as_str() {
+                "type" if kind == ir::PlaceholderKind::Value => {
+                    Some(partials::singleton(ir::PlaceholderKind::Class))
+                }
+                "type" => annotations::builtin_type("type"),
+                "callable" => Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(kind == ir::PlaceholderKind::Class),
+                }),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(partials::after(value.clone(), result));
+            }
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Calendar(_))
             && matches!(name.id.as_str(), "str" | "print" | "repr")
@@ -9331,7 +9403,10 @@ impl<'a> Checker<'a> {
             return Ok(rendered);
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(
+                args[0].ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
             && matches!(name.id.as_str(), "repr" | "str" | "print")
         {
             let rendered = Expr {

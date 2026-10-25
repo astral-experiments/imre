@@ -448,6 +448,7 @@ impl Builtin {
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
