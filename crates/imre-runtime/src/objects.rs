@@ -14,6 +14,7 @@ mod boxed_values;
 mod builtins;
 mod bytes;
 mod cache_paths;
+mod calendar;
 mod chainmap;
 mod contexts;
 mod copying;
@@ -40,10 +41,13 @@ mod paths;
 pub(crate) mod posixpath;
 mod processes;
 mod random;
+mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod socket;
+mod source_modules;
 mod stdlib;
 mod string_enums;
 mod structs;
@@ -90,6 +94,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
     Deque(Box<deque::Deque>),
@@ -107,7 +112,12 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
+    SourceModule {
+        name: Rc<Str>,
+        filename: Rc<Str>,
+    },
     Sha256(Box<sha2::Sha256>),
+    Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
@@ -138,6 +148,7 @@ enum Storage {
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    Calendar(Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),

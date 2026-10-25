@@ -8,9 +8,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 178,
+      "blocked": 177,
       "failed": 15,
-      "host-driven-native-operation": 74,
+      "host-driven-native-operation": 75,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -330,19 +330,23 @@
         "opt_level": 0,
         "fixture_variant": "MiscTests",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: subprocess.getoutput",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "opt_level": 0,
+          "imre_revision": "31cca90475de8d6fb53ed6416821b7eea197044e",
+          "tested_tree": "e48bd67c8875adc91aaeefb7932de415d44c6940",
+          "source": "shell-output-linux.json",
+          "operation": "Imre launches all three original shell commands, drains the same pipe written by the shell on stdout or cat on stderr and reaps statuses 0, 0 and 1.",
+          "fixture": "CPython runs the unchanged method, assertions and temporary directory cleanup. Replacing the observed status 1 with zero fails its original assertion.",
+          "native_body_diagnostic": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill",
@@ -1197,25 +1201,22 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, reaped SIGKILL before the subsequent failed exec; fixture waitpid returned ECHILD",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds",
@@ -2139,25 +2140,22 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, original teardown waited on the retained child (exit 0) and _cleanup removed it",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode",
@@ -8548,9 +8546,9 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 178,
+      "blocked": 177,
       "failed": 15,
-      "host-driven-native-operation": 74,
+      "host-driven-native-operation": 75,
       "host-operation": 6,
       "mixed": 9,
       "native-body-host-fixture": 30,
@@ -8870,19 +8868,23 @@
         "opt_level": 3,
         "fixture_variant": "MiscTests",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: subprocess.getoutput",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:11:26: Imre: name is not a local value; globals and first-class functions are unsupported"
+          "opt_level": 3,
+          "imre_revision": "31cca90475de8d6fb53ed6416821b7eea197044e",
+          "tested_tree": "e48bd67c8875adc91aaeefb7932de415d44c6940",
+          "source": "shell-output-linux.json",
+          "operation": "Imre launches all three original shell commands, drains the same pipe written by the shell on stdout or cat on stderr and reaps statuses 0, 0 and 1.",
+          "fixture": "CPython runs the unchanged method, assertions and temporary directory cleanup. Replacing the observed status 1 with zero fails its original assertion.",
+          "native_body_diagnostic": "<case>/case.py:12:26: Imre: expected int, got tuple[int, str]; annotations are enforced contracts"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill",
@@ -9737,25 +9739,22 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, reaped SIGKILL before the subsequent failed exec; fixture waitpid returned ECHILD",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds",
@@ -10679,25 +10678,22 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "failure",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
         },
-        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported",
-          "native_actor_calls": {
-            "Popen": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          }
+          "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+          "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+          "source": "active-children-linux.json",
+          "operation": "native parent: finalizer warned for actual child PID, retained original Popen in _active, original teardown waited on the retained child (exit 0) and _cleanup removed it",
+          "fixture": "unchanged CPython body, assertions, warning capture and teardown; two pipe closes, _active and _cleanup delegated to their native owner; literal Python data child ran on pinned CPython",
+          "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
         },
-        "classification": "failed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode",
