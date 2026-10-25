@@ -855,6 +855,7 @@ pub(crate) enum Builtin {
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
     DictDelete,
+    DictClear,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
