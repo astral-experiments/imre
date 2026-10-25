@@ -180,7 +180,7 @@ class TestCase:
         if not a >= b:
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
-    def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
             left, right = _short_reprs(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, left + " != " + right))

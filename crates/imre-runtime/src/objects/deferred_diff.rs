@@ -363,7 +363,21 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             let input = source.map_or_else(|| words.resolved(), |source| source.projected());
             let mut sorted = snapshot(input, std::iter::empty())?;
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
-            sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
+            // The standard stable slice sort allocates scratch and aborts when
+            // that allocation fails. Keep a stack fallback, as direct string
+            // sorting does, so the already-owned result remains sortable.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if sorted.values.len() <= 128
+                || heap.try_reserve_exact(sorted.values.len()).is_err()
+            {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(&mut sorted.values, scratch, |&a, &b| {
+                key(a).cmp(key(b))
+            });
             Ok(if let Some(source) = source {
                 Words::deferred(Deferred(View::Sorted {
                     rows: Rc::new(sorted),

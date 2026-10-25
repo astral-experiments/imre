@@ -170,7 +170,10 @@ impl Checker<'_> {
                 let loc = field(&obj, LOCATION, &types);
                 let from_origin = Expr {
                     ty: cached.ty,
-                    kind: ExprKind::Builtin(Builtin::ModuleCacheFromOrigin, vec![origin]),
+                    kind: ExprKind::Builtin(
+                        Builtin::ModuleCacheFromOrigin,
+                        vec![origin, self.default_cache_optimization()],
+                    ),
                 };
                 let populate = Statement::If(
                     Expr {
