@@ -56,6 +56,7 @@ impl RecordDescriptor {
     fn allocated_words(&self) -> usize {
         // These struct-sequence attributes contain only raw numbers. They are
         // neither Python tuple elements nor owners to be visited during release.
+        // SAFETY: a non-null semantics pointer refers to the descriptor's permanent metadata.
         let stat_words = if unsafe { self.semantics.as_ref() }.is_some_and(|s| s.flags & 8 != 0) {
             super::os::stat_result::EXTRA_WORDS
         } else {

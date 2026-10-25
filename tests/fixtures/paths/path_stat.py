@@ -18,6 +18,13 @@ print(st.st_atime == st[7] + 1e-9 * (st.st_atime_ns % 1_000_000_000))
 print(st.st_mtime == st[8] + 1e-9 * (st.st_mtime_ns % 1_000_000_000))
 print(st.st_ctime == st[9] + 1e-9 * (st.st_ctime_ns % 1_000_000_000))
 print(st.st_blksize > 0 and st.st_blocks >= 0 and st.st_rdev == 0)
+clock = Path('stat-clock').stat()
+print(clock[7])
+print(clock.st_atime_ns)
+print(clock.st_atime == clock[7] + 1e-9 * (clock.st_atime_ns % 1_000_000_000))
+print(clock[8])
+print(clock.st_mtime_ns)
+print(clock.st_mtime == clock[8] + 1e-9 * (clock.st_mtime_ns % 1_000_000_000))
 try:
     print(st.st_birthtime > 0 and st.st_birthtime == p.lstat().st_birthtime)
 except AttributeError as error:
