@@ -609,6 +609,9 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    ClassNamePart {
+        module: bool,
+    },
     NewForwardRef,
     ForwardRefField(usize),
     StrEnumValue,

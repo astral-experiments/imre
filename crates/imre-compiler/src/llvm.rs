@@ -3756,6 +3756,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ClassNamePart { module } => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_class_name_part(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(*module)
+                )),
+                small_integer: false,
+            },
             Builtin::ForwardRefField(_)
             | Builtin::NewForwardRef
             | Builtin::LiteralStringView
@@ -7867,6 +7876,7 @@ declare void @imre_str_enum_table(ptr, i64)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
+declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
