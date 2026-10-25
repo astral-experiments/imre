@@ -7,9 +7,37 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from suite_evidence import build_report, validate_pair, write_reports
+from suite_evidence import build_report, validate_pair, write_reports  # noqa: E402
 
 NAME = "test.test_subprocess.POSIXProcessTestCase.test_stopped"
+
+
+def verified_shared_wait(shared, level, roles):
+    [pair] = [p for p in shared["reports"] if p["opt_level"] == level]
+    for key, outcome, failure in (
+        ("mock_only", "failure", "0 != -3"),
+        ("integrated", "pass", None),
+        ("hosted_integrated", "pass", None),
+    ):
+        report = pair[key]
+        [case] = report["rows"][NAME]
+        assert report["opt_level"] == level and case["roles"] == roles
+        assert (case["outcome"], case["failure"]) == (outcome, failure)
+        assert (
+            case["external_wait_in_native_parent"]
+            and case["original_support_wait_process"]
+        )
+        # The older runtime blocks; the concurrent-wait implementation polls.
+        flags = 0 if key == "mock_only" else 1
+        assert case["native_waitpid_mock"] == [dict(options=flags, status=895)]
+        assert case["restoration"] == dict(
+            original_host_binding_restored=True,
+            shared_native_mock_calls=1,
+            native_post_scope_wait_errno=10,
+        )
+        assert case["native_child_exit"] == case["native_signals_sent"] == 0
+    assert pair["integrated"]["toolchain"] == pair["hosted_integrated"]["toolchain"]
+    return pair["integrated"]["rows"][NAME][0]
 
 
 def main():
@@ -21,6 +49,8 @@ def main():
     prior = json.loads(args.previous.read_text())
     validate_pair(prior, ref)
     data = json.loads((HERE / "stopped-status-linux.json").read_text())
+    shared = json.loads((HERE / "shared-mock-linux.json").read_text())
+    assert shared["cpython_commit"] == ref["cpython_commit"]
     assert data["cpython_commit"] == ref["cpython_commit"] and [
         r["opt_level"] for r in data["reports"]
     ] == [0, 3]
@@ -37,6 +67,7 @@ def main():
         roles = dict(
             body="cpython", assertions="cpython", operation="imre", fixture="mixed"
         )
+        checked = verified_shared_wait(shared, level, roles)
         assert (
             case["roles"] == roles
             and case["outcome"] == "pass"
@@ -89,12 +120,12 @@ def main():
                     roles=roles,
                     evidence=dict(
                         opt_level=level,
-                        imre_revision=data["imre_revision"],
-                        tested_tree=data["tested_tree"],
-                        source="stopped-status-linux.json",
-                        operation="native Popen.wait consumed the original waitpid mock's W_STOPCODE(3) and returned -3; independent kernel SIGQUIT stops gave -3 in native poll and wait",
-                        fixture="original CPython body, assertions, unit hooks and scoped waitpid Mock; after a real external reap the native waitpid call requested that mock's tuple over the fixture pipe",
-                        native_body_diagnostic=case["body_attempt"]["reason"],
+                        imre_revision=shared["integrated"]["revision"],
+                        tested_tree=shared["integrated"]["tested_tree"],
+                        source="shared-mock-linux.json",
+                        operation="Native Popen.wait called the shared Mock, consumed the original patch's raw stop status and returned -3. A fresh wait after restoration reached the kernel and reported ECHILD.",
+                        fixture="CPython owns the original body, patch context, tuple and assertions. The compiled parent's scoped libc fixture invoked Imre's unittest.mock recorder during the actual wait. The direct native mock.patch expression remains blocked.",
+                        native_body_diagnostic=checked["body_attempt"]["reason"],
                     ),
                 )
         out.append(build_report(ref, level, discovery, obs, exceptions=exceptions))
