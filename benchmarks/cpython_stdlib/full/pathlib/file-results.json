@@ -1,0 +1,65 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "passed_at_opt_levels": [
+    0,
+    3
+  ],
+  "passed": {
+    "test.test_pathlib.test_read.PathReadTest.test_read_bytes": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0e212e7e5b0af6c1e3f675ba3781036545f68fa3ccdb59026fa6d6d3c1af2b13"
+    },
+    "test.test_pathlib.test_read.PathReadTest.test_read_text": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "14f0f1217817e33bc517f971a4a8d0023cac3b12edd744f52a7fdb226c5c0503"
+    },
+    "test.test_pathlib.test_read.PathReadTest.test_read_text_with_newlines": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "104fa65d1014522aef9bee0f6d58fb133ce508ce196e8ee858377435493dc836"
+    },
+    "test.test_pathlib.test_write.PathWriteTest.test_write_bytes": {
+      "execution": "host-driven-native-operations",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython upstream hooks and ground",
+      "native_calls": {
+        "join": 1,
+        "write_bytes": 1,
+        "write_bytes_str": 1
+      },
+      "method_sha256": "71b564fa8a4691d07069d4a0aeca678a036153adaadff184b1596f731bca6e02"
+    },
+    "test.test_pathlib.test_write.PathWriteTest.test_write_text": {
+      "execution": "host-driven-native-operations",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython upstream hooks and ground",
+      "native_calls": {
+        "join": 1,
+        "write_text": 1,
+        "write_text_bytes": 1
+      },
+      "method_sha256": "87f7027dcbb357740e4f00fc203f3fb0dc6032eeb08b736a33496e9e9aa0147b"
+    },
+    "test.test_pathlib.test_write.PathWriteTest.test_write_text_with_newlines": {
+      "execution": "host-driven-native-operations",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "CPython upstream hooks and ground",
+      "native_calls": {
+        "join": 4,
+        "write_text": 4
+      },
+      "method_sha256": "1a9852d2641f01f801ca8b9ec8b2430ceca03a57bd34fa42a2def52e65aa9060"
+    }
+  }
+}
