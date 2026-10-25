@@ -19,27 +19,27 @@ def status(value):
     raise ValueError(f"unrecognized reference outcome: {value!r}")
 
 
-def cases(report):
+def occurrences(report):
     if "reference" in report:
         groups = [report["reference"]]
     elif "routines" in report:  # JSON reports fixtures by their defining routine.
         groups = report["routines"].values()
     else:  # pathlib records an upstream skip reason or a successful run per ID.
         for case, reason in report["reference_skip_reason_by_id"].items():
-            yield case, status("pass" if reason is None else {"skipped": reason})
+            yield case, "pass" if reason is None else {"skipped": reason}
         return
     for results in groups:
         for case, outcome in results.items():
             for occurrence in outcome if isinstance(outcome, list) else [outcome]:
-                yield case, status(occurrence)
+                yield case, occurrence
 
 
-def read_results(path, pin, platform):
+def checked_reference(path, pin, platform):
     report = json.loads(path.read_bytes())
     if report["cpython_commit"] != pin or report["platform"] != platform:
         raise ValueError(f"{path}: wrong interpreter pin or platform")
-    results = list(cases(report))
-    counts = Counter(outcome for _, outcome in results)
+    results = list(occurrences(report))
+    counts = Counter(status(outcome) for _, outcome in results)
     expected = report.get("denominator", report.get("executions", report.get("discovered")))
     if len(results) != expected:
         raise ValueError(f"{path}: has {len(results)} executions, expected {expected}")
@@ -47,7 +47,12 @@ def read_results(path, pin, platform):
                             ("passed", counts["pass"]), ("skipped", counts["skipped"])]:
         if field in report and report[field] != measured:
             raise ValueError(f"{path}: {field}={report[field]}, measured {measured}")
-    return results
+    return report, results
+
+
+def read_results(path, pin, platform):
+    _, results = checked_reference(path, pin, platform)
+    return [(case, status(outcome)) for case, outcome in results]
 
 
 def summary(results):

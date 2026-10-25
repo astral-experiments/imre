@@ -56,7 +56,7 @@ pub(crate) enum Type {
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture),
     /// A synchronous child with statically known captured stream types.
-    Popen(ProcessCapture),
+    Popen(ProcessCapture, bool),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -69,6 +69,7 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    LogRecord,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -170,7 +171,7 @@ impl std::fmt::Display for Type {
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
             Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
             Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
-            Self::Popen(_) => "subprocess.Popen",
+            Self::Popen(..) => "subprocess.Popen",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -180,6 +181,7 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
@@ -270,14 +272,17 @@ pub(crate) enum JsonDefault {
 impl Module {
     /// Process argument state is required only by an actual argv expression.
     /// Merely importing sys emits no startup allocation or runtime query.
-    pub(crate) fn uses_sys_argv(&self) -> bool {
-        let mut used = false;
+    pub(crate) fn sys_argument_usage(&self) -> (bool, bool) {
+        let mut argv = false;
+        let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| {
-                used |= matches!(value.kind, ExprKind::Builtin(Builtin::SysArgv, _));
+            walk_expressions(&function.body, &mut |value| match value.kind {
+                ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
+                ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
+                _ => {}
             });
         }
-        used
+        (argv || original, original)
     }
 }
 
@@ -463,6 +468,7 @@ pub(crate) enum Builtin {
         bounded: bool,
     },
     Islice,
+    Tee,
     Cycle,
     DirectoryContextView,
     Document(DocumentOp),
@@ -514,6 +520,7 @@ pub(crate) enum Builtin {
     WallTime,
     Logging(LogOperation),
     Timed(TimedOperation),
+    LogRecord(LogRecordOperation),
     Input,
     Chr,
     Int,
@@ -616,6 +623,8 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    DecodeAscii,
+    UrlsafeB64encode,
     Sha256Hex,
     Sha256New,
     HashNew,
@@ -669,6 +678,7 @@ pub(crate) enum Builtin {
     StringListNonempty,
     RStrip,
     SysArgv,
+    SysOrigArgv,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         children: Vec<usize>,
@@ -736,6 +746,7 @@ pub(crate) enum Builtin {
     TextFlush,
     TextClose,
     TextClosed,
+    FileFileno,
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
@@ -781,6 +792,7 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     ExceptionCause,
@@ -855,6 +867,7 @@ pub(crate) enum RegexCapture {
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
+    Lower,
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -900,6 +913,10 @@ pub(crate) enum PathOperation {
     ReadBytes,
     WriteText,
     WriteBytes,
+    WriteTypeError,
+    WriteUnion {
+        binary: bool,
+    },
     Mkdir,
     Unlink,
     Rmdir,
@@ -956,6 +973,19 @@ pub(crate) enum TimedOperation {
     DoRollover,
 }
 
+/// Operations on a record with individually owned, named Python fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LogRecordOperation {
+    New,
+    Put,
+    Update,
+    Read,
+    Message,
+    Repr,
+    Flag,
+    SetFlag,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -991,12 +1021,20 @@ pub(crate) enum ProcessOperation {
     Popen {
         streams: u32,
     },
+    Call {
+        streams: u32,
+        check: bool,
+    },
     PopenPid,
     PopenArgs,
+    PopenPipe(u8),
     PopenStatus {
         poll: bool,
     },
     PopenWait,
+    PopenCommunicate {
+        text: bool,
+    },
     PopenExit,
     PopenSignal,
     AsyncSpawn {
@@ -1053,6 +1091,7 @@ pub(crate) enum ProcessOperation {
     EnvironGet,
     GetCwd,
     Which,
+    CopyFile,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

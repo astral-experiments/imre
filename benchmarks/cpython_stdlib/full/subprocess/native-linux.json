@@ -1,0 +1,2880 @@
+{
+  "imre_revision": "92373d7d739a62d68671148cc3a3b35891193d92",
+  "denominator": 353,
+  "totals": {
+    "O0": {
+      "blocked": 227,
+      "failed": 26,
+      "host-driven-native": 36,
+      "mixed": 8,
+      "native-body-host-fixtures": 11,
+      "reference-only": 6,
+      "reference-skip": 39
+    },
+    "O3": {
+      "blocked": 227,
+      "failed": 26,
+      "host-driven-native": 36,
+      "mixed": 8,
+      "native-body-host-fixtures": 11,
+      "reference-only": 6,
+      "reference-skip": 39
+    }
+  },
+  "ids": {
+    "test.test_subprocess.CommandsWithSpaces.test_noshell_sequence_with_spaces": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows-specific tests"
+      }
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_noshell_string_with_spaces": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows-specific tests"
+      }
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_shell_sequence_with_spaces": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows-specific tests"
+      }
+    },
+    "test.test_subprocess.CommandsWithSpaces.test_shell_string_with_spaces": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows-specific tests"
+      }
+    },
+    "test.test_subprocess.ContextManagerTests.test_broken_pipe_cleanup": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "exit:OSError": 1,
+          "returncode": 2,
+          "stdin.closed": 1,
+          "stdin.write": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ContextManagerTests.test_communicate_stdin": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "returncode": 1,
+          "streams": 1
+        },
+        "method_sha256": "07917a8cd8fe06d29f88b99445c9f816b93fa8f08cf56ecea0d71806c6a73432"
+      }
+    },
+    "test.test_subprocess.ContextManagerTests.test_invalid_args": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.ContextManagerTests.test_pipe": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stderr.closed": 1,
+          "stderr.read": 1,
+          "stdout.closed": 1,
+          "stdout.read": 1,
+          "streams": 1
+        },
+        "method_sha256": "9d2321c619634a10142409a8aa0b136f89ece6f7db2e894a07a2ddde9b82c05a"
+      }
+    },
+    "test.test_subprocess.ContextManagerTests.test_returncode": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "returncode": 1,
+          "streams": 1
+        },
+        "method_sha256": "7b33585e25d6c3ddb5ecf14d9aeba1c6c7bf3211d50ce20470c138340fe72c5c"
+      }
+    },
+    "test.test_subprocess.MiscTests.test__all__": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.__all__"
+      }
+    },
+    "test.test_subprocess.MiscTests.test_call_keyboardinterrupt_no_kill": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.MiscTests.test_context_manager_keyboardinterrupt_no_kill": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "IndexError: pop from empty list"
+      }
+    },
+    "test.test_subprocess.MiscTests.test_getoutput": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.getoutput"
+      }
+    },
+    "test.test_subprocess.MiscTests.test_run_keyboardinterrupt_no_kill": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_non_zero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_signal": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_CalledProcessError_str_unknown_signal": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_args_string": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen transport requires a string argv sequence"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_bytes_program": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_call_string": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_0": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_1": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fd_2": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "13 : Some fds were closed",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_1_2": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_0_2": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_1_2": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_after_preexec": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: preexec_fn"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_close_fds_when_max_fd_is_lowered": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "  Actual: not called.",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_close_with_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: unsupported integer timeout: 999",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: Expected 'flush' to be called once. Called 0 times.",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_write": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: Expected 'write' to be called once. Called 0 times.",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_communicate_repeated_call_after_stdout_close": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "communicate:timeout": 19,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_args_0": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: 2 != None",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_bad_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_cwd": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: 2 != None",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_bad_data": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.SubprocessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_exception_errpipe_normal": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "the original patches CPython's _fork_exec and Popen.__del__; its simulated errpipe is read by CPython"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "setgroup() EPERM; this test may require root."
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_empty_list": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "setgroup() EPERM; this test may require root."
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_extra_groups_invalid_gid_t_values": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_fork_exec": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "the original calls CPython's private _posixsubprocess.fork_exec directly"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_fork_exec_sorted_fd_sanity_check": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "the original calls CPython's private _posixsubprocess.fork_exec with a mutable __int__ callback"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_group": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_group_error": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "setregid() available on platform"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_invalid_args": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_kill": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "kill": 1,
+          "stdout.read_size": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_kill_dead": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "kill": 1,
+          "stdout.read_size": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pass_fds"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pass_fds"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pass_fds"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: 'Stream' object has no attribute 'fileno'",
+        "operations": {
+          "Popen": 2,
+          "communicate": 2,
+          "streams": 2
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_pipe_cloexec_real_tools": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen transport requires a string argv sequence",
+        "operations": {
+          "Popen": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: preexec_fn"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_at_exit": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "assert_python_ok launches a CPython interpreter; the Popen in __del__ runs in that interpreter"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_errpipe_does_not_double_close_pipes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.SubprocessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_exception": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.SubprocessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_fork_failure": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_preexec_gc_module_failure": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_process_group_0": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_remapping_std_fds": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_restore_signals": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_run_abort": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_select_unbuffered": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "TypeError: argument must be an int, or have a fileno() method.",
+        "operations": {
+          "Popen": 1,
+          "stdout.close": 1,
+          "stdout.read_size": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: 'Remote' object has no attribute 'send_signal'",
+        "operations": {
+          "Popen": 1,
+          "stdout.read_size": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_dead": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: 'Remote' object has no attribute 'send_signal'",
+        "operations": {
+          "Popen": 1,
+          "stdout.read_size": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "ChildProcessError: [Errno 10] No child processes",
+        "operations": {
+          "Popen": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_send_signal_race2": {
+      "O0": {
+        "status": "blocked",
+        "reason": "AttributeError: property 'returncode' of 'Remote' object has no setter",
+        "operations": {
+          "Popen": 1,
+          "poll": 53,
+          "returncode": 54,
+          "streams": 1
+        }
+      },
+      "O3": {
+        "status": "blocked",
+        "reason": "AttributeError: property 'returncode' of 'Remote' object has no setter",
+        "operations": {
+          "Popen": 1,
+          "poll": 125,
+          "returncode": 126,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_shell_sequence": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env, shell"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_shell_string": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen transport requires a string argv sequence"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_small_errpipe_write_fd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the control pipes occupy descriptors that the upstream fixture closed",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_specific_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen transport requires a string argv sequence"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_start_new_session": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_stderr_stdin_are_single_inout_fd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_stdout_stderr_are_single_inout_fd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_stdout_stdin_are_single_inout_fd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_stopped": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "ChildProcessError: [Errno 10] No child processes",
+        "operations": {
+          "Popen": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_surrogates_error_message": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.SubprocessError"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_swap_fds": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_swap_std_fds_with_one_closed": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_terminate": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stdout.read_size": 1,
+          "streams": 1,
+          "terminate": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_terminate_dead": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stdout.read_size": 1,
+          "streams": 1,
+          "terminate": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_umask": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_call"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_undecodable_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_user": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_user_error": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "setreuid() available on platform"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "worker fixture: Requires working strace"
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_wait_when_sigchild_ignored": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: filter ('', ResourceWarning) did not catch any warning",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_binary_mode": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_bufsize_equal_one_text_mode": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_bufsize_is_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_bytes_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_bytes_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_call_kwargs": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_call_seq": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_call_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_call_nonzero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_call_zero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_encoding_errors": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_text": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_input_none_universal_newlines": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_nonzero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_stderr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdin_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdin_with_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_stdout_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_check_output_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_class_getitems": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "TypeError: 'method' object is not subscriptable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_eintr": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stdin.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_errors": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: errors"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: unsupported communication input representation",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: unsupported communication input representation",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 7,
+          "communicate": 7,
+          "stderr.closed": 4,
+          "stdin.closed": 4,
+          "stdout.closed": 4,
+          "streams": 7
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_returns": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        },
+        "method_sha256": "9268e8036ce63337675e2a26cd1c00b71cdfd5eddb510a921bbf5401363946fb"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_stderr": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        },
+        "method_sha256": "d26e8c51d429ecd45589fb980f2c07805e81349c23d357a7d78b2cf703f882ea"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdin": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "streams": 1
+        },
+        "method_sha256": "3e4af7f35b67768d0ab540fc19d472be0441519fc7fe279e86dc97bdc86c61c4"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdin_closed_before_call": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "returncode": 1,
+          "stdin.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_stdout": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        },
+        "method_sha256": "1c6f5f200cfd3b1438be8d1b1195f88da5226b4e27b3d81553a7815fb473b7a2"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_input": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: combined nonliteral timeout and communication input",
+        "operations": {
+          "Popen": 1,
+          "kill": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "communicate:timeout": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_absolute_arg": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "Popen:FileNotFoundError": 1,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_bytes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/fb678dc96480aea4a18f4186.py:16:40: Imre: expected str, got bytes; annotations are enforced contracts"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_pathlike": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/3c5c1f46f25883d7d1b9ce4c.py: Expected an expression at byte range 428..429"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_relative_arg": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "Popen:FileNotFoundError": 2,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_cwd_with_relative_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_double_close_on_error": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the race opens descriptors on the host rather than in the native launcher's descriptor table",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_empty_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_executable_takes_precedence": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_executable_with_cwd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_executable_without_cwd": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need an installed Python. See #7774"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_failed_child_execute_fd_leak": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "the original subclasses CPython Popen, overrides _execute_child, and counts descriptors in the host"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_file_not_found_includes_filename": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_file_not_found_with_bad_cwd": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: None != '/some/nonexistent/directory'",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_handles_closed_on_exception": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_invalid_args": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_invalid_bufsize": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_invalid_cmd": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen:ValueError": 2
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_invalid_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_issue8780": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_leaking_fds_on_error": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the 1024 failure attempts use separate native parents; descriptor exhaustion must be observed in one parent",
+        "operations": {
+          "Popen:FileNotFoundError": 1024
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_list2cmdline": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.list2cmdline"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_no_leaking": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "OSError: [Errno 24] Too many open files",
+        "operations": {
+          "Popen": 3,
+          "communicate": 3,
+          "streams": 3
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_nonexisting_with_pipes": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need msvcrt.CrtSetReportMode"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_one_environment_variable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_pathlike_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_pathlike_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_pipesize_default": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pipesize"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_pipesizes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pipesize"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_poll": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: 'Stream' object has no attribute 'fileno'",
+        "operations": {
+          "Popen": 1,
+          "poll": 1,
+          "stdin.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "communicate:timeout": 1,
+          "exit": 1,
+          "returncode": 1,
+          "streams": 1
+        },
+        "native_body_blocker": "Imre does not infer that the except handler calling self.fail() never returns."
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_repr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: <bound method Harness.Popen of <__main__.Harness object at <address>>> does not have the attribute '_execute_child'"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_devnull": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_none": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_pipe": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stderr.read": 1,
+          "streams": 1
+        },
+        "method_sha256": "3faa8fd08713ebcce3dd422f216a5c5c98c207d4dd3eeb5eeaa9241341d4a710"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stderr_redirect_with_no_stdout_redirect": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdin_devnull": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdin_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdin_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdin_none": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdin_pipe": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "stdin.close": 1,
+          "stdin.write": 1,
+          "streams": 1,
+          "wait": 1
+        },
+        "method_sha256": "4be91d3e38077c5299349478ad299dacfbf1766c558c379dd7faf7633392c090"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_devnull": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_filedes_of_stdout": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_none": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_pipe": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stdout.read": 1,
+          "streams": 1
+        },
+        "method_sha256": "80819fcbb79ff23f90e6f6d74fa70d78feb227db1ed979ad6d9745818b7bbd3d"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_stderr_file": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_stdout_stderr_pipe": {
+      "O0/O3": {
+        "status": "native-body-host-fixtures",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stdout.read": 1,
+          "streams": 1
+        },
+        "method_sha256": "c2c8f9bf6c3ffaab945ce0001f38561a32034a731ab88ef1e0b6f40dcfe863f6"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_threadsafe_wait": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: 0 != -9 : unexpected result in wait from main thread",
+        "operations": {
+          "Popen": 1,
+          "kill": 1,
+          "poll": 1,
+          "returncode": 4,
+          "streams": 1,
+          "wait": 3
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_timeout_exception": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_and_text": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_encodings": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/c0339fa49c621d503ae373bb.py:16:13: Imre: process encoding requires literal 'utf-8'"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_input_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_stdin": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_universal_newlines_communicate_stdin_stdout_stderr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_wait": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 2
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_wait_negative_timeout": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need subprocess._winapi"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_wait_timeout": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1,
+          "wait:timeout": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_win32_duplicate_envs": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows only issue"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_win32_invalid_env": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows only issue"
+      }
+    },
+    "test.test_subprocess.ProcessTestCase.test_writes_before_communicate": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdin.write": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_equal_one_binary_mode": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_equal_one_text_mode": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bufsize_is_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_bytes_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_kwargs": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_seq": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_nonzero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_call_zero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_encoding_errors": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_text": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_input_none_universal_newlines": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_nonzero": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.CalledProcessError"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stderr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdin_with_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_stdout_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_check_output_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_class_getitems": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "TypeError: 'method' object is not subscriptable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_eintr": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "worker 1: BrokenPipeError: [Errno 32] Broken pipe"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_epipe_only_stdin": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stdin.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_errors": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: errors"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: unsupported communication input representation",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_memoryview_input_nonbyte": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: unsupported communication input representation",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_buf": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_pipe_fd_leak": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 7,
+          "communicate": 7,
+          "stderr.closed": 4,
+          "stdin.closed": 4,
+          "stdout.closed": 4,
+          "streams": 7
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_returns": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stderr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdin_closed_before_call": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "exit": 1,
+          "returncode": 1,
+          "stdin.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_stdout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_input": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: combined nonliteral timeout and communication input",
+        "operations": {
+          "Popen": 1,
+          "kill": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_communicate_timeout_large_output": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "communicate:timeout": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_absolute_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "Popen:FileNotFoundError": 1,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_bytes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/fb678dc96480aea4a18f4186.py:16:40: Imre: expected str, got bytes; annotations are enforced contracts"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_pathlike": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/3c5c1f46f25883d7d1b9ce4c.py: Expected an expression at byte range 428..429"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_relative_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "Popen:FileNotFoundError": 2,
+          "returncode": 1,
+          "stdout.close": 1,
+          "stdout.read": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_cwd_with_relative_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_double_close_on_error": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the race opens descriptors on the host rather than in the native launcher's descriptor table",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_empty_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_takes_precedence": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_with_cwd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_executable_without_cwd": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need an installed Python. See #7774"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_failed_child_execute_fd_leak": {
+      "O0/O3": {
+        "status": "reference-only",
+        "reason": "the original subclasses CPython Popen, overrides _execute_child, and counts descriptors in the host"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_includes_filename": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.call"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_file_not_found_with_bad_cwd": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: None != '/some/nonexistent/directory'",
+        "operations": {
+          "Popen:FileNotFoundError": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_handles_closed_on_exception": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_args": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_bufsize": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen positional binding"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_cmd": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen:ValueError": 2
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_invalid_env": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.BufferedIOBase'>",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: <__main__.Stream object at <address>> is not an instance of <class 'io.RawIOBase'>",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_issue8780": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.check_output"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_leaking_fds_on_error": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the 1024 failure attempts use separate native parents; descriptor exhaustion must be observed in one parent",
+        "operations": {
+          "Popen:FileNotFoundError": 1024
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_list2cmdline": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.list2cmdline"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_no_leaking": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "OSError: [Errno 24] Too many open files",
+        "operations": {
+          "Popen": 3,
+          "communicate": 3,
+          "streams": 3
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_nonexisting_with_pipes": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need msvcrt.CrtSetReportMode"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_one_environment_variable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: env"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pathlike_executable": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pathlike_executable_replaces_shell": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: executable, shell"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesize_default": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pipesize"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesizes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: pipesize"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_poll": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: 'Stream' object has no attribute 'fileno'",
+        "operations": {
+          "Popen": 1,
+          "poll": 1,
+          "stdin.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_post_timeout_communicate_sends_input": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "communicate:timeout": 1,
+          "exit": 1,
+          "returncode": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_repr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "AttributeError: <bound method Harness.Popen of <__main__.Harness object at <address>>> does not have the attribute '_execute_child'"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_devnull": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "stdin.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_pipe": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stderr.read": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stderr_redirect_with_no_stdout_redirect": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_pipe": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "returncode": 1,
+          "stdin.close": 1,
+          "stdin.write": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_devnull": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_filedes_of_stdout": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_none": {
+      "O0/O3": {
+        "status": "mixed",
+        "reason": "child program exercises subprocess",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "returncode": 1,
+          "stderr.close": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_pipe": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stdout.read": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_file": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: stream transport does not admit external descriptors yet"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_stderr_pipe": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "exit": 1,
+          "stdout.read": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_threadsafe_wait": {
+      "O0/O3": {
+        "status": "failed",
+        "reason": "AssertionError: 0 != -9 : unexpected result in wait from main thread",
+        "operations": {
+          "Popen": 1,
+          "kill": 1,
+          "poll": 1,
+          "returncode": 4,
+          "streams": 1,
+          "wait": 3
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_timeout_exception": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_and_text": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_encodings": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: native compilation: <worker>/c0339fa49c621d503ae373bb.py:16:13: Imre: process encoding requires literal 'utf-8'"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_input_none": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_stdin": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_universal_newlines_communicate_stdin_stdout_stderr": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: Popen options: universal_newlines"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 2
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_negative_timeout": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "need subprocess._winapi"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_wait_timeout": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "streams": 1,
+          "wait": 1,
+          "wait:timeout": 1
+        }
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_duplicate_envs": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows only issue"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_win32_invalid_env": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows only issue"
+      }
+    },
+    "test.test_subprocess.ProcessTestCaseNoPoll.test_writes_before_communicate": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "the fixture selects SelectSelector on the host; the native parent still uses poll",
+        "operations": {
+          "Popen": 1,
+          "communicate": 1,
+          "stderr.close": 1,
+          "stdin.close": 1,
+          "stdin.write": 1,
+          "stdout.close": 1,
+          "streams": 1
+        }
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_capture_output": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_capture_stderr": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_capture_stdout": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check_output_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check_output_stdin_with_input_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check_output_timeout": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_check_zero": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_encoding_warning": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_returncode": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_kwargs": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_an_empty_env": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Maybe test trigger a leak on Ubuntu"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_bytes_path_and_arguments": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_pathlike_path": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_pathlike_path_and_arguments": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_run_with_shell_timeout_and_capture_output": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_stderr_with_capture_output_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_stdout_stdout": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_stdout_with_capture_output_arg": {
+      "O0/O3": {
+        "status": "blocked",
+        "reason": "Unsupported: subprocess.run"
+      }
+    },
+    "test.test_subprocess.RunFuncTestCase.test_timeout": {
+      "O0/O3": {
+        "status": "host-driven-native",
+        "operations": {
+          "run": 1
+        },
+        "fixture": "native_subprocess.py reconstructed host case; original method and assertions"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_call_string": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_close_fds": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_close_fds_with_stdio": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_creationflags": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_empty_attribute_list": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_empty_handle_list": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_invalid_args": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_issue31471": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_kill": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_kill_dead": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_send_signal": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_send_signal_dead": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_encodings": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_sequence": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_shell_string": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_copy": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_startupinfo_keywords": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_terminate": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    },
+    "test.test_subprocess.Win32ProcessTestCase.test_terminate_dead": {
+      "O0/O3": {
+        "status": "reference-skip",
+        "reason": "Windows specific tests"
+      }
+    }
+  }
+}
