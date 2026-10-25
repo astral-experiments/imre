@@ -686,7 +686,7 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
-    PercentScalar,
+    PercentFormat,
     Logging(LogOperation),
     Timed(TimedOperation),
     LogRecord(LogRecordOperation),

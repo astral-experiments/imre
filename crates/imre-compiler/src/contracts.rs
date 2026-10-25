@@ -200,7 +200,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::TimeSleep
-            | Self::PercentScalar
+            | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningReset => Contract::new(true, PreservesLists),
             Self::Formatter(_) => Contract::new(true, PreservesLists),
@@ -834,6 +834,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_time_sleep"
                 | "imre_str_percent_int"
                 | "imre_str_percent_text"
+                | "imre_str_percent_tuple"
                 | "imre_formatter_format"
                 | "imre_formatter_time"
                 | "imre_formatter_message"
