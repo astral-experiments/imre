@@ -788,6 +788,10 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysThreadInfo,
+    SysThreadText {
+        version: bool,
+    },
     SysVersionInfo {
         implementation: bool,
     },

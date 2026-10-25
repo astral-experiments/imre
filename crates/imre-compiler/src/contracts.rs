@@ -560,6 +560,8 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::ExceptionFieldIdentity { .. }
+            | Self::SysThreadInfo
+            | Self::SysThreadText { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName

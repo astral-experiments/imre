@@ -5393,6 +5393,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
+                Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {
                     return Ok(crate::version::integer(crate::version::hex(
                         crate::version::components(false),

@@ -4876,6 +4876,34 @@ impl Emitter<'_, '_> {
                     Some(root),
                 )
             }
+            Builtin::SysThreadInfo => {
+                let text = self.module.types.optional(Type::Str);
+                let field = |version| Expr {
+                    ty: text,
+                    kind: ExprKind::Builtin(Builtin::SysThreadText { version }, vec![]),
+                };
+                // The Rust runtime does not expose either Python thread-lock implementation.
+                let lock = Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                };
+                self.tuple(
+                    returns,
+                    &[field(false), lock, field(true)],
+                    Some("sys_thread_info"),
+                )
+            }
+            Builtin::SysThreadText { version } => {
+                let pointer = self.instruction(format!(
+                    "call ptr @imre_sys_thread_text(i32 {})",
+                    u32::from(*version)
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
+                    small_integer: false,
+                }
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
@@ -8608,6 +8636,7 @@ declare i32 @imre_errno_has(ptr,ptr)
 declare ptr @imre_errno_lookup(ptr,ptr,i32)
 declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
+declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
