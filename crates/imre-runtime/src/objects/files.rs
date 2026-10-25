@@ -555,7 +555,10 @@ pub unsafe extern "C" fn imre_text_write_parts(
     count: usize,
 ) -> u32 {
     // SAFETY: all fragments remain rooted and immutable through assembly.
-    let text = unsafe { concat_parts(parts, count) };
+    let text = match unsafe { concat_parts(parts, count) } {
+        Ok(text) => text,
+        Err(error) => return error.returning(0),
+    };
     // SAFETY: the file remains rooted; no callback or storage reference escapes.
     // Assembly precedes even the stream-state check, preserving evaluation order.
     let result = unsafe {

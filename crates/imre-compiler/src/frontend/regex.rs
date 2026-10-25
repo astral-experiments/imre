@@ -256,6 +256,51 @@ impl Checker<'_> {
         self.fixed_regex(&call.arguments.args[0], verbose)
     }
 
+    pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let (
+            [
+                ast::Expr::StringLiteral(pattern),
+                ast::Expr::StringLiteral(replacement),
+                text,
+            ],
+            [],
+        ) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        )
+        else {
+            return Err(error(
+                self.source,
+                call,
+                "re.sub expects a literal str pattern, a literal str replacement, and a str input",
+            ));
+        };
+        check_string(pattern, self.source)?;
+        check_string(replacement, self.source)?;
+        let fixed = crate::fixed_regex::translate(pattern.value.to_str(), false)
+            .map_err(|msg| error(self.source, pattern, &msg))?;
+        if fixed.may_match_empty {
+            return Err(error(
+                self.source,
+                pattern,
+                "re.sub requires a nonempty match",
+            ));
+        }
+        let template = crate::fixed_regex::replacement(replacement.value.to_str(), &fixed.groups)
+            .map_err(|msg| error(self.source, replacement, msg))?;
+        let pattern = Expr {
+            ty: Type::RegexPattern,
+            kind: ExprKind::Builtin(Builtin::RegexCompile(fixed.source), vec![]),
+        };
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::RegexSub(template),
+                vec![pattern, self.expr_expected(text, Type::Str)?],
+            ),
+        })
+    }
+
     pub(super) fn search_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let verbose = self.regex_verbose(call, 2)?;
         let pattern = &call.arguments.args[0];

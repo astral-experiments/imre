@@ -190,6 +190,7 @@ impl Builtin {
             Self::BytesGet
             | Self::Decode
             | Self::DecodeSplitLines
+            | Self::SplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
@@ -211,6 +212,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexSub(_)
             | Self::StringJoin
             | Self::StringReplace
             | Self::StringGet
@@ -257,7 +259,6 @@ impl Builtin {
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
-            | Self::SplitLines
             | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
@@ -433,7 +434,7 @@ impl Binary {
     /// Includes checked byte concatenation and conversion of mixed integer/float operands.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
-            || (matches!(self, Self::Concat) && left == Type::Bytes)
+            || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
             || matches!(
                 (left, right),
                 (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -574,9 +575,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
                 | "imre_bytes_slice"
+                | "imre_str_concat"
                 | "imre_bytes_concat"
                 | "imre_bytes_repeat"
                 | "imre_bytes_decode_splitlines"
+                | "imre_str_splitlines"
                 | "imre_bytes_decode"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
