@@ -1,9 +1,10 @@
 """Run pinned cache methods with a persistent native cache for each decorated function."""
 import argparse
-from collections import Counter, namedtuple
+from collections import Counter
 import inspect
 import json
 from pathlib import Path
+import random
 import select
 import subprocess
 import sys
@@ -21,8 +22,23 @@ class UnsupportedFixture(Exception):
     pass
 
 
-Info = namedtuple("CacheInfo", "hits misses maxsize currsize")
 length = len
+
+
+class Snapshot(tuple):
+    """Transport native tuple values; named access is host work until CacheInfo is native."""
+
+    def __new__(cls, values, counts):
+        result = super().__new__(cls, values)
+        result.counts = counts
+        return result
+
+    def __getattr__(self, name):
+        fields = ("hits", "misses", "maxsize", "currsize")
+        if name not in fields:
+            raise AttributeError(name)
+        self.counts["host_named_fields"] += 1
+        return self[fields.index(name)]
 
 
 class Build:
@@ -112,6 +128,7 @@ class Wrapper:
                 self.send(-1, token)
             reply = self.read()
         if reply == "raised" and original is not None:
+            self.counts["host_exception_state"] += 1
             raise original
         if original is not None or not reply.startswith("result "):
             raise RuntimeError(f"unexpected native cache response: {reply}")
@@ -124,7 +141,8 @@ class Wrapper:
         if op != "info":
             raise RuntimeError(op)
         self.counts["snapshots"] += 1
-        return Info(int(hits), int(misses), None if size == "None" else int(size), int(current))
+        return Snapshot((int(hits), int(misses), None if size == "None" else int(size), int(current)),
+                        self.counts)
 
     def cache_clear(self):
         self.start(self.shape if self.shape is not None else (int,) * self.arity)
@@ -197,7 +215,8 @@ def exercise(build, case, original, counts):
             wrapper.close()
     if not counts["lookups"] and not counts["snapshots"]:
         raise UnsupportedFixture("no native cache operation executed")
-    return {"status": "mixed" if counts["host_wrapper_metadata"] else "host_driven_native_operation", **counts}
+    mixed = counts["host_wrapper_metadata"] or counts["host_named_fields"] or counts["host_exception_state"]
+    return {"status": "mixed" if mixed else "host_driven_native_operation", **counts}
 
 
 def main():
@@ -235,7 +254,13 @@ def main():
                 else:
                     counts[name] = Counter()
                     executions[name] = lambda case, method: exercise(build, case, method, counts[case.id()])
-            evidence, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
+            # Both optimization levels receive the same stream of calls from random.choice.
+            state = random.getstate()
+            try:
+                random.seed(0)
+                evidence, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
+            finally:
+                random.setstate(state)
             if skips:
                 raise RuntimeError(f"unexpected skips: {skips}")
             for name, entries in evidence.items():
