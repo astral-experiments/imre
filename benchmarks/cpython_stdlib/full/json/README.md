@@ -21,6 +21,8 @@ On Linux, 215 executions passed. `TestCEncodeBasestringAscii.test_overflow` has 
 
 The [v1 report](evidence-linux.json) covers all 216 occurrences at each optimization level, including the package submodules, both backend fixtures and both CLI variants. Eighteen complete native methods ran under 36 host fixture IDs; 45 additional fixture IDs called native operations from host methods. The other 135 occurrences are 83 blocked, two failed, 38 reference-only, 11 individually reviewed backend/private API exclusions, and the single upstream skip. The report includes partial calls, exact native recursion exceptions, concrete diagnostics and source locations.
 
+These measurements used the iterative-decoder revision `beb93cb91524e72a9e12b7a90b7189c5951f79c0` from [#770](https://github.com/astral-sh/imre/pull/770). The [complete-method sweep](routine-sweep-linux.json) and [round-trip report](roundtrips-linux.json) identify the compiler and runtime binaries by SHA-256. A later main checkout can reproduce the measurements with the commands below.
+
 ```sh
 python -B benchmarks/cpython_stdlib/full/json/evidence.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
