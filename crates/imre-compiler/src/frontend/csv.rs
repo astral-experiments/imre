@@ -109,7 +109,12 @@ impl Checker<'_> {
         if matches!(payload.unwrap_or(ty), Type::Str | Type::StrLiteral(_)) {
             return Ok([value, string("NoneType")]);
         }
-        let invalid = match payload.unwrap_or(ty) {
+        let concrete = payload.unwrap_or(ty);
+        let record = self
+            .types
+            .namedtuple_definition(concrete)
+            .and_then(|definition| self.types.namedtuple(definition));
+        let invalid = match concrete {
             Type::None => "NoneType",
             Type::Bool => "bool",
             Type::Int => "int",
@@ -118,7 +123,9 @@ impl Checker<'_> {
             Type::ListInt | Type::List(_) => "list",
             Type::Dict(_) => "dict",
             Type::Set(_) => "set",
-            Type::Tuple(_) => "tuple",
+            Type::Tuple(_) => record
+                .as_ref()
+                .map_or("tuple", |record| record.name.as_str()),
             Type::Class(id) => self.classes.declarations.definitions[id].name.as_str(),
             _ => {
                 return Err(error(

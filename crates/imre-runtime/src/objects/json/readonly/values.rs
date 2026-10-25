@@ -6,6 +6,16 @@ use super::{Node, View};
 use crate::objects::exceptions::push_string_repr;
 
 impl View {
+    /// Containers use identity before comparing their elements. Direct equality
+    /// of a floating point NaN is false even for the same operand.
+    pub(super) fn equal_operand(&self, right: &Self) -> bool {
+        let is_nan = |view: &Self| {
+            matches!(&view.nodes[view.index], Node::ConstantNan)
+                || matches!(&view.nodes[view.index], Node::Float(f) if f.is_nan())
+        };
+        !is_nan(self) && !is_nan(right) && self.equal(right)
+    }
+
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
         let left_root = self.snapshot_root();
         let right_root = right.snapshot_root();
@@ -29,7 +39,7 @@ impl View {
             return true;
         }
         match (left, right) {
-            (Node::Null, Node::Null) => true,
+            (Node::Null, Node::Null) | (Node::ConstantNan, Node::ConstantNan) => true,
             (Node::Datetime(a), Node::Datetime(b)) => a == b,
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
@@ -88,6 +98,7 @@ impl View {
                 }
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
+            Node::ConstantNan => output.push_str("nan"),
             Node::String(s) => push_string_repr(s, output),
             Node::Deferred(array) => array.view().write_repr(output),
             Node::Array(items) => {

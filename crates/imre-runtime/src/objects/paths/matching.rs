@@ -86,6 +86,16 @@ fn glob_matches(
     if sensitive && !pattern.contains(['*', '?', '[']) {
         return Ok(path == pattern);
     }
+    Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+}
+
+/// Compile once for a filesystem selector that checks many names against the same pattern.
+pub(super) fn glob_regex(
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<Regex> {
     let slash = || Hir::literal([sep as u8]);
     let mut parts = pattern.split(sep).peekable();
     let mut expression = vec![Hir::look(Look::Start)];
@@ -113,10 +123,9 @@ fn glob_matches(
         }
     }
     expression.push(Hir::look(Look::End));
-    let regex = Regex::builder()
+    Regex::builder()
         .build_from_hir(&Hir::concat(expression))
-        .map_err(|e| Error::new(Kind::MemoryError, e.to_string()))?;
-    Ok(regex.is_match(path))
+        .map_err(|e| Error::new(Kind::MemoryError, e.to_string()))
 }
 
 /// A normalized anchor is a single part, even for a Windows UNC share. A

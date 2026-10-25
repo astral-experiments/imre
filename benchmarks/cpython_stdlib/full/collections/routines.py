@@ -21,12 +21,17 @@ sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain, native_method, run_in_fixtures
 from native_counter import assertion_fixture
+from deque_methods import METHODS as DEQUE_METHODS, method_fixture as deque_fixture
 
 
 COUNTER_OPERATIONS = {
     "test_total": "Counter construction and total()",
     "test_invariant_for_the_in_operator": "Counter construction, key iteration, subscription and membership",
     "test_eq": "Counter equality and inequality with missing zero counts",
+    "test_le": "Counter multiset inclusion with missing zero counts",
+    "test_lt": "Counter strict multiset inclusion with missing zero counts",
+    "test_ge": "Counter multiset containment with missing zero counts",
+    "test_gt": "Counter strict multiset containment with missing zero counts",
 }
 EMPTY = {f"test.test_deque.TestSequence.{method}" for method in
          ("test_getitem", "test_getslice", "test_subscript")}
@@ -105,12 +110,15 @@ def main():
     parser.add_argument("--opt-level", choices=(0, 3), type=int, required=True)
     parser.add_argument("--compiler-revision", required=True)
     parser.add_argument("--class", dest="class_name", help="probe only this class")
+    parser.add_argument("--module", help="probe one complete upstream module in the manifest")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("use a test-enabled CPython 3.14.5")
     import test
 
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
+    if args.module and args.module not in manifest["modules"]:
+        parser.error("--module must name one of the original suites in UPSTREAM.json")
     reference = json.loads((HERE / "reference-linux.json").read_text())["reference"]
     upstream = Path(test.__file__).resolve().parents[2]
     verify_files(HERE / "upstream", manifest["files"])
@@ -118,6 +126,8 @@ def main():
     tools = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
     results = {}
     for name in manifest["modules"]:
+        if args.module and name != args.module:
+            continue
         try:
             suite = load_suite(name)
         except unittest.SkipTest:
@@ -152,6 +162,8 @@ def main():
                 if case_id == f"test.test_collections.TestCounter.{method}" and method in COUNTER_OPERATIONS:
                     fixture = assertion_fixture(method, "NativeCase")
                     operation = ("imre", COUNTER_OPERATIONS[method])
+                elif case_id == f"test.test_deque.TestBasic.{method}" and method in DEQUE_METHODS:
+                    fixture, operation = deque_fixture(method, sys.modules[name].BIG)
                 elif case_id in EMPTY:
                     if len(node.body) != 1 or not isinstance(node.body[0], ast.Pass):
                         raise ValueError(f"{case_id} is no longer an empty upstream test")
@@ -178,8 +190,10 @@ def main():
                     results[case_id].update(result="fixture-skip", reason=detail)
                 if any("result" not in results[key] for key in executors):
                     raise ValueError("missing native routine outcome")
-    if not args.class_name and set(reference) != set(results):
-        raise ValueError(f"routine IDs differ from the reference: {set(reference) ^ set(results)}")
+    expected = {name for name in reference if not args.module or name.startswith(args.module + ".")
+                or (args.module == "test.test_collections" and name.startswith("collections."))}
+    if not args.class_name and expected != set(results):
+        raise ValueError(f"routine IDs differ from the reference: {expected ^ set(results)}")
     report = {"cpython_commit": manifest["commit"], "compiler_revision": args.compiler_revision,
               "opt_level": args.opt_level, "reference_denominator": len(reference),
               "routines": results}

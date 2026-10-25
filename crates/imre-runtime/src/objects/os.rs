@@ -6,6 +6,7 @@ use super::files::errno_error;
 use super::{Bytes, Int, Str};
 use std::ffi::CString;
 use std::io;
+use std::rc::Rc;
 
 macro_rules! open_flags {
     ($($name:ident = $flag:ident),* $(,)?) => {$(
@@ -33,7 +34,7 @@ pub unsafe extern "C" fn imre_os_open(
     dir_fd: usize,
 ) -> usize {
     // SAFETY: the caller's representation tag describes this rooted path.
-    let path: &[u8] = unsafe {
+    let spelling: &[u8] = unsafe {
         if bytes == 0 {
             (&*path.cast::<Str>()).as_bytes()
         } else {
@@ -42,7 +43,7 @@ pub unsafe extern "C" fn imre_os_open(
     };
     finish(
         (|| {
-            let name = CString::new(path).map_err(|_| {
+            let name = CString::new(spelling).map_err(|_| {
                 Error::new(Kind::ValueError, "open: embedded null character in path")
             })?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
@@ -60,17 +61,19 @@ pub unsafe extern "C" fn imre_os_open(
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(super::files::errno_with_paths(error, |message| {
-                        message.push_str(": ");
+                    // SAFETY: retain the same rooted input object, including raw byte paths.
+                    let filename = unsafe {
                         if bytes == 0 {
-                            super::exceptions::push_string_repr(
-                                std::str::from_utf8(path).expect("Str is UTF-8"),
-                                message,
-                            );
+                            super::exceptions::Filename::Str(super::acquire_rc(path as usize))
                         } else {
-                            super::bytes::write_repr(message, path);
+                            super::exceptions::Filename::Bytes(super::acquire_rc(path as usize))
                         }
-                    }));
+                    };
+                    return Err(super::files::errno_with_filenames(
+                        error,
+                        Some(filename),
+                        None,
+                    ));
                 }
             }
         })(),
@@ -97,6 +100,27 @@ fn checked(ret: libc::c_int) -> Result<libc::c_int> {
     } else {
         Ok(ret)
     }
+}
+
+/// Like strerror(3), describe known and unknown target errno values.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
+    finish(
+        c_int(code).and_then(|code| {
+            // SAFETY: copy libc's terminated string before any further calls.
+            let message = unsafe { libc::strerror(code) };
+            if message.is_null() {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "strerror() argument out of range",
+                ));
+            }
+            // SAFETY: the non-null pointer returned above remains live during this copy.
+            let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+            Ok(Rc::into_raw(Rc::new(Str::from(text.as_ref()))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Close exactly once: retrying an interrupted close can close a reused fd.

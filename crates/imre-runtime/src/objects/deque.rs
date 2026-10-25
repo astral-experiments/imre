@@ -3,7 +3,6 @@
 
 use std::collections::VecDeque;
 
-use super::mappings::IterationError;
 use super::words::WordKind;
 use super::*;
 
@@ -332,9 +331,7 @@ pub(super) struct DequeIterator {
 }
 
 impl DequeIterator {
-    pub(super) fn next(
-        &mut self,
-    ) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, IterationError> {
+    pub(super) fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
         // SAFETY: a cursor and its independently rooted deque are distinct
         // allocations; cloning a word cannot run a destructor or mutate storage.
         unsafe {
@@ -345,7 +342,10 @@ impl DequeIterator {
                 }
                 if self.state != deque.state {
                     self.remaining = 0;
-                    return Err(IterationError::DequeMutation);
+                    return Err(Error::new(
+                        Kind::RuntimeError,
+                        "deque mutated during iteration",
+                    ));
                 }
                 if self.remaining == 0 {
                     return Ok(None);

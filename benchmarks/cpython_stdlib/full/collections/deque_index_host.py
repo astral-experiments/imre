@@ -141,6 +141,7 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--opt-level", type=int, choices=(0, 3), required=True)
+    parser.add_argument("--compiler-revision")
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         parser.error("use test-enabled CPython 3.14.5")
@@ -185,8 +186,11 @@ def main():
 
         methods = {f"test.test_deque.TestBasic.{name}": execute for name in ("test_getitem", "test_delitem")}
         evidence, failures, skips = run_in_fixtures(load_suite("test.test_deque"), methods)
-    args.result.write_text(json.dumps({"cpython_commit": manifest["commit"], "opt_level": args.opt_level,
-                                      "tests": evidence, "failures": failures, "skips": skips}, indent=2) + "\n")
+    report = {"cpython_commit": manifest["commit"], "opt_level": args.opt_level,
+              "tests": evidence, "failures": failures, "skips": skips}
+    if args.compiler_revision:
+        report["compiler_revision"] = args.compiler_revision
+    args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(bool(failures or skips) or evidence.keys() != methods.keys())
 
 

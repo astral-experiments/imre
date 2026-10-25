@@ -3665,9 +3665,14 @@ impl Emitter<'_, '_> {
             | Builtin::DirectoryContextView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
-            Builtin::StringContains => {
+            Builtin::StringContains | Builtin::ExceptionMatchesAny => {
+                let name = if matches!(builtin, Builtin::ExceptionMatchesAny) {
+                    "imre_exception_matches_any"
+                } else {
+                    "imre_str_contains"
+                };
                 let found = self.instruction(format!(
-                    "call i32 @imre_str_contains(ptr {}, ptr {})",
+                    "call i32 @{name}(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -3838,6 +3843,7 @@ impl Emitter<'_, '_> {
                     ConfigureName => "imre_log_config_named",
                     Name => "imre_log_name",
                     Parent => "imre_log_parent",
+                    Children => "imre_log_children",
                     Root => "imre_log_root",
                     Level => "imre_log_level",
                     EffectiveLevel => "imre_log_effective_level",
@@ -4038,6 +4044,17 @@ impl Emitter<'_, '_> {
             Builtin::JsonGetReceiver => {
                 self.call("imre_json_get_receiver", returns, &[&args[0].value])
             }
+            Builtin::JsonEqual => {
+                let equal = self.checked_instruction(format!(
+                    "call i32 @imre_json_equal(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {equal}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonIsInt => {
                 let bit = self.instruction(format!(
                     "call i32 @imre_json_is_int(ptr {})",
@@ -4084,13 +4101,17 @@ impl Emitter<'_, '_> {
                     let text_indent =
                         u32::from(matches!(indent_ty, Type::Str | Type::StrLiteral(_)));
                     let nan = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
+                    let sort =
+                        self.instruction(format!("zext i1 {} to i32", args[4].value.operand));
+                    let separators = self.word(&args[5].value);
+                    let sep_schema = self.output.global_ref(json::schema_name(args[5].value.ty));
                     let common = format!(
-                        "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}"
+                        "i64 {word}, ptr @{schema}, i64 {indent}, i32 {text_indent}, i32 {ascii}, i32 {nan}, i32 {sort}, i64 {separators}, ptr @{sep_schema}"
                     );
                     if matches!(builtin, Builtin::JsonDump(_)) {
                         self.checked_instruction(format!(
                             "call i32 @imre_json_dump({common}, ptr {})",
-                            args[4].value.operand
+                            args[6].value.operand
                         ));
                         "0".to_owned()
                     } else {
@@ -4145,18 +4166,11 @@ impl Emitter<'_, '_> {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_inject(value, returns);
             }
-            Builtin::ExactRecord(class) => {
-                let layout = self.output.global_ref(format!("layout_class_{class}"));
-                let matched = self.instruction(format!(
-                    "call i32 @imre_record_has_type(ptr {}, ptr @{layout})",
-                    args[0].value.operand
-                ));
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i32 {matched}, 0")),
-                    small_integer: false,
-                }
-            }
+            Builtin::ExactRecord(class) => Value {
+                ty: Type::Bool,
+                operand: self.exact_record_test(&args[0].value, *class),
+                small_integer: false,
+            },
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);
@@ -4169,6 +4183,19 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::IntegerPower => {
+                self.call("imre_int_pow", Type::Int, &[&args[0].value, &args[1].value])
+            }
+            Builtin::NegativeIntegerPower => self.call(
+                "imre_int_negative_pow",
+                Type::Float,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::ModularPower => self.call(
+                "imre_int_modpow",
+                Type::Int,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
@@ -4568,6 +4595,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::ImportErrorReset => {
                 self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
+                none()
+            }
+            Builtin::ImportErrorRejectReset => {
+                self.void_call(
+                    "imre_import_error_reject_reset",
+                    &[&args[0].value, &args[1].value, &args.last().unwrap().value],
+                );
                 none()
             }
             Builtin::ImportErrorField(field) => Value {
@@ -5058,6 +5092,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
+            Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::DequeNew => {
                 let element = self.module.types.deque_element(returns).unwrap();
@@ -5145,6 +5180,22 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::CounterTotal => self.call("imre_counter_total", returns, &[&args[0].value]),
+            Builtin::CounterMostCommon => {
+                let pair = self.module.types.element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(pair)));
+                let limit = self.word(&args[1].value);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_counter_most_common(ptr {}, i64 {limit}, ptr @{layout})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultListDict => {
                 let (key, list) = self.module.types.mapping(returns).unwrap();
                 let element = self.module.types.element(list).unwrap();
@@ -5167,6 +5218,17 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_counter_update", &[&args[0].value, &args[1].value]);
                 none()
             }
+            Builtin::CounterMath { op, inplace } => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_counter_math(ptr {}, ptr {}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    args.last().unwrap().value.operand,
+                    *op as u32,
+                    u32::from(*inplace)
+                )),
+                small_integer: false,
+            },
             Builtin::KeyUnion
             | Builtin::KeySet
             | Builtin::KeyIntersection
@@ -6558,8 +6620,8 @@ declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
-declare ptr @imre_popen_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext)
-declare i64 @imre_call_command(ptr, i32, ptr, ptr, i32, i64, i1 zeroext, i32, i64, i1 zeroext)
+declare ptr @imre_popen_config(ptr)
+declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
 declare ptr @imre_popen_pipe(ptr, i32)
 declare i64 @imre_file_fileno(ptr)
 declare i64 @imre_popen_pid(ptr)
@@ -6577,6 +6639,8 @@ declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
+declare i64 @imre_os_error_field(ptr, i32)
+declare ptr @imre_os_strerror(i64)
 @imre_os_o_rdonly = external constant i64
 @imre_os_o_wronly = external constant i64
 @imre_os_o_rdwr = external constant i64
@@ -6597,7 +6661,7 @@ declare void @imre_os_set_blocking(i64, i64)
 declare i32 @imre_os_get_inheritable(i64)
 declare void @imre_os_set_inheritable(i64, i64)
 declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
-declare ptr @imre_shutil_copyfile(ptr, i32, ptr, i32, i32)
+declare i64 @imre_shutil_copy(i32, ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
 declare i64 @imre_subprocess_error_field(ptr, i32)
 declare i64 @imre_subprocess_timeout_field(ptr, i32)
@@ -6605,6 +6669,7 @@ declare ptr @imre_path_new(ptr)
 declare ptr @imre_path_join(ptr, ptr)
 declare ptr @imre_path_text(ptr)
 declare ptr @imre_path_name(ptr)
+declare i64 @imre_path_count_part(ptr, ptr)
 declare ptr @imre_path_with_name(ptr, ptr)
 declare ptr @imre_path_stem(ptr)
 declare ptr @imre_path_suffix(ptr)
@@ -6653,6 +6718,7 @@ declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
 declare ptr @imre_path_iter(ptr, ptr)
+declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
 declare ptr @imre_path_next(ptr)
 declare i64 @imre_float_box(double)
 declare double @imre_float_unbox(i64)
@@ -6739,6 +6805,7 @@ declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
 declare i32 @imre_exception_matches(ptr, i32)
+declare i32 @imre_exception_matches_any(ptr, ptr)
 declare i64 @imre_string_iterable_len(i64)
 declare ptr @imre_string_iterable_list(i64)
 declare void @imre_union_retain(i64)
@@ -6748,6 +6815,7 @@ declare ptr @imre_exception_message(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
+declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
@@ -6775,6 +6843,7 @@ declare ptr @imre_json_iter(ptr)
 declare i64 @imre_json_len(ptr)
 declare i64 @imre_json_get(ptr, ptr, i64, i32, i32, i64)
 declare ptr @imre_json_add(ptr, ptr)
+declare i32 @imre_json_equal(ptr, ptr)
 declare ptr @imre_json_get_receiver(ptr)
 declare ptr @imre_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
 declare i32 @imre_json_is_int(ptr)
@@ -6784,8 +6853,8 @@ declare i32 @imre_json_null(ptr)
 declare ptr @imre_toml_decode(ptr, ptr)
 declare ptr @imre_toml_keys(ptr)
 declare ptr @imre_json_encode(i64, ptr, i64, i32)
-declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32)
-declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, ptr)
+declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
+declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
 declare void @imre_record_release(ptr)
@@ -6857,6 +6926,7 @@ define internal i64 @imre_seq_borrow_index_proven_fast(ptr %sequence, i64 %index
 }
 declare ptr @imre_seq_repeat(ptr, i64)
 declare ptr @imre_dict_new(i32, i32)
+declare ptr @imre_dict_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
 declare ptr @imre_deque_new(i32, i64)
 declare void @imre_deque_append(ptr, i64, i32, i32)
@@ -6873,8 +6943,10 @@ declare i64 @imre_deque_maxlen(ptr)
 declare ptr @imre_deque_iter(ptr, i32)
 declare ptr @imre_counter_new(i32)
 declare void @imre_counter_update(ptr, ptr)
+declare ptr @imre_counter_math(ptr, ptr, i32, i32)
 declare i64 @imre_dict_sum_values(ptr, i64)
 declare i64 @imre_counter_total(ptr)
+declare ptr @imre_counter_most_common(ptr, i64, ptr)
 declare i32 @imre_counter_subset(ptr, ptr, i32)
 declare ptr @imre_key_union(ptr, ptr)
 declare ptr @imre_key_difference(ptr, ptr)
@@ -7042,6 +7114,7 @@ declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)
 declare i64 @imre_log_level(ptr)
 declare i64 @imre_log_effective_level(ptr)
+declare ptr @imre_log_children(ptr)
 declare void @imre_log_set_level(ptr, i64)
 declare i1 @imre_log_enabled(ptr, i64)
 declare void @imre_log_emit(ptr, i64, ptr)
@@ -7079,6 +7152,9 @@ declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
+declare i64 @imre_int_pow(i64, i64)
+declare double @imre_int_negative_pow(i64, i64)
+declare i64 @imre_int_modpow(i64, i64, i64)
 declare ptr @imre_list_new()
 declare i64 @imre_list_sum(ptr, i64)
 declare i64 @imre_list_slice_sum(ptr, i64, i64, i64)

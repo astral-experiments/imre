@@ -11,8 +11,9 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
+import native_copy
 import which_cases
-from suite_evidence import write_reports
+from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, run_evidence
 
@@ -72,8 +73,18 @@ def run_level(args, module, reference, level, directory):
     tools = Toolchain(args.imre, args.runtime, args.clang, level)
     executions, calls = which_cases.executors(tools, directory, SOURCE, module)
     executions.update(copyfile.executors(args, module, directory, level, with_roles=True))
+    executions.update(native_copy.executors(args, module, directory, level, with_roles=True))
+    preflight = {}
+    for name, reason in native_copy.MOCK_CASES.items():
+        test_id = module.TestCopy(name).id()
+        if reference["reference"][test_id] == "pass":
+            preflight[test_id, 1] = {"outcome": "blocked", "reason": reason,
+                                     "roles": roles(body="unobserved", assertions="unobserved",
+                                                    operation="unobserved", fixture="unobserved"),
+                                     "evidence": {"operation": "shutil metadata", "fixture": reason}}
     suite = load_suite(reference["module"])
-    report = run_evidence(suite, executions, reference, level, exceptions=reference_skips(suite, reference, level))
+    report = run_evidence(suite, executions, reference, level, preflight=preflight,
+                          exceptions=reference_skips(suite, reference, level))
     for row in report["records"]:
         if row["outcome"] == "failure" and calls.get(row["id"]):
             # A failed assertion prevents the adapter from returning its normal
