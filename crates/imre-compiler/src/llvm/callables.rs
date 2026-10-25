@@ -16,6 +16,7 @@ pub(super) fn adapters(
     let mut invoked = false;
     let mut enum_receiver = false;
     let mut object_receiver = false;
+    let mut int_list_receiver = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -30,7 +31,8 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
                 object_receiver |= receiver
                     .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::Deque(_)));
+                    .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
+                int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });
@@ -46,6 +48,7 @@ pub(super) fn adapters(
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", "i32 0, i32 10", 2)))
         .chain(object_receiver.then_some(("callable_object", "i32 0, i32 5", 2)))
+        .chain(int_list_receiver.then_some(("callable_list", "i32 0, i32 4", 2)))
         .chain(cached.then_some(("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4)))
     {
         writeln!(
@@ -147,6 +150,7 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
+        let bound = receiver.is_some();
         let receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its
         // nonowning tag in that word; only its adapter converts the bits back.
@@ -160,9 +164,11 @@ impl Emitter<'_, '_> {
             "callable_enum"
         } else if receiver
             .as_ref()
-            .is_some_and(|r| matches!(r.ty, Type::Deque(_)))
+            .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)))
         {
             "callable_object"
+        } else if receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt) {
+            "callable_list"
         } else {
             "callable"
         };
@@ -196,6 +202,23 @@ impl Emitter<'_, '_> {
             self.forget(&receiver);
         } else {
             self.line(format!("store ptr null, ptr {context}"));
+        }
+        if !bound
+            && policy.is_none()
+            && self.module.types.is_plain_callback(ty)
+            && let Some(site) = self.module.types.function_site(function)
+        {
+            let module = self.pooled_literal(site.module.as_bytes(), Type::Str);
+            let name = self.pooled_literal(site.qualname.as_bytes(), Type::Str);
+            let short_name = self.pooled_literal(
+                site.qualname.rsplit('.').next().unwrap().as_bytes(),
+                Type::Str,
+            );
+            self.line(format!("call void @imre_typing_declare(ptr {}, i32 {function}, ptr {}, ptr {}, ptr {}, i32 {})",
+                result.operand,module.operand,name.operand,short_name.operand,site.line));
+            self.release(&short_name);
+            self.release(&name);
+            self.release(&module);
         }
         result
     }

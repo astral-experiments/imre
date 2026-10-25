@@ -65,6 +65,10 @@ def observe(name, level, body, body_rev, probes):
             if counts.get("parameter_reads"):
                 detail = (f"Imre constructed {counts['parameter_reads']} fresh cache_parameters dictionaries. "
                           "CPython decoded the returned values and ran the original dictionary assertions.")
+            if fields := counts.get("native_named_fields"):
+                detail += f" Imre read {fields} named fields on the original retained cache snapshots."
+            if expected := counts.get("native_expected_constructors"):
+                detail += f" Imre constructed {expected} expected _CacheInfo tuples; CPython compared the transported values."
             if bindings:
                 detail = ("CPython saved, replaced, looked up and restored its live builtins.len binding. "
                           "Imre chose hits, misses and evictions; the miss callback invoked the original host len. "

@@ -421,7 +421,6 @@ static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
 /// Capture buffering from the startup descriptors before user code can replace them.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_stdio_init() {
-    LazyLock::force(&integer_text::MAX_STR_DIGITS);
     initialize_io();
     LazyLock::force(&STDIO_SETTINGS);
 }
@@ -860,12 +859,17 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
     // SAFETY: the caller keeps the integer alive through formatting.
     let value = unsafe { Int::borrow(value) };
-    let text = if let Some(value) = value.as_small() {
-        Str::new(itoa::Buffer::new().format(value))
-    } else {
-        Str::from(value.big().to_string())
-    };
-    StrOwner::into_raw(StrOwner::new(text))
+    match integer_text::decimal_string(&value).and_then(checked_owned_str) {
+        Ok(text) => text,
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+/// Transfer a freshly formatted string to generated code, preserving allocation failure.
+fn checked_owned_str(text: Str) -> Result<*const Str> {
+    StrOwner::try_new(text)
+        .map(StrOwner::into_raw)
+        .map_err(|_| Error::allocation())
 }
 
 /// Returns an owned Python spelling for a compiler-validated boolean.
@@ -1168,6 +1172,16 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
             drop(value);
         }
     }
+}
+
+/// Reverse the tagged integer words in place without changing any owner.
+///
+/// # Safety
+/// The caller keeps this list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
+    // SAFETY: only swaps within the buffer occur under the exclusive borrow.
+    unsafe { (&*list).0.with_mut(|values| values.reverse()) };
 }
 
 /// Returns an owned nonzero integer word, or raw zero with a pending error.

@@ -92,15 +92,6 @@ impl Checker<'_> {
             if value.ty == Type::Str {
                 value
             } else {
-                // The boxed formatter enforces Python's decimal digit limit for integers.
-                let value = if value.ty == Type::Int {
-                    Expr {
-                        ty: Type::ObjectValue,
-                        kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
-                    }
-                } else {
-                    value
-                };
                 Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::Str, vec![value]),

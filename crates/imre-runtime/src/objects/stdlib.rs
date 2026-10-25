@@ -505,9 +505,17 @@ pub(super) fn check_keyword_field(name: &str) -> crate::Result<()> {
     Ok(())
 }
 
+enum FormatValue<'a> {
+    Text(&'a str),
+    Integer(std::mem::ManuallyDrop<crate::Int>),
+}
+
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
-fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
+fn format_named<'a>(
+    template: &str,
+    field: impl Fn(&str) -> Option<FormatValue<'a>>,
+) -> crate::Result<Str> {
     // A long template can consist entirely of fields with empty replacements.
     let mut result = Str::default();
     let mut rest = template;
@@ -574,7 +582,12 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 "Imre str.format supports plain named fields and !s",
             ));
         }
-        result.push_str(text);
+        match text {
+            FormatValue::Text(text) => result.push_str(text),
+            FormatValue::Integer(value) => {
+                result.push_str(&crate::integer_text::decimal_string(&value)?)
+            }
+        }
     }
     result.push_str(rest);
     Ok(result)
@@ -594,13 +607,41 @@ pub unsafe extern "C" fn imre_str_format(
     let formatted = format_named(template, |name| {
         fields.iter().find_map(|&[key, value]| {
             // SAFETY: the operands stay immutable and rooted until formatting ends.
-            unsafe { ((&*key).as_str() == name).then(|| (&*value).as_str()) }
+            unsafe { ((&*key).as_str() == name).then(|| FormatValue::Text((&*value).as_str())) }
         })
     });
     super::finish(
         formatted.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
+}
+
+/// Format named fields without converting unused or not-yet-selected integers.
+///
+/// # Safety
+/// The caller roots the template and every (name, word, representation) triple
+/// while the formatter borrows each matching field.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_format_fields(
+    template: *const Str,
+    fields: *const [usize; 3],
+    count: usize,
+) -> *const Str {
+    // SAFETY: the compiler creates one triple per evaluated keyword argument.
+    let (template, fields) = unsafe { (&*template, std::slice::from_raw_parts(fields, count)) };
+    let result = format_named(template, |name| {
+        fields.iter().find_map(|&[key, value, kind]| {
+            // SAFETY: these immutable words use the signature-checked string and integer tags.
+            unsafe {
+                ((&*(key as *const Str)).as_str() == name).then(|| match kind {
+                    2 => FormatValue::Integer(crate::Int::borrow(value)),
+                    3 => FormatValue::Text((&*(value as *const Str)).as_str()),
+                    _ => unreachable!("invalid string-format field type"),
+                })
+            }
+        })
+    });
+    super::finish(result.and_then(crate::checked_owned_str), std::ptr::null())
 }
 
 /// # Safety
@@ -756,8 +797,8 @@ mod tests {
     fn empty_named_fields_do_not_reserve_the_template_length() {
         let template = "{x}".repeat(20_000) + "{y}";
         let result = format_named(&template, |name| match name {
-            "x" => Some(""),
-            "y" => Some("雪"),
+            "x" => Some(FormatValue::Text("")),
+            "y" => Some(FormatValue::Text("雪")),
             _ => None,
         })
         .unwrap_or_else(|_| panic!("valid named fields"));

@@ -99,6 +99,93 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind list.reverse on an instance or as a descriptor. The receiver and
+    /// every argument are evaluated before a rejected call raises TypeError.
+    pub(super) fn list_reverse(
+        &mut self,
+        receiver: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let skip = usize::from(receiver.is_none());
+        let mut receiver = if let Some(receiver) = receiver {
+            Some(receiver)
+        } else {
+            args.args
+                .first()
+                .map(|arg| self.evaluated_argument(arg))
+                .transpose()?
+        };
+        if let Some(value) = receiver.take() {
+            receiver = Some(self.json_mutation_receiver(value, call)?);
+        }
+        let extra = args.args.len().saturating_sub(skip);
+        let message = match receiver.as_ref() {
+            None => {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                "unbound method list.reverse() needs an argument".to_owned()
+            }
+            Some(value) if self.types.element(value.ty).is_none() => {
+                let name = match value.ty {
+                    Type::None => "NoneType".to_owned(),
+                    Type::PlainObject => "object".to_owned(),
+                    Type::StrLiteral(_) => "str".to_owned(),
+                    Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes => {
+                        self.type_name(value.ty)
+                    }
+                    Type::Set(_) => "set".to_owned(),
+                    Type::Tuple(_) if self.types.namedtuple_definition(value.ty).is_none() => {
+                        "tuple".to_owned()
+                    }
+                    Type::Dict(_)
+                        if !self.types.is_counter(value.ty)
+                            && !self.types.is_default_list_dict(value.ty) =>
+                    {
+                        "dict".to_owned()
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "list.reverse requires an exact native list or known descriptor receiver",
+                        ));
+                    }
+                };
+                format!(
+                    "descriptor 'reverse' for 'list' objects doesn't apply to a '{name}' object"
+                )
+            }
+            Some(_) if !args.keywords.is_empty() => {
+                "list.reverse() takes no keyword arguments".to_owned()
+            }
+            Some(_) if extra != 0 => format!("list.reverse() takes no arguments ({extra} given)"),
+            Some(_) => {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ListReverse, vec![receiver.unwrap()]),
+                });
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for arg in args.args.iter().skip(skip) {
+            self.graph.checked_excess_argument(self.module, arg.range());
+        }
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        for arg in args
+            .args
+            .iter()
+            .skip(skip)
+            .chain(args.keywords.iter().map(|kw| &kw.value))
+        {
+            values.push(self.evaluated_argument(arg)?);
+        }
+        Ok(calls::type_error(Type::None, values, message))
+    }
+
     /// Keeps the receiver identity and argument order. A key can observe or mutate
     /// the temporarily empty list, so restoration must run on every completion.
     pub(super) fn list_sort(
@@ -477,25 +564,18 @@ impl Checker<'_> {
                 return Err(error(self.source, keyword, "repeated str.format keyword"));
             }
             let value = Self::string_value(self.expr(&keyword.value)?);
-            let text = match value.ty {
-                Type::Str => value,
-                Type::Int => Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Str, vec![value]),
-                },
-                _ => {
-                    return Err(error(
-                        self.source,
-                        keyword,
-                        "str.format fields require str or int",
-                    ));
-                }
-            };
+            if !matches!(value.ty, Type::Str | Type::Int) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "str.format fields require str or int",
+                ));
+            }
             args.push(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(name.to_string()),
             });
-            args.push(text);
+            args.push(value);
         }
         Ok(Expr {
             ty: Type::Str,
@@ -558,16 +638,6 @@ impl Checker<'_> {
                 "debug f-string fields are unsupported",
             ));
         }
-        if !matches!(
-            field.conversion,
-            ast::ConversionFlag::None | ast::ConversionFlag::Str | ast::ConversionFlag::Repr
-        ) {
-            return Err(error(
-                self.source,
-                field,
-                "f-string conversions support only !s and !r",
-            ));
-        }
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
@@ -580,6 +650,16 @@ impl Checker<'_> {
                 };
                 specification.push_str(&literal.value);
             }
+        }
+        if field.conversion == ast::ConversionFlag::Ascii {
+            if !specification.is_empty() {
+                return Err(error(
+                    self.source,
+                    field,
+                    "formatted strings support !a with an empty format specification",
+                ));
+            }
+            return self.ascii_expr(&field.expression);
         }
         if specification.is_empty()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
@@ -704,6 +784,9 @@ impl Checker<'_> {
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+            return self.record_repr(value, field);
         }
         if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
