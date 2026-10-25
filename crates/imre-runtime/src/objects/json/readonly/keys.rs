@@ -1,5 +1,6 @@
 //! Python exposes the identity of decoded dictionary keys. Every object in one
 //! input shares owners, including objects reached later through a deferred span.
+use crate::StrOwner;
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -7,7 +8,7 @@ use std::rc::Rc;
 
 use super::{Error, Str};
 
-type Owners = Rc<RefCell<HashSet<Rc<Str>>>>;
+type Owners = Rc<RefCell<HashSet<StrOwner>>>;
 
 #[derive(Default)]
 pub(super) struct KeyMemo(OnceCell<Owners>);
@@ -61,13 +62,13 @@ impl ObjectFields {
 
     /// Field lookups can borrow their spelling; materialize an owner when a
     /// key escapes through iteration or conversion to a Python dictionary.
-    pub(super) fn owner(&self, key: &Str) -> Result<Rc<Str>, Error> {
+    pub(super) fn owner(&self, key: &Str) -> Result<StrOwner, Error> {
         let mut owners = self.owners.borrow_mut();
         if let Some(owner) = owners.get(key) {
             return Ok(owner.clone());
         }
         owners.try_reserve(1).map_err(|_| Error::allocation())?;
-        let owner = Rc::new(Str::try_new(key.as_str()).map_err(|_| Error::allocation())?);
+        let owner = StrOwner::new(Str::try_new(key.as_str()).map_err(|_| Error::allocation())?);
         owners.insert(owner.clone());
         Ok(owner)
     }

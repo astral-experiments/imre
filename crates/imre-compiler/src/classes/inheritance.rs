@@ -72,7 +72,7 @@ pub(super) fn resolve(
                 }
             }
         }
-        classes[id] = Some(collect_class(
+        let mut class = collect_class(
             graph,
             module,
             definition,
@@ -80,7 +80,11 @@ pub(super) fn resolve(
             base.map(|i| (i, classes[i].as_ref().unwrap())),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?);
+        )?;
+        if exceptions.layouts.contains(&definition) && base.is_none() {
+            exceptions::install_argument_slot(&mut class, module);
+        }
+        classes[id] = Some(class);
         path.pop();
         Ok(())
     }
