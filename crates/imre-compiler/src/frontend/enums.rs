@@ -159,6 +159,8 @@ impl Checker<'_> {
                 )
             })
             || types == [Type::Logger; 2]
+            || types == [Type::TimedFileHandler; 2]
+            || types == [Type::ClockTime; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(
