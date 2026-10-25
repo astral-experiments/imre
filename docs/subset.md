@@ -598,6 +598,12 @@ The receiver of an instance call evaluates first. Supplied arguments then evalua
 
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
+## String percent formatting
+
+String `%` formatting accepts an exact integer, a string, or a fixed tuple of
+integers and strings as positional operands. The entire tuple is evaluated before
+formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+
 ## F-strings and repr
 
 The string `%` operator accepts an exact integer or string operand. A text
@@ -1073,6 +1079,13 @@ entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
+
+`collections.ChainMap[K, V]` accepts dictionaries with matching key and value
+types and exposes them in its mutable `maps` list. A no-argument constructor
+starts with a fresh dictionary. Replacing `maps` affects all aliases of the
+ChainMap; callers that saved the previous list still hold that list. Truth
+testing checks whether any underlying dictionary is nonempty. `repr` uses the
+current mappings in order.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 

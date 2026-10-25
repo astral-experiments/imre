@@ -20,6 +20,7 @@ mod cached_properties;
 mod call_binding_errors;
 mod callables;
 mod calls;
+mod chainmap;
 mod comprehensions;
 mod contexts;
 mod copying;
@@ -1527,6 +1528,9 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::Deque)) => return Ok(types.deque(Type::Int)),
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
+        Some(Binding::Intrinsic(Intrinsic::ChainMap)) => {
+            return Ok(types.chainmap(Type::Str, Type::Int));
+        }
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
@@ -1763,8 +1767,12 @@ fn annotation_with_aliases(
             }
             receiver
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
-                    || graph.resolve_type(module, receiver)
-                        == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
+                    || matches!(
+                        graph.resolve_type(module, receiver),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::DefaultDict | Intrinsic::ChainMap
+                        ))
+                    ) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
                     return Err(error(
@@ -1799,6 +1807,11 @@ fn annotation_with_aliases(
                     ));
                 }
                 let value_type = nested(value)?;
+                if graph.resolve_type(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::ChainMap))
+                {
+                    return Ok(types.chainmap(key_type, value_type));
+                }
                 if graph.resolve_type(module, receiver)
                     == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
                 {
@@ -2533,6 +2546,29 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Attribute(attr)
+                if attr.attr.as_str() == "maps"
+                    && let Some(dict) = self.types.element(concrete)
+                    && let Some((key, value)) = self.types.mapping(dict)
+                    && self.types.dict(key, value) == dict
+                    && let ast::Expr::Call(call) = &*attr.value
+                    && self.resolve(&call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::ChainMap)) =>
+            {
+                // A typed list target supplies the dictionary shape for an
+                // otherwise empty ChainMap constructor.
+                let owner = self.chainmap(call, Some((key, value)))?;
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Builtin(Builtin::ChainMapMaps, vec![owner]),
+                }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ChainMap))
+                    && let Type::ChainMap(id) = concrete =>
+            {
+                self.chainmap(call, self.types.mapping(Type::Dict(id)))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Deque))
@@ -4849,11 +4885,11 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && matches!(right.ty, Type::Int | Type::Str)
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
         {
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::PercentScalar, vec![left, right]),
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
             });
         }
         if op == ast::Operator::Pow {
@@ -5688,7 +5724,13 @@ impl<'a> Checker<'a> {
                         matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
                     });
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
-                        || matches!(ty, Type::StringKeys | Type::Optional(_) | Type::Union(_))
+                        || matches!(
+                            ty,
+                            Type::ChainMap(_)
+                                | Type::StringKeys
+                                | Type::Optional(_)
+                                | Type::Union(_)
+                        )
                         || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
@@ -5721,7 +5763,7 @@ impl<'a> Checker<'a> {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if self.mapping_class(list.ty).is_some() {
                     let key = self.expr(&subscript.slice)?;
-                    return self.mapping_primitive(list, "__getitem__", &[key], expression);
+                    return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
                 if list.ty == Type::BuiltinClass {
                     // Python evaluates type arguments before invoking __class_getitem__.
@@ -5938,6 +5980,14 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    return Ok(Expr {
+                        ty: self.types.list(Type::Dict(id)),
+                        kind: ExprKind::Builtin(Builtin::ChainMapMaps, vec![receiver]),
+                    });
+                }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }
@@ -6526,6 +6576,10 @@ impl<'a> Checker<'a> {
             return Ok(copy);
         }
         if calls::starred(call) {
+            if let Some(Binding::Intrinsic(Intrinsic::Credential(name))) = self.resolve(&call.func)
+            {
+                return self.credential_call(call, name);
+            }
             if let Some(Binding::Definition(definition)) = self.resolve(&call.func)
                 && let Some(signature) = self.functions.get(&definition)
             {
@@ -6762,6 +6816,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
+            Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }
@@ -6795,6 +6850,9 @@ impl<'a> Checker<'a> {
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Fd(op))) => return self.fd_call(call, op),
+            Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
+                return self.credential_call(call, name);
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
