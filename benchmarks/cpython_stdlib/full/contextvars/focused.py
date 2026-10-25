@@ -58,7 +58,7 @@ BLOCKED = {
                 return "custom"
         v = ContextVar("name", default=Display())
         print("custom" in repr(v))
-    """, ("unsupported special method", "default with native repr")),
+    """, "default with native repr"),
 }
 
 
