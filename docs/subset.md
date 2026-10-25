@@ -872,6 +872,20 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 
 On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. `os.lseek(fd, position, whence)` reads or moves the shared offset. The runtime supplies the platform's open flags and `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `SEEK_DATA`, and `SEEK_HOLE` constants.
 
+On POSIX, `select.poll()` creates an independent poller. Its positional methods are
+`register(fd[, mask])`, `modify(fd, mask)`, `unregister(fd)`, and `poll([timeout])`.
+Descriptors are integers; the poller never owns or closes them. A repeated registration replaces the mask.
+Timeouts are milliseconds: zero checks immediately, and a negative number or `None` waits indefinitely.
+Results are fresh `(fd, mask)` tuples. The kernel can report `POLLERR`, `POLLHUP`, or `POLLNVAL`
+without those flags being requested. Unregister a descriptor before closing or reusing its number.
+An event loop can register several clients for `POLLIN` and enable `POLLOUT` only while bytes remain to send.
+
+`select.select(read, write, exceptional[, timeout])` accepts three integer lists and an optional timeout
+in seconds. It returns three fresh lists in input order, including duplicate ready descriptors.
+Closed descriptors raise `OSError(EBADF)`; descriptors outside the target's `FD_SETSIZE` raise `ValueError`.
+The native poller is not subject to the select fd-set limit. Objects with a dynamic `fileno()` and Python signal
+callbacks are outside this integer-fd interface.
+
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
 `shlex.split(s, comments=False, posix=True)` accepts a string or `None`

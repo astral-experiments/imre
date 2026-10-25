@@ -73,6 +73,8 @@ def serve() -> None:
                 else:
                     print(repr(locations))
             elif op == "cached":
+                sys.implementation.cache_tag = text()
+                sys.pycache_prefix = text()
                 send_text(obj.cached)
             elif op == "parent":
                 print(repr(obj.parent))

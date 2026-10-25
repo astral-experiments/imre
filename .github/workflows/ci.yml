@@ -233,6 +233,10 @@ jobs:
             Lib/ensurepip/_bundled
             Modules
           persist-credentials: false
+      - name: Compare POSIX fd readiness with CPython
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: python3 tests/posix_readiness.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --host-original
       - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
