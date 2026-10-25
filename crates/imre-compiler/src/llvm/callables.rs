@@ -28,7 +28,10 @@ pub(super) fn adapters(
                     .as_ref()
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
             }
-            invoked |= matches!(value.kind, ExprKind::Invoke { .. });
+            invoked |= matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
+            );
         });
     }
     if targets.is_empty() && !invoked {

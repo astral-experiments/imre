@@ -4698,6 +4698,9 @@ impl<'a> Checker<'a> {
     }
 
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.unshadowed_len(expression) {
+            return Ok(self.builtin_len());
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
                 self.resolve(&attr.value)
@@ -4812,6 +4815,7 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::BuiltinsLast => {
                     return Ok(Expr {
                         ty: Type::ValueView,
@@ -5935,6 +5939,12 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+            || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
+        {
+            let callable = self.builtin_len();
+            return self.invoke(call, callable);
+        }
         if let Some(tuple) = self.fixed_tuple.filter(|proof| proof.at == call.range()) {
             return Ok(self.materialize_fixed_tuple(tuple));
         }

@@ -15,6 +15,18 @@ pub(super) fn displayable(ty: Type) -> bool {
     )
 }
 impl Checker<'_> {
+    /// Return the callable currently bound in the native builtins namespace.
+    pub(super) fn builtin_len(&self) -> Expr {
+        Expr {
+            ty: self.types.callable(vec![Type::Str], Type::Int),
+            kind: ExprKind::Builtin(Builtin::BuiltinsLen, vec![]),
+        }
+    }
+
+    pub(super) fn unshadowed_len(&self, expr: &ast::Expr) -> bool {
+        matches!(expr, ast::Expr::Name(name) if name.id == "len" && !self.names.contains_key("len"))
+            && self.resolve(expr).is_none()
+    }
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
         let Some((flags, _)) = &self.graph.command_startup else {

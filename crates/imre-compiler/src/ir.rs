@@ -309,14 +309,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| {
                 used |= matches!(
                     value.kind,
-                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                    ExprKind::Builtin(
+                        Builtin::BuiltinsSetLast
+                            | Builtin::SysDisplayHook
+                            | Builtin::BuiltinsLen
+                            | Builtin::BuiltinsSetLen,
+                        _
+                    )
                 );
             });
         }
@@ -591,6 +597,8 @@ pub(crate) enum Builtin {
     Cycle,
     SysDisplayHook,
     BuiltinsLast,
+    BuiltinsLen,
+    BuiltinsSetLen,
     BuiltinsHasLast,
     BuiltinsSetLast,
     BuiltinsDeleteLast,

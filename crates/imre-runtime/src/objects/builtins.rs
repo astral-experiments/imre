@@ -1,11 +1,12 @@
 //! The default display hook owns the last displayed object in the builtins namespace.
-use super::words::WordKind;
-use super::{Error, Kind, Object, Storage, StorageCell, acquire_rc, exceptions, values};
+use super::words::{OwnedWord, WordKind};
+use super::{Error, Kind, Object, Storage, StorageCell, acquire_rc, exceptions, records, values};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 thread_local! {
     static LAST: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static LEN: RefCell<Option<OwnedWord>> = const { RefCell::new(None) };
 }
 
 // Unlike a concrete word kind, this argument already owns its runtime descriptor.
@@ -41,6 +42,46 @@ pub extern "C" fn imre_builtins_del_last() {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_builtins_clear() {
     drop(LAST.take());
+    drop(LEN.take());
+}
+
+/// The exact native callback convention includes an unused receiver for the original builtin.
+unsafe extern "C" fn string_len(_receiver: *const usize, value: *const crate::Str) -> usize {
+    // SAFETY: the string callback ABI roots its borrowed argument through the call.
+    unsafe { crate::imre_str_len(value) }
+}
+
+/// Read a retained snapshot of the binding, creating the original callable on first use.
+///
+/// # Safety
+/// The compiler supplies the permanent layout of its ordinary callable records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_builtins_len(
+    layout: *const records::RecordDescriptor,
+) -> *const usize {
+    LEN.with_borrow_mut(|slot| {
+        if slot.is_none() {
+            // SAFETY: a new ordinary callable has initialized null fields and a raw code slot.
+            unsafe {
+                let callable = records::imre_record_try_new(layout);
+                if callable.is_null() {
+                    return std::ptr::null();
+                }
+                callable.write(string_len as *const () as usize);
+                *slot = Some(OwnedWord::from_owned(callable as usize, WordKind::new(6)));
+            }
+        }
+        slot.as_ref().unwrap().clone().into_word() as *const usize
+    })
+}
+
+/// # Safety
+/// The argument is a rooted native callable with the checked len signature.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_builtins_set_len(callable: *const usize) {
+    // SAFETY: acquire before releasing the previous binding, including on self-assignment.
+    let owner = unsafe { WordKind::new(6).acquire(callable as usize) };
+    drop(LEN.replace(Some(owner)));
 }
 
 /// # Safety

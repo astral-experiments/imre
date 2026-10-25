@@ -448,6 +448,8 @@ impl Builtin {
             | Self::SortRestore
             | Self::StderrLine
             | Self::BuiltinsLast
+            | Self::BuiltinsLen
+            | Self::BuiltinsSetLen
             | Self::BuiltinsHasLast
             | Self::BuiltinsSetLast
             | Self::BuiltinsDeleteLast

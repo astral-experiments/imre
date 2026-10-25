@@ -129,6 +129,7 @@ pub(crate) enum Intrinsic {
     AnnotationFormat(i64),
     Declaration(&'static str),
     BuiltinsLast,
+    BuiltinsLen,
     SysDisplayHook,
     ArgumentParser,
     ArgparseNamespace,
@@ -436,6 +437,7 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
@@ -753,6 +755,7 @@ pub(crate) struct SourceGraph {
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
+    pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
@@ -845,6 +848,41 @@ impl SourceGraph {
             scan.found
         })
     }
+    /// A write affects bare len calls in every module, including earlier definitions.
+    fn writes_builtin_len(&self) -> bool {
+        use ruff_python_ast::visitor::{Visitor, walk_expr};
+        struct Scan<'a> {
+            graph: &'a SourceGraph,
+            module: ModuleId,
+            writes: bool,
+        }
+        impl<'a> Visitor<'a> for Scan<'_> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if let ast::Expr::Attribute(attr) = expr
+                    && attr.ctx != ast::ExprContext::Load
+                    && self.graph.resolve(self.module, expr)
+                        == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+                {
+                    self.writes = true;
+                }
+                if !self.writes {
+                    walk_expr(self, expr);
+                }
+            }
+        }
+        self.modules.iter().enumerate().any(|(module, source)| {
+            let mut scan = Scan {
+                graph: self,
+                module,
+                writes: false,
+            };
+            for stmt in &source.parsed.syntax().body {
+                scan.visit_stmt(stmt);
+            }
+            scan.writes
+        })
+    }
+
     pub(crate) fn reachable_only(&self) -> bool {
         self.reachable.is_some()
     }
@@ -1405,6 +1443,7 @@ impl<'a> Loader<'a> {
                 .transpose()?
                 .unwrap_or_default(),
             mutable_documents: false,
+            mutable_builtin_len: false,
             reachable: None,
             entry_filename,
             inputs: self.inputs,
@@ -1416,6 +1455,7 @@ impl<'a> Loader<'a> {
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
+        graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }
 
@@ -1678,6 +1718,9 @@ impl<'a> Loader<'a> {
                             })?;
                         if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
                             return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
+                        }
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLen) {
+                            return Err("from builtins import len needs an import-time snapshot; use a qualified lookup".into());
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), binding, alias)?;

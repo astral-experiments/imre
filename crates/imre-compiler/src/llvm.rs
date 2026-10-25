@@ -4348,6 +4348,20 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::BuiltinsLast => self.call("imre_builtins_last", returns, &[]),
+            Builtin::BuiltinsLen => {
+                let layout = self.output.global_ref("layout_callable".to_owned());
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .checked_pointer(format!("call ptr @imre_builtins_len(ptr @{layout})")),
+                    small_integer: false,
+                };
+                self.owned(value)
+            }
+            Builtin::BuiltinsSetLen => {
+                self.void_call("imre_builtins_set_len", &[&args[0].value]);
+                none()
+            }
             Builtin::BuiltinsHasLast => {
                 let bit = self.instruction("call i32 @imre_builtins_has_last()");
                 Value {
@@ -7369,6 +7383,8 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_builtins_last()
+declare ptr @imre_builtins_len(ptr)
+declare void @imre_builtins_set_len(ptr)
 declare i32 @imre_builtins_has_last()
 declare void @imre_builtins_set_last(i32, i64)
 declare void @imre_builtins_del_last()
