@@ -31,6 +31,7 @@ ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        re
 
 SLOTS = ITEM.replace("@dataclass\n", "@dataclass(slots=True)\n")
 ERASE = "\ndef hold(value: object) -> object:\n    return value\n"
+STRUCT = "from imre import struct\n@struct\nclass Point:\n    x: float\n"
 REJECTED = {
     "boxed_unslotted": ITEM + ERASE + "hold(Item(2))\n",
     "boxed_mutable_list_field": SLOTS.replace("value: int", "value: list[int]") + ERASE + "hold(Item([2]))\n",
@@ -38,7 +39,18 @@ REJECTED = {
     "boxed_disabled_equality": SLOTS.replace("slots=True", "slots=True, eq=False") + ERASE + "hold(Item(2))\n",
     "boxed_unchecked_attribute": SLOTS + "def observe(value: object) -> int:\n    return value.other\nobserve(Item(2))\n",
     "boxed_bad_index": SLOTS + ERASE + "def observe(value: object) -> object:\n    return value['invalid']\nobserve(hold(Item(2)))\n",
-
+    "struct_identity": STRUCT + "p = Point(1.0)\nprint(p is p)\n",
+    "struct_id": STRUCT + "print(id(Point(1.0)))\n",
+    "struct_field_write": STRUCT + "p = Point(1.0)\np.x = 2.0\n",
+    "struct_subclass": STRUCT + "class Child(Point):\n    pass\n",
+    "struct_owning_field": STRUCT.replace("x: float", "x: list[float]"),
+    "struct_python_int": STRUCT.replace("x: float", "x: int"),
+    "struct_weakref": STRUCT + "from weakref import ref\nref(Point(1.0))\n",
+    "struct_optional_identity": STRUCT + "def same(a: Point | None, b: Point | None) -> bool:\n    return a is b\n",
+    "struct_wrong_argument": STRUCT + "Point(True)\n",
+    "struct_custom_eq": STRUCT + "    def __eq__(self, other: object) -> bool:\n        return True\n",
+    "struct_post_init": STRUCT + "    def __post_init__(self) -> None:\n        print(self.x)\n",
+    "struct_erased_identity": STRUCT + ERASE + "p = Point(1.0)\nprint(hold(p) is hold(p))\n",
     "unproven_post_init_conversion": """from dataclasses import dataclass
 @dataclass(frozen=True)
 class Wrapper:

@@ -10,7 +10,7 @@ impl Checker<'_> {
         let decl = &all[class];
         let special_name = |name: &str| name.starts_with("__") && name.ends_with("__");
         decl.generated_initializer
-            && decl.dataclass.is_some_and(|d| d.slots && d.eq && d.repr)
+            && decl.dataclass.is_some_and(|d| !d.value_struct && d.slots && d.eq && d.repr)
             && !decl.fields.iter().any(|f| special_name(&f.name))
             && !decl.static_bindings.keys().any(|name| special_name(name))
             && decl.bases.is_empty()
@@ -209,6 +209,7 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 && !classes.methods[id].contains_key("__post_init__")
                 && !classes.has_concrete_subclasses(id))
             .then(|| classes.methods[id]["__init__"].id),
+            value_struct: class.dataclass.is_some_and(|options| options.value_struct),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,

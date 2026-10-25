@@ -51,7 +51,7 @@ pub(crate) struct Class {
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     /// Field writes required of every override called during construction.
-    pub(crate) init_hooks: HashMap<String, Vec<String>>,
+    pub(crate) init_hooks: init_hooks::Hooks,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -250,6 +250,29 @@ fn collect_class(
             == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
     }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
+    let value_struct = dataclass.is_some_and(|options| options.value_struct);
+    if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
+        || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())
+    {
+        return Err(module.error(node, "an imre.struct is final and cannot inherit fields"));
+    }
+    if value_struct {
+        for statement in &node.body {
+            match statement {
+                ast::Stmt::AnnAssign(field) if field.value.is_none() => {}
+                ast::Stmt::FunctionDef(method)
+                    if !method.name.starts_with("__") && method.decorator_list.is_empty() => {}
+                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Expr(stmt) if matches!(&*stmt.value, ast::Expr::StringLiteral(_)) => {}
+                _ => {
+                    return Err(module.error(
+                        statement,
+                        "imre.struct supports required fields and ordinary instance methods",
+                    ));
+                }
+            }
+        }
+    }
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
     let mut abstract_methods = base
@@ -419,10 +442,10 @@ fn collect_class(
                 }
                 let unary_protocol = matches!(
                     name,
-                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__" | "__fspath__"
+                    "__str__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
                 if name.starts_with("__")
-                    && name != "__init__"
+                    && !matches!(name, "__init__" | "__fspath__")
                     && !unary_protocol
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
@@ -621,6 +644,9 @@ fn collect_class(
             "an instance field cannot shadow a fixed class binding",
         ));
     }
+    if value_struct && fields.is_empty() {
+        return Err(module.error(node, "imre.struct needs at least one field"));
+    }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
     let initializer = if generated_initializer {
@@ -682,11 +708,20 @@ fn collect_class(
     let mut init_hooks = base
         .map(|(_, parent)| parent.init_hooks.clone())
         .unwrap_or_default();
+    let hook_writes = |name: &str, inherited: Option<&init_hooks::Hook>| {
+        init_hooks::method_writes(
+            graph,
+            &methods,
+            &method_kinds,
+            &method_origins,
+            name,
+            inherited,
+        )
+    };
     for (name, expected) in &init_hooks {
         if names.contains(name) {
-            let actual =
-                init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name);
-            if actual.transpose()?.as_ref() != Some(expected) {
+            let actual = hook_writes(name, Some(expected));
+            if actual.transpose()?.as_ref() != Some(&expected.writes) {
                 return Err(module.error(
                     node,
                     "an initializer hook override must initialize the same fields",
@@ -708,7 +743,7 @@ fn collect_class(
             },
             exception_layout,
             &mut init_hooks,
-            |name| init_hooks::method_writes(graph, &methods, &method_kinds, &method_origins, name),
+            |name| hook_writes(name, None),
         )?;
     }
     Ok(Class {
@@ -894,7 +929,7 @@ fn check_initializer(
         .iter()
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
-    let mut initialized = HashSet::new();
+    let mut initialized: HashSet<&str> = HashSet::new();
     let mut called_super = false;
     let mut called_exception_base = false;
     for statement in &initializer.body {
@@ -923,6 +958,7 @@ fn check_initializer(
             && let Some(writes) = lookup(name)
         {
             let writes = writes?;
+            let before = initialized.iter().copied().map(str::to_owned).collect();
             for field in &writes {
                 let Some(&declared_field) = declared.get(field.as_str()) else {
                     return Err(
@@ -936,7 +972,13 @@ fn check_initializer(
                     ));
                 }
             }
-            hooks.insert(name.to_owned(), writes);
+            hooks.insert(
+                name.to_owned(),
+                init_hooks::Hook {
+                    initialized: before,
+                    writes,
+                },
+            );
             continue;
         }
         let assignment = match statement {
