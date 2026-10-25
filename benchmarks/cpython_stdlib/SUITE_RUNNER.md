@@ -33,6 +33,31 @@ It uses the suite and validator at the selected commit, including when that
 commit predates this launcher. The build step in the dispatch establishes the
 compiler's provenance; a local invocation records the supplied binary hashes.
 
+### Verified upstream example
+
+The [Linux example](full/unittest/runner-modes-example-linux.tar.gz) contains
+both full reports and the receipt for Imre `ec4622afddbdf0b4b892220eae6580245a2f3291`.
+The unchanged CPython method
+`test.test_unittest.testmock.testmock.MockTest.test_assert_called_once_message_not_called`
+exercises a failing native `Mock.assert_called_once()` and checks its diagnostic
+with native assertions. Its original method and default fixture ran under Imre
+in all four configurations. To see its record and the actual build commands:
+
+```sh
+example=benchmarks/cpython_stdlib/full/unittest/runner-modes-example-linux.tar.gz
+tar -xOzf "$example" reachable.json | jq '.[] | .records[] | select(.id | endswith(".MockTest.test_assert_called_once_message_not_called"))'
+tar -xOzf "$example" source.json | jq '.modes'
+```
+
+Each configuration retained all **1,090** original occurrences: 8 fully native,
+8 native bodies with host fixtures, 9 host-driven native operations, 9 blocked,
+1,054 reference-only, and 2 original skips. Each mode observed 37 native builds
+at O0 and 37 at O3. Both reports matched independent runs byte for byte.
+`compiler_commands` counts actual invocations; `runner_mode_flag` records
+whether the owner's runner received its own `--reachable-only` switch.
+A record whose declared mode disagrees with the compiler, or a missing build
+at either optimization level, appears in `mode_errors` and fails the run.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
