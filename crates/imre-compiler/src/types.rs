@@ -24,11 +24,22 @@ enum Shape {
     NamedTuple(DefinitionId, Vec<Type>),
     PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
+    CachedCallable(CachedFunction),
     Awaitable(Type),
     DirectoryContext(Type),
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CachedFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub table: Type,
+    pub capacity: i64,
+    pub typed: bool,
 }
 
 #[derive(Clone)]
@@ -72,8 +83,12 @@ impl Types {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
+            Type::SimpleNamespace(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Dict(Type::Str, _)))
+            }
             Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
+            Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
@@ -84,7 +99,10 @@ impl Types {
                 storage.shapes.get(id),
                 Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
             ),
-            Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
+            Type::Callable(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Callable(..) | Shape::CachedCallable(_))
+            ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
             Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
@@ -97,7 +115,9 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
-            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
+            Type::Popen(_, _, id) | Type::CompletedProcess(_, Some(id)) => {
+                matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_)))
+            }
             Type::Int
             | Type::Float
             | Type::BuiltinClass
@@ -117,7 +137,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(_, None)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
@@ -128,6 +148,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -166,6 +188,7 @@ impl Types {
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
                 | Shape::Union(fields) => fields.clone(),
+                Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -175,6 +198,7 @@ impl Types {
                 if let Type::StrLiteral(child_id)
                 | Type::Cursor(child_id)
                 | Type::List(child_id)
+                | Type::CacheState(child_id)
                 | Type::Dict(child_id)
                 | Type::Deque(child_id)
                 | Type::Set(child_id)
@@ -183,6 +207,7 @@ impl Types {
                 | Type::Optional(child_id)
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
+                | Type::SimpleNamespace(child_id)
                 | Type::DirectoryContext(child_id)
                 | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
@@ -235,6 +260,15 @@ impl Types {
 
     pub(crate) fn set_custom_truth(&self, records: HashSet<usize>) {
         self.0.borrow_mut().custom_truth = records;
+    }
+
+    pub(crate) fn concrete_subclasses(&self, class: usize) -> Ref<'_, [Type]> {
+        Ref::map(self.0.borrow(), |storage| {
+            storage
+                .concrete_subclasses
+                .get(&class)
+                .map_or(&[][..], Vec::as_slice)
+        })
     }
 
     pub(crate) fn add_concrete_subclass(&self, class: usize, bases: &[usize]) {
@@ -456,11 +490,13 @@ impl Types {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
+            Type::SimpleNamespace(_) => Some(true),
             Type::Class(_)
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator
             | Type::Cursor(_)
+            | Type::CacheState(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::ImportException
@@ -468,7 +504,7 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::PurePath(_)
-            | Type::CompletedProcess(_)
+            | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -484,6 +520,8 @@ impl Types {
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
+            | Type::StrDescriptor(_)
+            | Type::PlainObject
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
@@ -594,6 +632,16 @@ impl Types {
         command
     }
 
+    /// An unqualified CompletedProcess keeps its original list-of-strings ABI.
+    pub(crate) fn completed_command(&self, id: Option<usize>) -> Type {
+        id.map_or_else(|| self.list(Type::Str), |id| self.command_type(id))
+    }
+
+    pub(crate) fn completed(&self, capture: crate::ir::ProcessCapture, command: Type) -> Type {
+        let id = (command != self.list(Type::Str)).then(|| self.process_args(command));
+        Type::CompletedProcess(capture, id)
+    }
+
     pub(crate) fn directory_context(&self, result: Type) -> Type {
         Type::DirectoryContext(self.intern(Shape::DirectoryContext(result)))
     }
@@ -628,10 +676,23 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn cached_callable(&self, layout: CachedFunction) -> Type {
+        Type::Callable(self.intern(Shape::CachedCallable(layout)))
+    }
+
+    pub(crate) fn cached_function(&self, ty: Type) -> Option<CachedFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::CachedCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            Shape::CachedCallable(c) => self.signature(c.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -787,9 +848,7 @@ impl Types {
                 Type::Class(class) => {
                     pending.extend_from_slice(&class_fields[class]);
                     // A base-typed reference can own fields introduced by its concrete layout.
-                    if let Some(subclasses) = self.0.borrow().concrete_subclasses.get(&class) {
-                        pending.extend_from_slice(subclasses);
-                    }
+                    pending.extend(self.concrete_subclasses(class).iter().copied());
                 }
                 _ => pending.extend(self.children(ty)),
             }
@@ -799,6 +858,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::SimpleNamespace(id) = ty {
+            return vec![Type::Dict(id)];
+        }
         if let Some(element) = self
             .element(ty)
             .or_else(|| self.payload(ty))
@@ -891,6 +953,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

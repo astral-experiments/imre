@@ -20,10 +20,12 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod hashlib;
+mod inspect;
 mod itertools;
 mod json;
 mod logging;
 mod mappings;
+mod namespaces;
 mod os;
 mod paths;
 pub(crate) mod posixpath;
@@ -54,11 +56,14 @@ use words::{OwnedWord, Words};
 pub struct Object(StorageCell<Storage>);
 
 enum Storage {
+    Plain,
+    StrDescriptor(u32),
     Sequence(Words),
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
-    Dictionary(Box<mappings::Mapping>),
-    Set(Box<mappings::Set>),
+    Dictionary(mappings::TableOwner<mappings::Mapping>),
+    FunctionCache(Box<mappings::FunctionCache>),
+    Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     Repeat(itertools::Repeat),
@@ -66,6 +71,7 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
+    SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
