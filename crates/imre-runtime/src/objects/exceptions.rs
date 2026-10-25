@@ -6,6 +6,7 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
+pub(super) use imports::imre_exception_field_repr;
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -1360,6 +1361,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: the view owns this integer list through the length read.
+        4 => unsafe { (&*(word as *const super::List)).0.with(|v| !v.is_empty()) },
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
         // SAFETY: the tuple remains rooted while its immutable length is read.
