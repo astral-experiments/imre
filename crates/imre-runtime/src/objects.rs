@@ -84,6 +84,7 @@ enum Storage {
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
     LogRecord(Box<logging::record::Record>),
+    LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }

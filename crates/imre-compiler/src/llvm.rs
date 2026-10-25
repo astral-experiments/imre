@@ -81,6 +81,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
@@ -134,6 +135,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
@@ -715,6 +717,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -3325,6 +3328,7 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
+                | Type::LogFormatter
                 | Type::LogRecord
                 | Type::Logger
                 | Type::RegexPattern
@@ -3694,6 +3698,42 @@ impl Emitter<'_, '_> {
                     none()
                 } else {
                     self.call(name, returns, &values)
+                }
+            }
+            Builtin::Formatter(operation) => {
+                use crate::ir::FormatterOperation::*;
+                if *operation == New {
+                    let defaults = self.word(&args[4].value);
+                    let operand=self.checked_instruction(format!("call ptr @imre_formatter_new(i64 {}, i64 {}, ptr {}, i1 {}, i64 {defaults})",args[0].value.operand,args[1].value.operand,args[2].value.operand,args[3].value.operand));
+                    self.owned(Value {
+                        ty: returns,
+                        operand,
+                        small_integer: false,
+                    })
+                } else {
+                    let name = match operation {
+                        Stack => "imre_formatter_stack",
+                        New => unreachable!(),
+                        Text => "imre_formatter_text",
+                        Date => "imre_formatter_date",
+                        UsesTime => "imre_formatter_uses_time",
+                        Format => "imre_formatter_format",
+                        Message => "imre_formatter_message",
+                        Time => "imre_formatter_time",
+                        SetUtc => "imre_formatter_utc",
+                        SetDate => "imre_formatter_set_date",
+                        DefaultTime => "imre_formatter_default_time",
+                        DefaultMsec => "imre_formatter_default_msec",
+                        SetDefaultTime => "imre_formatter_set_default_time",
+                        SetDefaultMsec => "imre_formatter_set_default_msec",
+                    };
+                    let operands: Vec<_> = args.iter().map(|a| &a.value).collect();
+                    if returns == Type::None {
+                        self.void_call(name, &operands);
+                        none()
+                    } else {
+                        self.call(name, returns, &operands)
+                    }
                 }
             }
             Builtin::LogRecord(operation) => {
@@ -5162,6 +5202,7 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(..)
                     | Type::AsyncProcess(_)
+                    | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
                     | Type::TimedFileHandler
@@ -5403,6 +5444,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -5470,6 +5512,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -6050,6 +6093,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
@@ -6620,6 +6664,20 @@ declare double @imre_log_file_compute_float(ptr, double)
 declare ptr @imre_log_file_deletions(ptr)
 declare i1 @imre_log_file_should_roll(ptr)
 declare void @imre_log_file_roll(ptr)
+declare ptr @imre_formatter_new(i64,i64,ptr,i1,i64)
+declare ptr @imre_formatter_stack(ptr,ptr)
+declare ptr @imre_formatter_text(ptr)
+declare i64 @imre_formatter_date(ptr)
+declare ptr @imre_formatter_default_time(ptr)
+declare i64 @imre_formatter_default_msec(ptr)
+declare i1 @imre_formatter_uses_time(ptr)
+declare ptr @imre_formatter_format(ptr,ptr)
+declare ptr @imre_formatter_message(ptr,ptr)
+declare ptr @imre_formatter_time(ptr,ptr,i64)
+declare void @imre_formatter_utc(ptr,i1)
+declare void @imre_formatter_set_date(ptr,i64)
+declare void @imre_formatter_set_default_time(ptr,ptr)
+declare void @imre_formatter_set_default_msec(ptr,i64)
 declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)

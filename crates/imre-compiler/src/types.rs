@@ -104,6 +104,7 @@ impl Types {
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
@@ -427,6 +428,7 @@ impl Types {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler

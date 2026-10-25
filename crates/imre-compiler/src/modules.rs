@@ -119,6 +119,8 @@ pub(crate) enum Intrinsic {
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
+    LogFormatter,
+    ClockConverter(bool),
     LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
@@ -333,6 +335,9 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
+            (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
             (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
