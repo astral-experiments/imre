@@ -25,6 +25,7 @@ REJECTED = {
     "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "missing_nested_walk_option": "def option(required: bool) -> bool:\n    return required\nPath('a').relative_to(walk_up=option())",
     "missing_nested_constructor_value": "def required(x: int) -> int:\n    return x\nPath(wrong=required())",
+    "missing_nested_fspath_value": "import os\ndef required(x: int) -> str:\n    return 'a'\nos.fspath(required())",
     "expanded_segments": "Path(*['a', 'b'])",
     "wrong_join": "Path('a') / 1",
     "unknown_nested_joinpath_value": "def real(x: int) -> int:\n    return x\nPath('a').joinpath(wrong=real(unknown=1))",

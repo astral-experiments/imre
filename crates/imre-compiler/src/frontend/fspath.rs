@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod descriptor;
+
 impl Checker<'_> {
     /// POSIX normcase(s) returns exactly os.fspath(s), with its own keyword signature.
     pub(super) fn public_fspath(
@@ -50,7 +52,11 @@ impl Checker<'_> {
             }
         };
         let value = self.expr(path)?;
-        self.fspath_protocol(value, path, None, None)
+        let result = self.fspath_protocol(value, path, None, None)?;
+        // The stubs omit invalid descriptors. The native operation above checks
+        // their binding and return type, so its own outer overload is accounted for.
+        self.graph.checked_overload(self.module, call.range());
+        Ok(result)
     }
 
     /// OS path converters name the operation and parameter if the protocol is missing.
@@ -143,14 +149,10 @@ impl Checker<'_> {
         at: &ast::Expr,
         syscall: Option<(&str, &str)>,
     ) -> Result<Expr, String> {
-        let Some(method) = self.classes.methods[id].get("__fspath__") else {
+        let Some(method) = self.classes.methods[id].get("__fspath__").cloned() else {
             return Ok(self.fspath_type_error(receiver, None, syscall));
         };
-        let result = Expr {
-            ty: method.returns,
-            kind: ExprKind::Call(method.id, ir::CallArgs::positional(vec![receiver])),
-        };
-        self.calls.insert(method.id);
+        let result = self.call_fspath_descriptor(id, receiver, &method, at, syscall)?;
         self.fspath_protocol(result, at, Some(id), syscall)
     }
 
