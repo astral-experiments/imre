@@ -77,14 +77,15 @@ def run(args, level, root):
     if (reference["module"], reference["cpython_commit"]) != (manifest["module"], manifest["commit"]):
         raise ValueError("reference does not match the pinned unittest manifest")
     lang = Toolchain(args.imre, args.runtime, args.clang, level)
-    control = root / "context"
-    control.mkdir()
-    program = HERE / "context_protocol.py"
-    native = lang.build(program.read_bytes(), control)
-    oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
-    observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
-    if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
-        raise AssertionError(f"context control differs from CPython: {observed!r} != {oracle!r}")
+    for family in ["protocol", *args.exception_family]:
+        control = root / ("context_" + family)
+        control.mkdir()
+        program = HERE / ("context_" + family + ".py")
+        native = lang.build(program.read_bytes(), control)
+        oracle = subprocess.run([sys.executable, "-B", program], capture_output=True, timeout=30, check=True)
+        observed = subprocess.run([native], capture_output=True, timeout=30, check=True)
+        if (observed.stdout, observed.stderr) != (oracle.stdout, oracle.stderr):
+            raise AssertionError(f"{program.name} differs from CPython: {observed!r} != {oracle!r}")
     driver = root / "assertions"
     driver.mkdir()
     executions, blocked = {}, {}
@@ -135,6 +136,8 @@ def main():
     for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
+    parser.add_argument("--exception-family", action="append", choices=("csv", "import"), default=[],
+                        help="also require a sibling exception family's differential control at both levels")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5):
         parser.error("run with test-enabled CPython 3.14.5")
