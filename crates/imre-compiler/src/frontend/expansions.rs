@@ -162,24 +162,40 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(destination, receiver)];
         // CPython reserves space on acquiring an iterator with no length hint,
         // even when its first pull stops or raises. A reentrant sort observes it.
-        let unhinted = match &input {
-            Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
-            Iteration::Container { iterable, .. } => {
-                matches!(
+        let reserve = Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
+        });
+        let before = match &input {
+            Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
+                let mut eager = Vec::new();
+                if self.locals[list.value] == self.locals[destination] {
+                    eager.push(Statement::Assign(
+                        list.value,
+                        self.list_snapshot(self.local(list.value)),
+                    ));
+                }
+                vec![Statement::If(
+                    self.local(list.selected),
+                    eager,
+                    vec![reserve],
+                )]
+            }
+            Iteration::Prepared(_)
+                if !matches!(source, ast::Expr::Call(call)
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")) =>
+            {
+                vec![reserve]
+            }
+            Iteration::Container { iterable, .. }
+                if matches!(
                     iterable.ty,
                     Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
-                )
+                ) =>
+            {
+                vec![reserve]
             }
-            Iteration::Range(_) => false,
-        };
-        let before = if unhinted {
-            vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
-            })]
-        } else {
-            Vec::new()
+            _ => Vec::new(),
         };
         body.extend(
             self.expand_items_after(input, node, before, |checker, value| {
