@@ -263,6 +263,7 @@ impl Checker<'_> {
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Path; 2]
             || types == [Type::Logger; 2]
+            || types == [Type::StringIO; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
             || types == [Type::Sha256; 2])
