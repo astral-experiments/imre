@@ -476,6 +476,15 @@ pub(crate) enum ZipField {
     IsDir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub(crate) enum ArgparseOutput {
+    Return,
+    Stdout,
+    Stderr,
+    File,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     Repeat,
@@ -719,6 +728,11 @@ pub(crate) enum Builtin {
     ParseArgs {
         children: Vec<usize>,
         process_argv: bool,
+    },
+    /// Format parser text or print it to the requested stream.
+    ArgparseText {
+        usage: bool,
+        output: ArgparseOutput,
     },
     /// Retags a namespace after its immutable command field selects a child layout.
     RecordView,
