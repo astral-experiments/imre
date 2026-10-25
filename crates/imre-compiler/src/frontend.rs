@@ -4615,11 +4615,11 @@ impl<'a> Checker<'a> {
         }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
-                Intrinsic::OpenFlag(name) => {
+                Intrinsic::DescriptorConstant(name) => {
                     return Ok(Expr {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::OpenFlag(name)),
+                            Builtin::Process(ir::ProcessOperation::DescriptorConstant(name)),
                             vec![],
                         ),
                     });
