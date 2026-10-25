@@ -22,6 +22,7 @@ pub(crate) enum Type {
     List(usize),
     Dict(usize),
     Set(usize),
+    Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
     Tuple(usize),
@@ -117,6 +118,7 @@ impl std::fmt::Display for Type {
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
+            Self::Deque(id) => return write!(f, "deque#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
@@ -169,6 +171,7 @@ impl std::fmt::Display for Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::Deque(_)
             | Self::Tuple(_)
             | Self::Callable(_)
             | Self::Optional(_)
@@ -687,6 +690,21 @@ pub(crate) enum Builtin {
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DequeNew,
+    DequeAppend {
+        left: bool,
+        extending: bool,
+    },
+    DequeExtendSource,
+    DequeCopy,
+    DequePop {
+        left: bool,
+    },
+    DequeClear,
+    DequeMaxlen,
+    DequeIter {
+        reverse: bool,
+    },
     CounterNew,
     CounterTotal,
     CounterUpdate,

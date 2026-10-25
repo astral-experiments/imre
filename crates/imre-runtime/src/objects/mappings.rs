@@ -896,10 +896,11 @@ impl Drop for Mapping {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum IterationError {
+pub(super) enum IterationError {
     DictionarySize,
     DictionaryKeys,
     SetSize,
+    DequeMutation,
 }
 impl IterationError {
     fn message(self) -> &'static str {
@@ -907,6 +908,7 @@ impl IterationError {
             Self::DictionarySize => "dictionary changed size during iteration",
             Self::DictionaryKeys => "dictionary keys changed during iteration",
             Self::SetSize => "Set changed size during iteration",
+            Self::DequeMutation => "deque mutated during iteration",
         }
     }
 }
@@ -1685,6 +1687,7 @@ pub unsafe extern "C" fn imre_mapping_iter_next(
             Storage::StringIterator(iterator) => Ok(iterator.next()),
             Storage::LineIterator(iterator) => Ok(iterator.next()),
             Storage::BytesIterator(iterator) => Ok(iterator.next()),
+            Storage::DequeIterator(iterator) => iterator.next(),
             _ => storage.mapping_iterator_mut().next(),
         })
     };

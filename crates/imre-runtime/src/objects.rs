@@ -12,6 +12,7 @@ mod asyncio;
 mod bytes;
 mod contexts;
 mod deferred_diff;
+mod deque;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
@@ -49,6 +50,8 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(Box<mappings::Mapping>),
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),

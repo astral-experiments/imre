@@ -96,11 +96,16 @@ impl Emitter<'_, '_> {
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
-                Type::ListInt | Type::Dict(_) | Type::Set(_) | Type::StringKeys => {
+                Type::ListInt
+                | Type::Deque(_)
+                | Type::Dict(_)
+                | Type::Set(_)
+                | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
                         Type::Dict(_) => "dict",
                         Type::Set(_) | Type::StringKeys => "set",
+                        Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };
                     // These containers have at least one word per entry, so
