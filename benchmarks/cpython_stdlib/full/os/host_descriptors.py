@@ -1,6 +1,6 @@
 """Run descriptor checks that require a host file object or independent fcntl."""
 import argparse
-from contextlib import contextmanager
+from contextlib import chdir, contextmanager
 import ctypes
 import json
 import os
@@ -9,11 +9,10 @@ import subprocess
 import sys
 import tempfile
 import types
-import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_descriptors import HERE, verify_sources
+from native_descriptors import HERE, descriptor_suite, host_fixtures, verify_sources
 
 CASES = {
     "test_os": ("FDInheritanceTests.test_get_inheritable_cloexec",
@@ -97,29 +96,29 @@ def main():
         # and the compiled calls share an fd table. No CPython API is linked.
         subprocess.run([clang, "-O" + args.opt_level, "-fPIC", "-shared", llvm, runtime,
                         "-ldl", "-lpthread", "-lm", "-o", library], check=True, cwd=work, timeout=120)
-        before = Path.cwd()
-        try:
-            os.chdir(work)
-            with bindings(library) as (view, calls):
-                for name, selections in CASES.items():
-                    mod = modules[name]
-                    for selection in selections:
-                        cls, method = selection.split(".")
-                        case = getattr(mod, cls)(method)
-                        calls.clear()
-                        with patch.object(mod, "os", view), patch.object(mod, "posix", view, create=True):
-                            result = unittest.TestResult()
-                            case.run(result)
-                        if result.skipped:
-                            row = {"reference_skip": result.skipped[0][1]}
-                        elif not result.wasSuccessful() or not calls:
-                            row = {"status": "failed", "diagnostic": str(result.failures + result.errors)}
-                        else:
-                            row = {"status": "host_driven_native", "native_calls": list(calls)}
-                        report[case.id()] = row
-                        print(case.id(), row, flush=True)
-        finally:
-            os.chdir(before)
+        with chdir(work), bindings(library) as (view, calls):
+            for name, selections in CASES.items():
+                module = modules[name]
+
+                def execute(case, method):
+                    calls.clear()
+                    trace = []
+                    # This runs after addCleanup(os.close, fd) registered by
+                    # the original body, before the next method starts.
+                    case.addCleanup(lambda: trace.extend(calls))
+                    # The fixture and its cleanups still have their original
+                    # imports. The method alone receives the native bindings.
+                    with patch.object(module, "os", view), patch.object(module, "posix", view, create=True):
+                        method()
+                    if not calls:
+                        raise AssertionError(f"no native descriptor calls from {case.id()}")
+                    return {"status": "host_driven_native", "host_fixtures": host_fixtures(case),
+                            "native_calls": trace}
+
+                ids = {f"{module.__name__}.{selection}": execute for selection in selections}
+                report.update(descriptor_suite(module, ids))
+    for name, row in report.items():
+        print(name, row, flush=True)
     args.result.write_text(json.dumps({"cpython_commit": commit, "opt_level": int(args.opt_level),
                                       "cases": report}, indent=2) + "\n")
     return int(any(row.get("status") == "failed" for row in report.values()))
