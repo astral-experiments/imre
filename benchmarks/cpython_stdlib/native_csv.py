@@ -84,7 +84,7 @@ def main():
         root = Path(tmp)
         upstream = root / "excel.py"
         upstream.write_bytes(upstream_case())
-        for source in (upstream, HERE.parents[1] / "tests/fixtures/csv/reader.py"):
+        for source in (upstream, *sorted((HERE.parents[1] / "tests/fixtures/csv").glob("*.py"))):
             expected = subprocess.run([args.python, "-I", "-B", source], cwd=root, capture_output=True, check=True)
             for level in args.opt_levels:
                 binary = root / f"{source.stem}-{level}"
@@ -96,7 +96,7 @@ def main():
                 if (actual.stdout, actual.stderr) != (expected.stdout, expected.stderr):
                     raise AssertionError((level, source.name, actual.stdout, actual.stderr, expected.stdout, expected.stderr))
                 print(f"O{level}: {len(METHODS)} native CPython methods and one CPython-driven multiline case" if source == upstream else
-                      f"O{level}: reader lifetime, error and dialect parity")
+                      f"O{level}: {source.stem} CPython parity")
 
 
 if __name__ == "__main__":

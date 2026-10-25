@@ -4047,8 +4047,23 @@ impl Emitter<'_, '_> {
                     Type::Str => 2,
                     _ => 0,
                 };
+                let (function, terminator) = match args.as_slice() {
+                    [_, text, bad_type] => {
+                        let text = if matches!(text.value.ty, Type::Optional(_)) {
+                            self.instruction(format!("inttoptr i64 {} to ptr", text.value.operand))
+                        } else {
+                            text.value.operand.clone()
+                        };
+                        (
+                            "imre_csv_reader_terminator",
+                            format!(", ptr {text}, ptr {}", bad_type.value.operand),
+                        )
+                    }
+                    [_] => ("imre_csv_reader", String::new()),
+                    _ => unreachable!("checked CSV arguments"),
+                };
                 let operand = self.checked_instruction(format!(
-                    "call ptr @imre_csv_reader(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags})",
+                    "call ptr @{function}(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags}{terminator})",
                     source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
                 ));
                 Value {
@@ -5830,6 +5845,7 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
+declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare ptr @imre_sha256_new(ptr)

@@ -273,7 +273,7 @@ for multiline fields. Errors use `csv.Error`; the default field limit is
 131,072 characters. Excel is the supported dialect. Literal `delimiter`,
 `quotechar`, `escapechar`, `doublequote`, `skipinitialspace` and `strict`
 keywords customize it. Other dialects, writers, dictionary adapters, and
-changing the field limit are outside the subset.
+changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
 
 ## Fixed regular expressions
 
