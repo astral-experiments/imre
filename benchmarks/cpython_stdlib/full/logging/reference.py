@@ -10,11 +10,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
-from suite_inventory import cases, load_suite, reference_results, verify_files
-try:
-    from suite_inventory import id_counts
-except ImportError:  # Shared runner before per-ID occurrence accounting.
-    from suite_inventory import unique_ids as id_counts
+from suite_inventory import cases, id_counts, load_suite, reference_results, verify_files
 
 
 def main():
@@ -38,7 +34,7 @@ def main():
                               "--junit-xml", xml, module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)
     report = {"module": module, "cpython_commit": manifest["commit"], "platform": sys.platform,
-              "resources": "all", "denominator": sum(ids.values()) if isinstance(ids, dict) else len(ids), "reference": results}
+              "resources": "all", "denominator": sum(ids.values()), "reference": results}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return run.returncode
 

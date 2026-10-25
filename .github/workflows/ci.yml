@@ -29,6 +29,11 @@ jobs:
       - name: Verify the standard library reference ledgers
         run: python3 benchmarks/cpython_stdlib/full/reference_report.py
       - run: cargo test --workspace --release --locked
+      - name: Run CPython logging record methods at O0 and O3
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
+          done
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
