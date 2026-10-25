@@ -47,7 +47,7 @@ REJECTED = {
     "rebind_type": 'def f() -> None:\n    x = 1\n    x = "wrong"\nf()\n',
     "rebind_builtin": 'def f() -> None:\n    len = 1\nf()\n',
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
-    "import": 'import math\nprint(1)\n',
+    "unknown_module": 'import missing_imre_test_module\nprint(1)\n',
     "recursive": 'def f(x: int) -> int:\n    return f(x)\nf(1)\n',
     "global_read": 'def f() -> int:\n    return x\nx = 1\nf()\n',
     "missing_return": 'def f(x: bool) -> int:\n    if x:\n        return 1\nf(False)\n',
