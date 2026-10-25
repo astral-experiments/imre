@@ -363,6 +363,19 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
                 let executable =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[10].value.operand));
+                // Bit 20 is set in the ABI word only when the caller disables
+                // restoration. The optional boolean is the final bound operand.
+                let signal_arg = streams & (1 << 20) != 0;
+                let stream_word = if signal_arg {
+                    self.instruction(format!(
+                        "select i1 {}, i32 {}, i32 {}",
+                        args[args.len() - 1].value.operand,
+                        streams & !(1 << 20),
+                        streams
+                    ))
+                } else {
+                    streams.to_string()
+                };
                 let kind = |index: usize| {
                     representation_kind(
                         self.module
@@ -381,7 +394,7 @@ impl Emitter<'_, '_> {
                     ("i32", kind(0).to_string()),
                     ("i32", kind(2).to_string()),
                     ("i32", kind(10).to_string()),
-                    ("i32", streams.to_string()),
+                    ("i32", stream_word),
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
@@ -403,7 +416,7 @@ impl Emitter<'_, '_> {
                 }
                 if child_options {
                     let pass_fds = streams & (1 << 19) != 0;
-                    let start = args.len() - 3 - usize::from(pass_fds);
+                    let start = args.len() - 3 - usize::from(pass_fds) - usize::from(signal_arg);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
