@@ -165,7 +165,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                     5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
-                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                            pending.try_reserve(1).map_err(|_| Error::memory_error())?;
                             pending.push((value, index + 1));
                         }
                         current = (word as *const usize, 0);

@@ -6,6 +6,7 @@
 extern void *__real_malloc(size_t);
 extern void *__real_realloc(void *, size_t);
 extern uint32_t __real_imre_record_equal(const void *, const void *);
+extern uint32_t __real_imre_sequence_equal(const void *, const void *);
 extern uint32_t __real_imre_system_exit_code_equal(const void *, uint32_t, uintptr_t);
 
 /* Fail once, inside the comparison only. Python error formatting stays usable. */
@@ -35,6 +36,13 @@ uint32_t __wrap_imre_system_exit_code_equal(const void *a, uint32_t kind, uintpt
     int previous = active;
     active = getenv("IMRE_REFUSE_COMPARISON") != NULL;
     uint32_t answer = __real_imre_system_exit_code_equal(a, kind, b);
+    active = previous;
+    return answer;
+}
+uint32_t __wrap_imre_sequence_equal(const void *a, const void *b) {
+    int previous = active;
+    active = getenv("IMRE_REFUSE_COMPARISON") != NULL;
+    uint32_t answer = __real_imre_sequence_equal(a, b);
     active = previous;
     return answer;
 }

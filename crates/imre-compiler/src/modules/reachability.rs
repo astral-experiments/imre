@@ -32,6 +32,21 @@ impl References<'_> {
     /// Root an implicit index method only if argument binding can reach conversion.
     fn invokes_index(&self, call: &ast::ExprCall) -> bool {
         let arity = match self.graph.resolve(self.module, &call.func) {
+            Some(Binding::Intrinsic(
+                intrinsic @ (Intrinsic::SysSetRecursionLimit | Intrinsic::SysGetFrameModuleName),
+            )) => {
+                return match (
+                    call.arguments.args.as_ref(),
+                    call.arguments.keywords.as_ref(),
+                ) {
+                    ([arg], []) => !matches!(arg, ast::Expr::Starred(_)),
+                    ([], [kw]) => {
+                        intrinsic == Intrinsic::SysGetFrameModuleName
+                            && kw.arg.as_deref() == Some("depth")
+                    }
+                    _ => false,
+                };
+            }
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }
@@ -842,6 +857,42 @@ run()
         let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
         reachable(source).unwrap();
         assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
+    }
+
+    #[test]
+    fn sys_index_protocol_follows_argument_binding() {
+        let source = r#"
+from sys import setrecursionlimit as set_limit, _getframemodulename as frame_name
+class Indexed:
+    def __index__(self) -> int:
+        return 12
+"#;
+        for (call, expected) in [
+            ("set_limit(Indexed())", true),
+            ("frame_name(Indexed())", true),
+            ("frame_name(depth=Indexed())", true),
+            ("set_limit(limit=Indexed())", false),
+            ("set_limit(Indexed(), Indexed())", false),
+            ("frame_name()", false),
+            ("frame_name(other=Indexed())", false),
+            ("frame_name(Indexed(), depth=Indexed())", false),
+        ] {
+            let source = format!("{source}\n{call}\n");
+            let graph = super::SourceGraph::single_with_mode(&source, true).unwrap();
+            let super::ast::Stmt::ClassDef(class) =
+                &graph.modules[graph.entry].parsed.syntax().body[1]
+            else {
+                panic!("expected Indexed");
+            };
+            let super::ast::Stmt::FunctionDef(index) = &class.body[0] else {
+                panic!("expected __index__");
+            };
+            assert_eq!(
+                graph.includes_method(graph.entry, index),
+                expected,
+                "{call}"
+            );
+        }
     }
 
     #[test]

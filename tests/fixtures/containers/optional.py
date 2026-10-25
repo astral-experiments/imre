@@ -32,6 +32,10 @@ def maybe_number(flag: bool) -> int | None:
     return None
 
 
+def add_one(value: int | None) -> int:
+    return value + 1
+
+
 def main() -> None:
     items: list[Item] = [Item("found")]
     result = find(items, "found")
@@ -82,6 +86,24 @@ def main() -> None:
     pair_item = optional_pair[-1]
     if pair_item is not None:
         print(pair_item.name)
+
+    values: dict[str, int | None] = {"one": 1, "empty": None}
+    for key in ["one", "empty"]:
+        try:
+            print(values[key] + 1)
+        except TypeError as error:
+            print(str(error))
+        try:
+            print(add_one(values.get(key)))
+        except TypeError as error:
+            print(str(error))
+    if values.get("one") is not None:
+        print(values.get("one") + 1)
+        del values["one"]
+        try:
+            print(values.get("one") + 1)
+        except TypeError as error:
+            print(str(error))
 
 
 main()

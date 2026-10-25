@@ -273,6 +273,10 @@ impl Builtin {
                 | ProcessOperation::GeneratorNext
                 | ProcessOperation::GeneratorYield
                 | ProcessOperation::Acquire
+                | ProcessOperation::PopenSetPoll { .. }
+                | ProcessOperation::PopenDeletePoll
+                | ProcessOperation::PopenStatus { poll: true }
+                | ProcessOperation::PopenSignal
                 | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
                 | ProcessOperation::RunToStderr
@@ -287,11 +291,10 @@ impl Builtin {
                 | ProcessOperation::PopenIdentity
                 | ProcessOperation::PopenPipe(_)
                 | ProcessOperation::PopenArgs
-                | ProcessOperation::PopenStatus { .. }
+                | ProcessOperation::PopenStatus { poll: false }
                 | ProcessOperation::PopenExit
                 | ProcessOperation::PopenCommunicate { .. }
                 | ProcessOperation::PopenWait
-                | ProcessOperation::PopenSignal
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
                 | ProcessOperation::IndirectCoroutine { .. }
@@ -583,6 +586,8 @@ impl Builtin {
             | Self::SortRestore
             | Self::StderrLine
             | Self::BuiltinsLast
+            | Self::BuiltinsLen
+            | Self::BuiltinsSetLen
             | Self::BuiltinsHasLast
             | Self::BuiltinsSetLast
             | Self::BuiltinsDeleteLast
