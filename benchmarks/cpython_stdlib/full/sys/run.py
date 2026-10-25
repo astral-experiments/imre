@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, native_method, run_evidence, run_in_fixtures
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
@@ -86,6 +86,17 @@ def select(toolchain, work, source, module):
     binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
     if output(binary) != (ref.stdout, ref.stderr):
         raise AssertionError("native string interning differs from CPython")
+
+    invalid = HERE / "intern-binder/intern-nested-invalid.py"
+    folder = directory(work, "intern-nested-invalid")
+    try:
+        toolchain.build(invalid.read_bytes(), folder)
+    except NativeCompileError as error:
+        expected = f'{folder}/case.py:6:23: Imre: parameter "value" is positional-only'
+        if str(error).splitlines()[-1] != expected:
+            raise AssertionError(("nested sys.intern diagnostic", str(error))) from error
+    else:
+        raise AssertionError("sys.intern accepted a bad call inside its argument")
 
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
