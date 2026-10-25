@@ -222,8 +222,8 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
-/// Popen acquires these handles before opening a parent stream with bufsize.
-fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+/// Check only on a validation failure: a successful launch creates its own handles.
+fn check_handles(modes: &[u32], fork_error_pipe: bool) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
@@ -240,7 +240,21 @@ fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
             _ => {}
         }
     }
+    if fork_error_pipe {
+        let (_read, write) = io::pipe()?;
+        // The fork child needs its error writer above the standard descriptors.
+        if write.as_raw_fd() < 3 {
+            let _above_stdio = write.try_clone()?;
+        }
+    }
     Ok(())
+}
+
+pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: Error) -> Error {
+    match check_handles(modes, fork_error_pipe) {
+        Ok(()) => error,
+        Err(io) => errno_error(io),
+    }
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
@@ -281,7 +295,8 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
                 object(words[i] as *const Object)
                     .0
                     .with(|s| s.file().fileno())
-            }?,
+            }
+            .map_err(|e| error_after_handles(&modes[..i], false, e))?,
             _ => -1,
         };
     }
@@ -291,11 +306,7 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
         let size = unsafe { Int::borrow(config.bufsize) };
         match c_int(&size) {
             Some(size) => size,
-            None => {
-                // Before reporting bufsize, preserve any error acquiring the pipe handles.
-                check_buffer_error_handles(modes).map_err(errno_error)?;
-                return Err(c_int_overflow());
-            }
+            None => return Err(error_after_handles(&modes, false, c_int_overflow())),
         }
     } else {
         -1

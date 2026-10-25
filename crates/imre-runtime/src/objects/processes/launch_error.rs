@@ -116,27 +116,32 @@ pub(super) unsafe fn spawn(
     fds: [RawFd; 3],
     oversized_fd: bool,
 ) -> Result<Child> {
+    let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
     // SAFETY: the caller roots the command until both launch APIs finish validation.
-    let fork_overflow = oversized_fd
-        && !uses_posix_spawn(
+    unsafe { validate_command_shape(cmd, config) }
+        .map_err(|e| popen::error_after_handles(&modes, false, e))?;
+    let uses_fork = || {
+        !uses_posix_spawn(
+            // SAFETY: the original command and configuration are still rooted.
             unsafe { has_directory(cmd, config) },
             !config.cwd.is_null(),
             streams,
             fds,
-        );
+        )
+    };
+    // In fork/exec, the error pipe exists before native argument conversion.
     // SAFETY: validation and copying complete before the command may fork.
-    let (launch, cwd) = unsafe { prepare_command(cmd, config, fork_overflow)? };
+    let (launch, cwd) = unsafe { prepare_command(cmd, config, oversized_fd && uses_fork()) }
+        .map_err(|e| popen::error_after_handles(&modes, uses_fork(), e))?;
     let has_directory = launch.search.is_none();
     if launch.argv.strings.is_empty()
         && uses_posix_spawn(has_directory, cwd.is_some(), streams, fds)
     {
-        return Err(Error::new(
-            Kind::ValueError,
-            "posix_spawn: argv must not be empty",
-        ));
+        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
+        return Err(popen::error_after_handles(&modes, false, error));
     }
     if oversized_fd {
-        return Err(c_int_overflow());
+        return Err(popen::error_after_handles(&modes, false, c_int_overflow()));
     }
     launch
         .spawn_tagged(cwd.as_ref(), streams, fds)

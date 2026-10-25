@@ -1240,7 +1240,11 @@ unsafe fn prepare_process(
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.
-    unsafe { prepare_command(&WordKind::new(5).acquire(args as usize), &config, false) }
+    unsafe {
+        let cmd = WordKind::new(5).acquire(args as usize);
+        validate_command_shape(&cmd, &config)?;
+        prepare_command(&cmd, &config, false)
+    }
 }
 
 /// Conversion error shared by Popen's file descriptors and pipe buffer sizes.
@@ -1251,17 +1255,13 @@ fn c_int_overflow() -> Error {
     )
 }
 
+/// Validate the argument shape before CPython chooses a launch API or opens its fork error pipe.
+///
 /// # Safety
-/// The exact optional directory and environment stay rooted across conversion.
-unsafe fn prepare_command(
-    cmd: &OwnedWord,
-    config: &popen::LaunchConfig,
-    oversized_fork_fd: bool,
-) -> Result<(Launch, Option<CString>)> {
-    // SAFETY: the caller roots the exact argv, optional directory and environment.
+/// The command and configuration must remain rooted.
+unsafe fn validate_command_shape(cmd: &OwnedWord, config: &popen::LaunchConfig) -> Result<()> {
+    // SAFETY: the caller roots the exact argument representation.
     unsafe {
-        // Python selects args[0], validates every environment name, then
-        // converts native strings. Preserve that order for mixed failures.
         if config.shell
             && cmd.kind.raw() == 5
             && object(cmd.word as *const Object)
@@ -1276,6 +1276,21 @@ unsafe fn prepare_command(
         if !config.shell && config.executable.is_null() && argv::first(cmd).is_none() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
+        Ok(())
+    }
+}
+
+/// # Safety
+/// The exact optional directory and environment stay rooted across conversion.
+unsafe fn prepare_command(
+    cmd: &OwnedWord,
+    config: &popen::LaunchConfig,
+    oversized_fork_fd: bool,
+) -> Result<(Launch, Option<CString>)> {
+    // SAFETY: the caller roots the exact argv, optional directory and environment.
+    unsafe {
+        // Python selects args[0], validates every environment name, then
+        // converts native strings. Preserve that order for mixed failures.
         let env = if config.env.is_null() {
             None
         } else {
