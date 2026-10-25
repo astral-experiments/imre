@@ -9,6 +9,7 @@
 
 use crate::callables::Targets;
 use crate::ir::{Expr, ExprKind, Module, Statement};
+use crate::types::Types;
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -26,7 +27,7 @@ impl ExceptionEffects {
 #[derive(Clone, Copy)]
 struct Context<'a> {
     calls: &'a Targets,
-    types: &'a crate::types::Types,
+    types: &'a Types,
 }
 
 /// Removes fallibility only after every operation and callee is proved safe.
@@ -54,8 +55,12 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
 }
 
 /// Check a fragment during lowering, when no callee is yet proven infallible.
-pub(crate) fn may_raise_locally(body: &[Statement]) -> bool {
-    block(body, &[], &Targets::default())
+pub(crate) fn may_raise_locally(body: &[Statement], types: &Types) -> bool {
+    let context = Context {
+        calls: &Targets::default(),
+        types,
+    };
+    block(body, &[], context)
 }
 
 /// Any potentially failing path is enough; unreachable branches and caught
@@ -356,6 +361,26 @@ mod tests {
             analyze(&module).functions,
             [false, false, false, true, true]
         );
+    }
+
+    #[test]
+    fn local_list_effects_use_the_module_struct_layouts() {
+        let types = Types::default();
+        types.set_value_structs([0].into());
+        for (class, can_raise) in [(0, true), (1, false)] {
+            let ty = Type::Class(class);
+            let list = Expr {
+                ty: types.list(ty),
+                kind: ExprKind::List(vec![Expr {
+                    ty,
+                    kind: ExprKind::Local(0),
+                }]),
+            };
+            assert_eq!(
+                may_raise_locally(&[Statement::Return(list)], &types),
+                can_raise
+            );
+        }
     }
 
     #[test]
