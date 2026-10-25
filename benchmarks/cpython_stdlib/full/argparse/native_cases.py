@@ -71,15 +71,24 @@ class Parser(Group):
         return Group(self.declarations, name)
 
     def parse_args(self, args=None):
+        return self._parse("parse_args", args)
+
+    def parse_known_args(self, args=None):
+        return self._parse("parse_known_args", args)
+
+    def _parse(self, method, args):
         # The upstream failure wrappers always call parse_args(args), even when
         # their test name ends in sysargs. Observe the actual call each time.
         explicit = args is not None
         arg = "words" if explicit else ""
         decl = "\n    ".join(self.declarations)
+        result = "result" if method == "parse_args" else "result[0]"
         source = (f"import argparse\nimport sys\n\ndef parse({'words: list[str]' if explicit else ''}):\n"
-                  f"    {decl}\n    return parser.parse_args({arg})\n\n"
+                  f"    {decl}\n    return parser.{method}({arg})\n\n"
                   f"result = parse({'sys.argv[1:]' if explicit else ''})\n"
-                  f"print('RETURN')\nprint(repr(result))\n")
+                  f"print('RETURN')\nprint(repr({result}))\n")
+        if method == "parse_known_args":
+            source += "print(repr(result[1]))\n"
         binary, reason = self.driver.build(source)
         if reason:
             self.driver.blocked[self.driver.name].add(reason)
@@ -89,18 +98,30 @@ class Parser(Group):
         expected = completed([sys.executable, "-B", binary.with_name("case.py"), *argv])
         if actual != expected:
             raise AssertionError(f"argv={argv!r}: native={actual!r}, CPython={expected!r}")
-        self.driver.calls["parse_args"] += 1
+        self.driver.calls[method] += 1
         code, stdout, stderr = actual
         marker = b"RETURN\n"
         if code or not stdout.startswith(marker):
-            from test.test_argparse import ArgumentParserError
-            raise ArgumentParserError("SystemExit", stdout.decode(), stderr.decode(), code)
-        # Only transport the native namespace. CPython's copy above is used
-        # solely as a byte-for-byte process oracle, never to produce the result.
-        expr = ast.parse(stdout.removeprefix(marker).decode().strip(), mode="eval").body
+            self.exited(code, stdout, stderr)
+        # Only transport the native values. The reference process never supplies
+        # any part of the namespace or the extras used by the original assertions.
+        lines = stdout.removeprefix(marker).decode().splitlines()
+        if len(lines) != (1 if method == "parse_args" else 2):
+            raise AssertionError(f"unexpected native result: {stdout!r}")
+        expr = ast.parse(lines[0], mode="eval").body
         if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name) or expr.func.id != "Namespace":
             raise AssertionError(f"unexpected native namespace: {stdout!r}")
-        return types.SimpleNamespace(**{kw.arg: ast.literal_eval(kw.value) for kw in expr.keywords})
+        namespace = types.SimpleNamespace(**{kw.arg: ast.literal_eval(kw.value) for kw in expr.keywords})
+        if method == "parse_args":
+            return namespace
+        extras = ast.literal_eval(lines[1])
+        if not isinstance(extras, list) or not all(isinstance(arg, str) for arg in extras):
+            raise AssertionError(f"unexpected native extras: {extras!r}")
+        return namespace, extras
+
+    def exited(self, code, stdout, stderr):
+        from test.test_argparse import ArgumentParserError
+        raise ArgumentParserError("SystemExit", stdout.decode(), stderr.decode(), code)
 
 
 class Driver:
@@ -157,7 +178,8 @@ class Driver:
                                  or "upstream input table is empty; no operation ran",
                                  "native_calls": calls, "opt_level": self.toolchain.level,
                                  "fixture": "CPython original method, assertions, and module/class/instance fixtures",
-                                 "process_comparison": "exit status, stdout and stderr against a separate CPython process"},
+                                 "process_comparison": ("exit status, stdout and stderr against a separate CPython process"
+                                                        if calls else "no subprocess needed for the empty input table")},
                 }
             results[name] = (["host-driven-native", operations] if operations else
                              ["reference-only", "no parse_args calls in the upstream routine"])
