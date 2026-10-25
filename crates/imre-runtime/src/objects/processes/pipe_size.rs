@@ -36,12 +36,11 @@ pub(super) unsafe fn capacity(mut word: usize, mut kind: WordKind) -> Result<Opt
     }
 }
 
-/// Return the parent's and child's respective ends of a resized pipe. On any
-/// error Rust drops both CLOEXEC descriptors before a child can be started.
-pub(super) fn pair(size: Option<u32>, parent_writes: bool) -> io::Result<Option<(OwnedFd, Stdio)>> {
+/// Create both CLOEXEC ends and apply the requested Linux capacity before a child can start.
+pub(super) fn open(size: Option<u32>) -> io::Result<(io::PipeReader, io::PipeWriter)> {
+    let (read, write) = io::pipe()?;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     if let Some(size) = size {
-        let (read, write) = io::pipe()?;
         loop {
             // SAFETY: the write end is open; F_SETPIPE_SZ accepts a C int.
             if unsafe { libc::fcntl(write.as_raw_fd(), libc::F_SETPIPE_SZ, size as libc::c_int) }
@@ -54,13 +53,21 @@ pub(super) fn pair(size: Option<u32>, parent_writes: bool) -> io::Result<Option<
                 return Err(err);
             }
         }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = size;
+    Ok((read, write))
+}
+
+/// Return the parent and child ends when the platform supports resizing a new pipe.
+pub(super) fn pair(size: Option<u32>, parent_writes: bool) -> io::Result<Option<(OwnedFd, Stdio)>> {
+    if cfg!(any(target_os = "linux", target_os = "android")) && size.is_some() {
+        let (read, write) = open(size)?;
         return Ok(Some(if parent_writes {
             (write.into(), Stdio::from(read))
         } else {
             (read.into(), Stdio::from(write))
         }));
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    let _ = (size, parent_writes);
     Ok(None)
 }

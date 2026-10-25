@@ -283,12 +283,12 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
 }
 
 /// Popen acquires these handles before opening a parent stream with bufsize.
-fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+fn check_buffer_error_handles(modes: [u32; 3], pipe_capacity: Option<u32>) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
         match mode {
-            1 => *pipe = Some(io::pipe()?),
+            1 => *pipe = Some(super::pipe_size::open(pipe_capacity)?),
             2 if devnull.is_none() => {
                 devnull = Some(
                     fs::OpenOptions::new()
@@ -369,7 +369,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             Some(size) => size,
             None => {
                 // Before reporting bufsize, preserve any error acquiring the pipe handles.
-                check_buffer_error_handles(modes).map_err(errno_error)?;
+                check_buffer_error_handles(modes, pipe_capacity).map_err(errno_error)?;
                 return Err(c_int_overflow());
             }
         }

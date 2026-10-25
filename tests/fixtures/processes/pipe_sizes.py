@@ -60,6 +60,18 @@ if platform == 'linux':
         print(code)
     else:
         raise AssertionError('kernel accepted a 4 GiB pipe')
+    # Pipe setup precedes opening the buffered stream, even if both arguments fail.
+    try:
+        subprocess.Popen(['/nonexistent-after-pipe-allocation'], stdout=subprocess.PIPE,
+                         pipesize=4294967295, bufsize=1 << 100)
+    except OSError as exc:
+        assert exc.filename is None
+        code = exc.errno
+        if code is None:
+            raise AssertionError('missing pipe setup errno before buffer validation')
+        print(code)
+    else:
+        raise AssertionError('expected a pipe setup error before the buffer overflow')
 try:
     subprocess.Popen(['/nonexistent-before-pipesize-validation'], pipesize='invalid')
 except TypeError as exc:
