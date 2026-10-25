@@ -3,6 +3,7 @@
 import logging
 import os.path
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 seen_records: list[logging.LogRecord] = []
@@ -35,6 +36,16 @@ class Redirect(logging.FileHandler):
 filename = sys.argv[1]
 entry = logging.makeLogRecord({"msg": "π"})
 seen_records.append(entry)
+supplied_path = Path(filename + ".supplied")
+supplied_path.write_bytes(b"old\n")
+rotator = RotatingFileHandler(supplied_path, maxBytes=2, backupCount=1, delay=True)
+rotator.stream = supplied_path.open("a", encoding="utf-8")
+print(rotator.shouldRollover(entry))
+rotator.emit(entry)
+rotator.close()
+print(repr(supplied_path.read_bytes()))
+print(repr(Path(filename + ".supplied.1").read_bytes()))
+
 redirect_path = Path(filename + ".redirect")
 delayed = logging.FileHandler(filename, mode="w", encoding="utf-8", delay=True)
 print(delayed.stream is None)
