@@ -41,10 +41,6 @@ def exercise(flag: bool) -> None:
     print(other.dispatch(bool) is base)
 
 
-exercise(True)
-exercise(False)
-
-
 def local_registry() -> None:
     def local_base(value: str) -> str:
         return "local base"
@@ -59,4 +55,6 @@ def local_registry() -> None:
     print(registry("item"))
 
 
+exercise(True)
+exercise(False)
 local_registry()
