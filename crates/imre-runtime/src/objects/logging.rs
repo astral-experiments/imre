@@ -2,6 +2,7 @@
 mod levels;
 pub(super) mod timed;
 
+pub(super) mod formatter;
 pub(super) mod record;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -146,10 +147,27 @@ fn timestamp(format: Option<&str>) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let seconds = now.as_secs() as libc::time_t;
+    timestamp_at(format, now.as_secs() as libc::time_t, now, false)
+}
+
+/// Renders either an emitted timestamp or the time captured earlier by a LogRecord.
+fn timestamp_at(
+    format: Option<&str>,
+    seconds: libc::time_t,
+    now: std::time::Duration,
+    utc: bool,
+) -> String {
     let mut local = MaybeUninit::<libc::tm>::uninit();
     // SAFETY: the scalar and destination are live for the call.
-    if unsafe { libc::localtime_r(&seconds, local.as_mut_ptr()) }.is_null() {
+    if unsafe {
+        if utc {
+            libc::gmtime_r(&seconds, local.as_mut_ptr())
+        } else {
+            libc::localtime_r(&seconds, local.as_mut_ptr())
+        }
+    }
+    .is_null()
+    {
         return String::new();
     }
     let custom = format.filter(|value| !value.is_empty());

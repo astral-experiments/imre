@@ -4,6 +4,13 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 
 ## Accepted source
 
+Module functions with annotated results can use `functools.cache` or
+`functools.lru_cache` with a literal capacity. The native cache accepts fixed
+positional arguments with immutable key types. Bounded caches evict the least
+recently used key; zero disables storage, and `None` keeps all results.
+`cache_clear()` resets entries and counters. `cache_info()` supports unpacking
+and indexing the four snapshot fields.
+
 | Area | Supported behavior |
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
@@ -652,7 +659,7 @@ Final reference release closes a file best-effort without callbacks or a new pen
 
 Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueError`. Embedded NULs in paths raise `ValueError`. Missing files, permission failures, directories opened as files, and non-directory path components use `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`; exclusive-create collisions use `FileExistsError`, also an `OSError`; other operating-system errors use `OSError`. Runtime-generated message text is not a CPython compatibility promise.
 
-`sys.argv` is one lazily initialized mutable `list[str]`, shared across aliases and modules. Its first element identifies the invoked native executable, corresponding to the script identity under CPython. Element writes and list mutation are supported; rebinding the module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
+`sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
 ## Command-line options
 
@@ -724,6 +731,8 @@ The call waits for the child and inherits stdin. It closes other inherited descr
 The result exposes read-only `args: list[str]`, `returncode: int`, and the two stream fields. Each stream has the exact type `str`, `bytes` or `None` selected by that call. `CompletedProcess[str]` and `CompletedProcess[bytes]` annotate results that capture both streams. A bare annotation retains the existing two-text-captures type. Signal termination produces a negative return code. Results can be stored in classes, containers, and optionals. Equality compares identity; `str`, `repr`, formatted output, and `isinstance` support the sealed result. `args` retains the original argument list, so later list mutation remains visible through that field. Calling `check_returncode()` immediately checks the stored status; escaping that bound method is unsupported.
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
+
+On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. Open flags use the runtime target's values.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
@@ -986,6 +995,16 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
+`ImportError` and its subclass `ModuleNotFoundError` retain their positional
+arguments in `.args`. The keyword-only `name`, `path`, and `name_from` attributes
+default to `None`; `.msg` is the sole positional argument, or `None`. Arguments
+can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
+values. On a constructed or narrowed import exception, these fields support
+`str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
+support length and integer indexing. Reinitializing an instance resets omitted
+fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
+and pickling remain outside this subset.
+
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary
@@ -1203,7 +1222,7 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 ### Closed entry profiles
 
-`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unknown exports, modules with observable import effects, and first-party module initializers remain subject to normal checks. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unreferenced first-party module values built solely from builtin literals may omit their storage if their keys are statically hashable and their annotations contain only static types. Other first-party initializers and modules with observable import effects remain subject to normal checks; unknown exports are rejected. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
 
 ```json
 {"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}
