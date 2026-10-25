@@ -1,6 +1,7 @@
 //! Lift typed local definitions into native functions. A captured binding is
 //! loaded at each direct call, after its explicit arguments, as Python would
 //! read the enclosing cell on entry. No callable with captures can escape.
+use ruff_python_ast::visitor::{Visitor, walk_expr};
 use std::rc::Rc;
 
 use super::*;
@@ -19,6 +20,32 @@ pub(super) struct Binding {
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
     later_writes: HashSet<String>,
+    value_read: bool,
+    pub(super) value_slot: Option<usize>,
+}
+
+/// A direct call can target a lifted helper. Every other read of the name
+/// must see the same callable object for this execution of its definition.
+fn reads_function_value(body: &[ast::Stmt], name: &str) -> bool {
+    struct Read<'n>(&'n str, bool);
+    impl<'a> Visitor<'a> for Read<'_> {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if self.1 {
+                return;
+            }
+            match expr {
+                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(n) if n.id == self.0) =>
+                {
+                    self.visit_arguments(&call.arguments);
+                }
+                ast::Expr::Name(n) if n.id == self.0 => self.1 = true,
+                _ => walk_expr(self, expr),
+            }
+        }
+    }
+    let mut read = Read(name, false);
+    read.visit_body(body);
+    read.1
 }
 
 impl Binding {
@@ -90,30 +117,48 @@ impl Checker<'_> {
 
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
-    pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
+    pub(super) fn collect_local_definitions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
         for (index, statement) in stmts.iter().enumerate() {
-            let Some(function) = statement.as_function_def_stmt() else {
-                continue;
+            let name = match statement {
+                ast::Stmt::ClassDef(class) => class.name.as_str(),
+                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+                _ => continue,
             };
-            let name = function.name.as_str();
             if reserved(name)
                 || self.names.contains_key(name)
                 || self.graph.modules[self.module].bindings.contains_key(name)
                 || self.class_receiver.as_deref() == Some(name)
                 || self.local_functions.contains_key(name)
+                || self.local_classes.contains_key(name)
             {
                 return Err(error(
                     self.source,
-                    function,
-                    "local functions require a unique unshadowed name",
+                    statement,
+                    if statement.is_class_def_stmt() {
+                        "local classes require a unique unshadowed name"
+                    } else {
+                        "local functions require a unique unshadowed name"
+                    },
                 ));
             }
+            let Some(function) = statement.as_function_def_stmt() else {
+                self.local_classes.insert(
+                    name.to_owned(),
+                    local_classes::Binding {
+                        site: statement.range(),
+                        value: None,
+                    },
+                );
+                continue;
+            };
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {
                     site: function.range,
                     function: None,
                     generic: None,
+                    value_read: reads_function_value(&stmts[index + 1..], name),
+                    value_slot: None,
                     instances: HashMap::new(),
                     later_writes: if function.is_async {
                         narrowing::assigned_names(&stmts[index + 1..])
@@ -129,7 +174,7 @@ impl Checker<'_> {
     pub(super) fn define_local_function(
         &mut self,
         definition: &ast::StmtFunctionDef,
-    ) -> Result<(), String> {
+    ) -> Result<Option<Statement>, String> {
         let name = definition.name.as_str();
         if !self
             .local_functions
@@ -142,7 +187,7 @@ impl Checker<'_> {
                 "local definitions must appear directly in the enclosing function's suite",
             ));
         }
-        if definition.returns.is_none()
+        if (definition.returns.is_none() && !annotations::inert_body(definition))
             || definition
                 .parameters
                 .iter_non_variadic_params()
@@ -156,7 +201,7 @@ impl Checker<'_> {
         }
         if self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
-            return Ok(());
+            return Ok(None);
         }
         let signature = signature(
             definition,
@@ -168,8 +213,23 @@ impl Checker<'_> {
             &inference::Inference::default(),
         )?;
         let function = self.lift_local(definition, signature)?;
-        self.local_functions.get_mut(name).unwrap().function = Some(function);
-        Ok(())
+        let object = if self.local_functions[name].value_read {
+            function
+                .callback(self.types, self.source, definition)
+                .ok()
+                .map(|value| {
+                    let slot = self.hidden(value.ty);
+                    self.assigned.insert(slot);
+                    self.calls.insert(function.signature.id);
+                    (slot, value)
+                })
+        } else {
+            None
+        };
+        let binding = self.local_functions.get_mut(name).unwrap();
+        binding.function = Some(function);
+        binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
+        Ok(object.map(|(slot, value)| Statement::Assign(slot, value)))
     }
 
     fn generic_awaitable_wrapper(&self, definition: &ast::StmtFunctionDef) -> bool {
@@ -255,6 +315,7 @@ impl Checker<'_> {
         mut signature: Signature,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -264,6 +325,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
         helper.asynchronous = signature.asynchronous;
@@ -299,6 +361,9 @@ impl Checker<'_> {
                 helper.names.insert(read, inner);
             } else if let Some(binding) = self.local_functions.get(&read) {
                 let mut binding = binding.clone();
+                if let Some(slot) = &mut binding.value_slot {
+                    *slot = capture(*slot, &mut helper);
+                }
                 // An earlier helper can itself close over enclosing slots. Keep
                 // their outer identity even if this function shadows their names.
                 if let Some(sibling) = &mut binding.function {

@@ -78,22 +78,32 @@ def main():
         ref.write_bytes(entry)
         expected = observe([sys.executable, "-I", "-B", ref], work)
         assert expected == ["True"] * 5
+        control = HERE.parents[3] / "tests/fixtures/files/logging_adapter_core.py"
+        context_expected = observe([sys.executable, "-I", "-B", control], work)
         levels = {}
+        public_context = {}
         for level in (0, 3):
             tool = Toolchain(args.imre, args.runtime, args.clang, level)
             actual = observe([tool.build(entry, work)], work)
             if actual != expected:
                 raise AssertionError((level, expected, actual))
             levels[str(level)] = actual
+            context_actual = observe([tool.build(control.read_bytes(), work)], work)
+            if context_actual != context_expected:
+                raise AssertionError((level, context_expected, context_actual))
+            public_context[str(level)] = {
+                "output_lines": len(context_actual),
+                "stdout_sha256": hashlib.sha256(("\n".join(context_actual) + "\n").encode()).hexdigest(),
+            }
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())
     report = {
         "cpython_commit": manifest["commit"], "blob": BLOB, "source": LOGGING,
         "method": "LoggerAdapter.manager getter and setter", "sha256": digest,
         "fixture": "Typed native holder and two native adapter layers; no LoggerAdapterTest fixture",
-        "logging_occurrences": 0, "levels": levels,
+        "logging_occurrences": 0, "levels": levels, "public_context": public_context,
     }
     args.result.write_text(json.dumps(report, indent=2) + "\n")
-    print("LoggerAdapter.manager: five identity checks matched at O0 and O3; zero test IDs")
+    print(f"LoggerAdapter: five manager and {len(context_expected)} public context checks at O0/O3; zero test IDs")
 
 
 def observe(command, work):
