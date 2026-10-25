@@ -1196,6 +1196,8 @@ pub(crate) enum LogOperation {
     FileConfig,
     Disabled,
     Propagate,
+    SetPropagate,
+    HasHandlers,
     Name,
     Level,
     Root,
