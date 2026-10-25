@@ -50,7 +50,18 @@ impl Checker<'_> {
             }
         };
         let value = self.expr(path)?;
-        self.fspath_protocol(value, path, None)
+        self.fspath_protocol(value, path, None, None)
+    }
+
+    /// OS path converters name the operation and parameter if the protocol is missing.
+    pub(super) fn syscall_fspath(
+        &mut self,
+        value: Expr,
+        at: &ast::Expr,
+        operation: &str,
+        parameter: &str,
+    ) -> Result<Expr, String> {
+        self.fspath_protocol(value, at, None, Some((operation, parameter)))
     }
 
     /// A path protocol result must be a string or bytes; do not recursively call
@@ -60,6 +71,7 @@ impl Checker<'_> {
         value: Expr,
         at: &ast::Expr,
         returned_by: Option<usize>,
+        syscall: Option<(&str, &str)>,
     ) -> Result<Expr, String> {
         if matches!(
             value.ty,
@@ -69,14 +81,19 @@ impl Checker<'_> {
             .members(value.ty)
             .is_some_and(|members| members == [Type::Str, Type::Bytes])
         {
-            return Ok(value);
+            // OS consumers need the string spelling; os.fspath itself preserves subclasses.
+            return Ok(if syscall.is_some() {
+                Self::string_value(value)
+            } else {
+                value
+            });
         }
         if returned_by.is_none() && matches!(value.ty, Type::Path | Type::PurePath(_)) {
             return self.fspath_value(value, at);
         }
         if let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) {
-            let mut left = self.fspath_protocol(first, at, returned_by)?;
-            let mut right = self.fspath_protocol(second, at, returned_by)?;
+            let mut left = self.fspath_protocol(first, at, returned_by, syscall)?;
+            let mut right = self.fspath_protocol(second, at, returned_by, syscall)?;
             // A branch that only raises supplies no Python value to the join.
             if matches!(left.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
                 left.ty = right.ty;
@@ -111,27 +128,38 @@ impl Checker<'_> {
         {
             if self.classes.has_concrete_subclasses(id) {
                 return self.dispatch_record(id, value, at, |checker, class, receiver| {
-                    checker.exact_fspath(class, receiver, at)
+                    checker.exact_fspath(class, receiver, at, syscall)
                 });
             }
-            return self.exact_fspath(id, value, at);
+            return self.exact_fspath(id, value, at, syscall);
         }
-        Ok(self.fspath_type_error(value, returned_by))
+        Ok(self.fspath_type_error(value, returned_by, syscall))
     }
 
-    fn exact_fspath(&mut self, id: usize, receiver: Expr, at: &ast::Expr) -> Result<Expr, String> {
+    fn exact_fspath(
+        &mut self,
+        id: usize,
+        receiver: Expr,
+        at: &ast::Expr,
+        syscall: Option<(&str, &str)>,
+    ) -> Result<Expr, String> {
         let Some(method) = self.classes.methods[id].get("__fspath__") else {
-            return Ok(self.fspath_type_error(receiver, None));
+            return Ok(self.fspath_type_error(receiver, None, syscall));
         };
         let result = Expr {
             ty: method.returns,
             kind: ExprKind::Call(method.id, ir::CallArgs::positional(vec![receiver])),
         };
         self.calls.insert(method.id);
-        self.fspath_protocol(result, at, Some(id))
+        self.fspath_protocol(result, at, Some(id), syscall)
     }
 
-    fn fspath_type_error(&self, evaluated: Expr, returned_by: Option<usize>) -> Expr {
+    fn fspath_type_error(
+        &self,
+        evaluated: Expr,
+        returned_by: Option<usize>,
+        syscall: Option<(&str, &str)>,
+    ) -> Expr {
         let actual = match evaluated.ty {
             Type::None => "NoneType".to_owned(),
             Type::List(_) | Type::ListInt | Type::ByteOutput => "list".to_owned(),
@@ -141,12 +169,15 @@ impl Checker<'_> {
             Type::Class(id) => self.classes.declarations.definitions[id].name.clone(),
             ty => self.type_name(ty),
         };
-        let message = match returned_by {
-            Some(id) => format!(
+        let message = match (returned_by, syscall) {
+            (Some(id), _) => format!(
                 "expected {}.__fspath__() to return str or bytes, not {actual}",
                 self.classes.declarations.definitions[id].name
             ),
-            None => format!("expected str, bytes or os.PathLike object, not {actual}"),
+            (None, Some((operation, parameter))) => format!(
+                "{operation}: {parameter} should be string, bytes or os.PathLike, not {actual}"
+            ),
+            (None, None) => format!("expected str, bytes or os.PathLike object, not {actual}"),
         };
         let exception = Expr {
             ty: Type::Exception,
