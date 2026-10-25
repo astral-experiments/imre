@@ -1802,7 +1802,7 @@ impl Checker<'_> {
             let mut step = inputs[index].next.clone();
             step.push(Statement::If(
                 self.local(inputs[index].ready),
-                self.generator_clause_body(available),
+                self.generator_body(available),
                 exhausted,
             ));
             cases = vec![Statement::If(
@@ -1838,9 +1838,8 @@ impl Checker<'_> {
         })
     }
 
-    /// PEP 479 applies to the target binding, predicates, yielded expression,
-    /// and inner iterable construction after the source has produced an item.
-    fn generator_clause_body(&self, body: Vec<Statement>) -> Vec<Statement> {
+    /// Convert StopIteration escaping suspended generator code, retaining its cause.
+    pub(super) fn generator_body(&self, body: Vec<Statement>) -> Vec<Statement> {
         let error = Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
