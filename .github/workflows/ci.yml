@@ -18,6 +18,8 @@ on:
           - '45375ede540b8bd3912f95b1345a4fc586505673'
           - '8c29f1ac2d63f4040bd7cca2ab92d7d03337f08a'
           - 'cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e'
+          - '73aa81754dfbb26b0d2707deabc4a539ef9f19ba'
+          - '4aa16ea86ca21be024b520a995e0675fb6f8b762'
 permissions:
   contents: read
 jobs:
@@ -73,7 +75,7 @@ jobs:
             sha256sum target/debug/imre target/debug/libimre_runtime.a
           } > "$RUNNER_TEMP/argparse-receipts/build.txt"
       - name: Compare argparse process results and test the runtime
-        if: ${{ inputs.revision == 'cc8a48c1c96509c299ecb38a2f9f2952a7c2fd3e' }}
+        if: ${{ inputs.revision == '4aa16ea86ca21be024b520a995e0675fb6f8b762' }}
         shell: bash
         run: |
           set -euo pipefail
