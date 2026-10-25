@@ -13,6 +13,7 @@ sys.path[:0] = [str(HERE), str(STDLIB)]
 import copyfile
 import native_copy
 import native_rmtree
+import tree_ops
 import which_cases
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -77,21 +78,22 @@ def run_level(args, module, reference, level, directory):
     executions.update(copyfile.executors(args, module, directory, level, with_roles=True))
     executions.update(native_copy.executors(args, module, directory, level, with_roles=True))
     executions.update(native_rmtree.executors(args, module, directory, level, with_roles=True))
+    tree_work = directory / "tree"
+    tree_work.mkdir()
+    executions.update(tree_ops.executors(module, tools, tree_work, with_roles=True))
     preflight = {}
-    for name, reason in native_copy.MOCK_CASES.items():
-        test_id = module.TestCopy(name).id()
-        if reference["reference"][test_id] == "pass":
-            preflight[test_id, 1] = {"outcome": "blocked", "reason": reason,
-                                     "roles": roles(body="unobserved", assertions="unobserved",
-                                                    operation="unobserved", fixture="unobserved"),
-                                     "evidence": {"operation": "shutil metadata", "fixture": reason}}
-    for name, reason in native_rmtree.BLOCKERS.items():
-        test_id = module.TestRmTree(name).id()
-        if reference["reference"][test_id] == "pass":
-            preflight[test_id, 1] = {"outcome": "blocked", "reason": reason,
-                                     "roles": roles(body="unobserved", assertions="unobserved",
-                                                    operation="unobserved", fixture="unobserved"),
-                                     "evidence": {"operation": "shutil.rmtree", "fixture": reason}}
+    for cls, operation, blockers in (
+        (module.TestCopy, "shutil metadata", native_copy.MOCK_CASES),
+        (module.TestRmTree, "shutil.rmtree", native_rmtree.BLOCKERS),
+        (module.TestCopyTree, "shutil.copytree", tree_ops.BLOCKERS),
+    ):
+        for name, reason in blockers.items():
+            test_id = cls(name).id()
+            if reference["reference"][test_id] == "pass":
+                preflight[test_id, 1] = {"outcome": "blocked", "reason": reason,
+                                         "roles": roles(body="unobserved", assertions="unobserved",
+                                                        operation="unobserved", fixture="unobserved"),
+                                         "evidence": {"operation": operation, "fixture": reason}}
     attempts = json.loads(args.method_attempts.read_text())
     if (attempts["schema"] != "imre.shutil-method-attempts.v1"
             or attempts["cpython_commit"] != reference["cpython_commit"]

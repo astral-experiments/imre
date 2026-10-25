@@ -6,7 +6,8 @@
 //! attributes can introduce ownership cycles.
 
 mod imports;
-mod suggestions;
+mod tree;
+pub(super) use tree::append_tree_entries;
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -302,6 +303,7 @@ enum Payload {
     /// Some builtins render a human message that differs from their original arguments.
     Arguments(Box<BuiltinArguments>),
     Json(Rc<JsonError>),
+    Tree(Rc<tree::Errors>),
     Key(OwnedWord),
     Exit(Option<OwnedWord>),
     Import(Box<imports::Import>),
@@ -587,6 +589,16 @@ impl Error {
 
     pub(crate) fn index() -> Self {
         Self::new(Kind::IndexError, "list index out of range")
+    }
+
+    /// Copytree aggregates only OS failures; language errors still escape intact.
+    pub(super) fn into_os_message(self) -> Result<Rc<Str>> {
+        if !self.kind.matches(Kind::OSError) {
+            return Err(self);
+        }
+        let error = self.into_object();
+        // SAFETY: this fresh exception owns its payload throughout the read.
+        Ok(unsafe { error.0.with(Storage::exception_message) })
     }
 
     /// Retain the original exception when a native operation translates an error.
@@ -1099,6 +1111,7 @@ impl Storage {
                 // SAFETY: this owned kind-3 word is a live string.
                 Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
             }
+            Payload::Tree(errors) => errors.message(),
             Payload::Key(key) => {
                 let mut message = String::new();
                 // SAFETY: the exception owns the immutable key and its exact kind.
@@ -1523,6 +1536,7 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             let arg = match &e.payload {
                 Payload::Import(err) => err.args.repr_args(),
                 Payload::Positional(args) => args.repr_args(),
+                Payload::Tree(errors) => errors.message().as_ref().clone(),
                 Payload::Empty => Str::new(""),
                 Payload::Arguments(arguments) => {
                     let mut result = String::new();
