@@ -135,6 +135,7 @@ impl Value {
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
             Node::Float(x) => Self::Float(*x),
+            Node::ConstantNan => Self::Float(f64::NAN),
             Node::String(x) => Self::String(x.clone()),
             Node::Datetime(x) => Self::Datetime(x.clone()),
             Node::Array(a) => Self::array(
