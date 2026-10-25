@@ -40,7 +40,6 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         (M::Declaration("importlib.resources"), "files") => "importlib.resources.files",
         (M::Declaration("warnings"), "warn") => "warnings.warn",
         (M::CollectionsAbc, "Collection") => "collections.abc.Collection",
-        (M::CollectionsAbc, "Mapping") => "collections.abc.Mapping",
         _ => return None,
     };
     Some(Binding::Intrinsic(Intrinsic::Declaration(symbol)))
