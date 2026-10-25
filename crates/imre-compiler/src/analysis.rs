@@ -72,7 +72,7 @@ impl Session {
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
-                "from _hashlib import HASH as _Hash\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
             ),
             (
                 "tomli",
@@ -121,7 +121,7 @@ impl Session {
             "from os import PathLike\nfrom typing import TypeVar\n_S = TypeVar('_S', str, bytes)\ndef which(cmd: _S | PathLike[_S], mode: int = ..., path: str | bytes | PathLike[str] | None = ...) -> _S | None: ...\n",
         ).map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
-        settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
+        settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
         let mut roots = vec![SystemPathBuf::from(root)];
         for path in extension_roots {
             let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;
@@ -255,6 +255,19 @@ impl Session {
             expression.inferred_type(&model),
             Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
         )
+    }
+
+    /// A nominal instance here, instead of its declared optional union, records
+    /// a source-level narrowing. The backend must still guard mutable rereads.
+    pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        ty != KnownClass::NoneType.to_instance(&self.db, &ProgramEnvironment::from_file(program))
     }
 
     /// Get a scalar layout hint for an append operand in its own lexical scope.

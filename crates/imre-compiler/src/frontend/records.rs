@@ -494,7 +494,69 @@ pub(super) fn record_factories(
     Ok(())
 }
 
+/// The next initializer in the lexical class lineage, independent of the
+/// concrete receiver used for inherited method specialization.
+#[derive(Clone, Copy)]
+pub(super) enum BaseInitializer {
+    Object,
+    Record(usize),
+}
+
 impl Checker<'_> {
+    /// A checked type for a mutable field can become stale through an alias.
+    /// Load the field once per attribute access and raise Python's AttributeError
+    /// if an intervening effect cleared it.
+    pub(super) fn checked_record_receiver(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Expr {
+        let Some(payload @ Type::Class(_)) = self.types.payload(receiver.ty) else {
+            return receiver;
+        };
+        if !matches!(&*attr.value, ast::Expr::Attribute(_))
+            || !self
+                .graph
+                .session
+                .narrowed_instance(self.module, &attr.value)
+        {
+            return receiver;
+        }
+        let slot = self.hidden(receiver.ty);
+        let local = self.local(slot);
+        let missing = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+        };
+        let error = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("AttributeError").unwrap(),
+                message: Some(Box::new(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(format!(
+                        "'NoneType' object has no attribute '{}'",
+                        attr.attr
+                    )),
+                })),
+            },
+        }));
+        Expr {
+            ty: payload,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, receiver),
+                    Statement::If(missing, vec![error], vec![]),
+                ],
+                value: Box::new(Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(local)),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     pub(super) fn iteration_expression(
         &mut self,
         expr: &ast::Expr,
@@ -503,7 +565,16 @@ impl Checker<'_> {
         let previous = self.iterator_source.replace(expr.range());
         let result = self.boolean_operand(expr, hint);
         self.iterator_source = previous;
-        result.map(|value| self.document_iteration(value))
+        result.map(|value| {
+            if value.ty == Type::StringIterable {
+                Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::StringIterationList, vec![value]),
+                }
+            } else {
+                self.document_iteration(value)
+            }
+        })
     }
 
     pub(super) fn record_generator(&self, context: MethodContext) -> bool {
@@ -532,10 +603,13 @@ impl Checker<'_> {
                 return None;
             }
             let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            self.classes.declarations.definitions[owner]
-                .bases
-                .first()
-                .copied()
+            Some(
+                self.classes.declarations.definitions[owner]
+                    .bases
+                    .first()
+                    .copied()
+                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
+            )
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -599,12 +673,67 @@ impl Checker<'_> {
         if self.is_class_receiver(expression) {
             return self.class;
         }
+        if let ast::Expr::Attribute(a) = expression
+            && let Some(class) = self.class_reference(&a.value)
+            && let Some(crate::classes::ExceptionAlias::Named(def)) =
+                self.classes.declarations.definitions[class]
+                    .exception_aliases
+                    .get(a.attr.as_str())
+        {
+            return self.classes.declarations.ids.get(def).copied();
+        }
         match self.resolve(expression) {
             Some(Binding::Definition(definition)) => {
                 self.classes.declarations.ids.get(&definition).copied()
             }
             _ => None,
         }
+    }
+
+    /// Class-valued exception attributes bind as constructors, never as methods.
+    /// An upcast receiver selects the override on its concrete record layout.
+    pub(super) fn exception_alias_call(
+        &mut self,
+        call: &ast::ExprCall,
+        attr: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+    ) -> Result<Option<Expr>, String> {
+        if !self.classes.declarations.definitions[class]
+            .exception_aliases
+            .contains_key(attr.attr.as_str())
+        {
+            return Ok(None);
+        }
+        let direct = |checker: &mut Self, id: usize| -> Result<Expr, String> {
+            match checker.classes.declarations.definitions[id].exception_aliases[attr.attr.as_str()]
+            {
+                crate::classes::ExceptionAlias::Builtin(kind) => {
+                    checker.simple_exception(call, kind)
+                }
+                crate::classes::ExceptionAlias::Named(def) => {
+                    if let Some(&layout) = checker.classes.declarations.ids.get(&def) {
+                        checker.construct(call, layout)
+                    } else {
+                        checker
+                            .simple_exception(call, checker.classes.declarations.exceptions[&def])
+                    }
+                }
+            }
+        };
+        if let Some(receiver) = receiver {
+            if self.classes.has_concrete_subclasses(class) {
+                return self
+                    .dispatch_record(class, receiver, call, |checker, id, _| {
+                        let e = direct(checker, id)?;
+                        checker.coerce(e, Type::Exception, call)
+                    })
+                    .map(Some);
+            }
+            let result = direct(self, class)?;
+            return Ok(Some(self.evaluated_receiver(Some(receiver), result)));
+        }
+        direct(self, class).map(Some)
     }
 
     /// Instance access still evaluates the receiver for class/static methods,
@@ -747,7 +876,18 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        calls::reject_unpacking(call, self.source)?;
+        if call
+            .arguments
+            .keywords
+            .iter()
+            .any(|keyword| keyword.arg.is_none())
+        {
+            return Err(error(
+                self.source,
+                call,
+                "keyword argument unpacking is unsupported",
+            ));
+        }
         if attribute.attr.starts_with("__")
             && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
         {
@@ -784,6 +924,7 @@ impl Checker<'_> {
             ));
         }
         if kind == MethodKind::Property {
+            calls::reject_unpacking(call, self.source)?;
             let value = self.class_attribute(attribute, class, receiver, None)?;
             return self.invoke(call, value);
         }
@@ -793,16 +934,7 @@ impl Checker<'_> {
             (None, receiver)
         };
         let skip = usize::from(receiver.is_some());
-        let (ty, args) = if self.inference.is_some() {
-            self.infer_call(call, &signature, receiver, skip)?
-        } else {
-            (
-                signature.returns,
-                self.arguments(call, &signature.params[skip..], receiver)?,
-            )
-        };
-        self.calls.insert(signature.id);
-        let value = self.call_value(&signature, ty, args);
+        let value = self.source_call(call, &signature, receiver, skip)?;
         Ok(self.evaluated_receiver(discarded, value))
     }
 
@@ -911,18 +1043,98 @@ impl Checker<'_> {
             self.arguments(call, &signature.params[1..], None)?
         };
         self.calls.insert(signature.id);
-        Ok(Expr {
+        let record = Expr {
             ty: Type::Class(class),
             kind: ExprKind::Construct {
                 initializer: signature.id,
                 args,
             },
-        })
+        };
+        let decl = &self.classes.declarations.definitions[class];
+        if let Some(&kind) = self.classes.declarations.exceptions.get(&decl.definition) {
+            let text = self.classes.methods[class].get("__str__").map(|m| m.id);
+            let repr = self.classes.methods[class].get("__repr__").map(|m| m.id);
+            self.calls.extend(text);
+            self.calls.extend(repr);
+            return Ok(Expr {
+                ty: Type::NamedException(class),
+                kind: ExprKind::Builtin(
+                    Builtin::NamedException {
+                        kind,
+                        message_field: decl.fields.len() - 1,
+                        text,
+                        repr,
+                        dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
+                    },
+                    vec![record],
+                ),
+            });
+        }
+        Ok(record)
     }
 
     pub(super) fn call_super_initializer(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(class) = self.class
+            && self
+                .classes
+                .declarations
+                .exceptions
+                .contains_key(&self.classes.declarations.definitions[class].definition)
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+        {
+            let [message] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "fixed exception payloads require one string argument to super().__init__",
+                ));
+            };
+            if !call.arguments.keywords.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "exception messages do not accept keyword arguments",
+                ));
+            }
+            let ty = self.types.optional(Type::Str);
+            let message_value = self.expr_expected(message, Type::Str)?;
+            let value = self.coerce(message_value, ty, message)?;
+            let field = self.classes.fields[class].len() - 1;
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::SetField(self.local(0), field, value)],
+                    value: Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    }),
+                    clear: Vec::new(),
+                },
+            });
+        }
+        // An initializer defined at the root of a checked record lineage finds
+        // object.__init__, including when that initializer runs on a subclass.
+        if matches!(self.super_initializer, Some(BaseInitializer::Object))
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+            && call.arguments.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+        }
         let base = self
             .super_initializer
+            .and_then(|base| match base {
+                BaseInitializer::Record(base) => Some(base),
+                BaseInitializer::Object => None,
+            })
             .filter(|_| {
                 !self.names.contains_key("super")
                     && !self.graph.modules[self.module]

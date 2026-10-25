@@ -59,6 +59,8 @@ pub(crate) enum IntrinsicModule {
     Dataclasses,
     Difflib,
     Logging,
+    LoggingHandlers,
+    Datetime,
     Abc,
     Asyncio,
     Contextlib,
@@ -81,6 +83,7 @@ pub(crate) enum IntrinsicModule {
     Collections,
     CollectionsAbc,
     Itertools,
+    Operator,
     Textwrap,
     Io,
     Gzip,
@@ -104,6 +107,10 @@ pub(crate) enum Intrinsic {
     FutureAnnotations,
     TypeChecking,
     GetLogger,
+    GetLevelName,
+    AddLevelName,
+    LevelNamesMapping,
+    LevelMap { names: bool },
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -120,6 +127,7 @@ pub(crate) enum Intrinsic {
     ContextManager,
     FunctionCache,
     LruCache,
+    Reduce,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -140,7 +148,9 @@ pub(crate) enum Intrinsic {
     SysExecutable,
     SysPlatform,
     SysEncoding(&'static str),
+    SysException,
     Stdin,
+    OsName,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -152,6 +162,8 @@ pub(crate) enum Intrinsic {
     Logger,
     LogRoot,
     LogEmit(Option<u8>),
+    TimedFileHandler,
+    ClockTime,
     TextIO,
     BinaryIO,
     Union,
@@ -163,6 +175,8 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     Sha256,
+    HashNew,
+    HashAvailable,
     ZipFile,
     ZipInfo,
     BytesIo,
@@ -172,12 +186,15 @@ pub(crate) enum Intrinsic {
     RegexSearch,
     RegexSub,
     RegexVerbose,
+    RegexUnicode,
     RegexPattern,
     RegexMatch,
     StrEnum,
     EnumAuto,
     DefaultDict,
     Counter,
+    Repeat,
+    LengthHint,
     GroupBy,
     Chain,
     AbstractSet,
@@ -198,9 +215,11 @@ pub(crate) enum Intrinsic {
     DataclassField,
     AsDict,
     SelfType,
+    ClassVar,
     AssertNever,
     Cast,
     Path,
+    PurePath(crate::ir::PathFlavor),
     Which,
     TemporaryDirectory,
     SubprocessRun,
@@ -223,6 +242,8 @@ impl IntrinsicModule {
         match name {
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
+            "logging.handlers" => Some(Self::LoggingHandlers),
+            "datetime" => Some(Self::Datetime),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextlib" => Some(Self::Contextlib),
@@ -250,6 +271,7 @@ impl IntrinsicModule {
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "itertools" => Some(Self::Itertools),
+            "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
@@ -268,6 +290,9 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Logging && name == "handlers" {
+            return Some(Binding::IntrinsicModule(Self::LoggingHandlers));
+        }
         if self == Self::Os && name == "path" {
             return Some(Binding::IntrinsicModule(Self::PosixPath));
         }
@@ -286,6 +311,11 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
+            (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
+            (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,
+            (Self::Logging, "getLevelNamesMapping") => Intrinsic::LevelNamesMapping,
+            (Self::Logging, "_nameToLevel") => Intrinsic::LevelMap { names: true },
+            (Self::Logging, "_levelToName") => Intrinsic::LevelMap { names: false },
             (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
             (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
@@ -310,6 +340,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
+            (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -323,9 +354,11 @@ impl IntrinsicModule {
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
+            (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Os, "name") => Intrinsic::OsName,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -335,6 +368,8 @@ impl IntrinsicModule {
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
             (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
+            (Self::Datetime, "time") => Intrinsic::ClockTime,
             (Self::Logging, "Logger") => Intrinsic::Logger,
             (Self::Logging, "root") => Intrinsic::LogRoot,
             (Self::Logging, "log") => Intrinsic::LogEmit(None),
@@ -355,6 +390,7 @@ impl IntrinsicModule {
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
+            (Self::Typing, "ClassVar") => Intrinsic::ClassVar,
             (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
@@ -365,6 +401,8 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
+            (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "algorithms_available") => Intrinsic::HashAvailable,
             (Self::Zipfile, "ZipFile") => Intrinsic::ZipFile,
             (Self::Zipfile, "ZipInfo") => Intrinsic::ZipInfo,
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
@@ -374,12 +412,15 @@ impl IntrinsicModule {
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
+            (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Itertools, "repeat") => Intrinsic::Repeat,
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
             (Self::Itertools, "chain") => Intrinsic::Chain,
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
@@ -399,6 +440,12 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
+            (Self::Pathlib, "PurePath" | "PurePosixPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
+            }
+            (Self::Pathlib, "PureWindowsPath") => {
+                Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
@@ -435,6 +482,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
+    bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -481,6 +529,26 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep module indices stable for the semantic cache. Only after lowering
+    /// expose the files a disk build must revalidate and protect from writes.
+    pub(crate) fn disk_inputs(
+        &mut self,
+        profile: Option<&Path>,
+    ) -> (crate::SourceInputs, Vec<PathBuf>) {
+        let mut inputs = std::mem::take(&mut self.inputs);
+        let mut modules = self.modules.iter();
+        inputs
+            .files
+            .retain(|_| !modules.next().expect("one input per module").bundled);
+        let paths = inputs
+            .files
+            .iter()
+            .map(|(path, _, _)| path.clone())
+            .chain(profile.map(Path::to_path_buf))
+            .collect();
+        (inputs, paths)
+    }
+
     /// Keep read-only JSON views in programs that never parse or modify a TOML document.
     fn uses_mutable_documents(&self) -> bool {
         use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
@@ -842,6 +910,7 @@ impl<'a> Loader<'a> {
             path,
             name,
             source,
+            bundled: false,
             parsed,
             is_package,
             root_index: 0,
@@ -1161,7 +1230,14 @@ impl<'a> Loader<'a> {
     /// first-party file that attempts to shadow the standard-library namespace.
     fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name);
-        if module.is_some() && self.allow_imports {
+        if module.is_some() {
+            self.reject_stdlib_shadow(name)?;
+        }
+        Ok(module)
+    }
+
+    fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
+        if self.allow_imports {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -1176,7 +1252,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        Ok(module)
+        Ok(())
     }
 
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
@@ -1205,9 +1281,6 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        if !self.allow_imports {
-            return Err("imports require a source file and a first-party module root".into());
-        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(
@@ -1215,6 +1288,25 @@ impl<'a> Loader<'a> {
                 ));
             }
             return Ok(id);
+        }
+        if name == "unittest" {
+            self.reject_stdlib_shadow(name)?;
+            // ty resolves this immutable source at its Python import path in the
+            // in-memory project. It is part of the compiler, not a disk input.
+            let path = self.root.join("unittest/__init__.py");
+            let id = self.add(
+                path.clone(),
+                path,
+                name.into(),
+                true,
+                include_str!("../stdlib/unittest/__init__.py"),
+            )?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+            return Ok(id);
+        }
+        if !self.allow_imports {
+            return Err("imports require a source file and a first-party module root".into());
         }
         // Both scanning an import and resolving a dotted package parent can
         // re-enter the loader. Count active calls, including unresolved parents.
