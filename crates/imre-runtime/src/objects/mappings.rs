@@ -1236,9 +1236,7 @@ impl Mapping {
         }
         let Some((next, key, value)) = self.tables.next(position) else {
             output.push('}');
-            if self.order_version.is_some()
-                || matches!(self.missing, Missing::List(_) | Missing::NoFactory)
-            {
+            if self.order_version.is_some() || matches!(self.missing, Missing::List(_) | Missing::NoFactory) {
                 output.push(')');
             }
             return None;
