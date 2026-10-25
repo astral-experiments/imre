@@ -120,12 +120,14 @@ impl Initialization {
     pub fn lower(
         mut checker: Checker<'_>,
         available: &mut HashSet<DefinitionId>,
+        range: Range<usize>,
     ) -> Result<Self, String> {
         checker.module_scope = true;
         let module = &checker.graph.modules[checker.module];
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
-        for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
+        for index in range {
+            let statement = &module.parsed.syntax().body[index];
             if module.type_guards.binary_search(&index).is_ok()
                 || local_functions::type_variable(checker.graph, checker.module, statement)
             {

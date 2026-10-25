@@ -76,6 +76,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::ZipFile
             | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
@@ -121,6 +122,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::ZipFile
             | Self::CsvReader
             | Self::RegexPattern
             | Self::JsonRoot
@@ -693,6 +695,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -3243,6 +3246,7 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::Sha256
+                | Type::ZipFile
                 | Type::CsvReader
                 | Type::Exception
                 | Type::ExitCode
@@ -3621,6 +3625,20 @@ impl Emitter<'_, '_> {
                     none()
                 } else {
                     self.call(name, returns, &values)
+                }
+            }
+            Builtin::RegexSub(template) => {
+                let name = self.byte_array(template.clone());
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_regex_sub(ptr {}, ptr {}, ptr @{name}, i64 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    template.len()
+                ));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
                 }
             }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
@@ -4074,6 +4092,12 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::ZipOpen => self.call("imre_zip_open", returns, &[&args[0].value]),
+            Builtin::ZipNamelist => self.call("imre_zip_namelist", returns, &[&args[0].value]),
+            Builtin::ZipClose => {
+                self.void_call("imre_zip_close", &[&args[0].value]);
+                none()
+            }
             Builtin::BytesValidateUtf8 => {
                 self.call("imre_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
             }
@@ -4732,6 +4756,7 @@ impl Emitter<'_, '_> {
                     | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::Sha256
+                    | Type::ZipFile
                     | Type::CsvReader
                     | Type::RegexPattern
                     | Type::JsonRoot
@@ -4952,6 +4977,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -5008,6 +5034,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::CsvReader
             | Type::RegexPattern
             | Type::JsonRoot
@@ -5554,6 +5581,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::Sha256
+        | Type::ZipFile
         | Type::CsvReader
         | Type::RegexPattern
         | Type::JsonRoot
@@ -5809,6 +5837,9 @@ declare void @imre_sha256_update(ptr, ptr)
 declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
+declare ptr @imre_zip_open(ptr)
+declare ptr @imre_zip_namelist(ptr)
+declare void @imre_zip_close(ptr)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_binary_read(ptr)
@@ -6030,6 +6061,7 @@ declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
+declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
 declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_config(i64, i64, i64, i1)

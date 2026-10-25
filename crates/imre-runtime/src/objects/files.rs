@@ -302,6 +302,26 @@ fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object
 }
 
 fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let (file, metadata) = open_file(path, mode)?;
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+    let stream = match mode {
+        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        _ => Stream::Write(Output::new(file, capacity, binary)),
+    };
+    Ok(FileState {
+        stream: Some(stream),
+        kind: match (binary, mode) {
+            (false, _) => FileKind::Text,
+            (true, 0) if gzip => FileKind::GzipBinaryRead,
+            (true, 0) => FileKind::BinaryRead,
+            (true, _) => FileKind::BinaryWrite,
+        },
+    })
+}
+
+/// Open a raw descriptor with the same pathname and directory errors as Python open().
+pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -325,21 +345,7 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
             Some(path),
         ));
     }
-    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
-    let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
-        _ => Stream::Write(Output::new(file, capacity, binary)),
-    };
-    Ok(FileState {
-        stream: Some(stream),
-        kind: match (binary, mode) {
-            (false, _) => FileKind::Text,
-            (true, 0) if gzip => FileKind::GzipBinaryRead,
-            (true, 0) => FileKind::BinaryRead,
-            (true, _) => FileKind::BinaryWrite,
-        },
-    })
+    Ok((file, metadata))
 }
 
 /// A close failure takes precedence over a read or write failure, matching

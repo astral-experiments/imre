@@ -99,6 +99,7 @@ impl Types {
             | Type::Document(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
@@ -405,6 +406,7 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
@@ -616,6 +618,7 @@ impl Types {
                 Type::TextIO
                 | Type::CsvReader
                 | Type::BinaryIO
+                | Type::ZipFile
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext
