@@ -56,7 +56,7 @@ jobs:
             sudo apt-get update && sudo apt-get install -y clang-18
           fi
       - name: Build with default compiler features for prospective compiler checks
-        if: inputs.audit == 'properties' || inputs.audit == 'handler-locks' || inputs.audit == 'drain'
+        if: inputs.audit == 'properties' || inputs.audit == 'handler-locks' || inputs.audit == 'drain' || inputs.audit == 'codec-writer'
         run: cargo build --locked -p imre-compiler -p imre-runtime -j 2
       - name: Build this source with IR verification
         run: cargo build --locked -p imre-compiler -p imre-runtime --features imre-compiler/verify-ir -j 2
@@ -198,6 +198,14 @@ jobs:
               python3 -B tests/files.py "${ordinary[@]}"
               ;;
             codec-writer)
+              cargo test --locked -p imre-runtime -j 2 strict_registry_errors_retain_text_and_copy_bytes
+              sample=tests/fixtures/processes/shell_output.py
+              python3 -I -B "$sample" > "$results/shell-reference"
+              for opt in 0 3; do
+                "$imre" build "$sample" --no-cache --opt-level "$opt" --runtime "$runtime" --clang /usr/bin/clang-18 -o "$RUNNER_TEMP/shell-output"
+                "$RUNNER_TEMP/shell-output" > "$results/shell-O$opt"
+                cmp "$results/shell-reference" "$results/shell-O$opt"
+              done
               python3 -I -B benchmarks/cpython_stdlib/full/logging/codec_writer.py "${tools[@]}" --cpython-source "$ref" --result "$results/codec-writer.json"
               cmp benchmarks/cpython_stdlib/full/logging/codec-writer-linux.json "$results/codec-writer.json"
               python3 -I -B benchmarks/cpython_stdlib/full/sys/codec_device.py "${tools[@]}" --cpython-source "$ref" --result "$results/sys-codec-device.json"
