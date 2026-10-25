@@ -731,9 +731,9 @@ Call `format_help()` or `format_usage()` to obtain a string, including its final
 
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
-A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
+A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested or optional subcommands are outside this grammar.
+Keep each builder local to a function or method. Declare parent options first, followed by each subparser and its options, then call `parse_args()`. An explicit list or tuple literal supplies the arguments; a standalone call still checks them and can raise `SystemExit`. Dynamic declarations and nested subcommands are outside this grammar.
 
 ## Standard logging
 

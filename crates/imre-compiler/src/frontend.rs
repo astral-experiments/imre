@@ -4995,15 +4995,16 @@ impl<'a> Checker<'a> {
                         },
                     });
                 }
+                let scalar = |ty| match self.types.payload(ty).unwrap_or(ty) {
+                    Type::StrLiteral(_) => Type::Str,
+                    ty => ty,
+                };
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
-                    && [Type::Str, Type::Int].into_iter().any(|ty| {
-                        values
-                            .iter()
-                            .any(|value| self.types.payload(value.ty) == Some(ty))
-                            && values
-                                .iter()
-                                .all(|value| self.types.payload(value.ty).unwrap_or(value.ty) == ty)
-                    })
+                    && let [left, right] = values.as_slice()
+                    && (self.types.payload(left.ty).is_some()
+                        || self.types.payload(right.ty).is_some())
+                    && matches!(scalar(left.ty), Type::Str | Type::Int)
+                    && scalar(left.ty) == scalar(right.ty)
                 {
                     let operation = if *op == ast::CmpOp::Eq {
                         Compare::Equal
