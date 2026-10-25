@@ -10,3 +10,17 @@ To reproduce the reference with a test-enabled build of the pinned release, use 
 ```
 
 The runner verifies both the vendored and installed test blobs, discovers the full suite, and runs regrtest in a temporary directory. It requires regrtest's IDs to agree with unittest discovery.
+
+## Native execution
+
+[evidence-linux.json](evidence-linux.json) contains one row per occurrence at `-O0` and `-O3`, including every original skip and its source condition. At this revision, seven complete methods run their bodies and assertions in Imre under CPython fixtures; 23 use host assertions on a native operation. Two methods also call CPython `shutil.rmtree` from the original body. The two default-search-path assertions fail: Imre does not see the host's replacements of `os.confstr` and `os.defpath`. The remaining 139 are reference-only; none of the 50 upstream skips is counted as a native pass.
+
+```sh
+/path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/evidence.py \
+    --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+    --result /tmp/shutil-evidence.json
+python3 benchmarks/cpython_stdlib/suite_evidence.py \
+    benchmarks/cpython_stdlib/full/shutil/reference-linux.json /tmp/shutil-evidence.json
+```
+
+The first command writes all outcomes and exits unsuccessfully when an assertion fails. The second checks the report against the full pinned denominator. [mock-fixtures.json](mock-fixtures.json) identifies the original `unittest.mock` call sites, decorators and affected IDs, including those skipped by CPython.

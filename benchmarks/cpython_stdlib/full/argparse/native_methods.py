@@ -14,6 +14,7 @@ import unittest
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_inventory import cases, load_suite, verify_files
+from suite_evidence import ROLES, roles
 from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures, testcase_fixture
 
 
@@ -80,12 +81,12 @@ class Fixtures:
         return (prefix + b"\n" + testcase_fixture().encode() + b"\n" + b"\n".join(helpers.values())).decode()
 
 
-def measure(level, toolchain, manifest, reference, source):
+def measure(level, toolchain, manifest, reference, source, observations=None):
     fixtures = Fixtures(source)
     classes = {}
     for case in cases(load_suite(manifest["module"])):
         classes.setdefault(type(case), []).append(case)
-    results, rejected = {}, {}
+    results, rejected, entered = {}, {}, set()
     for cls, members in classes.items():
         with tempfile.TemporaryDirectory(prefix="imre-argparse-methods-") as directory:
             work = Path(directory)
@@ -114,18 +115,23 @@ def measure(level, toolchain, manifest, reference, source):
                 folder.mkdir()
                 try:
                     executions[name] = native_method(
-                        toolchain, folder, source, owner, name, fixture)
+                        toolchain, folder, source, owner, name, fixture,
+                        operation=("imre", "argparse.ArgumentParser.parse_args") if name in PARSE_METHODS else None,
+                        assertions="none" if name in PARSE_METHODS else "imre")
                 except RuntimeError as exc:
                     diagnostic = str(exc).replace(str(folder), "<work>").strip()
-                    status = "blocked" if "Imre:" in diagnostic else "failed"
+                    status = "blocked" if "<work>/case.py:" in diagnostic and "Imre:" in diagnostic else "failed"
                     results[name] = rejected[key] = [status, diagnostic]
             if not executions:
                 continue
+            entered.update(executions)
             evidence, failures, skips = run_in_fixtures(unittest.TestSuite(members), executions)
             for name, entries in evidence.items():
                 if entries:
                     entry, = entries
                     if name in PARSE_METHODS:
+                        if observations is not None:
+                            observations[name] = {"outcome": "pass", **entry["observation"]}
                         results[name] = ["native-body-host-fixture", entry["method_sha256"],
                                          "argparse.ArgumentParser.parse_args"]
                     else:
@@ -134,6 +140,13 @@ def measure(level, toolchain, manifest, reference, source):
                 results[name] = ["unexpected-skip", reason]
             for name, reason in failures:
                 results[name] = ["failed", reason.replace(directory, "<work>")]
+    if observations is not None:
+        for name, (status, reason, *_) in results.items():
+            if status in {"blocked", "failed", "unexpected-skip"}:
+                locations = (roles(body="unknown", assertions="unknown", operation="unknown", fixture="mixed")
+                             if name in entered else dict.fromkeys(ROLES, "unobserved"))
+                observations[name] = {"outcome": {"blocked": "blocked", "failed": "error", "unexpected-skip": "skip"}[status],
+                                      "roles": locations, "reason": reason}
     if set(results) != set(reference):
         raise ValueError("method results differ from pinned discovery")
     print(f"-O{level}: {dict(Counter(value[0] for value in results.values()))}", flush=True)

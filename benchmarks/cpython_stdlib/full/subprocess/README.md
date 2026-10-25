@@ -157,3 +157,64 @@ To regenerate the report, run `audit.py`, `native_bodies.py`, and
 `../../native_subprocess.py` for each level, capturing the latter's combined
 output. Pass the two files from each command, in level order, to
 `report.py --audit O0 O3 --bodies O0 O3 --run-log O0 O3 --imre-revision REV --result FILE`.
+
+## Per-occurrence evidence on Linux
+
+[evidence-linux.json](evidence-linux.json) follows the [shared evidence contract](../../NATIVE_EVIDENCE.md).
+It covers the 353 original loader occurrences (353 distinct IDs) at each of -O0 and -O3,
+using Imre `f5d008458b8ab221026f9ac92ba28fd028e96ece`. There is no companion Python test
+package: `test.test_subprocess` is one module, and the five `subprocessdata` scripts are
+child programs. The earlier [native-linux.json](native-linux.json) records a different
+pipe implementation revision and remains useful for comparing individual calls.
+
+| Execution | -O0 | -O3 |
+| --- | ---: | ---: |
+| Fully native | 0 | 0 |
+| Native method and subprocess operation, CPython fixture | 28 | 28 |
+| Host method and assertions, native subprocess operation | 44 | 44 |
+| Both host and native subprocess operations | 8 | 8 |
+| Host subprocess operation only | 6 | 6 |
+| Blocked | 199 | 199 |
+| Failed | 27 | 27 |
+| Upstream skip with exact condition and source (2 CPU cases pass when enabled) | 41 | 41 |
+| **Total** | **353** | **353** |
+
+[attempt_bodies.py](attempt_bodies.py) tried every eligible complete body via the shared
+runner, including the methods inherited by the NoPoll class. The native method source
+and its helpers are taken byte for byte from the pinned file. The oracle supplies the
+original fixtures, selected module globals and literal Python child programs. The native
+parent launches the child, owns the file descriptors, communicates, waits, and propagates
+the result. Native status does not imply that the child is native. Twelve inherited
+NoPoll cases never reached a selector in the native parent; [selector_proof.py](selector_proof.py)
+checked each one, with a separate timed communication case as a positive control.
+The control has no separate assertion call: its original loop must catch timeouts and
+eventually return. Of the 44 host-driven cases, eight use the older reconstructed
+`RunFuncTestCase` fixture. Six cases exercising the reference's private process interface
+are explicitly recorded as host operations. See [MOCK.md](MOCK.md) for the shared mock requirements.
+
+The default reference disables the CPU resource. The two inherited `test_leaking_fds_on_error`
+occurrences include a separate `evidence.cpu_enabled` observation. With CPU enabled, the
+original reference and host-driven Imre operations both pass. Each original host method
+issued all 1,024 failed launches to one Imre parent. The parent had the same five open
+descriptors before and after, at a soft limit of 64. Its syscall trace recorded 1,024 child
+creations and 1,024 reaps, with no selector calls, at both levels. These results do not
+add occurrences or upgrade the CPython fixtures, loop, or assertions.
+
+To reproduce, run `attempt_bodies.py` and `audit.py` with the pinned Python, Imre
+compiler and runtime, and `--opt-level 0` or `3`. Run the original vfork fixture separately
+with `attempt_bodies.py --only test.test_subprocess.POSIXProcessTestCase.test_vfork_used_when_expected`
+where strace is permitted. Run `selector_proof.py --mode build`, followed by `--mode trace`
+with the same tools and work directory. The trace checks compiler, runtime, binary and method
+hashes; it traces the native parent only. Also run `../../native_subprocess.py` for each
+level and capture its combined output. For the CPU cases, use `leak_cleanup.py --mode build`
+and then `--mode exercise` with identical `--imre`, `--runtime`, `--clang`,
+`--opt-level`, `--work`, and `--result` arguments. The latter needs Linux procfs and strace.
+Combine those files and validate from the repository root:
+
+```sh
+python benchmarks/cpython_stdlib/full/subprocess/evidence.py --audit AUDIT0 AUDIT3 --bodies BODY0 BODY3 --trace TRACE0 TRACE3 \
+    --vfork VFORK0 VFORK3 --run-log LEGACY0 LEGACY3 --cpu CPU0 CPU3 --imre-revision FULL_SHA --result benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
+python3 benchmarks/cpython_stdlib/suite_evidence.py \
+    benchmarks/cpython_stdlib/full/subprocess/reference-linux.json \
+    benchmarks/cpython_stdlib/full/subprocess/evidence-linux.json
+```

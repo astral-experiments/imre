@@ -204,8 +204,11 @@ reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
-with string or integer keys, and parsed documents. Keyword options include
-`indent` (integer, string, or `None`), `ensure_ascii` and `allow_nan`.
+with string or integer keys, and parsed documents. Fresh nested list and dict
+displays can mix JSON types. Both functions accept `indent` (integer, string,
+or `None`), `ensure_ascii`, `allow_nan`, `sort_keys`, and `separators`.
+Separators are unpacked as the item separator and key separator; sorting
+compares dictionary keys before converting them to JSON strings.
 Defaults match Python's separators, escaping and nonfinite number spellings.
 Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
@@ -297,6 +300,18 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## CSV reader
+
+`csv.reader(lines)` returns a lazy iterator over lists of strings. The supported
+input types are a text file, a live `list[str]`, and a string (one character per
+input element). `for`, `list`, `iter(reader)` and `next(reader)` share the
+same cursor. `reader.line_num` counts physical lines, including lines pulled
+for multiline fields. Errors use `csv.Error`; the default field limit is
+131,072 characters. Excel is the supported dialect. Literal `delimiter`,
+`quotechar`, `escapechar`, `doublequote`, `skipinitialspace` and `strict`
+keywords customize it. Other dialects, writers, dictionary adapters, and
+changing the field limit are outside the subset. An explicit text `lineterminator` is validated against the dialect characters; the reader recognizes CR and LF independently of this setting. A nonstring raises `TypeError`.
 
 ## Fixed regular expressions
 
@@ -684,6 +699,8 @@ if args.output:
 
 Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive integer. A fixed count (including `1`), `"*"`, or `"+"` produces a list. An earlier positional reserves enough values for the following positionals. A named option with `nargs="?"` uses its `const` when present without a value and its default when omitted. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
+Arguments accept the built-in `int` and `float` converters. Integer arguments also support fixed or variable length lists. Literal numeric choices compare converted values; string choices may be a single string of characters, and integer choices may be a literal `range`. Failure to convert an argument reports that option and its original value on stderr. String defaults and constants are converted when used. An integer default or constant on a string argument retains its integer type.
+
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
@@ -908,6 +925,8 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`. `subtract(iterable, **counts)` decrements instead of replacing counts and retains nonpositive values. Typed mappings contribute their counts; other iterables contribute one per occurrence. Bound and unbound update/subtract calls support native argument errors.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
+
+Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
@@ -1222,7 +1241,7 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 
 ### Closed entry profiles
 
-`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unknown exports, modules with observable import effects, and first-party module initializers remain subject to normal checks. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+`--reachable-only` checks and compiles definitions used by the entrypoint. It can resolve selected standard-library declarations, such as `configparser.ConfigParser`, when only an unused function needs them. Using one in executable code still requires a native implementation. Unreferenced first-party module values built solely from builtin literals may omit their storage if their keys are statically hashable and their annotations contain only static types. Other first-party initializers and modules with observable import effects remain subject to normal checks; unknown exports are rejected. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
 
 ```json
 {"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}
