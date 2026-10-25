@@ -6071,6 +6071,7 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
+            Some(Binding::Intrinsic(Intrinsic::UpdateWrapper)) => return self.update_wrapper(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
@@ -6415,6 +6416,9 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                return self.invoke(call, wrapped);
+            }
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }

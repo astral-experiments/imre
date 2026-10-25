@@ -279,12 +279,33 @@ fn emit_program(
     let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut extension_modules = std::collections::BTreeSet::new();
+    let mut function_link_types = HashSet::new();
+    let mut declared_caches = HashSet::new();
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
                 extension_modules.insert(name.clone());
             }
+            if let ExprKind::Builtin(
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet,
+                args,
+            ) = &expr.kind
+            {
+                function_link_types.insert(args[0].ty);
+            }
+            if let ExprKind::Builtin(Builtin::ModuleCache(id), _) = &expr.kind {
+                declared_caches.insert(*id);
+            }
         });
+    }
+    if function_link_types.iter().any(|&ty| {
+        let targets = callable_targets.get(ty);
+        targets.is_empty()
+            || targets
+                .iter()
+                .any(|target| target.bound || declared_caches.contains(&target.function))
+    }) {
+        return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
     }
     let (uses_sys_argv, uses_orig_argv) = module.sys_argument_usage();
     let mut emitter = Emitter {
@@ -296,6 +317,7 @@ fn emit_program(
         string_literals: BTreeMap::new(),
         tuple_literals: BTreeMap::new(),
         static_functions: BTreeSet::new(),
+        function_link_types,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -407,7 +429,13 @@ fn emit_program(
     }
     record_layouts(module, emitter.output);
     json::schemas(module, emitter.output);
-    callables::adapters(module, sanitize, &emitter.resource_types, emitter.output);
+    callables::adapters(
+        module,
+        sanitize,
+        &emitter.resource_types,
+        !emitter.function_link_types.is_empty(),
+        emitter.output,
+    );
     asyncio::adapters(module, sanitize, &emitter.resource_types, emitter.output);
     emitter.output.common().push_str(&integer_helpers());
     emitter
@@ -482,6 +510,7 @@ struct Emitter<'a, 'module> {
     string_literals: BTreeMap<Vec<u8>, usize>,
     tuple_literals: BTreeMap<usize, Vec<String>>,
     static_functions: BTreeSet<String>,
+    function_link_types: HashSet<Type>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -4675,6 +4704,14 @@ impl Emitter<'_, '_> {
             },
             Builtin::NewPlainObject => self.call("imre_plain_object_new", returns, &[]),
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::FunctionWrappedSet => self.call(
+                "imre_function_set_wrapped",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::FunctionWrappedGet => {
+                self.call("imre_function_get_wrapped", returns, &[&args[0].value])
+            }
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
             Builtin::Sha256Update => {
@@ -7087,6 +7124,8 @@ declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
 declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
+declare ptr @imre_function_set_wrapped(ptr, ptr)
+declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
 declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind

@@ -10,6 +10,7 @@ pub(super) fn adapters(
     module: &Module,
     sanitize: bool,
     resource_types: &HashSet<Type>,
+    function_links: bool,
     output: &mut Output,
 ) {
     let mut targets = BTreeSet::new();
@@ -35,6 +36,19 @@ pub(super) fn adapters(
         return;
     }
     output.common().push_str("%callable = type { ptr, ptr }\n");
+    if function_links {
+        // Keep the ordinary adapter/context ABI. The optional third field owns
+        // __wrapped__; kind 2 identifies this link when reclaiming a cycle.
+        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 2, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
+        output
+            .global(
+                output.entry,
+                "layout_python_function",
+                "constant",
+                "{ i64, ptr, ptr }",
+            )
+            .push_str("{ i64 3, ptr @kinds_python_function, ptr @semantics_python_function }\n");
+    }
     for (name, kind) in [("callable", 6)]
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", 10)))
@@ -139,7 +153,14 @@ impl Emitter<'_, '_> {
         let scalar = receiver
             .as_ref()
             .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
-        let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
+        let layout = if receiver.is_none() && self.function_link_types.contains(&ty) {
+            "python_function"
+        } else if scalar {
+            "callable_enum"
+        } else {
+            "callable"
+        };
+        let result = self.record_with_layout(ty, layout);
         let target = self.output.adapter_ref(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.instruction(format!(

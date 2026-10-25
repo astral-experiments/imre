@@ -7,6 +7,7 @@ use std::rc::Rc;
 use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+mod wrappers;
 
 enum Release {
     Record(*const usize),
@@ -30,9 +31,9 @@ pub struct RecordDescriptor {
     pub semantics: *const RecordSemantics,
 }
 
-/// Generated behavior is shared by a class, never carried by individual fields.
-/// `kind` is zero for a class and one for a tuple; flags select generated equality
-/// and representation. All strings are immutable UTF-8 byte slices.
+/// Kinds are zero for a class, one for a tuple, and two for a Python function
+/// that owns a wrapper link. Flags select generated equality and representation.
+/// All strings are immutable UTF-8 byte slices.
 #[repr(C)]
 pub struct RecordSemantics {
     pub kind: u32,
@@ -453,6 +454,11 @@ unsafe fn release_record_owner(payload: *const usize) {
     }
     header.references.set(count - 1);
     if count != 1 {
+        if count == 2 && wrappers::is_function(header.descriptor()) {
+            // SAFETY: the remaining owner roots this marked function. Every
+            // traversed edge independently owns its target on this thread.
+            unsafe { wrappers::release_unowned_cycle(payload) };
+        }
         return;
     }
     // SAFETY: metadata remains immutable and live even while payloads are released.
