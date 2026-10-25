@@ -104,7 +104,7 @@ impl Session {
             .fs()
             .write_file_all(
                 intrinsic.join("__init__.pyi"),
-                "from . import json as json, toml as toml\n",
+                "from . import json as json, toml as toml\nfrom typing import TypeVar, dataclass_transform\n_T = TypeVar('_T')\n@dataclass_transform(frozen_default=True)\ndef struct(cls: type[_T], /) -> type[_T]: ...\n",
             )
             .map_err(|error| error.to_string())?;
         system

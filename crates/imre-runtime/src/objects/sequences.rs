@@ -358,6 +358,9 @@ pub unsafe extern "C" fn imre_seq_slice(
     // leave storage. A normalization failure is raised after the borrow ends.
     let result = unsafe {
         object(value).0.with(|storage| {
+            if let Some(rows) = storage.sequence_storage().rows() {
+                return rows.slice(SliceIndices::new(rows.len(), start, stop, step)?);
+            }
             let values = storage.sequence();
             let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
             let mut result = Words::new(values.kind.raw());

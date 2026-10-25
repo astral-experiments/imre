@@ -291,6 +291,7 @@ pub(crate) struct ClassMetadata {
     pub enum_members: Vec<(String, String)>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    pub value_struct: bool,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
@@ -619,6 +620,7 @@ pub(crate) enum Builtin {
     ExceptionMatchesAny,
     LiteralStringView,
     StringListContains,
+    StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
     BytesContains,

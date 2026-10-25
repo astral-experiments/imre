@@ -824,6 +824,7 @@ fn namespace_class(
         toml_hash: false,
         abc: false,
         dataclass: Some(DataclassOptions {
+            value_struct: false,
             slots: false,
             init: false,
             eq: true,

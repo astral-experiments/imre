@@ -213,6 +213,29 @@ fn collect_class(
             == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
     }
     let dataclass = dataclasses::options(graph, definition.module, node)?;
+    let value_struct = dataclass.is_some_and(|options| options.value_struct);
+    if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
+        || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())
+    {
+        return Err(module.error(node, "an imre.struct is final and cannot inherit fields"));
+    }
+    if value_struct {
+        for statement in &node.body {
+            match statement {
+                ast::Stmt::AnnAssign(field) if field.value.is_none() => {}
+                ast::Stmt::FunctionDef(method)
+                    if !method.name.starts_with("__") && method.decorator_list.is_empty() => {}
+                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Expr(stmt) if matches!(&*stmt.value, ast::Expr::StringLiteral(_)) => {}
+                _ => {
+                    return Err(module.error(
+                        statement,
+                        "imre.struct supports required fields and ordinary instance methods",
+                    ));
+                }
+            }
+        }
+    }
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
     let mut abstract_methods = base
@@ -573,6 +596,9 @@ fn collect_class(
             node,
             "an instance field cannot shadow a fixed class binding",
         ));
+    }
+    if value_struct && fields.is_empty() {
+        return Err(module.error(node, "imre.struct needs at least one field"));
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);

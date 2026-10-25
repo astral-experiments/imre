@@ -31,6 +31,7 @@ mod records;
 mod runtime;
 mod stdlib;
 mod string_enums;
+mod structs;
 mod text;
 mod truthiness;
 mod unions;
@@ -324,6 +325,7 @@ fn emit_program(
         borrowed_params: Vec::new(),
         resource_types,
         borrowed_locals: Vec::new(),
+        struct_locals: Vec::new(),
         rooted_locals: Vec::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
@@ -510,6 +512,7 @@ struct Emitter<'a, 'module> {
     borrowed_params: Vec<bool>,
     resource_types: HashSet<Type>,
     borrowed_locals: Vec<bool>,
+    struct_locals: Vec<bool>,
     rooted_locals: Vec<bool>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
@@ -1208,6 +1211,14 @@ impl Emitter<'_, '_> {
                 if snapshot.data.is_none() {
                     let helper = match snapshot.receiver.ty {
                         Type::ListInt => "imre_list_data_readonly",
+                        ty if self
+                            .module
+                            .types
+                            .element(ty)
+                            .is_some_and(|t| self.module.types.is_value_struct(t)) =>
+                        {
+                            "imre_struct_data_readonly"
+                        }
                         Type::List(_) => "imre_seq_data_readonly_fast",
                         _ => unreachable!("only exact lists have buffer snapshots"),
                     };
@@ -1626,6 +1637,10 @@ impl Emitter<'_, '_> {
         self.locals = function.locals.clone();
         byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
+        self.struct_locals = structs::snapshot_locals(self.module, function);
+        for (slot, &snapshot) in self.struct_locals.iter().enumerate() {
+            self.borrowed_locals[slot] |= snapshot;
+        }
         self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
         self.length_snapshots = vec![None; self.locals.len()];
@@ -1922,6 +1937,13 @@ impl Emitter<'_, '_> {
                 {
                     let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
                     self.store(*slot, &value);
+                    return;
+                }
+                if self.struct_locals[*slot] {
+                    let value = self
+                        .struct_snapshot(expression)
+                        .expect("checked scalar struct source");
+                    self.store_borrowed(*slot, &value);
                     return;
                 }
                 if self.borrowed_locals[*slot] {
@@ -2393,17 +2415,28 @@ impl Emitter<'_, '_> {
                     self.call("imre_list_new", expression.ty, &[])
                 } else {
                     let element = self.module.types.element(expression.ty).unwrap();
-                    let value = Value {
-                        ty: expression.ty,
-                        operand: self.instruction(format!(
+                    let op = if self.module.types.is_value_struct(element) {
+                        let layout = self
+                            .output
+                            .global_ref(format!("layout_{}", record_name(element)));
+                        format!("call ptr @imre_struct_list_new(ptr @{layout})")
+                    } else {
+                        format!(
                             "call ptr @imre_seq_new(i32 {})",
                             representation_kind(element, &self.module.types)
-                        )),
+                        )
+                    };
+                    let value = Value {
+                        ty: expression.ty,
+                        operand: self.instruction(op),
                         small_integer: false,
                     };
                     self.owned(value)
                 };
                 for value in values {
+                    if self.append_struct_constructor(&list, value) {
+                        continue;
+                    }
                     let value = self.operand(value);
                     self.append(&list, &value.value);
                     self.release_operand(&value);
@@ -2550,6 +2583,18 @@ impl Emitter<'_, '_> {
             ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
+                if let [arg] = args.values.as_slice()
+                    && self.module.types.is_value_struct(arg.ty)
+                    && structs::field_reader(&self.module.functions[*id])
+                    && let Some(snapshot) = self.struct_snapshot(arg)
+                {
+                    return self.user_call(
+                        *id,
+                        expression.ty,
+                        &[&snapshot],
+                        args.exhaustive_enum_match,
+                    );
+                }
                 let mut values = self.call_operands(args);
                 self.transfer_call_operands(&mut values);
                 let result = self.user_call(
@@ -2619,6 +2664,10 @@ impl Emitter<'_, '_> {
                 value
             }
             ExprKind::Field(receiver, field) => {
+                if let Some(snapshot) = self.struct_snapshot(receiver) {
+                    let ptr = self.field_pointer(&snapshot, *field);
+                    return self.field_value(&ptr, expression.ty);
+                }
                 let receiver = self.immediate_receiver(receiver);
                 let value = self.get_field(&receiver.value, *field, expression.ty);
                 self.release_operand(&receiver);
@@ -3596,6 +3645,16 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if let (Builtin::Append, [receiver, item]) = (builtin, expressions)
+            && self.module.types.is_value_struct(item.ty)
+            && matches!(item.kind, ExprKind::Construct { .. })
+        {
+            let list = self.operand(receiver);
+            let appended = self.append_struct_constructor(&list.value, item);
+            debug_assert!(appended);
+            self.release_operand(&list);
+            return none();
+        }
         if let Builtin::ForwardRefField(index) = builtin {
             let [reference] = expressions else {
                 unreachable!()
@@ -3793,9 +3852,14 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::StringListContains => {
+            Builtin::StringListContains | Builtin::StructListContains => {
+                let helper = if matches!(builtin, Builtin::StructListContains) {
+                    "imre_struct_list_contains"
+                } else {
+                    "imre_str_list_contains"
+                };
                 let byte = self.instruction(format!(
-                    "call i32 @imre_str_list_contains(ptr {}, ptr {})",
+                    "call i32 @{helper}(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
@@ -5263,6 +5327,14 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
+            Builtin::SequenceGetInBounds if self.module.types.is_value_struct(returns) => {
+                let native = self.instruction(format!("lshr i64 {}, 1", args[1].value.operand));
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_seq_get_index(ptr {}, i64 {native})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
             Builtin::SequenceGetInBounds => {
                 debug_assert!(matches!(
                     expressions[1].kind,
@@ -7530,6 +7602,12 @@ declare i32 @imre_tuple_compare(ptr, ptr) nounwind
 declare ptr @imre_value_repr(i64, i32)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
+declare ptr @imre_struct_list_new(ptr)
+declare ptr @imre_struct_data_readonly(ptr) nounwind
+declare ptr @imre_struct_row(ptr, i64) nounwind
+declare ptr @imre_struct_row_checked(ptr, i64)
+declare i32 @imre_struct_append(ptr, ptr, ptr)
+declare i32 @imre_struct_list_contains(ptr, ptr) nounwind
 declare ptr @imre_seq_new(i32)
 declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)

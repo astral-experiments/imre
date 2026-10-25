@@ -137,6 +137,17 @@ Synchronous subprocess calls form another sealed Unix boundary. The checker fixe
 
 Timed subprocess calls pass integer and float seconds through separate native entry points. The runtime keeps the original value for `TimeoutExpired` and starts a monotonic deadline after launch. A nonblocking poll loop drains both streams without waiting for descendants that inherit a pipe. Expiry snapshots undecoded bytes, kills and reaps the direct child, and closes captures. Catch bindings and `isinstance` narrowing expose `bytes | None` captures. The compiler gives `.timeout` an exact numeric layout when all deadline sites agree on its kind.
 
+The [value struct contract](subset.md#immutable-value-structs) uses the annotated class and
+decorator form established by [PEP 557](https://peps.python.org/pep-0557/).
+[Brett Cannon’s record prototype](https://discuss.python.org/t/struct-in-python/62777/2)
+explored dedicated declaration syntax; Imre keeps existing Python syntax and opts into
+different *identity and storage* rules through the decorator. [PEP 585](https://peps.python.org/pep-0585/#objects-created-with-bare-types-and-parameterized-types-are-exactly-the-same)
+explains why ordinary CPython erases the element argument when creating a list.
+The compatibility module therefore implements value behavior, while the Imre compiler uses
+the checked element type to select contiguous storage. A fast direct scan needs no boxes.
+When a value escapes it gets an owned snapshot; legacy word-based consumers can request a
+boxed view, which is discarded on mutation. The list handle itself is never replaced.
+
 Ordinary floats use LLVM `double` values and double fields; homogeneous containers carry their raw binary64 bits under one shared descriptor. They need no reference ownership. LLVM receives no fast-math permission. Mixed arithmetic explicitly checks integer conversion, while mixed comparisons compare an exact truncated-float integer and fractional sign. Integer true division scales the arbitrary-precision ratio and rounds once to nearest-even, including subnormals, instead of converting both operands independently. Optional floats own nullable `Rc<f64>` payloads so signed zero and every NaN bit pattern remain distinct from None.
 
 Float literals come from Ruff's AST. String conversion normalizes Python's decimal grammar before Rust's correctly rounded parser, using the existing pinned ICU character categories for Unicode digits. Ruff supplies nonfinite formatting; finite shortest digits use the already-pinned Ryu implementation because Ruff's current Rust-based finite formatter differs from Python at decimal ties. A small notation adaptation adds Python's exponent threshold, sign, and minimum width. Explicit exact-type checking prevents Python typing's permitted int-to-float assignment widening from silently changing stored values.

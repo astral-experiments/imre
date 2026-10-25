@@ -76,6 +76,7 @@ struct Storage {
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
+    value_structs: HashSet<usize>,
     custom_truth: HashSet<usize>,
     pathlike_records: HashSet<usize>,
     fallible_keys: HashSet<usize>,
@@ -272,6 +273,14 @@ impl Types {
                 _ => unreachable!("literal type identity has a string domain"),
             }
         }))
+    }
+
+    pub(crate) fn set_value_structs(&self, ids: HashSet<usize>) {
+        self.0.borrow_mut().value_structs = ids;
+    }
+
+    pub(crate) fn is_value_struct(&self, ty: Type) -> bool {
+        matches!(ty, Type::Class(id) if self.0.borrow().value_structs.contains(&id))
     }
 
     pub(crate) fn set_hashable_records(&self, records: HashSet<usize>) {
