@@ -1195,6 +1195,16 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
     }
 }
 
+/// Reverse the tagged integer words in place without changing any owner.
+///
+/// # Safety
+/// The caller keeps this list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
+    // SAFETY: only swaps within the buffer occur under the exclusive borrow.
+    unsafe { (&*list).0.with_mut(|values| values.reverse()) };
+}
+
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety

@@ -102,6 +102,10 @@ pub(crate) enum Type {
     Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// A source function from a heterogeneous overload list.
+    FunctionRef,
+    /// The shared failing function returned by typing.overload.
+    OverloadStub,
     /// An exact immutable method descriptor on the builtin str class.
     StrDescriptor(StrDescriptor),
     ProcessSelectorClass,
@@ -189,6 +193,20 @@ impl ProcessCapture {
 pub(crate) enum PathFlavor {
     Posix,
     Windows,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TypingOperation {
+    Register,
+    Get,
+    RegisterBuiltin,
+    GetBuiltin,
+    Clear,
+    CallStub,
+    Attr(u32),
+    SetAttr(u32),
+    RegistryLen,
+    Dummy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,6 +331,7 @@ impl std::fmt::Display for Type {
             Self::Calendar(CalendarType::Delta) => "datetime.timedelta",
             Self::Calendar(CalendarType::Zone) => "datetime.timezone",
             Self::PlainObject => "object",
+            Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
@@ -981,6 +1000,7 @@ pub(crate) enum Builtin {
     Sha256New,
     HashNew,
     NewPlainObject,
+    Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
     InspectSentinel,
     HashAvailable,
@@ -1013,6 +1033,7 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     ListClear,
+    ListReverse,
     IsNone,
     /// Promotes an exact str/bytes owner without allocating or changing identity.
     UnionInject,
@@ -1162,6 +1183,11 @@ pub(crate) enum Builtin {
     RecordCopy,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    DefaultDictMissing,
+    DefaultFactoryEnabled,
+    DefaultFactorySet {
+        enabled: bool,
+    },
     DequeNew,
     DequeReset,
     DequeAppend {
@@ -1665,6 +1691,9 @@ pub(crate) enum ProcessOperation {
     SetSelector,
     Executable,
     RunToStderr,
+    ShellOutput {
+        status: bool,
+    },
     CheckOutput {
         streams: u32,
         validation: u32,

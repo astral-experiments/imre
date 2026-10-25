@@ -157,6 +157,19 @@ impl<'a> Visitor<'a> for References<'_> {
                     }
                 }
             }
+            if matches!(name.as_str(), "assertIn" | "assertNotIn") {
+                self.found.attributes.extend(
+                    [
+                        "_assertTextMembership",
+                        "_assertTextListMembership",
+                        "_assertIntListMembership",
+                        "_assertTextDictMembership",
+                        "_assertIntKeyMembership",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+            }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 if name == "assertEqual" {
                     self.found.attributes.insert("assertDictEqual".into());
@@ -367,12 +380,17 @@ impl Reachable {
                                             | "_assert_called_once_with"
                                     ),
                                     "_Call" => matches!(name, "_represent" | "_represent_list"),
+                                    "_PatchFactory" => name == "_dictionary",
+                                    "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
                                     _ => false,
                                 };
                             if (property
                                 || unittest_method
                                 || assertion_exit
                                 || mock_dispatch
+                                || (source.is_bundled("selectors")
+                                    && class.name.as_str() == "PollSelector"
+                                    && name == "close")
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,

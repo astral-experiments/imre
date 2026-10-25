@@ -234,6 +234,24 @@ impl Inference {
         }
     }
 
+    /// Discover the actual input type of closed keyword calls even when all
+    /// written signatures have annotations. Python annotations do not reject None.
+    pub(super) fn discover_packed_arguments(&self) {
+        self.widened.set(true);
+    }
+
+    fn widen_keyword(&self, id: usize, index: usize, ty: Type) {
+        let mut pending = self.pending.borrow_mut();
+        pending[id].params[index] = Some(ty);
+        for function in &mut *pending {
+            if function.infer_return {
+                function.returns = None;
+            }
+        }
+        self.widened.set(true);
+        self.revision.set(self.revision.get() + 1);
+    }
+
     /// A later call from a different subcommand replaces a child layout with
     /// its stable parent prefix. Revisit helpers whose result may pass it on.
     fn widen_namespace(&self, id: usize, index: usize, parent: Type, parsers: &argparse::Parsers) {
@@ -353,10 +371,8 @@ impl Inference {
                 checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
-                    for (parameter, signature) in function
-                        .parameters
-                        .iter_non_variadic_params()
-                        .zip(&signature.params)
+                    for (parameter, signature) in
+                        closed_calls::parameters(&function.parameters).zip(&signature.params)
                     {
                         let slot =
                             checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
@@ -495,10 +511,9 @@ impl Checker<'_> {
             receiver,
             skip,
             (calls::starred(call)
-                || signature
-                    .params
-                    .iter()
-                    .any(|p| p.kind == ParameterKind::KeywordRest))
+                || signature.params.iter().any(|p| {
+                    matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+                }))
             .then_some(&mut scope),
         )?;
         Ok(scope.finish(self.call_value(signature, ty, args)))
@@ -517,6 +532,11 @@ impl Checker<'_> {
         // as 0 or 1; ordinary annotated Python functions retain their own types.
         let stat_mode = matches!(self.resolve(&call.func), Some(Binding::Definition(id))
             if self.graph.modules[id.module].is_bundled("stat"));
+        let selector_wait = signature.method.is_some_and(|method| {
+            let class = &self.classes.declarations.definitions[method.class];
+            self.graph.modules[class.definition.module].is_bundled("selectors")
+                && class.methods[method.index].name.as_str() == "select"
+        });
         let inference = self.inference;
         let args = self.bind_supplied(
             call,
@@ -526,6 +546,12 @@ impl Checker<'_> {
             |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
+                if selector_wait && parameter.name == "timeout" {
+                    let node = argument.site();
+                    let value = argument.value(checker)?;
+                    let value = checker.selector_seconds(value);
+                    return checker.coerce(value, parameter.ty, node);
+                }
                 if stat_mode && parameter.ty == Type::Int {
                     let node = argument.site();
                     let value = argument.value(checker)?;
@@ -543,6 +569,29 @@ impl Checker<'_> {
                 };
                 let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
+                    // Normalized inline keywords carry the value range; source names have their own.
+                    if closed_calls::keyword_field(node)
+                        || call.arguments.keywords.iter().any(|kw| {
+                            kw.arg.as_ref().is_some_and(|name| {
+                                name.range() == node.range() && kw.value.range() == node.range()
+                            })
+                        })
+                    {
+                        let supplied = argument.value(checker)?;
+                        if supplied.ty == Type::None
+                            && ty != Type::None
+                            && checker.types.payload(ty).is_none()
+                        {
+                            let expected = checker.types.optional(ty);
+                            inference.widen_keyword(signature.id, index, expected);
+                            return checker.coerce(supplied, expected, node);
+                        }
+                        if checker.types.payload(supplied.ty) == Some(ty) {
+                            inference.widen_keyword(signature.id, index, supplied.ty);
+                            return Ok(supplied);
+                        }
+                        return checker.direct_value(supplied, node, ty, parameter.sign_only);
+                    }
                     if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {
                         let value = argument.value(checker)?;

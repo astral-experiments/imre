@@ -77,7 +77,7 @@ class Build:
 class Wrapper:
     def __init__(self, build, function, decorator, counts):
         self.build, self.function, self.decorator, self.counts = build, function, decorator, counts
-        self.proc = self.shape = None
+        self.proc = self.shape = self.failure = None
         self.objects = []
         self.arity = length(inspect.signature(function).parameters)
         self.bound_len_calls = 0
@@ -94,15 +94,29 @@ class Wrapper:
             raise UnsupportedFixture(f"cache wrapper has one native argument layout: {self.shape!r} vs {shape!r}")
 
     def send(self, *values):
-        self.proc.stdin.write("".join(f"{value}\n" for value in values))
-        self.proc.stdin.flush()
+        if self.failure is not None:
+            raise self.failure
+        try:
+            self.proc.stdin.write("".join(f"{value}\n" for value in values))
+            self.proc.stdin.flush()
+        except BrokenPipeError:
+            raise self.closed() from None
+
+    def closed(self):
+        # EOF and EPIPE come from the same child. Preserve its first diagnostic
+        # when a reentrant callback unwinds or the fixture closes the driver.
+        if self.failure is None:
+            out, err = self.proc.communicate(timeout=5)
+            self.failure = RuntimeError(
+                f"native cache fixture exit {self.proc.returncode}: {err.strip() or out.strip() or 'unexpected EOF'}")
+        return self.failure
 
     def read(self):
         if not select.select([self.proc.stdout], [], [], 15)[0]:
             raise RuntimeError("native cache fixture timed out")
         line = self.proc.stdout.readline().rstrip("\n")
         if not line:
-            raise RuntimeError(f"native cache fixture closed: {self.proc.stderr.read()}")
+            raise self.closed()
         return line
 
     def __call__(self, *args, **kwargs):
@@ -195,8 +209,9 @@ class Wrapper:
         if self.proc is not None:
             proc = self.proc
             try:
-                self.send(-3)
-                out, err = proc.communicate(timeout=5)
+                if self.failure is not None:
+                    return
+                out, err = proc.communicate(input="-3\n", timeout=5)
                 if out or err or proc.returncode:
                     raise RuntimeError(f"native cache fixture exit {proc.returncode}: {out!r} {err!r}")
             finally:

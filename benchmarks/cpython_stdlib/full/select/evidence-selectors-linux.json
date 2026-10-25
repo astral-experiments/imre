@@ -1,0 +1,4698 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_selectors",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 121,
+    "distinct_ids": 121,
+    "counts": {
+      "host-driven-native-operation": 2,
+      "native-body-host-fixture": 4,
+      "reference-only": 71,
+      "reference-skip": 44
+    },
+    "records": [
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native DefaultSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "b2835b8b8eb49241657b9ad119402a36e998aba656da00075f0f06db1d6efeea",
+          "negative_control": "expected empty selector results"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native DefaultSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "002f73ee0388841fd90ccae339451b71151379807885d52c0275c782e8956c77",
+          "negative_control": "KeyError"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_context_manager",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_empty_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_fileno",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_get_key",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_get_map",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_modify",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_modify_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_register",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_exc",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_noraise",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_read_write",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_selector",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close_and_reuse",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_socket_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'cpu' is not enabled",
+          "reason": "resource 'cpu' is not enabled",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_register_file",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_context_manager",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_empty_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_empty_select_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_empty_select_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_fileno",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_get_key",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_get_map",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_modify",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_modify_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_register",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_register_bad_fd",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_register_bad_fd",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_exc",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_noraise",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_read_write",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_selector",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close_and_reuse",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_socket_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'cpu' is not enabled",
+          "reason": "resource 'cpu' is not enabled",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native PollSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "b2835b8b8eb49241657b9ad119402a36e998aba656da00075f0f06db1d6efeea",
+          "negative_control": "expected empty selector results"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native PollSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "002f73ee0388841fd90ccae339451b71151379807885d52c0275c782e8956c77",
+          "negative_control": "KeyError"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_selectors",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 121,
+    "distinct_ids": 121,
+    "counts": {
+      "host-driven-native-operation": 2,
+      "native-body-host-fixture": 4,
+      "reference-only": 71,
+      "reference-skip": 44
+    },
+    "records": [
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native DefaultSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "b2835b8b8eb49241657b9ad119402a36e998aba656da00075f0f06db1d6efeea",
+          "negative_control": "expected empty selector results"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native DefaultSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "002f73ee0388841fd90ccae339451b71151379807885d52c0275c782e8956c77",
+          "negative_control": "KeyError"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_selectors.DefaultSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_context_manager",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_empty_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_fileno",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_get_key",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_get_map",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_modify",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_modify_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_register",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_exc",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_noraise",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_select_read_write",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_selector",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close_and_reuse",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.DevpollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.DevpollSelector"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.DevpollSelector",
+          "reason": "Test needs selectors.DevpollSelector",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_socket_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'cpu' is not enabled",
+          "reason": "resource 'cpu' is not enabled",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_register_file",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.EpollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_context_manager",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_empty_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_empty_select_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_empty_select_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_fileno",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_get_key",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_get_map",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_modify",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_modify_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_register",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_register_bad_fd",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_register_bad_fd",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_exc",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_interrupt_noraise",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_select_read_write",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_selector",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_timeout",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_fd_close_and_reuse",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.KqueueSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "Test needs selectors.KqueueSelector)"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "Test needs selectors.KqueueSelector)",
+          "reason": "Test needs selectors.KqueueSelector)",
+          "source": "Lib/test/test_selectors.py:test_unregister_after_socket_close",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_above_fd_setsize",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": {
+          "skipped": "resource 'cpu' is not enabled"
+        },
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "exception": {
+          "kind": "upstream-skip",
+          "condition": "resource 'cpu' is not enabled",
+          "reason": "resource 'cpu' is not enabled",
+          "source": "Lib/test/test_selectors.py:test_above_fd_setsize",
+          "configuration": "CPython regrtest default resources",
+          "platform": "linux",
+          "fixture_variant": "integer-fd readiness"
+        },
+        "classification": "reference-skip"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native PollSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "b2835b8b8eb49241657b9ad119402a36e998aba656da00075f0f06db1d6efeea",
+          "negative_control": "expected empty selector results"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "native PollSelector registration, close/unregister or zero-timeout wait",
+          "fixture": "host extracts the unchanged base-class method, checks its POSIX guard and provides a real socketpair; native fixture selects the upstream constructor, defers its close, and specializes the empty-list assertion",
+          "method_sha256": "002f73ee0388841fd90ccae339451b71151379807885d52c0275c782e8956c77",
+          "negative_control": "KeyError"
+        },
+        "classification": "native-body-host-fixture"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
+          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."
+        },
+        "classification": "host-driven-native-operation"
+      },
+      {
+        "id": "test.test_selectors.PollSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_context_manager",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_empty_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_fileno",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_get_key",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_get_map",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_modify",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_modify_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_register",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_interrupt_exc",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_interrupt_noraise",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_select_read_write",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_selector",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_timeout",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_fd_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_fd_close_and_reuse",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      },
+      {
+        "id": "test.test_selectors.SelectSelectorTestCase.test_unregister_after_socket_close",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "integer-fd readiness",
+        "reference": "pass",
+        "outcome": "not-run",
+        "roles": {
+          "body": "unobserved",
+          "assertions": "unobserved",
+          "operation": "unobserved",
+          "fixture": "unobserved"
+        },
+        "classification": "reference-only"
+      }
+    ]
+  }
+]

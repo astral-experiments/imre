@@ -407,12 +407,12 @@ fn ini_error(args: fmt::Arguments<'_>) -> Error {
     }
 }
 
-type Sections = HashMap<String, HashMap<String, String>>;
+type Sections<'a> = HashMap<&'a str, HashMap<Str, Str>>;
 
-fn ini(source: &str, filename: &str) -> Result<Sections> {
+fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
     let mut sections = Sections::new();
-    let mut section = String::new();
-    let mut last = None::<(String, usize)>;
+    let mut section = "";
+    let mut last = None::<(Str, usize)>;
     let mut errors = IniDiagnostic::default();
     for (i, raw) in source.split_inclusive('\n').enumerate() {
         let text = raw.trim();
@@ -423,7 +423,10 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
         if let Some((key, previous_indent)) = &last
             && indent > *previous_indent
         {
-            let option = sections.get_mut(&section).unwrap().get_mut(key).unwrap();
+            let option = sections.get_mut(section).unwrap().get_mut(key).unwrap();
+            option
+                .try_reserve(text.len() + 1)
+                .map_err(|_| Error::allocation())?;
             option.push('\n');
             option.push_str(text);
             continue;
@@ -441,8 +444,9 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
                     Quoted(header)
                 )));
             }
-            section = header.to_owned();
-            sections.insert(section.clone(), HashMap::new());
+            sections.try_reserve(1).map_err(|_| Error::allocation())?;
+            section = header;
+            sections.insert(section, HashMap::new());
             last = None;
             continue;
         }
@@ -457,19 +461,24 @@ fn ini(source: &str, filename: &str) -> Result<Sections> {
         if let Some(pos) = text.find(['=', ':'])
             && pos != 0
         {
-            let key = text[..pos].trim_end().to_lowercase();
-            let options = sections.get_mut(&section).unwrap();
+            let key = super::super::text::lowercase(text[..pos].trim_end())
+                .map_err(|_| Error::allocation())?;
+            let options = sections.get_mut(section).unwrap();
             if options.contains_key(&key) {
                 return Err(ini_error(format_args!(
                     "{filename} is invalid: While reading from {} [line {:2}]: option {} in section {} already exists",
                     Quoted(filename),
                     i + 1,
                     Quoted(&key),
-                    Quoted(&section)
+                    Quoted(section)
                 )));
             }
-            options.insert(key.clone(), text[pos + 1..].trim_start().to_owned());
-            last = Some((key, indent));
+            options.try_reserve(1).map_err(|_| Error::allocation())?;
+            let retained = Str::try_new(key.as_str()).map_err(|_| Error::allocation())?;
+            let value =
+                Str::try_new(text[pos + 1..].trim_start()).map_err(|_| Error::allocation())?;
+            options.insert(key, value);
+            last = Some((retained, indent));
         } else {
             if errors.0.is_empty() {
                 write!(
@@ -552,7 +561,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
         section(name)?
             .get(key)
             .or_else(|| sections.get("DEFAULT").and_then(|d| d.get(key)))
-            .map(String::as_str)
+            .map(Str::as_str)
             .ok_or_else(|| Error::string_key(Str::from(key)))
     };
     for group in ["formatters", "handlers"] {

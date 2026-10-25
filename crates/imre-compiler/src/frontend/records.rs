@@ -1137,6 +1137,13 @@ impl Checker<'_> {
         {
             return Ok(names);
         }
+        if matches!(attribute.attr.as_str(), "assertIn" | "assertNotIn")
+            && let Some(receiver) = &receiver
+            && let Some(checked) =
+                self.unittest_membership(call, attribute.attr.as_str(), class, receiver)?
+        {
+            return Ok(checked);
+        }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver
             && let Some(checked) =
@@ -1153,6 +1160,12 @@ impl Checker<'_> {
                 self.unittest_assert_raises(call, class, receiver, attribute.attr.as_str())?
         {
             return Ok(context);
+        }
+        if attribute.attr.as_str() == "dict"
+            && self.bundled_mock_class(class, "_PatchFactory")
+            && let Some(object) = &receiver
+        {
+            return self.mock_dictionary_call(call, class, object.clone());
         }
         if self.native_mock(class)
             && let Some(object) = &receiver
