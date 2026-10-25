@@ -5,6 +5,17 @@ import warnings
 from io import StringIO
 
 
+class Message(ValueError):
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+    def __str__(self) -> str:
+        if self.detail == "broken":
+            raise OSError("message text unavailable")
+        return "reported: " + self.detail
+
+
 def optional_line(override: bool) -> str | None:
     if override:
         return " override "
@@ -40,6 +51,11 @@ def main() -> None:
     sink = StringIO()
     warnings.showwarning("first", category, source, 1, sink)
     warnings.showwarning("second", category, source, 2, sink, " explicit ")
+    warnings.showwarning(Message("ok"), category, source, 2, sink, "")
+    try:
+        warnings.showwarning(Message("broken"), category, source, 2, sink, "")
+    except OSError as error:
+        print("formatting failed: " + str(error))
     write_optional(sink, source)
     write_optional(None, source)
     print(repr(sink.getvalue()))

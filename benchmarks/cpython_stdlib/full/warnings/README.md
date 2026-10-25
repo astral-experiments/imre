@@ -50,7 +50,8 @@ its entire body can compile.
 Default `formatwarning` and `showwarning` share the public linecache and its
 mutable source lists. Omitted and explicit lines preserve CPython's whitespace
 and newline behavior. `showwarning` can write to stderr, stdout, text files
-and StringIO. OS write errors are ignored; closed-stream ValueError propagates.
+and StringIO. OS write errors are ignored; a closed-stream ValueError or a
+formatting error from the message's `__str__` propagates.
 The display slice accepts builtin category objects, string filenames and source
 lines, and supported scalar or exception messages. User-defined warning
 classes, arbitrary streams, and replacements for the format hook are outside
