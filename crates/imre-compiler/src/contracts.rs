@@ -65,6 +65,12 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::ImportErrorReset => Contract::new(false, Unknown),
+            Self::ImportErrorNew { .. }
+            | Self::ImportErrorField(_)
+            | Self::ExceptionFieldLen
+            | Self::ExceptionFieldIndex => Contract::new(true, PreservesLists),
+            Self::ExceptionFieldRepr => Contract::new(false, PreservesOwners),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -697,6 +703,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_regex_groupdict"
                 | "imre_bytes_decode_splitlines"
                 | "imre_str_splitlines"
+                | "imre_exception_field_index"
+                | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
                 | "imre_urlsafe_b64encode"

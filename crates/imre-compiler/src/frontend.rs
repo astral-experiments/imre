@@ -29,6 +29,7 @@ mod fixed_tuples;
 mod function_caches;
 mod functools;
 mod hashlib;
+mod import_errors;
 mod inference;
 mod iterables;
 mod itertools;
@@ -351,6 +352,12 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         _ => {}
+    }
+    if name == "ImportError" {
+        return Some(41);
+    }
+    if name == "ModuleNotFoundError" {
+        return Some(42);
     }
     if name == "StopIteration" {
         return Some(35);
@@ -1339,6 +1346,7 @@ fn annotation_with_aliases(
             "str" => Ok(Type::Str),
             "bytes" => Ok(Type::Bytes),
             "BaseException" | "Exception" => Ok(Type::Exception),
+            "ImportError" => Ok(Type::ImportException),
             _ => Err(error(
                 source,
                 expression,
@@ -1992,8 +2000,10 @@ impl<'a> Checker<'a> {
             };
             return self.coerce(literals::view(value, string), expected, node);
         }
-        if matches!(value.ty, Type::TimeoutExpired | Type::NamedException(_))
-            && expected == Type::Exception
+        if matches!(
+            value.ty,
+            Type::ImportException | Type::TimeoutExpired | Type::NamedException(_)
+        ) && expected == Type::Exception
         {
             return Ok(Expr {
                 ty: expected,
@@ -3828,6 +3838,9 @@ impl<'a> Checker<'a> {
     /// turn an arbitrary first-party definition into a builtin category.
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+        if self.is_import_error(kind) {
+            return self.import_error(call, kind);
+        }
         if kind == 32 {
             return self.system_exit(call, false);
         }
@@ -3900,6 +3913,9 @@ impl<'a> Checker<'a> {
                     value,
                     "raise a constructed exception payload with its required arguments",
                 ));
+            }
+            if self.is_import_error(kind) {
+                return Ok(self.import_error_value(kind, Vec::new(), vec![], [None; 3]));
             }
             if kind == 32 {
                 return Ok(Expr {
@@ -4054,6 +4070,9 @@ impl<'a> Checker<'a> {
                         && let Some(&class) = self.classes.declarations.ids.get(&def)
                     {
                         self.narrowed.insert_mut(slot, Type::NamedException(class));
+                    }
+                    if !kinds.is_empty() && kinds.iter().all(|kind| self.is_import_error(*kind)) {
+                        self.narrowed.insert_mut(slot, Type::ImportException);
                     }
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
                         self.narrowed.insert_mut(slot, Type::TimeoutExpired);
@@ -4881,19 +4900,19 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
-                if values.iter().any(|value| value.ty == Type::ExitCode) {
+                if values.iter().any(|value| value.ty == Type::ExceptionField) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
-                            v.ty == Type::ExitCode || sys::exit_payload_supported(v.ty, self.types)
+                            v.ty == Type::ExceptionField || self.import_argument_supported(v.ty)
                         })
                     {
                         return Err(error(
                             self.source,
                             expression,
-                            "unsupported comparison with a SystemExit payload",
+                            "exception fields support equality with None, bool, int, str, bytes, or tuples",
                         ));
                     }
-                    let reversed = values[0].ty != Type::ExitCode;
+                    let reversed = values[0].ty != Type::ExceptionField;
                     let eq = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::SystemExitCodeEqual { reversed }, values),
@@ -4993,6 +5012,13 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::ExceptionField {
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    return Ok(Expr {
+                        ty: Type::ExceptionField,
+                        kind: ExprKind::Builtin(Builtin::ExceptionFieldIndex, vec![list, index]),
+                    });
+                }
                 let list = match list.ty {
                     documents::LIST => self.document_list(list),
                     Type::Document(_) => self.document_map(list),
@@ -5221,7 +5247,10 @@ impl<'a> Checker<'a> {
                 if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
                 }
-                if matches!(receiver.ty, Type::Exception | Type::TimeoutExpired) {
+                if matches!(
+                    receiver.ty,
+                    Type::Exception | Type::ImportException | Type::TimeoutExpired
+                ) {
                     let field = if receiver.ty == Type::TimeoutExpired {
                         self.timeout_error_attribute(&receiver, attribute)?
                     } else {
@@ -5231,7 +5260,21 @@ impl<'a> Checker<'a> {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
-                        "code" => (Type::ExitCode, Builtin::SystemExitCode),
+                        field @ ("args" | "msg" | "name" | "path" | "name_from")
+                            if receiver.ty == Type::ImportException =>
+                        {
+                            (
+                                Type::ExceptionField,
+                                Builtin::ImportErrorField(match field {
+                                    "args" => 0,
+                                    "msg" => 1,
+                                    "name" => 2,
+                                    "path" => 3,
+                                    _ => 4,
+                                }),
+                            )
+                        }
+                        "code" => (Type::ExceptionField, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
                         "doc" => (Type::Str, Builtin::JsonErrorField(1)),
                         "pos" => (Type::Int, Builtin::JsonErrorField(2)),
@@ -5860,6 +5903,13 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
+                let replacement = self.import_error(call, 41)?;
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ImportErrorReset, vec![receiver, replacement]),
+                });
+            }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
             {
@@ -6464,15 +6514,22 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if name.id == "repr" && args.len() == 1 && args[0].ty == Type::ExitCode {
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Repr, args),
-            });
+        if args.len() == 1 && args[0].ty == Type::ExceptionField {
+            let op = match name.id.as_str() {
+                "repr" => Some((Type::Str, Builtin::ExceptionFieldRepr)),
+                "len" => Some((Type::Int, Builtin::ExceptionFieldLen)),
+                _ => None,
+            };
+            if let Some((ty, op)) = op {
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(op, args),
+                });
+            }
         }
         if matches!(name.id.as_str(), "str" | "print")
             && args.len() == 1
-            && args[0].ty == Type::ExitCode
+            && args[0].ty == Type::ExceptionField
         {
             let text = Expr {
                 ty: Type::Str,
@@ -6491,7 +6548,10 @@ impl<'a> Checker<'a> {
             && args.len() == 1
             && matches!(
                 args[0].ty,
-                Type::Exception | Type::NamedException(_) | Type::TimeoutExpired
+                Type::Exception
+                    | Type::NamedException(_)
+                    | Type::ImportException
+                    | Type::TimeoutExpired
             )
         {
             return Ok(Expr {
@@ -6507,7 +6567,10 @@ impl<'a> Checker<'a> {
         }
         if name.id == "repr"
             && args.len() == 1
-            && matches!(args[0].ty, Type::Exception | Type::NamedException(_))
+            && matches!(
+                args[0].ty,
+                Type::Exception | Type::ImportException | Type::NamedException(_)
+            )
         {
             return Ok(Expr {
                 ty: Type::Str,
@@ -6601,6 +6664,7 @@ impl<'a> Checker<'a> {
                             | Type::None
                             | Type::Exception
                             | Type::NamedException(_)
+                            | Type::ImportException
                             | Type::TimeoutExpired
                     ) =>
             {
