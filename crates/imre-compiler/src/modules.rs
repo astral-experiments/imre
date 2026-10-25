@@ -33,6 +33,31 @@ const INTRINSIC_MODULES: &[&str] = &[
     "_types",
 ];
 
+/// Preserve the spelling of a target errno symbol through import aliases.
+/// Values and even the presence of a symbol come from the target C headers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ErrnoName([u8; 32]);
+
+impl ErrnoName {
+    pub(crate) fn new(s: &str) -> Option<Self> {
+        if s.len() > 32
+            || !(s.starts_with('E') || s.starts_with("WSA"))
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        {
+            return None;
+        }
+        let mut value = [0; 32];
+        value[..s.len()].copy_from_slice(s.as_bytes());
+        Some(Self(value))
+    }
+    pub(crate) fn name(&self) -> &str {
+        let n = self.0.iter().position(|&v| v == 0).unwrap_or(self.0.len());
+        std::str::from_utf8(&self.0[..n]).unwrap()
+    }
+}
+
 /// A source definition's identity, independent of its eventual runtime representation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct DefinitionId {
@@ -53,6 +78,7 @@ pub(crate) enum Binding {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
     Argparse,
+    Errno,
     Future,
     Sys,
     Typing,
@@ -150,6 +176,8 @@ pub(crate) enum Intrinsic {
     SysException,
     Stdin,
     OsName,
+    ErrnoConstant(ErrnoName),
+    ErrnoErrorcode,
     GetSysconfigPath,
     OsPathExists,
     OsDevnull,
@@ -284,6 +312,7 @@ impl IntrinsicModule {
             "imre" => Some(Self::Imre),
             "imre.json" => Some(Self::ImreJson),
             "imre.toml" => Some(Self::ImreToml),
+            "errno" => Some(Self::Errno),
             "tomllib" => Some(Self::Tomllib),
             _ => None,
         }
@@ -358,6 +387,10 @@ impl IntrinsicModule {
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Os, "name") => Intrinsic::OsName,
+            (Self::Errno, "errorcode") => Intrinsic::ErrnoErrorcode,
+            (Self::Errno, name) if ErrnoName::new(name).is_some() => {
+                Intrinsic::ErrnoConstant(ErrnoName::new(name).unwrap())
+            }
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {

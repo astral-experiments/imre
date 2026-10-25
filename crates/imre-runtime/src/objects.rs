@@ -13,6 +13,7 @@ mod bytes;
 mod contexts;
 mod deferred_diff;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod hashlib;
@@ -59,6 +60,9 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
     ZipFile(Box<zipfile::Archive>),

@@ -104,6 +104,9 @@ impl Types {
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -426,6 +429,9 @@ impl Types {
             | Type::Semaphore
             | Type::Popen(_)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime

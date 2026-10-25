@@ -64,6 +64,8 @@ impl Builtin {
             {
                 Contract::new(true, Unknown)
             }
+            Self::FreezeStrings => Contract::new(true, PreservesLists),
+            Self::Errno(_) => Contract::new(true, PreservesLists),
             Self::ExceptionRepr | Self::ExceptionMessage => Contract::new(true, Unknown),
             Self::ExceptionArgument(_) | Self::NamedException { .. } => {
                 Contract::new(false, PreservesLists)
@@ -371,6 +373,7 @@ impl Builtin {
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
             | Self::SysPlatform
+            | Self::StrIsUpper
             | Self::OsName
             | Self::SysArgv
             | Self::TextClose

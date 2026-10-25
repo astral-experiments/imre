@@ -68,6 +68,12 @@ impl Session {
         // compatibility implementation or weakening unresolved-import checks.
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
+            // The errno mapping is mutable in CPython, and available integer
+            // names depend on the target headers rather than the analysis host.
+            (
+                "errno",
+                "errorcode: dict[int, str]\ndef __getattr__(name: str) -> int: ...\n",
+            ),
             (
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython

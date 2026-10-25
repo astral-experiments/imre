@@ -81,6 +81,9 @@ impl Type {
             | Self::Popen(_)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
@@ -133,6 +136,9 @@ impl Type {
             | Self::Popen(_)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::NativeModule
+            | Self::ModuleNamespace
+            | Self::ModuleMember
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
@@ -713,6 +719,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(_)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -3306,6 +3315,9 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(_)
                 | Type::AsyncProcess(_)
+                | Type::NativeModule
+                | Type::ModuleNamespace
+                | Type::ModuleMember
                 | Type::Logger
                 | Type::RegexPattern
                 | Type::JsonRoot
@@ -3977,6 +3989,92 @@ impl Emitter<'_, '_> {
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::FreezeStrings => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_frozenset_strings(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::StrIsUpper => {
+                let bit = self.instruction(format!(
+                    "call i32 @imre_str_is_upper(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::Errno(op) => {
+                use crate::ir::ErrnoOperation as Op;
+                let call = match op {
+                    Op::Module => "call ptr @imre_errno_module()".to_string(),
+                    Op::Namespace | Op::Keys | Op::Errorcode => {
+                        let f = match op {
+                            Op::Namespace => "namespace",
+                            Op::Keys => "keys",
+                            _ => "errorcode",
+                        };
+                        format!("call ptr @imre_errno_{f}(ptr {})", args[0].value.operand)
+                    }
+                    Op::Number | Op::Text | Op::Has => {
+                        let (ty, f) = match op {
+                            Op::Number => ("i64", "number"),
+                            Op::Text => ("ptr", "text"),
+                            _ => ("i32", "has"),
+                        };
+                        format!(
+                            "call {ty} @imre_errno_{f}(ptr {}, ptr {})",
+                            args[0].value.operand, args[1].value.operand
+                        )
+                    }
+                    Op::Lookup | Op::Items => format!(
+                        "call ptr @imre_errno_lookup(ptr {}, ptr {}, i32 {})",
+                        args[0].value.operand,
+                        args[1].value.operand,
+                        u32::from(matches!(op, Op::Items))
+                    ),
+                    Op::ItemRepr | Op::ItemText => format!(
+                        "call ptr @imre_errno_member_text(ptr {}, i32 {})",
+                        args[0].value.operand,
+                        u32::from(matches!(op, Op::ItemRepr))
+                    ),
+                    Op::MemberContains => format!(
+                        "call i32 @imre_errno_member_contains(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                    Op::ItemEq => {
+                        let i = usize::from(args[0].value.ty != Type::ModuleMember);
+                        let other = &args[1 - i].value;
+                        let kind = representation_kind(other.ty, &self.module.types);
+                        let word = self.word(other);
+                        format!(
+                            "call i32 @imre_errno_member_equal(ptr {}, i32 {kind}, i64 {word})",
+                            args[i].value.operand
+                        )
+                    }
+                };
+                let raw = if matches!(
+                    op,
+                    Op::Module | Op::Number | Op::Lookup | Op::Items | Op::MemberContains
+                ) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand: if returns == Type::Bool {
+                        self.instruction(format!("icmp ne i32 {raw}, 0"))
+                    } else {
+                        raw
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
@@ -4968,6 +5066,9 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(_)
                     | Type::AsyncProcess(_)
+                    | Type::NativeModule
+                    | Type::ModuleNamespace
+                    | Type::ModuleMember
                     | Type::Logger
                     | Type::TimedFileHandler
                     | Type::ClockTime
@@ -5202,6 +5303,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(_)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -5268,6 +5372,9 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(_)
             | Type::AsyncProcess(_)
+            | Type::NativeModule
+            | Type::ModuleNamespace
+            | Type::ModuleMember
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -5832,6 +5939,9 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(_)
         | Type::AsyncProcess(_)
+        | Type::NativeModule
+        | Type::ModuleNamespace
+        | Type::ModuleMember
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
@@ -6336,6 +6446,19 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_frozenset_strings(ptr)
+declare i32 @imre_str_is_upper(ptr)
+declare ptr @imre_errno_module()
+declare ptr @imre_errno_namespace(ptr)
+declare ptr @imre_errno_keys(ptr)
+declare ptr @imre_errno_errorcode(ptr)
+declare i64 @imre_errno_number(ptr,ptr)
+declare ptr @imre_errno_text(ptr,ptr)
+declare i32 @imre_errno_has(ptr,ptr)
+declare ptr @imre_errno_lookup(ptr,ptr,i32)
+declare ptr @imre_errno_member_text(ptr,i32)
+declare i32 @imre_errno_member_contains(ptr,ptr)
+declare i32 @imre_errno_member_equal(ptr,i32,i64)
 declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)

@@ -23,6 +23,7 @@ mod dataclass_values;
 mod dispatch;
 mod documents;
 mod enums;
+mod errno;
 mod expansions;
 mod functools;
 mod hashlib;
@@ -4300,8 +4301,29 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
+        if self.resolve(expression)
+            == Some(Binding::IntrinsicModule(
+                crate::modules::IntrinsicModule::Errno,
+            ))
+        {
+            return Ok(errno::module());
+        }
         if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
             match symbol {
+                Intrinsic::ErrnoConstant(name) => {
+                    return Ok(errno::op(
+                        ir::ErrnoOperation::Number,
+                        Type::Int,
+                        vec![errno::module(), unpacking::string(name.name())],
+                    ));
+                }
+                Intrinsic::ErrnoErrorcode => {
+                    return Ok(errno::op(
+                        ir::ErrnoOperation::Errorcode,
+                        self.types.dict(Type::Int, Type::Str),
+                        vec![errno::module()],
+                    ));
+                }
                 Intrinsic::HashAvailable => {
                     return Ok(Expr {
                         ty: self.types.set(Type::Str),
@@ -4571,6 +4593,31 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if key.ty == Type::ModuleMember
+                        && self
+                            .types
+                            .mapping(receiver.ty)
+                            .is_some_and(|(k, _)| k == Type::Int)
+                    {
+                        let answer = errno::op(
+                            ir::ErrnoOperation::MemberContains,
+                            Type::Bool,
+                            vec![key, receiver],
+                        );
+                        return Ok(if compare.ops[0] == ast::CmpOp::NotIn {
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Not(Box::new(answer)),
+                            }
+                        } else {
+                            answer
+                        });
+                    }
+                    let receiver = if receiver.ty == Type::ModuleNamespace {
+                        errno::op(ir::ErrnoOperation::Keys, Type::StringKeys, vec![receiver])
+                    } else {
+                        receiver
+                    };
                     let (key_type, builtin) =
                         if let Some((key, _)) = self.types.mapping(receiver.ty) {
                             (key, Builtin::DictContains)
@@ -4722,6 +4769,32 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
+                if values.iter().any(|v| v.ty == Type::ModuleMember) {
+                    if values.len() != 2
+                        || !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        || !values.iter().all(|v| {
+                            matches!(
+                                v.ty,
+                                Type::ModuleMember | Type::Int | Type::Str | Type::StrLiteral(_)
+                            )
+                        })
+                    {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "module attribute values support equality with integers or strings",
+                        ));
+                    }
+                    let answer = errno::op(ir::ErrnoOperation::ItemEq, Type::Bool, values);
+                    return Ok(if compare.ops[0] == ast::CmpOp::NotEq {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(answer)),
+                        }
+                    } else {
+                        answer
+                    });
+                }
                 if values.iter().any(|value| value.ty == Type::ExitCode) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
@@ -4838,6 +4911,14 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::ModuleNamespace {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(errno::op(
+                        ir::ErrnoOperation::Items,
+                        Type::ModuleMember,
+                        vec![list, key],
+                    ));
+                }
                 let list = match list.ty {
                     documents::LIST => self.document_list(list),
                     Type::Document(_) => self.document_map(list),
@@ -4994,6 +5075,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::NativeModule {
+                    return Ok(self.errno_attribute(receiver, attribute.attr.as_str()));
+                }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"
                 {
@@ -5217,6 +5301,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+        if let Some(value) = self.errno_builtin(call)? {
+            return Ok(value);
+        }
         if let Some(value) = self.sys_call(call)? {
             return Ok(value);
         }
@@ -5621,6 +5708,28 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if receiver.ty == Type::ModuleNamespace
+                && attribute.attr.as_str() == "keys"
+                && call.arguments.is_empty()
+            {
+                return Ok(errno::op(
+                    ir::ErrnoOperation::Keys,
+                    Type::StringKeys,
+                    vec![receiver],
+                ));
+            }
+            if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+                && attribute.attr.as_str() == "isupper"
+                && call.arguments.is_empty()
+            {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(
+                        Builtin::StrIsUpper,
+                        vec![Self::string_value(receiver)],
+                    ),
+                });
+            }
             if matches!(receiver.ty, Type::NamedException(_))
                 && matches!(attribute.attr.as_str(), "__init__" | "__post_init__")
             {
@@ -6150,6 +6259,37 @@ impl<'a> Checker<'a> {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::Len, vec![text]),
                 },
+            });
+        }
+        if args.len() == 1
+            && args[0].ty == Type::ModuleMember
+            && matches!(name.id.as_str(), "str" | "repr" | "print")
+        {
+            let text = errno::op(
+                if name.id == "repr" {
+                    ir::ErrnoOperation::ItemRepr
+                } else {
+                    ir::ErrnoOperation::ItemText
+                },
+                Type::Str,
+                args,
+            );
+            return Ok(if name.id == "print" {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            } else {
+                text
+            });
+        }
+        if name.id == "frozenset"
+            && args.len() == 1
+            && self.types.element(args[0].ty) == Some(Type::Str)
+        {
+            return Ok(Expr {
+                ty: Type::StringKeys,
+                kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
             });
         }
         if name.id == "divmod" && args.len() == 2 {
