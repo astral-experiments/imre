@@ -281,6 +281,11 @@ impl Checker<'_> {
                         value,
                     ));
                 }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return self.set_module_spec_location(attribute, receiver, value);
+                }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
                     return Ok(Statement::Expr(logging_records::op(

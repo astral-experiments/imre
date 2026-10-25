@@ -387,6 +387,7 @@ impl Checker<'_> {
                         | Type::Set(_)
                         | Type::Deque(_)
                         | Type::Class(_)
+                        | Type::ModuleSpec(_)
                 )
             })
             || types == [Type::Str; 2]
