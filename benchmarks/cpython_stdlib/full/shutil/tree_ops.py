@@ -140,10 +140,13 @@ def main(routine=execute_level):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--"+name, required=True, type=lambda x: Path(x).resolve())
+    parser.add_argument("--cpython-source", type=Path)
     parser.add_argument("--manifest", type=Path, default=HERE / "UPSTREAM.json")
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5) or sys.implementation.name != "cpython":
         parser.error("use CPython 3.14.5")
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     manifest = json.loads(args.manifest.read_text())
     root = STDLIB / "upstream"
     verify_files(root, manifest["files"])
