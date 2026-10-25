@@ -9,7 +9,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::PosixPathOperation;
+use crate::ir::{CopyOperation, PosixPathOperation};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -88,6 +88,7 @@ pub(crate) enum IntrinsicModule {
     UrllibParse,
     Collections,
     CollectionsAbc,
+    Copy,
     Itertools,
     Operator,
     Textwrap,
@@ -114,6 +115,7 @@ pub(crate) enum Intrinsic {
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
+    ShallowCopy,
     TypeChecking,
     GetLogger,
     GetLevelName,
@@ -145,6 +147,8 @@ pub(crate) enum Intrinsic {
     LruCache,
     CachedProperty,
     NewType,
+    Partial,
+    Placeholder,
     Reduce,
     TomlDumps,
     TomliLoads,
@@ -248,7 +252,7 @@ pub(crate) enum Intrinsic {
     Path,
     PurePath(crate::ir::PathFlavor),
     Which,
-    CopyFile,
+    Copy(CopyOperation),
     ShutilError,
     SameFileError,
     SpecialFileError,
@@ -271,6 +275,14 @@ pub(crate) enum Intrinsic {
     FsPath,
     PosixPath(PosixPathOperation),
     Unquote,
+}
+
+impl Intrinsic {
+    /// Resolve the actual public export, including when the caller imported it under an alias.
+    pub(crate) fn exported_by(self, module: &str, name: &str) -> bool {
+        IntrinsicModule::named(module).and_then(|m| m.symbol(name))
+            == Some(Binding::Intrinsic(self))
+    }
 }
 
 impl IntrinsicModule {
@@ -307,6 +319,7 @@ impl IntrinsicModule {
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
+            "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
@@ -401,6 +414,8 @@ impl IntrinsicModule {
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::Functools, "lru_cache") => Intrinsic::LruCache,
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
+            (Self::Functools, "partial") => Intrinsic::Partial,
+            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -485,6 +500,7 @@ impl IntrinsicModule {
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
@@ -516,7 +532,12 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Shutil, "which") => Intrinsic::Which,
-            (Self::Shutil, "copyfile") => Intrinsic::CopyFile,
+            (Self::Shutil, "copyfile") => Intrinsic::Copy(CopyOperation::File),
+            (Self::Shutil, "copymode") => Intrinsic::Copy(CopyOperation::Mode),
+            (Self::Shutil, "copystat") => Intrinsic::Copy(CopyOperation::Stat),
+            (Self::Shutil, "_copyxattr") => Intrinsic::Copy(CopyOperation::Xattr),
+            (Self::Shutil, "copy") => Intrinsic::Copy(CopyOperation::Copy),
+            (Self::Shutil, "copy2") => Intrinsic::Copy(CopyOperation::Copy2),
             (Self::Shutil, "Error") => Intrinsic::ShutilError,
             (Self::Shutil, "SameFileError") => Intrinsic::SameFileError,
             (Self::Shutil, "SpecialFileError") => Intrinsic::SpecialFileError,
@@ -563,7 +584,7 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
-    bundled: bool,
+    pub(crate) bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -598,6 +619,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_calls: std::cell::RefCell<Vec<Vec<TextRange>>>,
     checked_keywords: std::cell::RefCell<Vec<Vec<TextRange>>>,
+    checked_tuple_reads: std::cell::RefCell<Vec<Vec<TextRange>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
@@ -734,6 +756,14 @@ impl SourceGraph {
         self.checked_keywords.borrow_mut()[module].extend(keywords);
     }
 
+    /// Record the exact list read proved by lowering a fixed-width tuple spread.
+    /// Other diagnostics at this index or inside the receiver remain visible.
+    pub(crate) fn checked_tuple_list_read(&self, module: ModuleId, read: TextRange) {
+        if self.session.has_tuple_spreads(module) {
+            self.checked_tuple_reads.borrow_mut()[module].push(read);
+        }
+    }
+
     /// Source ranges where the reachable profile or native lowering handles diagnostics.
     pub(crate) fn diagnostic_scopes(
         &self,
@@ -778,6 +808,12 @@ impl SourceGraph {
                         keywords.sort_unstable_by_key(|range| (range.start(), range.end()));
                         keywords.dedup();
                         keywords.into_iter().map(CheckedDiagnostic::Keyword)
+                    })
+                    .chain({
+                        let mut reads = self.checked_tuple_reads.borrow()[id].clone();
+                        reads.sort_unstable_by_key(|range| (range.start(), range.end()));
+                        reads.dedup();
+                        reads.into_iter().map(CheckedDiagnostic::TupleListRead)
                     })
                     .collect()
             })
@@ -927,7 +963,9 @@ impl SourceGraph {
                 .or_else(|| self.resolve(module, expression)),
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
                 Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(target) => target.symbol(attribute.attr.as_str()),
+                Binding::IntrinsicModule(target) => {
+                    stdlib_symbol(&self.modules, target, attribute.attr.as_str())
+                }
                 _ => None,
             },
             _ => None,
@@ -945,7 +983,9 @@ fn resolve_binding(
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
-                Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
+                Binding::IntrinsicModule(module) => {
+                    stdlib_symbol(modules, module, attribute.attr.as_str())
+                }
                 Binding::Definition(_)
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
@@ -954,6 +994,26 @@ fn resolve_binding(
         }
         _ => None,
     }
+}
+
+const LOGGING_CLASSES: &str = "__imre_logging_classes__";
+
+/// Public logging classes can be compiled from Python alongside the module's
+/// native operations. Only local class definitions are exported from the bundle.
+fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
+    module.symbol(name).or_else(|| {
+        if module != IntrinsicModule::Logging || name.starts_with('_') {
+            return None;
+        }
+        let (id, source) = modules
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.bundled && m.name == LOGGING_CLASSES)?;
+        source.export(name).filter(|b| {
+            matches!(b, Binding::Definition(d) if d.module == id &&
+                matches!(&source.parsed.syntax().body[d.statement], ast::Stmt::ClassDef(_)))
+        })
+    })
 }
 
 struct Loader<'a> {
@@ -1107,7 +1167,13 @@ impl<'a> Loader<'a> {
                                     .copied()
                                     .or_else(|| target.export(alias.name.as_str()))
                             })
-                            .or_else(|| IntrinsicModule::named(&name)?.symbol(alias.name.as_str()));
+                            .or_else(|| {
+                                stdlib_symbol(
+                                    &self.modules,
+                                    IntrinsicModule::named(&name)?,
+                                    alias.name.as_str(),
+                                )
+                            });
                         if let Some(binding) = binding {
                             let local = alias.asname.as_ref().unwrap_or(&alias.name);
                             self.modules[id]
@@ -1124,6 +1190,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_calls: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             checked_keywords: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            checked_tuple_reads: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -1340,8 +1407,7 @@ impl<'a> Loader<'a> {
                     && let Some(module) = self.intrinsic_module(&name)?
                 {
                     for alias in &import.names {
-                        let binding = module
-                            .symbol(alias.name.as_str())
+                        let binding = stdlib_symbol(&self.modules, module, alias.name.as_str())
                             .filter(|binding| {
                                 self.reachable_only
                                     || !matches!(
@@ -1420,6 +1486,27 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
+        if name.split('.').next() == Some("logging")
+            && module.is_some()
+            && !self.by_name.contains_key(LOGGING_CLASSES)
+        {
+            let path = self.root.join(format!("{LOGGING_CLASSES}.py"));
+            if self.fs.exists(&path) {
+                return Err(format!(
+                    "standard-library shadowing is unsupported: {LOGGING_CLASSES:?}"
+                ));
+            }
+            self.inputs.missing.push(path.clone());
+            let id = self.add(
+                path.clone(),
+                path,
+                LOGGING_CLASSES.into(),
+                false,
+                include_str!("../stdlib/logging/classes.py"),
+            )?;
+            self.modules[id].bundled = true;
+            self.scan(id)?;
+        }
         Ok(module)
     }
 
@@ -1468,6 +1555,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == LOGGING_CLASSES {
+            return Err("the private logging implementation is not an importable module".into());
+        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(

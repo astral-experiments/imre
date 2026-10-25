@@ -146,7 +146,7 @@ def cases(args, suite, directory, level):
     return rows
 
 
-def main():
+def main(run_cases=cases):
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, required=True, type=lambda p: Path(p).resolve())
@@ -170,7 +170,7 @@ def main():
             directory = Path(tmp) / str(level)
             directory.mkdir()
             with chdir(directory):
-                report["optimization_levels"][level] = cases(args, suite, directory, level)
+                report["optimization_levels"][level] = run_cases(args, suite, directory, level)
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     return int(any(v["status"] == "failed" for rows in report["optimization_levels"].values()
                    for v in rows.values()))

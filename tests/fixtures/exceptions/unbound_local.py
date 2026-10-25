@@ -1,3 +1,21 @@
+class MissingValue(ValueError, UnboundLocalError):
+    pass
+
+
+class MissingName(UnboundLocalError, ValueError):
+    pass
+
+
+def show_handler(error: Exception) -> None:
+    try:
+        raise error
+    except NameError as caught:
+        print(str(caught))
+        print(isinstance(caught, ValueError))
+    except ValueError:
+        print("missed NameError")
+
+
 def parsed(text: str, known: bool, empty: bool) -> int | None:
     if not known:
         try:
@@ -39,3 +57,6 @@ try:
     parsed("bad", False, False)
 except NameError as e:
     print(str(e))
+
+show_handler(MissingValue("secondary base"))
+show_handler(MissingName("primary base"))

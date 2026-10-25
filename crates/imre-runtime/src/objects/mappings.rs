@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod counters;
 mod record_hash;
 mod sorted_rows;
 
@@ -46,22 +47,37 @@ impl Hash for IntKey {
     }
 }
 
-/// A key roots the first inserted immutable path, and hashes its normalized
-/// POSIX spelling without allocating or accessing the filesystem.
+/// Path keys compare by spelling; logger keys compare by object identity.
+/// Rooting the first inserted object keeps both its spelling and address valid.
 #[derive(Clone)]
-struct PathKey(Rc<Object>);
+struct ObjectKey(Rc<Object>);
 
-impl PartialEq for PathKey {
+impl PartialEq for ObjectKey {
     fn eq(&self, other: &Self) -> bool {
-        // SAFETY: both keys root exact immutable path objects.
-        unsafe { super::paths::imre_path_equal(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0)) != 0 }
+        if Rc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        // SAFETY: both owners root their objects; neither comparison runs callbacks.
+        unsafe {
+            self.0.0.with(|left| {
+                other.0.0.with(|right| match (left, right) {
+                    (Storage::Logger(_), _) | (_, Storage::Logger(_)) => false,
+                    (left, right) => left.path_equal(right),
+                })
+            })
+        }
     }
 }
-impl Eq for PathKey {}
-impl Hash for PathKey {
+impl Eq for ObjectKey {}
+impl Hash for ObjectKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // SAFETY: the key roots immutable path storage for this nonreentrant hash.
-        unsafe { self.0.0.with(|path| path.path_key().hash(state)) };
+        // SAFETY: the key roots this object throughout the nonreentrant hash.
+        unsafe {
+            self.0.0.with(|key| match key {
+                Storage::Logger(_) => Rc::as_ptr(&self.0).hash(state),
+                path => path.path_key().hash(state),
+            })
+        };
     }
 }
 
@@ -139,7 +155,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                     0 | 1 | 10 => word.hash(state),
                     2 => IntKey::borrow(word).hash(state),
                     3 => (&*(word as *const Str)).hash(state),
-                    5 => PathKey::borrow(word).hash(state),
+                    5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
                             pending.push((value, index + 1));
@@ -231,17 +247,17 @@ impl ScalarKey for Rc<Bytes> {
     }
 }
 
-impl ScalarKey for PathKey {
+impl ScalarKey for ObjectKey {
     const KIND: u32 = 5;
     fn word(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
     }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
-        // SAFETY: the caller roots an exact path; the borrowed Rc is never dropped.
+        // SAFETY: the caller roots the exact object; the borrowed Rc is never dropped.
         ManuallyDrop::new(Self(unsafe { Rc::from_raw(word as *const Object) }))
     }
     unsafe fn from_owned(word: usize) -> Self {
-        // SAFETY: the caller transfers one independently acquired path owner.
+        // SAFETY: the caller transfers one independently acquired object owner.
         Self(unsafe { Rc::from_raw(word as *const Object) })
     }
     fn into_word(self) -> usize {
@@ -490,7 +506,7 @@ enum Tables<V> {
     Int(Table<IntKey, V>),
     Enum(Table<usize, V>),
     Str(Table<Rc<Str>, V>),
-    Path(Table<PathKey, V>),
+    Object(Table<ObjectKey, V>),
     Bytes(Table<Rc<Bytes>, V>),
     Tuple(Table<TupleKey, V>),
 }
@@ -501,7 +517,7 @@ macro_rules! table {
             Tables::Int($table) => $body,
             Tables::Enum($table) => $body,
             Tables::Str($table) => $body,
-            Tables::Path($table) => $body,
+            Tables::Object($table) => $body,
             Tables::Bytes($table) => $body,
             Tables::Tuple($table) => $body,
         }
@@ -509,6 +525,13 @@ macro_rules! table {
 }
 
 impl<V: Copy> Tables<V> {
+    fn try_for_each(
+        &self,
+        mut visit: impl FnMut(usize, V) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        table!(self, table => table.entries.iter().flatten().try_for_each(|entry| visit(entry.key.word(), entry.value)))
+    }
+
     /// Visits borrowed key/value words in insertion order without acquiring keys.
     /// The predicate may inspect other immutable acyclic containers, not mutate
     /// this table or retain a storage reference after the visit.
@@ -523,7 +546,7 @@ impl<V: Copy> Tables<V> {
             2 => Self::Int(Table::new()),
             10 => Self::Enum(Table::new()),
             3 => Self::Str(Table::new()),
-            5 => Self::Path(Table::new()),
+            5 => Self::Object(Table::new()),
             6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
             _ => fail("SystemError", "unsupported immutable mapping key kind"),
@@ -534,7 +557,7 @@ impl<V: Copy> Tables<V> {
             Self::Int(_) => 2,
             Self::Enum(_) => 10,
             Self::Str(_) => 3,
-            Self::Path(_) => 5,
+            Self::Object(_) => 5,
             Self::Bytes(_) => 8,
             Self::Tuple(_) => 6,
         }
@@ -544,7 +567,7 @@ impl<V: Copy> Tables<V> {
             (Self::Int(table), Tables::Int(result)) => table.copy_keys(result),
             (Self::Enum(table), Tables::Enum(result)) => table.copy_keys(result),
             (Self::Str(table), Tables::Str(result)) => table.copy_keys(result),
-            (Self::Path(table), Tables::Path(result)) => table.copy_keys(result),
+            (Self::Object(table), Tables::Object(result)) => table.copy_keys(result),
             (Self::Bytes(table), Tables::Bytes(result)) => table.copy_keys(result),
             (Self::Tuple(table), Tables::Tuple(result)) => table.copy_keys(result),
             _ => unreachable!("key union requires the same key kind"),
@@ -770,13 +793,17 @@ impl Mapping {
         keys
     }
 
-    /// Borrowed document values stay rooted by the unmodified mapping.
-    pub(super) fn document_values(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Borrowed document entries stay rooted by the unmodified mapping.
+    pub(super) fn document_entries(&self) -> impl Iterator<Item = (&Str, usize)> + '_ {
         assert_eq!(self.value_kind.raw(), 5);
         let Tables::Str(table) = &self.tables else {
             unreachable!("expected a string-keyed document");
         };
-        table.entries.iter().flatten().map(|entry| entry.value)
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (entry.key.as_ref(), entry.value))
     }
 
     pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
@@ -1298,6 +1325,38 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
+}
+
+/// Copies the mapping in insertion order, preserving its subscription policy.
+/// The fresh mapping acquires its keys and values without duplicating them.
+///
+/// # Safety
+/// The input is a rooted dictionary, Counter or closed default-list dictionary.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_copy(value: *const Object) -> *const Object {
+    // SAFETY: the source owns every copied word; insertion in the fresh table
+    // hashes only closed immutable keys and cannot reenter the source.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let source = storage.dictionary();
+            let mut copy = Mapping::new(source.tables.key_kind(), source.value_kind.raw());
+            copy.missing = source.missing;
+            let mut position = 0;
+            while let Some((next, key, value)) = source.tables.next(position) {
+                copy.insert(key, source.value_kind.acquire(value))?;
+                position = next;
+            }
+            Ok(copy)
+        })
+    };
+    super::exceptions::finish(
+        result.map(|copy| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+                Box::new(copy),
+            )))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// Constructs an integer-valued Counter with non-inserting zero subscriptions.

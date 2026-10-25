@@ -5,6 +5,7 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from exit_case import exit_observation
 from suite_evidence import roles
 from suite_inventory import load_suite
 from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture
@@ -102,6 +103,9 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         node = methods[cls, method]
         folder = root / (cls + "." + method)
         folder.mkdir()
+        if cls == "SysModuleTest" and method == "test_exit":
+            results[key] = exit_observation(module, toolchain, folder, source)
+            continue
         used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         preamble = "\n".join(imports[n] for n in sorted(used & imports.keys()))
         fixture = preamble + "\n" + testcase_fixture()
