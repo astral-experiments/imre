@@ -208,6 +208,7 @@ impl Builtin {
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
+                | ProcessOperation::PopenCleanup
                 | ProcessOperation::Call { .. }
                 | ProcessOperation::AsyncSpawn { .. } => Contract::new(true, Unknown),
                 ProcessOperation::Executable

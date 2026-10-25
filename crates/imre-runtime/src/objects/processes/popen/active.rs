@@ -81,6 +81,12 @@ pub extern "C" fn imre_popen_active() -> *const Object {
     ACTIVE.with(|active| Rc::into_raw(active.clone()))
 }
 
+/// Apply the same nonblocking cleanup used by Popen's constructor.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_popen_cleanup() {
+    cleanup();
+}
+
 /// The caller roots a Popen, whose native allocation keeps a stable address.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_popen_identity(handle: *const Object) -> usize {

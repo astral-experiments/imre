@@ -74,4 +74,14 @@ for attempt in range(100):
     time.sleep(0.001)
 assert not active and third.returncode == -9
 third_pipe.close()
+
+fourth_id, fourth_pid, fourth_pipe = drop_sequence(argv)
+fourth = active[0]
+assert id(fourth) == fourth_id and fourth.pid == fourth_pid
+fourth.kill()
+assert fourth.wait() == -9
+assert active[0] is fourth
+subprocess._cleanup()
+assert not active
+fourth_pipe.close()
 print("retained original Popen objects, reaped on failed and successful launches")

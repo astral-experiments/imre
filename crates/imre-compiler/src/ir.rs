@@ -1192,6 +1192,7 @@ pub(crate) enum ProcessOperation {
     },
     PopenPid,
     PopenActive,
+    PopenCleanup,
     PopenIdentity,
     PopenArgs,
     PopenPipe(u8),
