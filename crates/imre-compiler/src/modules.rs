@@ -1169,13 +1169,22 @@ fn resolve_binding(
 
 const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
+const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
+
+fn textwrap_implementation(name: &str) -> Option<&'static str> {
+    match name {
+        "indent" => Some(TEXTWRAP_FUNCTIONS),
+        "TextWrapper" | "wrap" | "fill" | "shorten" => Some(TEXTWRAP_WRAPPER),
+        _ => None,
+    }
+}
 
 /// Resolve the public definitions compiled from Python alongside sealed native operations.
 fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) -> Option<Binding> {
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
-            IntrinsicModule::Textwrap if name == "indent" => TEXTWRAP_FUNCTIONS,
+            IntrinsicModule::Textwrap => textwrap_implementation(name)?,
             _ => return None,
         };
         let (id, source) = modules
@@ -1186,7 +1195,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Logging, ast::Stmt::ClassDef(_))
-                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_))))
+                    | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
     })
 }
@@ -1741,29 +1750,33 @@ impl<'a> Loader<'a> {
         if module.is_some() {
             self.reject_stdlib_shadow(name)?;
         }
-        let bundle = match (name.split('.').next(), module) {
-            (Some("logging"), Some(_)) => Some((
+        let needs_textwrap = |implementation| {
+            matches!(module, Some(IntrinsicModule::Textwrap))
+                && imports.is_none_or(|names| {
+                    names.iter().any(|alias| {
+                        textwrap_implementation(alias.name.as_str()) == Some(implementation)
+                    })
+                })
+        };
+        // A named import loads only the bundled definitions it can call.
+        let bundles = [
+            (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
             )),
-            // A named import of a native operation needs no bundled function definitions.
-            (_, Some(module @ IntrinsicModule::Textwrap))
-                if imports.is_none_or(|names| {
-                    names
-                        .iter()
-                        .any(|alias| module.symbol(alias.name.as_str()).is_none())
-                }) =>
-            {
-                Some((
-                    TEXTWRAP_FUNCTIONS,
-                    include_str!("../stdlib/textwrap/functions.py"),
-                ))
+            needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
+                TEXTWRAP_FUNCTIONS,
+                include_str!("../stdlib/textwrap/functions.py"),
+            )),
+            needs_textwrap(TEXTWRAP_WRAPPER).then_some((
+                TEXTWRAP_WRAPPER,
+                include_str!("../stdlib/textwrap/wrapper.py"),
+            )),
+        ];
+        for (implementation, source) in bundles.into_iter().flatten() {
+            if self.by_name.contains_key(implementation) {
+                continue;
             }
-            _ => None,
-        };
-        if let Some((implementation, source)) = bundle
-            && !self.by_name.contains_key(implementation)
-        {
             let path = self.root.join(format!("{implementation}.py"));
             if self.fs.exists(&path) {
                 return Err(format!(
@@ -1826,7 +1839,7 @@ impl<'a> Loader<'a> {
         if name == LOGGING_CLASSES {
             return Err("the private logging implementation is not an importable module".into());
         }
-        if name == TEXTWRAP_FUNCTIONS {
+        if matches!(name, TEXTWRAP_FUNCTIONS | TEXTWRAP_WRAPPER) {
             return Err("the private textwrap implementation is not an importable module".into());
         }
         if let Some(&id) = self.by_name.get(name) {

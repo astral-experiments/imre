@@ -19,6 +19,7 @@ sys.path.insert(0, str(HERE.parents[1]))
 from suite_evidence import build_report, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, method_bytes
+from wrapper_cases import wrapper_cases
 
 TESTS = HERE / "upstream/Lib/test/test_textwrap.py"
 OWNERS = ("DedentTestCase", "IndentTestCase")
@@ -199,6 +200,10 @@ def main():
             directory = Path(tmp)
             tools = Toolchain(args.imre, args.runtime, args.clang, level)
             native = run_native_cases(tools, directory, module, methods)
+            wrapped = wrapper_cases(module, tools, directory, ref["denominator"])
+            if native.keys() & wrapped.keys():
+                raise AssertionError("duplicate execution evidence")
+            native.update(wrapped)
             worker = tools.build(callback_worker(lambdas), directory)
             report = run_host_cases(module, worker, ref, native, lambdas, level)
             edges = HERE / "edge_cases.py"
