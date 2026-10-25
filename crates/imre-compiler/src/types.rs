@@ -117,6 +117,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -392,9 +393,9 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
-    /// A dynamic logging name resolves to an integer or to its fallback string.
-    /// Narrow this result before using it as either concrete type.
-    pub(crate) fn logging_level_result(&self) -> Type {
+    /// A closed builtin result that can be either a string or an integer.
+    /// Narrow the result before using it as either concrete type.
+    pub(crate) fn string_or_int(&self) -> Type {
         Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
     }
 
@@ -446,6 +447,7 @@ impl Types {
             | Type::Sha256
             | Type::ZipFile
             | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -679,6 +681,7 @@ impl Types {
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::BinaryIO
+                | Type::CsvReader
                 | Type::ZipFile
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)

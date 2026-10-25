@@ -11,6 +11,7 @@ mod args;
 mod asyncio;
 mod bytes;
 mod contexts;
+mod csv;
 mod deferred_diff;
 mod difflib;
 mod errno;
@@ -65,6 +66,7 @@ enum Storage {
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
+    CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
     ExceptionField(OwnedWord),
     File(Box<files::FileState>),

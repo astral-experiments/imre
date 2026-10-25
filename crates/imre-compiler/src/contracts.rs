@@ -274,6 +274,8 @@ impl Builtin {
             | Self::RegexGroupDict
             | Self::DictGet
             | Self::JsonDecode(_)
+            | Self::CsvReader { .. }
+            | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
             | Self::JsonErrorField(_)
@@ -311,6 +313,7 @@ impl Builtin {
             | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::CsvLineNumber
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::HashAvailable
@@ -442,7 +445,8 @@ impl Builtin {
             | Self::StringIter
             | Self::StringReverseIter
             | Self::TextClosed => Contract::new(false, Unknown),
-            Self::SortedRecordRows { .. }
+            Self::CounterMath { .. }
+            | Self::SortedRecordRows { .. }
             | Self::SortedStringKeys
             | Self::TupleCacheNew
             | Self::TupleCacheResult => Contract::new(true, Unknown),
