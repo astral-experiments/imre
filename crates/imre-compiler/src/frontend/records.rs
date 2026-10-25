@@ -1128,8 +1128,7 @@ impl Checker<'_> {
                     Builtin::NamedException {
                         kind,
                         message_field: decl.fields.len() - 1,
-                        tuple_args: self.classes.fields[class].last()
-                            == Some(&Type::ExceptionField),
+                        tuple_args: self.classes.fields[class].last() == Some(&Type::ValueView),
                         text,
                         repr,
                         dataclass_repr: decl.dataclass.is_some_and(|d| d.repr),
@@ -1172,7 +1171,7 @@ impl Checker<'_> {
             kind: ExprKind::Tuple(values),
         };
         let args = Expr {
-            ty: Type::ExceptionField,
+            ty: Type::ValueView,
             kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
         };
         Ok(self.store_exception_arguments(class, args))
@@ -1226,7 +1225,7 @@ impl Checker<'_> {
                 .bindings
                 .contains_key("super")
         {
-            if self.classes.fields[class].last() == Some(&Type::ExceptionField)
+            if self.classes.fields[class].last() == Some(&Type::ValueView)
                 && call.arguments.keywords.is_empty()
             {
                 return self.set_exception_arguments(class, &call.arguments.args);

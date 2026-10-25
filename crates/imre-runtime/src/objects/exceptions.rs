@@ -1191,11 +1191,11 @@ pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const O
     Rc::into_raw(unsafe { acquire_rc(value as usize) })
 }
 
-unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
+pub(super) unsafe fn value_word(value: *const Object) -> (WordKind, usize) {
     // SAFETY: a code view keeps its immutable typed exit payload alive.
     unsafe {
         (*value).0.with(|s| match s {
-            Storage::ExceptionField(v) => (v.kind, v.word),
+            Storage::ValueView(v) => (v.kind, v.word),
             Storage::Exception(e) => match &e.payload {
                 Payload::Exit(Some(code)) => (code.kind, code.word),
                 Payload::Exit(None) => (WordKind::new(0), 0),
@@ -1213,7 +1213,7 @@ unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32 {
     // SAFETY: the code view roots its typed payload.
-    unsafe { exit_word(value).0.raw() }
+    unsafe { value_word(value).0.raw() }
 }
 
 /// Render an exit code as a Python value, including None for a missing argument.
@@ -1224,7 +1224,7 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
 pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *const Str {
     // SAFETY: the caller roots the immutable exit payload.
     unsafe {
-        let (kind, word) = exit_word(value);
+        let (kind, word) = value_word(value);
         Rc::into_raw(imports::word_text(kind, word, false))
     }
 }
@@ -1242,9 +1242,9 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
 ) -> u32 {
     // SAFETY: both code views and all inferred scalar arguments remain rooted.
     let ((left_kind, left), (right_kind, right)) = unsafe {
-        let (k, w) = exit_word(value);
+        let (k, w) = value_word(value);
         let (j, v) = if kind == 5 {
-            exit_word(word as *const Object)
+            value_word(word as *const Object)
         } else {
             (WordKind::new(kind), word)
         };
@@ -1259,13 +1259,15 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u32 {
     // SAFETY: the code view roots the scalar described by the stored word kind.
-    let (kind, word) = unsafe { exit_word(value) };
+    let (kind, word) = unsafe { value_word(value) };
     u32::from(match kind.raw() {
         0 => false,
         1 => word != 0,
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
+        // SAFETY: the view owns this integer list through the length read.
+        4 => unsafe { (&*(word as *const super::List)).0.with(|v| !v.is_empty()) },
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
         // SAFETY: the tuple remains rooted while its immutable length is read.
@@ -1437,7 +1439,7 @@ pub unsafe extern "C" fn imre_named_exception_record_new(
             },
         );
         let positional = tuple.then(|| {
-            let (kind, word) = exit_word(argument.cast());
+            let (kind, word) = value_word(argument.cast());
             debug_assert_eq!(kind.raw(), 6);
             imports::Positional(kind.acquire(word))
         });
