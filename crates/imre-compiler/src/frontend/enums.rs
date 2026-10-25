@@ -179,6 +179,12 @@ impl Checker<'_> {
                     .types
                     .members(types[0])
                     .is_some_and(|members| members == [Type::Str, Type::Bytes]))
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_)
+                )
+            })
             || types == [Type::LogRecord; 2]
             || types == [Type::Logger; 2]
             || types == [Type::TimedFileHandler; 2]
@@ -188,7 +194,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "identity comparison requires supported objects with a shared identity representation",
+                "identity comparisons require supported stable object identities",
             ));
         }
         Ok(Self::identity_result(

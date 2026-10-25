@@ -2,18 +2,23 @@
 
 The [versioned per-occurrence report](evidence-linux.json) covers the same
 659 original IDs separately at O0 and O3 on Imre
-`7630556901c9936c9ca112f7fb2f4e52f3706fd3`. Each level has three
+`43755cbf6e6be29a6c1e68e78a483b4ed5d837c6`. Each level has seven
 Counter methods with native bodies, operations and assertions under the
-original CPython fixture hooks, two native doctest bodies with host output
-checking, four routines with no collections operation, and three reference
-skips. The other 647 report their first compiler or fixture blocker. No
+original CPython fixture hooks. Three native doctest bodies (initialization,
+update and subtract) have host output checking. One additional method,
+`test_subtract`, runs its original body and assertions in CPython with 24
+native Counter operations. Its direct body compilation blocker is retained
+in the same record. The shared classification places those three doctests and
+that host-driven method in `host-driven-native-operation`; their separate roles
+show which code ran where. Four routines have no collections operation, and
+three have justified reference skips. The other 641 report their first blocker. No
 occurrence on this build is classified as fully native.
 
 The four non-product methods are three original deque methods whose bodies
 are `pass`, and an inherited UserString case that calls `str.replace` on
 built-in strings. Those bodies were compiled and executed.
 
-To reproduce, run `routines.py` and `doctests.py` at each level under the pinned
+To reproduce, run `routines.py`, `doctests.py`, and `counter_host.py` at each level under the pinned
 Python with the same `--imre`, `--runtime`, `--clang`, full `--compiler-revision`,
 `--opt-level`, and a separate `--result` for each gate and level. The doctest
 gate writes all results and exits nonzero if any example collection is blocked.
@@ -21,7 +26,8 @@ From this directory:
 
 ```sh
 python3 native_report.py --routines routines-O0.json routines-O3.json \
-  --doctests doctests-O0.json doctests-O3.json --result evidence-linux.json
+  --doctests doctests-O0.json doctests-O3.json \
+  --host subtract-host-O0.json subtract-host-O3.json --result evidence-linux.json
 python3 ../../suite_evidence.py reference-linux.json evidence-linux.json
 ```
 
