@@ -43,7 +43,7 @@ impl Checker<'_> {
                 (Intrinsic::DocAscii, [value]) => (
                     Type::Str,
                     ExprKind::Builtin(
-                        Builtin::DocAscii,
+                        Builtin::AsciiEscape,
                         vec![self.expr_expected(value, Type::Str)?],
                     ),
                 ),
@@ -195,9 +195,9 @@ impl Checker<'_> {
                 source_docstrings(&source.name, &source.parsed.syntax().body, true, &mut docs);
                 source.name.as_str()
             }
-            Binding::IntrinsicModule(module) if let Some((owner, name, text)) = sealed(module) => {
-                docs.push((name.into(), text.into()));
-                owner
+            Binding::IntrinsicModule(module) if let Some(catalog) = sealed(module) => {
+                catalog.append_to(&mut docs);
+                catalog.module
             }
             _ => return Ok(None),
         };

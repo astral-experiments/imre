@@ -1,6 +1,7 @@
 //! Snapshot each source directory before creating its destination. Finish siblings
 //! after a filesystem failure and retain each (source, destination, message) tuple.
 
+use crate::StrOwner;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -149,7 +150,7 @@ fn entry(
 fn path_word(name: &Name) -> usize {
     match name {
         Name::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
-        Name::Text(s) | Name::Path(s) => Rc::into_raw(Rc::clone(s)) as usize,
+        Name::Text(s) | Name::Path(s) => StrOwner::into_raw(StrOwner::clone(s)) as usize,
     }
 }
 
@@ -175,7 +176,7 @@ fn record(
                 if let Some(display_error) = take_pending() {
                     return Err(Failure::Raised(display_error));
                 }
-                Rc::from_raw(raw)
+                StrOwner::from_raw(raw)
             }
         }
     };
@@ -195,7 +196,7 @@ fn record(
         tuple
             .add(2)
             .cast::<*const Str>()
-            .write(Rc::into_raw(message));
+            .write(StrOwner::into_raw(message));
         errors.values.push(tuple as usize);
     }
     Ok(())

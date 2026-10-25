@@ -315,6 +315,16 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     return 5 + len(rejected)
 
 
+def broken_pipe(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    reader, writer = os.pipe()
+    os.close(reader)
+    with os.fdopen(writer, "wb", buffering=0) as sink:
+        return subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.PIPE,
+            timeout=60, check=False, env=environment(),
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -365,6 +375,10 @@ def main() -> None:
         reference["terminal_loop"] = terminal_message(
             [args.python, "-I", str(sources["terminal_loop"])], args.timeout
         )
+        large_pipe = broken_pipe([args.python, "-I", str(sources["large"])])
+        assert large_pipe.returncode == 1, (large_pipe.returncode, large_pipe.stderr[-2000:])
+        immediate = large_pipe.stderr.splitlines(keepends=True)[-1]
+        assert immediate.startswith(f"BrokenPipeError: [Errno {errno.EPIPE}] ".encode()), immediate
 
         for level in args.opt_levels:
             binaries = {}
@@ -441,16 +455,10 @@ def main() -> None:
             shutdown = b"Exception ignored while flushing sys.stdout:\nBrokenPipeError:"
             for name, status, prefix, lines in [
                 ("small", 120, shutdown, 2),
-                ("large", 1, b"OSError:", 1),
+                ("large", 1, immediate, 1),
                 ("division_error", 120, b"ZeroDivisionError:", 3),
             ]:
-                reader, writer = os.pipe()
-                os.close(reader)
-                with os.fdopen(writer, "wb", buffering=0) as sink:
-                    result = subprocess.run(
-                        [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
-                        stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
-                    )
+                result = broken_pipe([binaries[name]])
                 assert result.returncode == status and result.stderr.startswith(prefix), (
                     "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )

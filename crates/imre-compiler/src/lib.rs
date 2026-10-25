@@ -4,7 +4,7 @@ mod callables;
 mod classes;
 mod contracts;
 mod effects;
-mod fixed_regex;
+use imre_regex as fixed_regex;
 mod frontend;
 mod guarded_text;
 mod ir;
@@ -19,6 +19,7 @@ mod record_copies;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
+mod sorted_rows;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -33,6 +34,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy)]
 pub struct CommandFlags {
     pub isolated: bool,
+    /// Python's language optimization level; independent of LLVM optimization.
+    pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
@@ -359,6 +362,8 @@ fn checked_lower_with(
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    sorted_rows::specialize(module);
+    verify_after(module, "sorted record rows")?;
     let reader_origins = record_copies::scalarize(module);
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
@@ -458,6 +463,22 @@ fn check_encoding(source: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
+        for source in [
+            "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",
+            "import logging\nv = logging.getLogger('x')\nprint(v != v)\n",
+            "import asyncio\nv = asyncio.Semaphore(1)\nprint(v != v)\n",
+            "from tempfile import TemporaryDirectory\nv = TemporaryDirectory()\nprint(v == v)\n",
+        ] {
+            let error = super::check(source).unwrap_err();
+            assert!(
+                error.contains("unsupported comparison for these types"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
