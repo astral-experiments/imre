@@ -5456,7 +5456,9 @@ impl<'a> Checker<'a> {
                                 "strerror" => (1, Type::Str),
                                 _ => (
                                     if name == "filename" { 2 } else { 3 },
-                                    self.types.union(&[Type::Str, Type::Bytes]).unwrap(),
+                                    self.types
+                                        .union(&[Type::Str, Type::Bytes, Type::Path])
+                                        .unwrap(),
                                 ),
                             };
                             (
