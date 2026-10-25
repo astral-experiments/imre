@@ -62,6 +62,17 @@ jobs:
             --imre "$RUNNER_TEMP/tools/imre" --runtime "$RUNNER_TEMP/tools/libimre_runtime.a" \
             --clang /usr/bin/clang-18 --compiler-tree e0d012f12c138cd432f7a72e0dc20c42f21523d4 \
             --cpython-source .reference --result "$RUNNER_TEMP/evidence/mock-startup-linux.json"
+      - name: Compile all original methods eligible on this runner under their real fixtures
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/.reference/Lib"
+          mod=benchmarks/cpython_stdlib/full/shutil
+          python -B benchmarks/cpython_stdlib/suite_inventory.py "$mod/UPSTREAM.json" \
+            --result "$RUNNER_TEMP/evidence/reference-linux.json"
+          python -B "$mod/attempt_methods.py" --imre "$RUNNER_TEMP/tools/imre" \
+            --runtime "$RUNNER_TEMP/tools/libimre_runtime.a" --clang /usr/bin/clang-18 \
+            --reference "$RUNNER_TEMP/evidence/reference-linux.json" \
+            --compiler-tree e0d012f12c138cd432f7a72e0dc20c42f21523d4 \
+            --result "$RUNNER_TEMP/evidence/mock-method-attempts-linux.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
