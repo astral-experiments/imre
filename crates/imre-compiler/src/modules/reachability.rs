@@ -210,7 +210,20 @@ fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunc
         || func
             .parameters
             .iter_non_variadic_params()
-            .any(|p| p.default.as_deref().is_some_and(|d| !literal(d)))
+            .any(|p| p.default.as_deref().is_some_and(|d| !inert_default(d)))
+}
+
+/// Creating a lambda does not execute its body, but its own parameter defaults
+/// still run immediately, even on a function that is never called.
+fn inert_default(expr: &ast::Expr) -> bool {
+    if let ast::Expr::Lambda(lambda) = expr {
+        return lambda
+            .parameters
+            .iter()
+            .flat_map(|p| p.iter_non_variadic_params())
+            .all(|p| p.default.as_deref().is_none_or(inert_default));
+    }
+    literal(expr)
 }
 
 fn literal(expr: &ast::Expr) -> bool {
@@ -460,6 +473,15 @@ run()
         assert!(
             reachable(&source.replace("print(Used().value())", "print(Used().unused())")).is_err()
         );
+    }
+
+    #[test]
+    fn cold_lambda_defaults_preserve_definition_time_evaluation() {
+        let source =
+            "def cold(callback = lambda x: globals()):\n    return callback(0)\nprint(42)\n";
+        reachable(source).unwrap();
+        assert!(reachable(&source.replace("lambda x:", "lambda x=globals():")).is_err());
+        assert!(reachable(&source.replace("print(42)", "print(cold())")).is_err());
     }
 
     #[test]
