@@ -7484,6 +7484,9 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
             });
         }
+        if let Some(cached) = self.local_cached_value(&call.func) {
+            return self.invoke(call, cached);
+        }
         if let Some(binding) = self.local_function_binding(&call.func) {
             if binding.overload_stub {
                 let callable = self.local(

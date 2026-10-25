@@ -2,6 +2,7 @@
 //! loaded at each direct call, after its explicit arguments, as Python would
 //! read the enclosing cell on entry. No callable with captures can escape.
 use ruff_python_ast::visitor::{Visitor, walk_expr};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use super::*;
@@ -14,14 +15,34 @@ pub(super) struct Function {
 }
 
 #[derive(Clone)]
+struct Site {
+    range: TextRange,
+    value_read: bool,
+    later_writes: HashSet<String>,
+}
+
+impl Site {
+    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt]) -> Self {
+        Self {
+            range: function.range,
+            value_read: reads_function_value(following, function.name.as_str()),
+            later_writes: if function.is_async {
+                narrowing::assigned_names(following)
+            } else {
+                HashSet::new()
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct Binding {
-    sites: Vec<TextRange>,
+    sites: VecDeque<Site>,
     pub(super) overload_stub: bool,
     function: Option<Function>,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
     later_writes: HashSet<String>,
-    value_read: bool,
     pub(super) value_slot: Option<usize>,
 }
 
@@ -116,6 +137,27 @@ impl Checker<'_> {
         self.local_functions.get(value.as_name_expr()?.id.as_str())
     }
 
+    pub(super) fn local_cached_value(&self, expression: &ast::Expr) -> Option<Expr> {
+        let slot = self.local_function_binding(expression)?.value_slot?;
+        self.types
+            .cached_function(self.locals[slot])
+            .map(|_| self.local(slot))
+    }
+
+    pub(super) fn local_callback(
+        &self,
+        binding: &Binding,
+        value: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if let Some(slot) = binding.value_slot {
+            Ok(self.local(slot))
+        } else {
+            binding
+                .target(self.source, value)?
+                .callback(self.types, self.source, value)
+        }
+    }
+
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
     pub(super) fn collect_local_definitions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
@@ -138,8 +180,9 @@ impl Checker<'_> {
                 && !suite_functions.insert(name)
             {
                 let binding = self.local_functions.get_mut(name).unwrap();
-                binding.sites.push(function.range);
-                binding.value_read |= reads_function_value(&stmts[index + 1..], name);
+                binding
+                    .sites
+                    .push_back(Site::new(function, &stmts[index + 1..]));
                 continue;
             }
             if reserved(name)
@@ -172,18 +215,13 @@ impl Checker<'_> {
             self.local_functions.insert(
                 name.to_owned(),
                 Binding {
-                    sites: vec![function.range],
+                    sites: VecDeque::from([Site::new(function, &stmts[index + 1..])]),
                     overload_stub: false,
                     function: None,
                     generic: None,
-                    value_read: reads_function_value(&stmts[index + 1..], name),
                     value_slot: None,
                     instances: HashMap::new(),
-                    later_writes: if function.is_async {
-                        narrowing::assigned_names(&stmts[index + 1..])
-                    } else {
-                        HashSet::new()
-                    },
+                    later_writes: HashSet::new(),
                 },
             );
         }
@@ -195,17 +233,23 @@ impl Checker<'_> {
         definition: &ast::StmtFunctionDef,
     ) -> Result<Option<Statement>, String> {
         let name = definition.name.as_str();
-        if !self
+        let Some(site) = self
             .local_functions
-            .get(name)
-            .is_some_and(|binding| binding.sites.contains(&definition.range))
-        {
+            .get_mut(name)
+            .filter(|binding| {
+                binding
+                    .sites
+                    .front()
+                    .is_some_and(|s| s.range == definition.range)
+            })
+            .and_then(|binding| binding.sites.pop_front())
+        else {
             return Err(error(
                 self.source,
                 definition,
                 "local definitions must appear directly in the enclosing function's suite",
             ));
-        }
+        };
         let overload = matches!(definition.decorator_list.as_slice(),[d] if self.resolve(&d.expression) == Some(crate::modules::Binding::Intrinsic(Intrinsic::Overload)));
         let plain;
         let definition = if overload {
@@ -218,11 +262,10 @@ impl Checker<'_> {
         } else {
             definition
         };
-        if (definition.returns.is_none() && !annotations::inert_body(definition))
-            || definition
-                .parameters
-                .iter_non_variadic_params()
-                .any(|p| p.annotation().is_none())
+        if definition
+            .parameters
+            .iter_non_variadic_params()
+            .any(|p| p.annotation().is_none())
         {
             return Err(error(
                 self.source,
@@ -237,14 +280,16 @@ impl Checker<'_> {
             old.instances.clear();
             old.value_slot = None;
             old.overload_stub = overload;
+            old.later_writes = site.later_writes;
         }
         if self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
+        let policy = self.local_cache_policy(definition)?;
         let decorator = self.local_dispatch_decorator(definition)?;
         let mut raw;
-        let signature_def = if decorator.is_some() {
+        let signature_def = if policy.is_some() || decorator.is_some() {
             raw = definition.clone();
             raw.decorator_list.clear();
             &raw
@@ -261,10 +306,14 @@ impl Checker<'_> {
             &inference::Inference::default(),
         )?;
         let function = self.lift_local(definition, signature)?;
-        let value = if let Some(decorator) = decorator {
+        let value = if let Some(policy) = policy {
+            let raw = function.callback(self.types, self.source, definition)?;
+            let origin = self.local_annotation_origin(&function);
+            Some(self.owned_cache(raw, policy, Some(origin), definition)?)
+        } else if let Some(decorator) = decorator {
             let target = function.callback(self.types, self.source, definition)?;
             Some(self.decorate_dispatch(decorator, target, definition)?)
-        } else if self.local_functions[name].value_read || overload {
+        } else if site.value_read || overload {
             function
                 .callback(self.types, self.source, definition)
                 .ok()
@@ -408,6 +457,8 @@ impl Checker<'_> {
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
+        helper.inferred_returns =
+            (definition.returns.is_none() && !annotations::inert_body(definition)).then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
         for (parameter, ty) in closed_calls::parameters(&definition.parameters)
@@ -438,6 +489,15 @@ impl Checker<'_> {
                 let inner = capture(outer, &mut helper);
                 helper.names.insert(read, inner);
             } else if let Some(binding) = self.local_functions.get(&read) {
+                if binding.function.is_some() && !binding.sites.is_empty() {
+                    return Err(error(
+                        self.source,
+                        definition,
+                        &format!(
+                            "captured local function '{read}' may be redefined before the call"
+                        ),
+                    ));
+                }
                 let mut binding = binding.clone();
                 if let Some(slot) = &mut binding.value_slot {
                     *slot = capture(*slot, &mut helper);
@@ -472,6 +532,20 @@ impl Checker<'_> {
             ));
         }
         let (mut body, falls) = helper.function_body(&definition.body)?;
+        if let Some(mut returns) = helper.inferred_returns.take() {
+            if falls || returns.is_empty() {
+                returns.push(Type::None);
+            }
+            let result = returns[0];
+            if !returns.iter().all(|&ty| ty == result) {
+                return Err(error(
+                    self.source,
+                    definition,
+                    "local functions with different return layouts require an annotated result",
+                ));
+            }
+            signature.returns = result;
+        }
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
                 Expr {
