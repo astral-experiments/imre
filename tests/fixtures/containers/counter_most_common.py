@@ -2,6 +2,11 @@ from collections import Counter
 from dataclasses import dataclass
 
 
+@dataclass(frozen=True)
+class Key:
+    value: int
+
+
 def take(counts: Counter[str], n: int | None) -> list[tuple[str, int]]:
     return counts.most_common(n=n)
 
@@ -41,12 +46,18 @@ counts["b"] = 1
 print(counts.most_common())
 
 
-@dataclass(frozen=True)
-class Key:
-    value: int
-
-
 # Equal counts never compare the keys. These records have no ordering methods.
-keys = Counter([Key(7), Key(3), Key(4), Key(7), Key(4)])
+keys: Counter[Key] = Counter()
+keys[Key(7)] = 2
+keys[Key(3)] = 1
+keys[Key(4)] = 2
 print(keys.most_common(2))
 print(keys.most_common())
+
+# Exercise every cutoff across tied, negative, zero and positive counts.
+for first in range(-2, 3):
+    for second in range(-2, 3):
+        for third in range(-2, 3):
+            integers = Counter({7: first, 3: second, 4: third})
+            for n in range(-1, 5):
+                print(integers.most_common(n))

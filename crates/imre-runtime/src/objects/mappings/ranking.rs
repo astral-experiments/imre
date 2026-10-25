@@ -59,7 +59,7 @@ pub unsafe extern "C" fn imre_counter_most_common(
             } else {
                 let n = Int::borrow(limit);
                 if let Some(small) = n.as_small() {
-                    (small.max(0) as usize).min(length)
+                    usize::try_from(small.max(0)).unwrap_or(length).min(length)
                 } else if n.big().is_negative() {
                     0
                 } else {
