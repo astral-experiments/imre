@@ -14,6 +14,7 @@ use crate::types::Types;
 mod argparse;
 mod assignments;
 mod asyncio;
+mod bytes;
 mod cached_properties;
 mod callables;
 mod calls;
@@ -4849,6 +4850,9 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
+                    if receiver.ty == Type::Bytes {
+                        return self.bytes_membership(key, receiver, compare.ops[0], expression);
+                    }
                     if let Some(fields) = self.types.fields(receiver.ty) {
                         return self.tuple_contains(key, receiver, &fields, compare);
                     }
