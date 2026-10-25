@@ -11,15 +11,18 @@ const MAX_DESCRIPTION_BYTES: usize = 1024;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     StringLiterals(Vec<String>),
+    Cursor(Type),
     List(Type),
     Dict(Type, Type),
     DefaultListDict(Type, Type),
     Counter(Type),
     Set(Type),
     Tuple(Vec<Type>),
+    PartialFrame(Vec<Type>),
     Callable(Vec<Type>, Type),
     Awaitable(Type),
     DirectoryContext(Type),
+    ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
 }
@@ -58,17 +61,23 @@ impl Types {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
+            Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
             Type::Dict(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
             ),
             Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
-            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Tuple(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Tuple(_) | Shape::PartialFrame(_))
+            ),
             Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => id < classes,
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
+                id < classes
+            }
             Type::Coroutine(id) | Type::Task(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
             }
@@ -76,28 +85,40 @@ impl Types {
                 matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
             }
             Type::AsyncProcess(bits) => bits <= 3,
+            Type::Popen(_, _, id) => matches!(storage.shapes.get(id), Some(Shape::ProcessArgs(_))),
             Type::Int
             | Type::Float
             | Type::Bool
             | Type::Str
             | Type::Bytes
             | Type::ListInt
+            | Type::StringIterable
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::BinaryIO
             | Type::Path
-            | Type::CompletedProcess
+            | Type::PurePath(_)
+            | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::TaskGroup
             | Type::GeneratorContext
             | Type::Semaphore
             | Type::Document(_)
+            | Type::LogFormatter
+            | Type::LogRecord
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
+            | Type::Sha256
+            | Type::ZipFile
+            | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -118,14 +139,18 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::List(ty)
+                Shape::Cursor(ty)
+                | Shape::List(ty)
                 | Shape::Set(ty)
                 | Shape::Counter(ty)
                 | Shape::Awaitable(ty)
                 | Shape::DirectoryContext(ty)
+                | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
                 Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
-                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Tuple(fields) | Shape::PartialFrame(fields) | Shape::Union(fields) => {
+                    fields.clone()
+                }
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
@@ -133,6 +158,7 @@ impl Types {
             for child in children {
                 self.verify_type(child, classes)?;
                 if let Type::StrLiteral(child_id)
+                | Type::Cursor(child_id)
                 | Type::List(child_id)
                 | Type::Dict(child_id)
                 | Type::Set(child_id)
@@ -142,6 +168,7 @@ impl Types {
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
                 | Type::DirectoryContext(child_id)
+                | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
                     && child_id >= id
                 {
@@ -241,7 +268,9 @@ impl Types {
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
+                | Type::Logger
                 | Type::Path
+                | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
     }
 
@@ -258,6 +287,8 @@ impl Types {
             | Type::Enum(_)
             | Type::Bytes
             | Type::Path
+            | Type::PurePath(_)
+            | Type::Logger
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) => self
@@ -367,6 +398,12 @@ impl Types {
         Some(if nullable { self.optional(ty) } else { ty })
     }
 
+    /// A closed builtin result that can be either a string or an integer.
+    /// Narrow the result before using it as either concrete type.
+    pub(crate) fn string_or_int(&self) -> Type {
+        Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Int])))
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
@@ -386,12 +423,15 @@ impl Types {
             | Type::Callable(_)
             | Type::Enum(_)
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
-            | Type::CompletedProcess
+            | Type::PurePath(_)
+            | Type::CompletedProcess(_)
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -400,8 +440,17 @@ impl Types {
             | Type::GeneratorContext
             | Type::DirectoryContext(_)
             | Type::Semaphore
+            | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogFormatter
+            | Type::LogRecord
             | Type::Logger
+            | Type::TimedFileHandler
+            | Type::ClockTime
+            | Type::Sha256
+            | Type::ZipFile
+            | Type::ZipInfo
+            | Type::CsvReader
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -439,6 +488,18 @@ impl Types {
         id
     }
 
+    pub(crate) fn cursor(&self, element: Type) -> Type {
+        Type::Cursor(self.intern(Shape::Cursor(element)))
+    }
+
+    pub(crate) fn cursor_element(&self, ty: Type) -> Option<Type> {
+        let Type::Cursor(id) = ty else { return None };
+        let Shape::Cursor(element) = self.0.borrow().shapes[id] else {
+            unreachable!()
+        };
+        Some(element)
+    }
+
     pub(crate) fn list(&self, element: Type) -> Type {
         if element == Type::Int {
             Type::ListInt
@@ -449,6 +510,26 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    /// Immutable private storage for the callable and arguments retained by partial.
+    pub(crate) fn partial_frame(&self, fields: Vec<Type>) -> Type {
+        Type::Tuple(self.intern(Shape::PartialFrame(fields)))
+    }
+
+    pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
+    }
+
+    pub(crate) fn process_args(&self, command: Type) -> usize {
+        self.intern(Shape::ProcessArgs(command))
+    }
+
+    pub(crate) fn command_type(&self, id: usize) -> Type {
+        let Shape::ProcessArgs(command) = self.0.borrow().shapes[id] else {
+            unreachable!("Popen carries its original command type")
+        };
+        command
     }
 
     pub(crate) fn directory_context(&self, result: Type) -> Type {
@@ -554,7 +635,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) => Some(fields.clone()),
+            Shape::Tuple(fields) | Shape::PartialFrame(fields) => Some(fields.clone()),
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -567,7 +648,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                Shape::Tuple(fields) | Shape::PartialFrame(fields) => {
+                    Some((Type::Tuple(id), fields.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -609,8 +692,12 @@ impl Types {
                 continue;
             }
             match ty {
-                Type::TextIO
+                Type::Cursor(_)
+                | Type::TextIO
                 | Type::BinaryIO
+                | Type::CsvReader
+                | Type::ZipFile
+                | Type::Popen(..)
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext
@@ -638,6 +725,7 @@ impl Types {
             .element(ty)
             .or_else(|| self.payload(ty))
             .or_else(|| self.set_element(ty))
+            .or_else(|| self.cursor_element(ty))
         {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
@@ -700,13 +788,14 @@ impl TypeDescription<'_> {
         let id = match ty {
             Type::StrLiteral(id)
             | Type::List(id)
+            | Type::Cursor(id)
             | Type::Tuple(id)
             | Type::Callable(id)
             | Type::Dict(id)
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
                 return self.write_str(&(self.class_name)(id));
             }
             _ => return write!(self, "{ty}"),
@@ -728,6 +817,10 @@ impl TypeDescription<'_> {
                 self.write_str("], ")?;
                 self.write_type(*returns)?;
             }
+            Shape::Cursor(element) => {
+                self.write_str("Iterator[")?;
+                self.write_type(*element)?;
+            }
             Shape::List(element) | Shape::Set(element) => {
                 self.write_str(if matches!(shape, Shape::List(_)) {
                     "list["
@@ -736,7 +829,7 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) => {
+            Shape::Tuple(fields) | Shape::PartialFrame(fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }
@@ -754,7 +847,7 @@ impl TypeDescription<'_> {
                 self.write_str(", ")?;
                 self.write_type(*value)?;
             }
-            Shape::DirectoryContext(_) | Shape::Awaitable(_) => {
+            Shape::DirectoryContext(_) | Shape::ProcessArgs(_) | Shape::Awaitable(_) => {
                 unreachable!("handled by the nominal type spelling")
             }
             Shape::Optional(element) => {

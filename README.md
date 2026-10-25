@@ -90,15 +90,24 @@ Other projects make different trade-offs:
 
 For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
 
-## Benchmark
+## Benchmarks
 
-Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Imre and CPython, and comparing it with a Rust implementation:
+Imre and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-| Workload | CPython 3.14.5 (ms) | Imre (ms) | Rust (ms) | Imre speedup vs. CPython |
-| --- | ---: | ---: | ---: | ---: |
-| Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
-| Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
+<p align="center">
+  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.">
+</p>
+
+Each result is the median of 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
+
+| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.84 | 80.00 | 33.18 | 2.41× |
+| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 48.02 | 117.84 | 60.54 | 1.95× |
+| Base45 decode | 64 × 16 KiB decoded | 9.17 | 190.52 | 14.51 | 13.13× |
+| Luhn checksum | 65,536 × 16 digits | 5.03 | 152.09 | 13.39 | 11.36× |
+| Telemetry report | 81 × 4,096 aligned pairs | 9.60 | 125.00 | 13.30 | 9.40× |
+| Conformance report | 146 files, two captured ty runs | 25.26 | 258.75 | 34.95 | 7.40× |
 
 ## Installation
 

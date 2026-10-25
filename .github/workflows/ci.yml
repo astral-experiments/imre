@@ -26,6 +26,11 @@ jobs:
         with:
           python-version: '3.14.5'
       - run: cargo build --workspace --release --locked
+      - name: Verify the standard library reference and native ledgers
+        run: |
+          python3 benchmarks/cpython_stdlib/full/reference_report.py
+          python3 benchmarks/cpython_stdlib/full/native_report.py
+          python3 benchmarks/cpython_stdlib/full/test_native_report.py
       - run: cargo test --workspace --release --locked
       - name: Build and install a Imre extension wheel
         run: |
@@ -40,6 +45,10 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
+      - name: Check pinned PyPA RECORD fixtures with reference CPython
+        run: python3 tests/wheel_record.py --reference-only
+      - name: Compare uv's upstream wheel checker with CPython
+        run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
@@ -72,6 +81,11 @@ jobs:
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
         run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
+      - name: Verify and assemble the vendored CPython suite fixtures
+        run: |
+          python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
+          python3 benchmarks/cpython_stdlib/full/stage_tests.py "$RUNNER_TEMP/imre-cpython-fixtures"
+          python3 -B benchmarks/cpython_stdlib/full/discover_staged.py "$RUNNER_TEMP/imre-cpython-fixtures"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -84,25 +98,83 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
-      - name: Get the pinned CPython unittest support
+      - name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: python/cpython
           ref: 5607950ef232dad16d75c0cf53101d9649d89115
           path: .cpython-stdlib-reference
-          sparse-checkout: Lib/test
+          sparse-checkout: |
+            Lib/test
+            Modules
           persist-credentials: false
+      - name: Run pinned unittest methods against native Imre
+        run: |
+          python3 benchmarks/cpython_stdlib/test_suite_evidence.py
+          python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
+      - name: Verify the complete OS, POSIX and genericpath evidence
+        run: |
+          for level in 0 3; do
+            for runner in value_cases native_descriptors host_descriptors credential_children; do
+              python3 "benchmarks/cpython_stdlib/full/os/$runner.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/$runner-O$level.json"
+            done
+          done
+          python3 benchmarks/cpython_stdlib/full/os/evidence.py --cpython-source .cpython-stdlib-reference --output "$RUNNER_TEMP" --check \
+            --values-results "$RUNNER_TEMP/value_cases-O0.json" "$RUNNER_TEMP/value_cases-O3.json" \
+            --credential-results "$RUNNER_TEMP/credential_children-O0.json" "$RUNNER_TEMP/credential_children-O3.json" \
+            --descriptor-results "$RUNNER_TEMP/native_descriptors-O0.json" "$RUNNER_TEMP/host_descriptors-O0.json" "$RUNNER_TEMP/native_descriptors-O3.json" "$RUNNER_TEMP/host_descriptors-O3.json"
       - name: Check sys streams and exits with vendored CPython methods
-        run: python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+        run: |
+          python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          for opt in 0 3; do
+            python3 -X utf8 benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
+          done
+          jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json "$RUNNER_TEMP/sys-evidence.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json benchmarks/cpython_stdlib/full/sys/evidence-linux.json
+      - name: Check pathlib file I/O under the original CPython fixtures
+        run: |
+          for level in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
+          done
+      - name: Account for every CPython itertools ID under its original fixtures
+        run: |
+          dir=benchmarks/cpython_stdlib/full/itertools
+          python3 "$dir/coverage.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --baseline "$dir/evidence-linux.json" --result "$RUNNER_TEMP/itertools-evidence-linux.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-linux.json" "$RUNNER_TEMP/itertools-evidence-linux.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py "$dir/reference-free-threading-linux.json" "$dir/evidence-free-threading-linux.json"
+      - name: Check subprocess.run with vendored CPython methods
+        run: python3 benchmarks/cpython_stdlib/native_subprocess.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Imre
         run: |
+          python3 benchmarks/cpython_stdlib/native_base64.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-base64.json"
           python3 benchmarks/cpython_stdlib/native_hashlib.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"
+          python3 benchmarks/cpython_stdlib/native_zip_members.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-zip-members.json"
+          python3 benchmarks/cpython_stdlib/native_zipfile.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-zipfile.json"
           python3 benchmarks/cpython_stdlib/native_paths.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
+          for level in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/pathlib/native_lexical.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-lexical-O$level.json"
+            python3 benchmarks/cpython_stdlib/full/pathlib/native_traversal.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-traversal-O$level.json"
+          done
           python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
+          python3 benchmarks/cpython_stdlib/full/shutil/native_copy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil-copy.json"
           python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
+          python3 benchmarks/cpython_stdlib/full/logging/native_timed.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          python3 benchmarks/cpython_stdlib/native_logging.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          python3 benchmarks/cpython_stdlib/full/logging/native_levels.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+      - name: Run CPython logging record and formatter methods at O0 and O3
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/logging/native_records.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-records-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_hierarchy.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-children-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_formatters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-formatters-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/logging/native_filters.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-filters-O$opt.json"
+          done
       - name: Build and install a Imre extension wheel
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
@@ -117,8 +189,27 @@ jobs:
           for suite in build_cache module_objects link_cache build_output; do
             env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
+      - name: Run complete upstream shallow-copy methods in native Imre
+        run: |
+          python3 benchmarks/cpython_stdlib/full/copy/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/copy-native.json"
+          cmp benchmarks/cpython_stdlib/full/copy/native-linux.json "$RUNNER_TEMP/copy-native.json"
+          python3 benchmarks/cpython_stdlib/full/copy/allocation_failure.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Run complete itertools methods in native Imre
+        run: |
+          for opt in 0 3; do
+            python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json"
+            for exercise in repeat sources tee; do
+              src="benchmarks/cpython_stdlib/full/itertools/$exercise.py"
+              target/release/imre build "$src" --opt-level "$opt" -o "$RUNNER_TEMP/iterator"
+              "$RUNNER_TEMP/iterator" > "$RUNNER_TEMP/iterator.native"
+              python3 "$src" > "$RUNNER_TEMP/iterator.reference"
+              diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"
+            done
+          done
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
+      - name: Compare uv's upstream wheel checker with CPython
+        run: python3 tests/uv_wheel_check.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
@@ -135,9 +226,15 @@ jobs:
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
           target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+      - name: Check CSV reader behavior with vendored CPython methods
+        run: |
+          python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/shutil/check_csv_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 benchmarks/cpython_stdlib/full/csv/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/test-csv.json"
+          cmp benchmarks/cpython_stdlib/full/csv/native-linux.json "$RUNNER_TEMP/test-csv.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Validate guarded list lengths on bounded heaps
         run: |

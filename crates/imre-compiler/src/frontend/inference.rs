@@ -250,16 +250,16 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
+            let helpers = Helpers::new(definitions.len() + graph.initializers().count());
             let globals = ModuleValues::default();
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            for module in graph.initializer_modules() {
+            for (module, range) in graph.initializers() {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
                 checker.inference = Some(self);
-                if let Err(diagnostic) = Initialization::lower(checker, &mut available) {
+                if let Err(diagnostic) = Initialization::lower(checker, &mut available, range) {
                     errors.push(format!(
                         "{}:{diagnostic}",
                         graph.modules[module].path.display()
@@ -291,6 +291,7 @@ impl Inference {
                 checker.returns = signature.returns;
                 checker.asynchronous = signature.asynchronous;
                 checker.method_context(signature.method);
+                checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
                     for (parameter, signature) in function
@@ -405,17 +406,59 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         skip: usize,
     ) -> Result<(Type, ir::CallArgs), String> {
-        let inference = self.inference.expect("discovery call has inference state");
-        let args = self.arguments_with(
+        self.bind_source(call, signature, receiver, skip, None)
+    }
+
+    pub(super) fn source_call(
+        &mut self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        receiver: Option<Expr>,
+        skip: usize,
+    ) -> Result<Expr, String> {
+        if self.classes.cached.contains_key(&signature.id) && !call.arguments.keywords.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "cached calls currently require a positional key",
+            ));
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let (ty, args) = self.bind_source(
+            call,
+            signature,
+            receiver,
+            skip,
+            calls::starred(call).then_some(&mut scope),
+        )?;
+        Ok(scope.finish(self.call_value(signature, ty, args)))
+    }
+
+    fn bind_source(
+        &mut self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        receiver: Option<Expr>,
+        skip: usize,
+        scope: Option<&mut calls::ArgumentScope>,
+    ) -> Result<(Type, ir::CallArgs), String> {
+        let inference = self.inference;
+        let args = self.bind_supplied(
             call,
             &signature.params[skip..],
             receiver,
+            scope,
             |checker, index, argument| {
                 let index = index + skip;
+                let parameter = &signature.params[index];
+                let Some(inference) = inference else {
+                    return argument.checked(checker, parameter.ty, parameter.sign_only);
+                };
+                let node = argument.site();
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
                     if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {
-                        let value = checker.expr(argument)?;
+                        let value = argument.value(checker)?;
                         let expected = if value.ty == ty {
                             ty
                         } else if let Some(parent) =
@@ -433,21 +476,24 @@ impl Checker<'_> {
                         } else {
                             ty
                         };
-                        checker.coerce(value, expected, argument)?
+                        checker.coerce(value, expected, node)?
                     } else {
-                        checker.direct_argument(argument, ty, signature.params[index].sign_only)?
+                        argument.checked(checker, ty, parameter.sign_only)?
                     }
                 } else {
-                    checker.expr(argument)?
+                    argument.value(checker)?
                 };
                 inference.learn_parameter(signature.id, index, value.ty);
                 Ok(value)
             },
         )?;
         self.calls.insert(signature.id);
-        let returns = inference.pending.borrow()[signature.id]
-            .returns
-            .ok_or_else(|| error(self.source, call, DEFERRED))?;
+        let returns = match inference {
+            Some(inference) => inference.pending.borrow()[signature.id]
+                .returns
+                .ok_or_else(|| error(self.source, call, DEFERRED))?,
+            None => signature.returns,
+        };
         Ok((returns, args))
     }
 }

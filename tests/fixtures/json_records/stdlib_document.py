@@ -53,6 +53,14 @@ print(len(report.queries))
 print(report == MemoryReport.from_json(Path("report.json")))
 print(repr(report))
 document = json.loads(text)
+# Exercise both sides of the bounded root-field index with an escaped duplicate key.
+for extra_field in ["", ',"h":8']:
+    fields = r'{"\u0061":1,"a":999999999999999999999999999999,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7'
+    print(json.dumps(json.loads(fields + extra_field + "}")))
+try:
+    json.loads(r'{"\ud800":0} extra')
+except json.JSONDecodeError as error:
+    print(str(error))
 for raw_key in document:
     key: str = raw_key
     print(key)

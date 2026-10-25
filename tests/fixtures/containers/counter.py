@@ -89,6 +89,15 @@ def bad(value: int) -> int:
 def main() -> None:
     check_typed_counts()
     big = 1267650600228229401496703205377
+    # Missing counts are zero on both sides, even for disjoint key types.
+    negative = Counter(a=-big)
+    positive = Counter({1: big})
+    assert negative < Counter() < positive
+    assert not (positive < negative or negative > positive)
+    assert Counter({1: 0}) == Counter(a=0)
+    assert not (negative < negative or positive > positive)
+    assert not (Counter(a=1) <= Counter(b=1) or Counter(a=1) >= Counter(b=1))
+    assert len(negative) == 1 and len(positive) == 1
     was = Producer()
     print(sum((was := Producer()).values()))
     c = Counter(a=big, z=0)

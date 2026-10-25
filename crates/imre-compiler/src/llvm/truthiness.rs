@@ -77,12 +77,19 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::ExitCode => {
+                Type::ExceptionField => {
                     let bit = self.instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
                     ));
                     self.instruction(format!("icmp ne i32 {bit}, 0"))
+                }
+                Type::StringIterable => {
+                    let length = self.instruction(format!(
+                        "call i64 @imre_string_iterable_len(i64 {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::Union(_) => {
                     let byte = self.instruction(format!(

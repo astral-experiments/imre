@@ -18,6 +18,10 @@ def main() -> None:
         raise ValueError("caught")
     except ValueError as problem:
         print(f"caught:{problem}")
+    for value in ["\ua7cf", "both'\"\u1acf\U000323b0", "é😀"]:
+        print(repr(value))
+        print(f"{[value]!r}")
+        print(str(KeyError(value)))
     boundaries = [
         -9223372036854775808,
         -4611686018427387905,

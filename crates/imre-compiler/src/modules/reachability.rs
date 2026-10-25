@@ -13,6 +13,8 @@ pub(super) struct Reachable {
     pub(super) definitions: HashSet<DefinitionId>,
     pub(super) methods: HashSet<(ModuleId, TextSize)>,
     pub(super) skipped: Vec<Vec<TextRange>>,
+    pub(super) unused_literals: HashSet<DefinitionId>,
+    value_reads: HashSet<DefinitionId>,
     attributes: HashSet<String>,
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
@@ -38,17 +40,33 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if !matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Store)
+            && let Some(Binding::Value(id)) = self.graph.resolve(self.module, expr)
+        {
+            self.found.value_reads.insert(id);
+        }
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
             self.found.definitions.insert(id);
         }
         if let ast::Expr::Attribute(attr) = expr {
             let name = attr.attr.to_string();
+            if name == "assertRaises"
+                && let Some(module) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                && let Some(Binding::Definition(context)) =
+                    module.bindings.get("_AssertRaisesContext")
+            {
+                self.found.definitions.insert(*context);
+            }
             if let Some(Binding::Definition(owner)) = self.graph.resolve(self.module, &attr.value) {
                 self.found.class_attributes.insert((owner, name.clone()));
                 self.found.attributes.insert(name);
             } else if self.graph.session.data_attribute(self.module, expr) {
                 self.found.properties.insert(name);
-            } else {
+            } else if !self.graph.session.sealed_native_method(self.module, attr) {
                 self.found.instance_attributes.insert(name.clone());
                 self.found.attributes.insert(name);
             }
@@ -123,8 +141,13 @@ impl Reachable {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
                             // An unsupported operator still fails when checking its expression.
-                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property"));
+                            let property = refs.found.properties.contains(name) && method.decorator_list.iter().any(|d| matches!(&d.expression, ast::Expr::Name(n) if n.id == "property") || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty)));
+                            let assertion_exit = source.bundled
+                                && source.name == "unittest"
+                                && class.name.as_str() == "_AssertRaisesContext"
+                                && name == "_missing";
                             if (property
+                                || assertion_exit
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
@@ -135,6 +158,7 @@ impl Reachable {
                                         | "__iter__"
                                         | "__str__"
                                 )
+                                || (name == "__repr__" && exception_base(graph, id))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
                             {
@@ -161,6 +185,18 @@ impl Reachable {
             let mut skipped = graph.entry_profile.ranges(module).collect::<Vec<_>>();
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
                 let id = DefinitionId { module, statement };
+                if module != graph.entry
+                    && !found.value_reads.contains(&id)
+                    && super::value_name(node)
+                        .is_some_and(|name| source.bindings.get(name) == Some(&Binding::Value(id)))
+                    && super::module_value(node).is_some_and(inert_literal)
+                    && (!matches!(node, ast::Stmt::AnnAssign(a) if
+                        !super::type_aliases::static_type(&graph.modules, module, &a.annotation)))
+                {
+                    found.unused_literals.insert(id);
+                    skipped.push(node.range());
+                    continue;
+                }
                 match node {
                     ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
                         if !found.definitions.contains(&id) =>
@@ -185,6 +221,21 @@ impl Reachable {
     }
 }
 
+/// Building these literals only allocates builtin storage. A dict or set still
+/// hashes every key at import time: a nested list/dict/set there must not be elided.
+fn inert_literal(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Tuple(t) => t.elts.iter().all(inert_literal),
+        ast::Expr::List(l) => l.elts.iter().all(inert_literal),
+        ast::Expr::Set(s) => s.elts.iter().all(literal),
+        ast::Expr::Dict(d) => d
+            .items
+            .iter()
+            .all(|i| i.key.as_ref().is_some_and(literal) && inert_literal(&i.value)),
+        _ => literal(expr),
+    }
+}
+
 fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> bool {
     let callee = if let ast::Expr::Call(call) = expr {
         &*call.func
@@ -197,7 +248,9 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
             Intrinsic::Dataclass
                 | Intrinsic::AbstractMethod
                 | Intrinsic::ContextManager
+                | Intrinsic::CachedProperty
                 | Intrinsic::FunctionCache
+                | Intrinsic::LruCache
         ))
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
@@ -209,10 +262,26 @@ fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunc
         || func
             .parameters
             .iter_non_variadic_params()
-            .any(|p| p.default.as_deref().is_some_and(|d| !literal(d)))
+            .any(|p| p.default.as_deref().is_some_and(|d| !inert_default(d)))
+}
+
+/// Creating a lambda does not execute its body, but its own parameter defaults
+/// still run immediately, even on a function that is never called.
+fn inert_default(expr: &ast::Expr) -> bool {
+    if let ast::Expr::Lambda(lambda) = expr {
+        return lambda
+            .parameters
+            .iter()
+            .flat_map(|p| p.iter_non_variadic_params())
+            .all(|p| p.default.as_deref().is_none_or(inert_default));
+    }
+    literal(expr)
 }
 
 fn literal(expr: &ast::Expr) -> bool {
+    if let ast::Expr::Tuple(tuple) = expr {
+        return tuple.elts.iter().all(literal);
+    }
     matches!(
         expr,
         ast::Expr::StringLiteral(_)
@@ -224,7 +293,136 @@ fn literal(expr: &ast::Expr) -> bool {
     )
 }
 
+/// A bare dataclass with ordinary marker bases can create its fields without
+/// running user code. Check positional default order: the decorator itself
+/// raises when a later required positional field follows an optional one.
+fn simple_dataclass(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef) -> bool {
+    if !matches!(class.decorator_list.as_slice(), [d] if graph.resolve(module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::Dataclass)))
+    {
+        return false;
+    }
+    let mut inherited_names = HashSet::new();
+    if let Some(bases) = &class.arguments
+        && (!bases.keywords.is_empty()
+            || bases.args.iter().any(|base| {
+                let Some(Binding::Definition(id)) = graph.resolve(module, base) else {
+                    return true;
+                };
+                let ast::Stmt::ClassDef(base) =
+                    &graph.modules[id.module].parsed.syntax().body[id.statement]
+                else {
+                    return true;
+                };
+                !base.decorator_list.is_empty()
+                    || base.arguments.is_some()
+                    || !base.body.iter().all(|stmt| match stmt {
+                        ast::Stmt::Pass(_) => true,
+                        ast::Stmt::Expr(expr) => {
+                            matches!(&*expr.value, ast::Expr::StringLiteral(_))
+                        }
+                        ast::Stmt::FunctionDef(f) => {
+                            inherited_names.insert(f.name.as_str());
+                            f.name.as_str() != "__init_subclass__"
+                        }
+                        _ => false,
+                    })
+            }))
+    {
+        return false;
+    }
+    let mut had_default = false;
+    let mut names = HashSet::new();
+    for stmt in &class.body {
+        match stmt {
+            ast::Stmt::FunctionDef(f) => {
+                if !names.insert(f.name.as_str()) {
+                    return false;
+                }
+            }
+            ast::Stmt::Assign(_) => return false,
+            _ => {}
+        }
+        if let ast::Stmt::AnnAssign(field) = stmt {
+            let ast::Expr::Name(name) = &*field.target else {
+                return false;
+            };
+            if !names.insert(name.id.as_str())
+                || inherited_names.contains(name.id.as_str())
+                || !field.simple
+                || !annotation_without_calls(&field.annotation)
+            {
+                return false;
+            }
+            let has_default = match field.value.as_deref() {
+                None => false,
+                Some(value) if literal(value) => true,
+                Some(value) if empty_field(graph, module, value, &names) => false,
+                _ => return false,
+            };
+            if had_default && !has_default {
+                return false;
+            }
+            had_default |= has_default;
+        }
+    }
+    true
+}
+
+fn annotation_without_calls(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Name(_)
+        | ast::Expr::StringLiteral(_)
+        | ast::Expr::NoneLiteral(_)
+        | ast::Expr::EllipsisLiteral(_) => true,
+        ast::Expr::Attribute(attr) => annotation_without_calls(&attr.value),
+        ast::Expr::Tuple(tuple) => tuple.elts.iter().all(annotation_without_calls),
+        ast::Expr::Subscript(sub) => {
+            annotation_without_calls(&sub.value) && annotation_without_calls(&sub.slice)
+        }
+        ast::Expr::BinOp(op) if op.op == ast::Operator::BitOr => {
+            annotation_without_calls(&op.left) && annotation_without_calls(&op.right)
+        }
+        _ => false,
+    }
+}
+
+/// These two flags only change generated method metadata. A default, a factory,
+/// or a more general expression still requires checking the whole declaration.
+fn empty_field(
+    graph: &SourceGraph,
+    module: ModuleId,
+    expr: &ast::Expr,
+    shadowed: &HashSet<&str>,
+) -> bool {
+    let ast::Expr::Call(call) = expr else {
+        return false;
+    };
+    let root = match &*call.func {
+        ast::Expr::Name(n) => Some(n.id.as_str()),
+        ast::Expr::Attribute(a) => a.value.as_name_expr().map(|n| n.id.as_str()),
+        _ => None,
+    };
+    let mut options = HashSet::new();
+    root.is_some_and(|name| !shadowed.contains(name))
+        && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::DataclassField))
+        && call.arguments.args.is_empty()
+        && call.arguments.keywords.iter().all(|kw| {
+            kw.arg.as_ref().is_some_and(|arg| {
+                matches!(arg.as_str(), "repr" | "compare") && options.insert(arg.as_str())
+            }) && matches!(kw.value, ast::Expr::BooleanLiteral(_))
+        })
+}
+
 fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef) -> bool {
+    let dataclass = class.decorator_list.iter().any(|d| {
+        let expr = if let ast::Expr::Call(call) = &d.expression {
+            &*call.func
+        } else {
+            &d.expression
+        };
+        graph.resolve(module, expr) == Some(Binding::Intrinsic(Intrinsic::Dataclass))
+    });
+    let verified = dataclass && simple_dataclass(graph, module, class);
     class
         .decorator_list
         .iter()
@@ -240,10 +438,49 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
             ast::Stmt::Pass(_) => false,
             ast::Stmt::Expr(s) => !matches!(&*s.value, ast::Expr::StringLiteral(_)),
             ast::Stmt::Assign(s) => !literal(&s.value),
-            ast::Stmt::AnnAssign(s) => s.value.as_deref().is_some_and(|v| !literal(v)),
+            ast::Stmt::AnnAssign(s) => s.value.as_deref().is_some_and(|v| {
+                // A tuple is a constant; dataclass must also accept the declaration.
+                if matches!(v, ast::Expr::Tuple(_)) && dataclass {
+                    !verified || !literal(v)
+                } else {
+                    !literal(v) && !(verified && matches!(v, ast::Expr::Call(_)))
+                }
+            }),
             ast::Stmt::FunctionDef(f) => definition_effect(graph, module, f),
             _ => true,
         })
+}
+
+/// Rich exception display overrides are reachable through base-class catches.
+fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
+    let mut pending = vec![id];
+    let mut seen = HashSet::new();
+    while let Some(def) = pending.pop() {
+        if !seen.insert(def) {
+            continue;
+        }
+        let ast::Stmt::ClassDef(c) = &graph.modules[def.module].parsed.syntax().body[def.statement]
+        else {
+            continue;
+        };
+        let Some(args) = &c.arguments else {
+            continue;
+        };
+        for base in &args.args {
+            match graph.resolve(def.module, base) {
+                Some(Binding::Definition(parent)) => pending.push(parent),
+                None if base
+                    .as_name_expr()
+                    .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
+                    .is_some() =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -287,6 +524,74 @@ run()
         assert!(
             reachable(&source.replace("print(Used().value())", "print(Used().unused())")).is_err()
         );
+    }
+
+    #[test]
+    fn only_unread_literal_module_storage_can_be_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let library = dir.path().join("library.py");
+        let check = |program: &str, body: &str| {
+            std::fs::write(&entry, program).unwrap();
+            std::fs::write(&library, body).unwrap();
+            crate::check_file_with_options(
+                &entry,
+                None,
+                &CompileOptions {
+                    reachable_only: true,
+                    ..Default::default()
+                },
+            )
+        };
+        let body = "from collections.abc import Mapping\nTABLE: Mapping[tuple[str, str], str] = {('a','b'): 'value'}\n";
+        check("import library\nprint(1)\n", body).unwrap();
+        // A read even through an import alias keeps its initialization and type check.
+        assert!(check("from library import TABLE as x\nprint(len(x))\n", body).is_err());
+        // Both produce an observable error despite their result never being read.
+        assert!(check("import library\n", "TABLE = {([],): 'value'}\n").is_err());
+        assert!(check("import library\n", "TABLE = [globals()]\n").is_err());
+        assert!(check("import library\n", "TABLE: missing() = []\n").is_err());
+    }
+
+    #[test]
+    fn cold_lambda_defaults_preserve_definition_time_evaluation() {
+        let source =
+            "def cold(callback = lambda x: globals()):\n    return callback(0)\nprint(42)\n";
+        reachable(source).unwrap();
+        assert!(reachable(&source.replace("lambda x:", "lambda x=globals():")).is_err());
+        assert!(reachable(&source.replace("print(42)", "print(cold())")).is_err());
+    }
+
+    #[test]
+    fn bound_native_methods_do_not_retain_unrelated_methods_with_the_same_name() {
+        let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
+        reachable(source).unwrap();
+        assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
+    }
+
+    #[test]
+    fn sealed_imports_without_lowering_stay_confined_to_cold_bodies() {
+        let source = "from configparser import ConfigParser as parser\ndef cold():\n    return parser()\nprint(42)\n";
+        reachable(source).unwrap();
+        assert!(compile(source, &CompileOptions::default()).is_err());
+        assert!(
+            reachable(&source.replace("print(42)", "print(cold())"))
+                .unwrap_err()
+                .contains("configparser.ConfigParser")
+        );
+        assert!(reachable(&source.replace("ConfigParser", "Missing")).is_err());
+        assert!(reachable("import this\nprint(42)\n").is_err());
+    }
+
+    #[test]
+    fn cold_tuple_defaults_and_field_options_do_not_hide_definition_errors() {
+        let cold = "from dataclasses import dataclass, field\n@dataclass\nclass Cold:\n    key: int = field(repr=False)\n    items: tuple[int, ...] = ()\n    def unused(self):\n        return globals()\nprint(42)\n";
+        reachable(cold).unwrap();
+        assert!(
+            reachable(&cold.replace("    def unused", "    required: str\n    def unused"))
+                .is_err()
+        );
+        assert!(reachable(&cold.replace("repr=False", "repr=globals()")).is_err());
     }
 
     #[test]

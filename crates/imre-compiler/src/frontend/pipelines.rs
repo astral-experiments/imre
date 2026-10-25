@@ -11,10 +11,10 @@ mod groupby;
 /// successful `next` owns `value`, and its consumer clears that transient owner.
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
-    acquire: Vec<Statement>,
-    next: Vec<Statement>,
+    pub(super) acquire: Vec<Statement>,
+    pub(super) next: Vec<Statement>,
     pub(super) value: usize,
-    ready: usize,
+    pub(super) ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
     /// Enclosing slots a later pull may replace, after constructor arguments.
@@ -23,6 +23,15 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    /// Only reads during a pull can observe an exception binding cleared by the consumer.
+    pub(super) fn reads_on_pull(&self, slot: usize) -> bool {
+        let mut reads = false;
+        ir::walk_expressions(&self.next, &mut |expr| {
+            reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
+        });
+        reads
+    }
+
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
     fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
         next.push(Statement::If(
@@ -43,6 +52,9 @@ impl Checker<'_> {
         value: &Expr,
         node: &impl Ranged,
     ) -> Result<Option<Prepared>, String> {
+        if let Some(element) = self.types.cursor_element(value.ty) {
+            return Ok(Some(self.prepare_cursor(value.clone(), element)));
+        }
         let (function, mut args, returns) = match (&value.kind, value.ty) {
             (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
                 (*id, args.clone(), value.ty)
@@ -96,11 +108,13 @@ impl Checker<'_> {
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
-            if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            if checker.generator_signature(call).is_some()
+            || checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            || checker.is_builtin_iter(call)
             || matches!(&*call.func, ast::Expr::Name(name)
                 if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
-                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")))
 }
 
 pub(super) fn integer(value: i64) -> Expr {
@@ -166,6 +180,15 @@ fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 }
 
 impl Checker<'_> {
+    pub(super) fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
+        matches!(&*call.func, ast::Expr::Name(name) if name.id == "iter")
+            && !self.local_iter
+            && !self.names.contains_key("iter")
+            && !self.is_class_receiver(&call.func)
+            && self.local_function_binding(&call.func).is_none()
+            && self.resolve(&call.func).is_none()
+    }
+
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
     pub(super) fn pipeline_input(
         &mut self,
@@ -180,8 +203,52 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.is_builtin_iter(call) && call.arguments.args.len() != 1 {
+            return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
+        }
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(
+                Intrinsic::Repeat | Intrinsic::Count | Intrinsic::Islice | Intrinsic::Cycle
+            ))
+        ) {
+            let cursor = self.call(call)?;
+            let element = self.types.cursor_element(cursor.ty).unwrap();
+            return Ok(Some(Iteration::Prepared(
+                self.prepare_cursor(cursor, element),
+            )));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
             return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
+        if let Some((signature, element)) = self.generator_signature(call) {
+            let frame = self.source_call(call, &signature, None, 0)?;
+            let handle = self.hidden(Type::GeneratorContext);
+            let value = self.hidden(element);
+            let ready = self.hidden(Type::Bool);
+            let op = |kind, ty| contexts::op(kind, ty, vec![self.local(handle)]);
+            let next = vec![
+                Statement::Clear(value),
+                Statement::Assign(ready, op(ir::ProcessOperation::GeneratorNext, Type::Bool)),
+                Statement::If(
+                    self.local(ready),
+                    vec![Statement::Assign(
+                        value,
+                        op(ir::ProcessOperation::GeneratorTake, element),
+                    )],
+                    Vec::new(),
+                ),
+            ];
+            return Ok(Some(Iteration::Prepared(Prepared {
+                evaluate: vec![Statement::Assign(handle, frame)],
+                acquire: Vec::new(),
+                next,
+                value,
+                ready,
+                elementless: false,
+                writes: HashSet::new(),
+                clear: vec![handle, value, ready],
+            })));
         }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
@@ -231,15 +298,14 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob")
             && self.class_reference(&attribute.value).is_none()
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::Path {
-                let iterator =
-                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                let iterator = self.path_iterator(receiver, call, attribute.attr.as_str())?;
                 return Ok(Some(Iteration::Prepared(
-                    self.prepare_path_iterator(iterator),
+                    self.prepare_cursor(iterator, Type::Path),
                 )));
             }
             if let Type::Class(class) = receiver.ty {
@@ -298,7 +364,9 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess => self.record_text(item, call)?,
+                        Type::Class(_) | Type::CompletedProcess(_) => {
+                            self.record_text(item, call)?
+                        }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
                             ty: Type::Str,
                             kind: ExprKind::Builtin(Builtin::Str, vec![item]),
@@ -406,6 +474,64 @@ impl Checker<'_> {
             _ => return Ok(None),
         };
         Ok(Some(Iteration::Prepared(input)))
+    }
+
+    /// A sentinel iterator owns its stop value and latches exhaustion at first match.
+    fn sentinel_input(&mut self, call: &ast::ExprCall) -> Result<Prepared, String> {
+        self.reject_builtin_keywords(call)?;
+        let [ast::Expr::Lambda(lambda), sentinel] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a nullary lambda and a sentinel",
+            ));
+        };
+        let sentinel = self.expr(sentinel)?;
+        let item = self.pull_lambda(lambda)?;
+        if !matches!(sentinel.ty, Type::Str | Type::Bytes) || item.ty != sentinel.ty {
+            return Err(error(
+                self.source,
+                call,
+                "iter requires a producer and sentinel of the same exact str or bytes type",
+            ));
+        }
+        let stop = self.hidden(sentinel.ty);
+        let value = self.hidden(item.ty);
+        let ready = self.hidden(Type::Bool);
+        let exhaust = vec![
+            Statement::Assign(ready, boolean(false)),
+            Statement::Clear(stop),
+            Statement::Clear(value),
+        ];
+        // Catch only exhaustion raised by the producer. Construction, the caller's
+        // loop body, and other producer exceptions keep their ordinary handlers.
+        let pull = Statement::Try {
+            body: vec![Statement::Assign(value, item)],
+            handlers: vec![ir::ExceptHandler {
+                kinds: vec![exception_kind("StopIteration").unwrap()],
+                name: None,
+                body: exhaust.clone(),
+            }],
+            orelse: vec![Statement::If(
+                compare(Compare::Equal, self.local(stop), self.local(value)),
+                exhaust,
+                Vec::new(),
+            )],
+            finalbody: Vec::new(),
+        };
+        Ok(Prepared {
+            evaluate: vec![
+                Statement::Assign(stop, sentinel),
+                Statement::Assign(ready, boolean(true)),
+            ],
+            acquire: Vec::new(),
+            next: vec![Statement::If(self.local(ready), vec![pull], Vec::new())],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![stop, value, ready],
+        })
     }
 
     /// Evaluate chain's arguments at construction, but acquire each iterator
@@ -536,23 +662,56 @@ impl Checker<'_> {
         })
     }
 
-    /// Method evaluation creates the iterator at Python's observable point.
-    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
-    /// nullable results own every yielded path until the consumer acquires it.
-    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
-        let iterator = self.hidden(Type::Iterator);
-        let optional = self.hidden(self.types.optional(Type::Path));
-        let value = self.hidden(Type::Path);
+    pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
+        let iterator = self.hidden(cursor.ty);
+        let value = self.hidden(element);
+        let ready = self.hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Assign(iterator, cursor)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
+        }
+    }
+
+    pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
+        self.prepare_pull_iterator(
+            reader,
+            self.types.list(Type::Str),
+            Builtin::CsvNext { required: false },
+        )
+    }
+
+    fn prepare_pull_iterator(
+        &mut self,
+        expression: Expr,
+        element: Type,
+        operation: Builtin,
+    ) -> Prepared {
+        let iterator = self.hidden(expression.ty);
+        let optional = self.hidden(self.types.optional(element));
+        let value = self.hidden(element);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let pull = vec![
             Statement::Assign(
                 optional,
-                paths::operation(
-                    ir::PathOperation::Next,
-                    self.locals[optional],
-                    vec![self.local(iterator)],
-                ),
+                Expr {
+                    ty: self.locals[optional],
+                    kind: ExprKind::Builtin(operation, vec![self.local(iterator)]),
+                },
             ),
             Statement::Assign(
                 ready,
@@ -566,7 +725,7 @@ impl Checker<'_> {
                 vec![Statement::Assign(
                     value,
                     Expr {
-                        ty: Type::Path,
+                        ty: element,
                         kind: ExprKind::Unwrap(Box::new(self.local(optional))),
                     },
                 )],
@@ -594,6 +753,52 @@ impl Checker<'_> {
             writes: HashSet::new(),
             clear: vec![iterator, optional, value, ready, done],
         }
+    }
+
+    /// Consume the cursor from its current position. Acquire the operand before
+    /// allocating the result, and release both owners if a later pull fails.
+    pub(super) fn collect_cursor_set(
+        &mut self,
+        cursor: Expr,
+        element: Type,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !self.types.hashable_key(element) {
+            return Err(error(
+                self.source,
+                node,
+                "set() requires hashable cursor elements",
+            ));
+        }
+        let ty = self.types.set(element);
+        let result = self.hidden(ty);
+        let input = Iteration::Prepared(self.prepare_cursor(cursor, element));
+        let empty = Expr {
+            ty,
+            kind: ExprKind::Set {
+                element,
+                values: Vec::new(),
+            },
+        };
+        let body = self.expand_items_after(
+            input,
+            node,
+            vec![Statement::Assign(result, empty)],
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::SetAdd, vec![checker.local(result), value]),
+                })])
+            },
+        )?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result],
+            },
+        })
     }
 
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
@@ -831,6 +1036,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        if !reverse && iterable.ty == Type::CsvReader {
+            return Ok(self.prepare_csv_reader(iterable));
+        }
         if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
             return Ok(self.prepare_file_lines(iterable));
         }

@@ -13,6 +13,11 @@ use num_traits::ToPrimitive;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+mod matching;
+mod pure;
+mod traversal;
+pub(super) use pure::PurePath;
+
 #[derive(Clone)]
 pub(super) enum PathText {
     Flat(Rc<Str>),
@@ -147,7 +152,17 @@ impl Storage {
         self.path_text()
     }
 
+    fn basename(&self) -> &str {
+        match self {
+            Self::PurePath(p) => p.basename(),
+            _ => name(self.path()),
+        }
+    }
+
     fn path_name(&self) -> &Rc<Str> {
+        if let Self::PurePath(p) = self {
+            return p.name();
+        }
         let Self::Path { name: cached, .. } = self else {
             fail("SystemError", "expected a path object");
         };
@@ -163,7 +178,10 @@ impl Storage {
     }
 
     fn path_text(&self) -> &Rc<Str> {
-        self.path_value().spelling()
+        match self {
+            Self::PurePath(p) => &p.text,
+            _ => self.path_value().spelling(),
+        }
     }
 
     fn path_value(&self) -> &PathText {
@@ -440,6 +458,11 @@ pub unsafe extern "C" fn imre_path_join(path: *const Object, child: *const Str) 
     // and, for a relative component, its immutable parent spelling.
     unsafe {
         object(path).0.with(|storage| {
+            if let Storage::PurePath(p) = storage {
+                return p
+                    .join([super::acquire_rc::<Str>(child as usize)])
+                    .into_object();
+            }
             let parent = storage.path_value();
             let child_text = &*child;
             if matches!(child_text.as_str(), "" | ".") {
@@ -479,6 +502,9 @@ pub unsafe extern "C" fn imre_path_with_name(
     // SAFETY: both inputs are rooted and lexical operations cannot invoke callbacks.
     let result = unsafe {
         object(path).0.with(|storage| {
+            if let Storage::PurePath(p) = storage {
+                return p.with_name(&*replacement);
+            }
             let path = storage.path();
             let replacement = &*replacement;
             if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
@@ -499,6 +525,32 @@ pub unsafe extern "C" fn imre_path_with_name(
     finish(result, std::ptr::null())
 }
 
+/// Count exact (case-sensitive) components, including a nonempty anchor.
+///
+/// # Safety
+/// The caller roots the native path and comparison string until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_count_part(path: *const Object, part: *const Str) -> usize {
+    // SAFETY: both inputs remain rooted, and component comparison cannot call Python.
+    let count = unsafe {
+        object(path).0.with(|storage| {
+            let part = (&*part).as_str();
+            if let Storage::PurePath(p) = storage {
+                return p.count_part(part);
+            }
+            let path = storage.path();
+            let tail = path.trim_start_matches('/');
+            let anchor = &path[..path.len() - tail.len()];
+            usize::from(!anchor.is_empty() && part == anchor)
+                + tail
+                    .split('/')
+                    .filter(|s| !s.is_empty() && *s != "." && *s == part)
+                    .count()
+        })
+    };
+    Int::from_usize(count).into_raw()
+}
+
 /// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]
@@ -511,7 +563,7 @@ pub unsafe extern "C" fn imre_path_equal(left: *const Object, right: *const Obje
         object(left).0.with(|left| {
             object(right)
                 .0
-                .with(|right| u32::from(left.path() == right.path()))
+                .with(|right| u32::from(left.path_equal(right)))
         })
     }
 }
@@ -551,7 +603,7 @@ pub unsafe extern "C" fn imre_path_stem(path: *const Object) -> *const Str {
     // SAFETY: the rooted path owns its spelling and cached basename.
     let stem = unsafe {
         object(path).0.with(|storage| {
-            let component = name(storage.path());
+            let component = storage.basename();
             match suffix_start(component) {
                 Some(end) => Rc::new(Str::from(&component[..end])),
                 None => Rc::clone(storage.path_name()),
@@ -568,7 +620,7 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
     // SAFETY: only an owned substring escapes this immutable storage access.
     let text = unsafe {
         object(path).0.with(|storage| {
-            let name = name(storage.path());
+            let name = storage.basename();
             Str::from(&name[suffix_start(name).unwrap_or(name.len())..])
         })
     };
@@ -583,15 +635,21 @@ pub unsafe extern "C" fn imre_path_suffix(path: *const Object) -> *const Str {
 pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object {
     // SAFETY: the rooted exact Path is accessed exclusively. Computing and
     // caching its lexical parent never invokes user code or borrows another Path.
-    let parent = unsafe {
+    unsafe {
         object(path).0.with_mut(|storage| {
+            if storage.basename().is_empty() {
+                Rc::increment_strong_count(path);
+                return path;
+            }
+            if let Storage::PurePath(p) = storage {
+                return p.parent().into_object();
+            }
             let Storage::Path { text, .. } = storage else {
                 fail("SystemError", "expected a path object");
             };
-            text.parent()
+            new_path(text.parent())
         })
-    };
-    new_path(parent)
+    }
 }
 
 /// # Safety
@@ -600,9 +658,12 @@ pub unsafe extern "C" fn imre_path_parent(path: *const Object) -> *const Object 
 pub unsafe extern "C" fn imre_path_is_absolute(path: *const Object) -> u32 {
     // SAFETY: the immutable rooted path is borrowed only for the predicate.
     unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(storage.path_value().is_absolute()))
+        object(path).0.with(|storage| {
+            u32::from(match storage {
+                Storage::PurePath(p) => p.is_absolute(),
+                _ => storage.path_value().is_absolute(),
+            })
+        })
     }
 }
 
@@ -866,11 +927,8 @@ pub(super) struct PathIterator {
 }
 
 enum IterationState {
-    PendingGlob(Pattern),
-    Snapshot {
-        names: std::vec::IntoIter<OsString>,
-        pattern: Option<Pattern>,
-    },
+    Glob(traversal::Glob),
+    Snapshot(std::vec::IntoIter<OsString>),
     Exhausted,
 }
 
@@ -897,59 +955,77 @@ fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
 impl PathIterator {
     fn new(root: Str, pattern: Option<&str>) -> Result<Self> {
         let state = if let Some(pattern) = pattern {
-            IterationState::PendingGlob(Pattern::new(pattern)?)
+            IterationState::Glob(traversal::Glob::new(
+                root.clone(),
+                pattern,
+                0,
+                false,
+                false,
+            )?)
         } else {
-            IterationState::Snapshot {
-                names: snapshot(&root, false)?.into_iter(),
-                pattern: None,
-            }
+            IterationState::Snapshot(snapshot(&root, false)?.into_iter())
         };
         Ok(Self { root, state })
     }
 
-    fn next(&mut self) -> Result<*const Object> {
-        if matches!(self.state, IterationState::PendingGlob(_)) {
-            let IterationState::PendingGlob(pattern) =
-                std::mem::replace(&mut self.state, IterationState::Exhausted)
-            else {
-                unreachable!()
-            };
-            if let Pattern::Literal(text) = &pattern {
-                let path = join(&self.root, text);
-                // Literal globbing uses lexists, so dangling symlinks are included
-                // without scanning or inspecting unrelated directory names.
-                return Ok(if fs::symlink_metadata(path.as_str()).is_ok() {
-                    new_path(path)
-                } else {
-                    std::ptr::null()
-                });
-            }
-            let names = snapshot(&self.root, true)?;
-            self.state = IterationState::Snapshot {
-                names: names.into_iter(),
-                pattern: Some(pattern),
-            };
-        }
-        let IterationState::Snapshot { names, pattern } = &mut self.state else {
-            return Ok(std::ptr::null());
+    pub(super) fn next(&mut self) -> Result<*const Object> {
+        let next = match &mut self.state {
+            IterationState::Glob(glob) => glob.next(),
+            IterationState::Snapshot(names) => names
+                .next()
+                .map(|name| {
+                    name.into_string()
+                        .map(|name| join(&self.root, &name))
+                        .map_err(|_| {
+                            Error::new(
+                                Kind::UnicodeDecodeError,
+                                "directory entry is not valid UTF-8",
+                            )
+                        })
+                })
+                .transpose(),
+            IterationState::Exhausted => Ok(None),
         };
-        for name in names {
-            let name = name.into_string().map_err(|_| {
-                Error::new(
-                    Kind::UnicodeDecodeError,
-                    "directory entry is not valid UTF-8",
-                )
-            })?;
-            if pattern
-                .as_ref()
-                .is_none_or(|pattern| pattern.matches(&name))
-            {
-                return Ok(new_path(join(&self.root, &name)));
+        match next {
+            Ok(Some(path)) => Ok(new_path(path)),
+            result => {
+                self.state = IterationState::Exhausted;
+                result.map(|_| std::ptr::null())
             }
         }
-        self.state = IterationState::Exhausted;
-        Ok(std::ptr::null())
     }
+
+    fn into_object(self) -> *const Object {
+        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PathIterator(
+            Box::new(self),
+        )))))
+    }
+}
+
+/// # Safety
+/// The path and pattern stay rooted while the selector copies its inputs; no filesystem
+/// scan occurs until the first pull. A zero case word selects platform defaults.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_glob(
+    path: *const Object,
+    pattern: *const Str,
+    case: usize,
+    follow: u32,
+    recursive: u32,
+) -> *const Object {
+    // SAFETY: construction has no user callbacks and no borrowed input escapes.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let root = Str::from(storage.path());
+            let glob =
+                traversal::Glob::new(root.clone(), &*pattern, case, follow != 0, recursive != 0)?;
+            Ok(PathIterator {
+                root,
+                state: IterationState::Glob(glob),
+            })
+        })
+    };
+    finish(result.map(PathIterator::into_object), std::ptr::null())
 }
 
 /// # Safety
@@ -967,14 +1043,7 @@ pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str
             )
         })
     };
-    finish(
-        result.map(|iterator| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PathIterator(
-                Box::new(iterator),
-            )))))
-        }),
-        std::ptr::null(),
-    )
+    finish(result.map(PathIterator::into_object), std::ptr::null())
 }
 
 /// # Safety
@@ -982,14 +1051,18 @@ pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str
 /// result owns one Path; null denotes exhaustion unless an exception is pending.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_next(iterator: *const Object) -> *const Object {
-    // SAFETY: no callback or storage reference escapes the exclusive iterator step.
-    let result = unsafe {
+    // SAFETY: the root is held through this single synchronous pull.
+    finish(unsafe { pull_path(iterator) }, std::ptr::null())
+}
+
+unsafe fn pull_path(iterator: *const Object) -> Result<*const Object> {
+    // SAFETY: the caller roots the cursor and the synchronous scan cannot reenter it.
+    unsafe {
         object(iterator).0.with_mut(|storage| match storage {
             Storage::PathIterator(iterator) => iterator.next(),
             _ => fail("SystemError", "expected a path iterator"),
         })
-    };
-    finish(result, std::ptr::null())
+    }
 }
 
 enum Pattern {
@@ -1008,6 +1081,7 @@ enum Token {
 }
 
 impl Pattern {
+    #[cfg(test)]
     fn new(pattern: &str) -> Result<Self> {
         if pattern.is_empty() || pattern == "." {
             return Err(Error::new(
@@ -1021,8 +1095,12 @@ impl Pattern {
                 "glob requires a nonrecursive single-component pattern",
             ));
         }
+        Ok(Self::component(pattern))
+    }
+
+    fn component(pattern: &str) -> Self {
         if !pattern.contains(['*', '?', '[']) {
-            return Ok(Self::Literal(Str::from(pattern)));
+            return Self::Literal(Str::from(pattern));
         }
         let chars: Vec<_> = pattern.chars().collect();
         let mut tokens = Vec::new();
@@ -1031,6 +1109,7 @@ impl Pattern {
             let character = chars[index];
             index += 1;
             match character {
+                '*' if matches!(tokens.last(), Some(Token::Star)) => {}
                 '*' => tokens.push(Token::Star),
                 '?' => tokens.push(Token::Any),
                 '[' => {
@@ -1049,7 +1128,7 @@ impl Pattern {
                 character => tokens.push(Token::Literal(character)),
             }
         }
-        Ok(Self::Wildcard(tokens))
+        Self::Wildcard(tokens)
     }
 
     /// Greedy star matching remembers the most recent star and advances its

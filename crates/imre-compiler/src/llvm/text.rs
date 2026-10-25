@@ -47,6 +47,9 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let source = &args[0].value.operand;
         let operand = match operation {
+            TextOperation::Lower => {
+                self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
+            }
             TextOperation::Split(reverse) => {
                 let separator =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -89,7 +92,7 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }
             TextOperation::Unquote => {
-                self.instruction(format!("call ptr @imre_str_unquote(ptr {source})"))
+                self.checked_pointer(format!("call ptr @imre_str_unquote(ptr {source})"))
             }
             TextOperation::ShlexSplit => {
                 self.checked_instruction(format!("call ptr @imre_shlex_split(ptr {source})"))

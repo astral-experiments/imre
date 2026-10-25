@@ -200,8 +200,11 @@ unsafe extern "C" fn imre_py_list_append(value: Py, item: Py) -> c_int {
         return extensions_error(Kind::TypeError, "Imre list[int] requires an int", -1);
     };
     // SAFETY: the extension roots both inputs. Append independently owns the item.
-    unsafe { imre_list_append(list, word) };
-    0
+    if unsafe { imre_list_append(list, word) } == 0 {
+        -1
+    } else {
+        0
+    }
 }
 
 #[repr(C)]

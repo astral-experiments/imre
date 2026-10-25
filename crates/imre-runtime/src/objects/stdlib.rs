@@ -368,10 +368,12 @@ pub unsafe extern "C" fn imre_sort_by_keys(
     }
 }
 
-fn string_capacity(length: Option<usize>) -> usize {
-    length
-        .filter(|&length| length <= isize::MAX as usize)
-        .unwrap_or_else(|| fail("MemoryError", "string is too large"))
+fn string_buffer(length: Option<usize>) -> Option<Str> {
+    let buffer = length.and_then(|length| Str::try_with_capacity(length).ok());
+    if buffer.is_none() {
+        super::exceptions::sequence_allocation_failed();
+    }
+    buffer
 }
 
 /// Joins an exact string sequence, retaining a single item without copying it.
@@ -392,15 +394,17 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 Rc::increment_strong_count(value);
                 return value;
             }
-            let separators = string_capacity(
-                separator
-                    .len()
-                    .checked_mul(values.values.len().saturating_sub(1)),
-            );
-            let length = values.values.iter().try_fold(separators, |length, &word| {
-                length.checked_add((&*(word as *const Str)).len())
-            });
-            let mut result = Str::with_capacity(string_capacity(length));
+            let length = separator
+                .len()
+                .checked_mul(values.values.len().saturating_sub(1))
+                .and_then(|separators| {
+                    values.values.iter().try_fold(separators, |length, &word| {
+                        length.checked_add((&*(word as *const Str)).len())
+                    })
+                });
+            let Some(mut result) = string_buffer(length) else {
+                return std::ptr::null();
+            };
             for (index, &word) in values.values.iter().enumerate() {
                 if index != 0 {
                     result.push_str(separator);
@@ -473,20 +477,22 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
             tail = &spec[end..];
         }
         rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
-        if name
-            .chars()
-            .all(|ch| crate::integer_text::decimal_digit(ch).is_some())
-        {
-            let index = name
-                .chars()
-                .try_fold(0isize, |index, ch| {
-                    index
-                        .checked_mul(10)?
-                        .checked_add(crate::integer_text::decimal_digit(ch)? as isize)
-                })
+        // A decimal prefix can overflow before a nondigit makes this a named field.
+        let mut index = 0isize;
+        let mut positional = true;
+        for ch in name.chars() {
+            let Some(digit) = crate::integer_text::decimal_digit(ch) else {
+                positional = false;
+                break;
+            };
+            index = index
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(isize::from(digit)))
                 .ok_or_else(|| {
                     Error::new(Kind::ValueError, "Too many decimal digits in format string")
                 })?;
+        }
+        if positional {
             return Err(Error::new(
                 Kind::IndexError,
                 compact_str::format_compact!(
@@ -560,7 +566,9 @@ pub unsafe extern "C" fn imre_str_replace(
                 .checked_mul(count)
                 .and_then(|extra| length.checked_add(extra))
         });
-    let mut result = Str::with_capacity(string_capacity(length));
+    let Some(mut result) = string_buffer(length) else {
+        return std::ptr::null();
+    };
     let mut copied = 0;
     for (index, _) in value.match_indices(old.as_str()) {
         result.push_str(&value[copied..index]);
@@ -602,6 +610,36 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         result.push('%');
     }
     Rc::into_raw(Rc::new(result))
+}
+
+/// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_time_sleep(seconds: f64) {
+    let error = if seconds.is_nan() {
+        Some(Error::new(
+            Kind::ValueError,
+            "Invalid value NaN (not a number)",
+        ))
+    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
+        Some(Error::new(
+            Kind::OverflowError,
+            "timestamp out of range for platform time_t",
+        ))
+    } else if seconds < 0.0 {
+        Some(Error::new(
+            Kind::ValueError,
+            "sleep length must be non-negative",
+        ))
+    } else {
+        None
+    };
+    if let Some(e) = error {
+        e.raise();
+        return;
+    }
+    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
+        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
+    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.
