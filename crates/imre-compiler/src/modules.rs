@@ -1631,6 +1631,11 @@ impl<'a> Loader<'a> {
                             symbol @ (Intrinsic::BuiltinsLast | Intrinsic::Stdout),
                         ) = binding
                         {
+                            // Typeshed omits the interactive name; this import
+                            // performs the real lookup and may raise ImportError.
+                            if symbol == Intrinsic::BuiltinsLast {
+                                self.checked_builtin_imports.push((id, alias.range()));
+                            }
                             self.modules[id].snapshots.insert(index, symbol);
                             Binding::Value(DefinitionId {
                                 module: id,
