@@ -19,6 +19,7 @@ mod calendar;
 mod chainmap;
 mod codecs;
 mod contexts;
+mod contextvars;
 mod copying;
 mod csv;
 mod deferred_diff;
@@ -97,6 +98,10 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    Context(Rc<contextvars::State>),
+    ContextVar(Rc<contextvars::Variable>),
+    ContextToken(Rc<contextvars::Token>),
+    TokenMissing,
     Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),

@@ -5,7 +5,6 @@ use std::collections::TryReserveError;
 use std::ffi::OsString;
 use std::ops::Range;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, sequence_allocation_failed};
 use super::{Bytes, Str};
@@ -17,7 +16,7 @@ enum Spelling<'a> {
 
 enum OwnedSpelling {
     WholeText(crate::StrOwner),
-    WholeBytes(Rc<Bytes>),
+    WholeBytes(crate::BytesOwner),
     Text(Str),
     Bytes(Bytes),
 }
@@ -27,8 +26,8 @@ impl OwnedSpelling {
         match self {
             Self::Text(text) => StrOwner::into_raw(StrOwner::new(text)).cast(),
             Self::WholeText(text) => StrOwner::into_raw(text).cast(),
-            Self::WholeBytes(bytes) => Rc::into_raw(bytes).cast(),
-            Self::Bytes(bytes) => Rc::into_raw(Rc::new(bytes)).cast(),
+            Self::WholeBytes(bytes) => crate::BytesOwner::into_raw(bytes).cast(),
+            Self::Bytes(bytes) => crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)).cast(),
         }
     }
 }
@@ -61,7 +60,7 @@ impl<'a> Spelling<'a> {
                     Self::Text(t) => OwnedSpelling::WholeText(StrOwner::acquire_word(
                         std::ptr::from_ref(*t) as usize,
                     )),
-                    Self::Bytes(b) => OwnedSpelling::WholeBytes(super::acquire_rc(
+                    Self::Bytes(b) => OwnedSpelling::WholeBytes(crate::acquire_bytes(
                         std::ptr::from_ref(*b) as usize,
                     )),
                 }
@@ -114,7 +113,7 @@ pub unsafe extern "C" fn imre_posix_join(
                     StrOwner::increment_strong_count(last.cast::<Str>())
                 },
                 // SAFETY: the spelling tag proves the rooted Rc payload type.
-                Spelling::Bytes(_) => unsafe { Rc::increment_strong_count(last.cast::<Bytes>()) },
+                Spelling::Bytes(_) => unsafe { crate::retain_bytes(last.cast::<Bytes>()) },
             }
             return last;
         }
@@ -145,7 +144,7 @@ pub unsafe extern "C" fn imre_posix_join(
         let text = String::from_utf8(output).expect("ASCII separators preserve UTF-8");
         StrOwner::into_raw(StrOwner::new(Str::from(text))).cast()
     } else {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     }
 }
 
@@ -299,7 +298,7 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
             }
         }
         if bytes {
-            let owner = Rc::into_raw(Rc::new(prefix)) as usize;
+            let owner = crate::BytesOwner::into_raw(crate::BytesOwner::new(prefix)) as usize;
             Ok(owner | usize::from(kind == 2))
         } else {
             let value = std::str::from_utf8(&prefix).expect("joined UTF-8 path components");
@@ -385,7 +384,7 @@ pub unsafe extern "C" fn imre_posix_normalize(
         return std::ptr::null();
     };
     if bytes != 0 {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     } else {
         // An undecodable cwd component canceled by `..` never reaches the text result.
         match super::paths::path_utf8(OsString::from_vec(output)) {

@@ -3,7 +3,7 @@
 use super::bytes::{ascii_decode_error, decode_error, owned_input};
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
-use crate::StrOwner;
+use crate::{BytesOwner, StrOwner};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -106,7 +106,13 @@ pub unsafe extern "C" fn imre_codec_encode(
         })
     };
     finish(
-        result.map(|b| Rc::into_raw(Rc::new(b.into_owned()))),
+        result.and_then(|bytes| {
+            let owner = match bytes {
+                Cow::Borrowed(bytes) => owned_input(bytes)?,
+                Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::allocation())?,
+            };
+            Ok(BytesOwner::into_raw(owner))
+        }),
         std::ptr::null(),
     )
 }
@@ -406,7 +412,7 @@ mod tests {
         let name = Str::new("ascii");
         let policy = Str::new("strict");
         let text = StrOwner::new(Str::new("xé€"));
-        let bytes = Rc::new(vec![b'a', 0xff]);
+        let bytes = BytesOwner::new(vec![b'a', 0xff]);
         // SAFETY: all ABI operands remain live until the returned owners are released.
         unsafe {
             let codec = Rc::from_raw(imre_codec_lookup(&name));
@@ -417,9 +423,11 @@ mod tests {
             assert_eq!(StrOwner::strong_count(&text), 2);
             drop(error);
             assert_eq!(StrOwner::strong_count(&text), 1);
-            assert!(imre_codec_decode(Rc::as_ptr(&codec), Rc::as_ptr(&bytes), &policy).is_null());
+            assert!(
+                imre_codec_decode(Rc::as_ptr(&codec), BytesOwner::as_ptr(&bytes), &policy).is_null()
+            );
             let _error = super::super::exceptions::take_pending().unwrap();
-            assert_eq!(Rc::strong_count(&bytes), 1);
+            assert_eq!(BytesOwner::strong_count(&bytes), 1);
         }
     }
 }

@@ -319,7 +319,10 @@ pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
 fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
     let text = String::from_utf8(bytes).map_err(|error| {
         let bounds = error.utf8_error();
-        super::bytes::decode_owned_error(Rc::new(error.into_bytes()), bounds)
+        match crate::BytesOwner::try_new(error.into_bytes()) {
+            Ok(bytes) => super::bytes::decode_owned_error(bytes, bounds),
+            Err(_) => Error::memory_error(),
+        }
     })?;
     if preserve_newlines || !text.contains('\r') {
         return Ok(Str::from(text));
@@ -389,6 +392,12 @@ fn os_error_kind(kind: io::ErrorKind) -> Kind {
 
 /// Format a POSIX errno without a filename, as in OSError(errno, strerror).
 pub(crate) fn errno_error(error: io::Error) -> Error {
+    if let Some(blocked) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<crate::BlockedWrite>())
+    {
+        return Error::blocked_write(blocked.errno, blocked.accepted);
+    }
     errno_with_filename(error, None)
 }
 
@@ -599,7 +608,7 @@ pub unsafe extern "C" fn imre_binary_read(value: *const Object) -> *const Bytes 
             .with_mut(|storage| storage.file_mut().read_bytes(None))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -618,7 +627,7 @@ pub unsafe extern "C" fn imre_binary_read_size(value: *const Object, size: usize
             .with_mut(|storage| storage.file_mut().read_size(&size))
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
@@ -636,7 +645,7 @@ pub unsafe extern "C" fn imre_binary_readline(value: *const Object) -> *const By
             .with_mut(|storage| storage.file_mut().read_line_bytes())
     };
     finish(
-        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        result.map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes))),
         std::ptr::null(),
     )
 }
