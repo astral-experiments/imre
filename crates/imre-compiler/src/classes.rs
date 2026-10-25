@@ -776,7 +776,7 @@ fn class_static_binding(
 }
 
 /// Only these sealed descriptors affect binding; arbitrary decorators still cannot run.
-fn method_kind(
+pub(crate) fn method_kind(
     graph: &SourceGraph,
     module_id: usize,
     method: &ast::StmtFunctionDef,

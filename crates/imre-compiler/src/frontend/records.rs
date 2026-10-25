@@ -998,6 +998,12 @@ impl Checker<'_> {
                 "special methods cannot be called directly",
             ));
         }
+        if attribute.attr.as_str() == "getTestCaseNames"
+            && let Some(object) = &receiver
+            && let Some(names) = self.unittest_loader_names(call, class, object)?
+        {
+            return Ok(names);
+        }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver
             && let Some(checked) =
