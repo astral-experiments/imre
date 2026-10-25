@@ -19,6 +19,17 @@ CASES = {
         ["prefix"], ["prefix", "+ββ"], ["prefix", "++m", "--no-e"],
         ["prefix", "++no-mode"], ["prefix", "/v"], ["prefix", "--help"],
     ],
+    "mutually_exclusive": [
+        [], ["-aaa"], ["-ab"], ["-ba"], ["-hba"], ["-ahb"], ["-abh"], ["-hab=2"],
+        ["-ahi"], ["-ahi", "bad"], ["-abi", "bad"], ["-a", "--integer", "bad"],
+        ["-a", "--integer", "3"], ["-i", "3", "-i", "4"], ["-a", "--pick"],
+        ["-a", "path", "--pick=x"], ["-a", "--pick=x", "path"], ["-a", "--", "file"],
+        ["-a", "--unknown"], ["empty"], ["empty", "--help"], ["child", "run"],
+        ["child", "run", "--help"], ["child", "run", "-x"], ["child", "run", "-x", "-y", "1"],
+        ["toggle"], ["toggle", "--help"], ["toggle", "--no-fe"], ["toggle", "--no-feature", "-ff"],
+        ["toggle", "-f", "--no-feature"], ["toggle", "-fxh"], ["toggle", "-hfx"],
+        ["toggle", "--no-feature", "-x"], ["toggle", "-x", "--no-feature"],
+    ],
     "numbers": [
         [], ["--help"], ["-i", "１２_３"], ["-i", "123456789012345678901234567890"],
         ["-i", "0" * 4301], ["-i", "\x1c34\x1f"],

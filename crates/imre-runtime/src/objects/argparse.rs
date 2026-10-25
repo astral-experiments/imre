@@ -82,6 +82,7 @@ struct OptionSpec {
     help: String,
     optional: bool,
     group: Option<usize>,
+    mutex: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +102,8 @@ struct Parser {
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
+    #[serde(default)]
+    mutex_required: Vec<bool>,
     subcommands: Option<Subcommands>,
 }
 
@@ -316,8 +319,49 @@ impl Parser {
         }
     }
 
+    fn select_group<'a>(&'a self, seen: &mut [Option<usize>], slot: usize) -> Result<(), Stop<'a>> {
+        if let Some(group) = self.options[slot].mutex {
+            if let Some(other) = seen[group]
+                && other != slot
+            {
+                return Err(Stop::Error(
+                    self,
+                    format!(
+                        "argument {}: not allowed with argument {}",
+                        self.options[slot].error_name(),
+                        self.options[other].error_name()
+                    ),
+                ));
+            }
+            seen[group] = Some(slot);
+        }
+        Ok(())
+    }
+
+    /// Resolve the whole short-option cluster before invoking its actions in order.
+    fn apply_flags<'a>(
+        &'a self,
+        flags: impl IntoIterator<Item = Option<(usize, &'a str)>>,
+        seen: &mut [Option<usize>],
+        values: &mut [Option<Bound<'a>>],
+    ) -> Result<(), Stop<'a>> {
+        for flag in flags {
+            let Some((slot, spelling)) = flag else {
+                return Err(Stop::Help(self));
+            };
+            self.select_group(seen, slot)?;
+            values[slot] = Some(
+                self.options[slot]
+                    .flag_value(values[slot].take(), spelling)
+                    .map_err(|e| Stop::Error(self, e))?,
+            );
+        }
+        Ok(())
+    }
+
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
+        let mut seen = vec![None; self.mutex_required.len()];
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -399,6 +443,9 @@ impl Parser {
                             .bind(Some(&taken))
                             .map_err(|e| Stop::Error(self, e))?,
                     );
+                    if !taken.is_empty() {
+                        self.select_group(&mut seen, slot)?;
+                    }
                 }
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
@@ -408,7 +455,7 @@ impl Parser {
             }
             let arg = args[index];
             index += 1;
-            let mut clustered_help = false;
+            let mut cluster = Vec::new();
             let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
@@ -475,21 +522,11 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, option)) = option {
-                            values[slot] = Some(
-                                option
-                                    .flag_value(values[slot].take(), matched)
-                                    .map_err(|e| Stop::Error(self, e))?,
-                            );
-                        } else {
-                            clustered_help = true;
-                        }
+                        cluster.push(slot.map(|slot| (slot, matched)));
                         suffix = rest;
                     }
                     let Some(take) = take else {
-                        if clustered_help {
-                            return Err(Stop::Help(self));
-                        }
+                        self.apply_flags(cluster, &mut seen, &mut values)?;
                         continue;
                     };
                     take
@@ -520,11 +557,7 @@ impl Parser {
                 }
                 vec![value]
             } else if !option.takes_value() {
-                values[slot] = Some(
-                    option
-                        .flag_value(values[slot].take(), spelling)
-                        .map_err(|e| Stop::Error(self, e))?,
-                );
+                self.apply_flags([Some((slot, spelling))], &mut seen, &mut values)?;
                 continue;
             } else {
                 let start = index;
@@ -549,14 +582,13 @@ impl Parser {
                 }
                 args[start..index].to_vec()
             };
-            if clustered_help {
-                return Err(Stop::Help(self));
-            }
+            self.apply_flags(cluster, &mut seen, &mut values)?;
             values[slot] = Some(
                 option
                     .bind(Some(&taken))
                     .map_err(|e| Stop::Error(self, e))?,
             );
+            self.select_group(&mut seen, slot)?;
         }
         let mut missing = Vec::new();
         let mut words = Vec::with_capacity(values.len());
@@ -594,6 +626,21 @@ impl Parser {
                     missing.join(", ")
                 ),
             ));
+        }
+        for (id, required) in self.mutex_required.iter().enumerate() {
+            if *required && seen[id].is_none() {
+                let names = self
+                    .options
+                    .iter()
+                    .filter(|o| o.mutex == Some(id))
+                    .map(OptionSpec::error_name)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(Stop::Error(
+                    self,
+                    format!("one of the arguments {names} is required"),
+                ));
+            }
         }
         if self
             .subcommands
