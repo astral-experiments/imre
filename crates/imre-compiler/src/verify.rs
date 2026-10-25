@@ -318,6 +318,7 @@ impl Verifier<'_> {
                 | Builtin::JsonDump(ty)
                 | Builtin::TomlDecode(ty)
                 | Builtin::DictTryGet(ty)
+                | Builtin::ChainMapGet(ty)
                 | Builtin::DictTryPop(ty),
                 _,
             ) => self.ty(*ty),

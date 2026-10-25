@@ -375,7 +375,7 @@ pub unsafe extern "C" fn imre_struct_append(
             if words.rows().is_none() {
                 // A generic empty list (including sort's detached destination)
                 // first learns its layout on append.
-                words.pack_structs();
+                words.pack_structs()?;
                 if words.rows().is_none() {
                     debug_assert!(words.values.is_empty());
                     *words = Words::from_rows(Rows::new(&*layout));
@@ -643,6 +643,63 @@ mod tests {
 
     fn ok<T>(result: Result<T>) -> T {
         result.unwrap_or_else(|_| panic!("unexpected struct list error"))
+    }
+
+    #[test]
+    fn invalid_json_separators_leave_the_boxed_view_unbuilt() {
+        use crate::objects::exceptions::{Kind, imre_error_take, imre_exception_matches};
+        use crate::objects::json::{Schema, imre_json_dumps};
+
+        let integer = Schema {
+            kind: 1,
+            word_kind: 2,
+            element: std::ptr::null(),
+            record: std::ptr::null(),
+            field_count: 0,
+            fields: std::ptr::null(),
+        };
+        let record = Schema {
+            kind: 7,
+            word_kind: 6,
+            record: POINT,
+            ..integer
+        };
+        let list = Schema {
+            kind: 6,
+            word_kind: 5,
+            element: &record,
+            ..integer
+        };
+        let mut seed = Rows::new(POINT);
+        ok(seed.append(&[0, 0]));
+        for (count, expected) in [(2, Kind::TypeError), (4096, Kind::ValueError)] {
+            let rows = ok(seed.repeat(count)).into_object();
+            // SAFETY: the scalar is tagged and the separator list, row layout and
+            // schemas stay rooted throughout the call. No row is being encoded.
+            unsafe {
+                let result = imre_json_dumps(
+                    crate::Int::small(17).unwrap().0,
+                    &integer,
+                    0,
+                    0,
+                    1,
+                    1,
+                    0,
+                    Rc::as_ptr(&rows) as usize,
+                    &list,
+                );
+                assert!(result.is_null());
+                let error = imre_error_take();
+                assert!(!error.is_null());
+                let error = Rc::from_raw(error);
+                assert_eq!(
+                    imre_exception_matches(Rc::as_ptr(&error), expected as u32),
+                    1
+                );
+                rows.0
+                    .with(|s| assert!(s.sequence_storage().rows().unwrap().boxed.get().is_none()));
+            }
+        }
     }
 
     #[test]

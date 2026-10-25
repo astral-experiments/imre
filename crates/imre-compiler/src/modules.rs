@@ -108,6 +108,7 @@ pub(crate) enum IntrinsicModule {
     CollectionsAbc,
     Copy,
     Itertools,
+    Math,
     Operator,
     Textwrap,
     Io,
@@ -154,6 +155,7 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     HandlerRename,
+    HandlerLock,
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
@@ -207,6 +209,7 @@ pub(crate) enum Intrinsic {
     TimeSleep,
     WarningFilter { simple: bool },
     WarningReset,
+    WarningDisplay { show: bool },
     PatchSet,
     Awaitable,
     TypeVar,
@@ -222,6 +225,7 @@ pub(crate) enum Intrinsic {
     SysVersion,
     SysHexversion,
     SysEncoding(&'static str),
+    SysIntern { query: bool },
     SysException,
     SysJitPredicate(&'static str),
     Stdin,
@@ -293,6 +297,7 @@ pub(crate) enum Intrinsic {
     Deque,
     Repeat,
     LengthHint,
+    MathProd,
     Count,
     Islice,
     Tee,
@@ -336,6 +341,8 @@ pub(crate) enum Intrinsic {
     SpecialFileError,
     TemporaryDirectory,
     Popen,
+    PopenActive,
+    PopenCleanup,
     SubprocessRun,
     SubprocessCall,
     SubprocessCheckCall,
@@ -424,6 +431,7 @@ impl IntrinsicModule {
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
+            "math" => Some(Self::Math),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
@@ -551,6 +559,8 @@ impl IntrinsicModule {
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "resetwarnings") => Intrinsic::WarningReset,
+            (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
+            (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             (Self::Time, "sleep") => Intrinsic::TimeSleep,
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
@@ -607,6 +617,8 @@ impl IntrinsicModule {
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
+            (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
             (Self::Sys, "implementation") => Intrinsic::SysImplementation,
             (Self::Sys, "pycache_prefix") => Intrinsic::SysPycachePrefix,
@@ -707,6 +719,7 @@ impl IntrinsicModule {
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
             (Self::Itertools, "count") => Intrinsic::Count,
@@ -759,6 +772,8 @@ impl IntrinsicModule {
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
             (Self::Subprocess, "STDOUT") => Intrinsic::SubprocessStdout,
             (Self::Subprocess, "Popen") => Intrinsic::Popen,
+            (Self::Subprocess, "_active") => Intrinsic::PopenActive,
+            (Self::Subprocess, "_cleanup") => Intrinsic::PopenCleanup,
             (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
             (Self::Subprocess, "call") => Intrinsic::SubprocessCall,
             (Self::Subprocess, "check_call") => Intrinsic::SubprocessCheckCall,
@@ -987,7 +1002,7 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
-    /// Mark the precise call where lowering raises Python's missing-argument TypeError.
+    /// Mark the precise call whose behavior for missing arguments is handled by native lowering.
     pub(crate) fn checked_missing_argument(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::MissingArgument(call));
@@ -1009,6 +1024,12 @@ impl SourceGraph {
     pub(crate) fn checked_repeated_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::RepeatedKeyword(keyword));
+    }
+
+    /// An optional handler lock either enters the captured lock or raises TypeError on None.
+    pub(crate) fn checked_optional_lock_context(&self, module: ModuleId, expr: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::OptionalLockContext(expr));
     }
 
     pub(crate) fn checked_keywords(
@@ -1899,6 +1920,7 @@ impl<'a> Loader<'a> {
                     for alias in &import.names {
                         let method = match alias.name.as_str() {
                             "_rename_handler" => Intrinsic::HandlerRename,
+                            "_Lock" => Intrinsic::HandlerLock,
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
