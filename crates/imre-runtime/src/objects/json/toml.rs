@@ -97,17 +97,25 @@ fn convert(
             .to_bits() as usize,
         (LIST, DeValue::Array(values)) => {
             let child = schema.child();
+            let mut allocation_error = || {
+                *allocation = Some(Error::allocation());
+                String::new()
+            };
             if schema.word_kind == 4 {
-                let values = values
-                    .iter()
-                    .map(|value| {
-                        convert(value.get_ref(), child, allocation)
-                            .map(|value| Int(value.into_word()))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                crate::new_list(values) as usize
+                let mut result = Vec::new();
+                result
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
+                for value in values {
+                    result.push(Int(convert(value.get_ref(), child, allocation)?.into_word()));
+                }
+                crate::new_list(result) as usize
             } else {
                 let mut result = Words::new(child.word_kind);
+                result
+                    .values
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| allocation_error())?;
                 for value in values {
                     result
                         .values

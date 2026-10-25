@@ -705,11 +705,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
-                    return Error::new(
-                        Kind::ZeroDivisionError,
-                        "integer division or modulo by zero",
-                    )
-                    .returning(1);
+                    return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -737,11 +733,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                return Error::new(
-                    Kind::ZeroDivisionError,
-                    "integer division or modulo by zero",
-                )
-                .returning(1);
+                return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -2368,6 +2360,27 @@ mod tests {
             let remainder = Int(unsafe { imre_int_binary(a.0, b.0, 4) });
             assert_eq!(quotient.as_small(), Some(q));
             assert_eq!(remainder.as_small(), Some(r));
+        }
+    }
+
+    #[test]
+    fn zero_integer_divisors_report_the_python_message() {
+        let zero = Int::small(0).unwrap();
+        for numerator in [Int::small(7).unwrap(), Int::new(BigInt::from(1) << 130_u32)] {
+            for op in [3, 4] {
+                // SAFETY: both integer handles remain live. Take the owned error and message.
+                unsafe {
+                    assert_eq!(imre_int_binary(numerator.0, zero.0, op), 1);
+                    let error = imre_error_take();
+                    assert_eq!(
+                        imre_exception_matches(error, Kind::ZeroDivisionError as u32),
+                        1
+                    );
+                    let message = Rc::from_raw(imre_exception_message(error));
+                    assert_eq!(message.as_str(), "division by zero");
+                    objects::imre_object_release(error);
+                }
+            }
         }
     }
 
