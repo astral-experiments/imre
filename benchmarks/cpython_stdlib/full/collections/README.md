@@ -31,3 +31,11 @@ Reference outcomes describe CPython only. The existing
 [`native_counter.py`](../../native_counter.py) compiles complete upstream
 methods with native assertion adapters. Other IDs require independent Imre
 execution evidence before they can count as native.
+
+`deque_methods.py` uses the shared runner to compile the four complete
+`test_big_queue_*` and `test_big_stack_*` methods. Their saved append/pop
+methods and integer assertions run in Imre; the original module, class, and
+instance fixture hooks run in CPython. The [O0](deque-methods-O0.json) and
+[O3](deque-methods-O3.json) reports record the hash of each unchanged method.
+Pass `--imre`, `--runtime`, `--clang`, `--opt-level`, and `--result` to
+the pinned Python build. These four IDs are part of the 659 above.

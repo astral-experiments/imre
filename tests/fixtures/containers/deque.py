@@ -35,6 +35,13 @@ print(text.pop())
 for letter in text:
     print(letter)
 print(text.maxlen is None)
+saved = text.popleft
+original = text
+text = deque("replacement")
+print(saved())
+print(original == deque("b", maxlen=3))
+print(text != original)
+text = original
 try:
     for letter in text:
         text.popleft()

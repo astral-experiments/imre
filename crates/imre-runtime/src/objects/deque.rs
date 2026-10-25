@@ -14,6 +14,28 @@ pub(super) struct Deque {
     state: usize,
 }
 
+impl Deque {
+    /// Compare one pair of elements and resume after the child comparison.
+    /// The traversal retains its deque roots; neither storage borrow escapes.
+    pub(super) fn compare_entry(&self, other: &Self, position: usize) -> values::Comparison {
+        if self.items.len() != other.items.len() {
+            return values::Comparison::Done(false);
+        }
+        if position == self.items.len() {
+            return values::Comparison::Done(true);
+        }
+        if self.kind != other.kind {
+            return values::Comparison::Done(false);
+        }
+        values::Comparison::Child {
+            left: self.items[position].word,
+            right: other.items[position].word,
+            kind: self.kind,
+            resume: Some(position + 1),
+        }
+    }
+}
+
 impl Storage {
     fn deque(&self) -> &Deque {
         let Self::Deque(deque) = self else {

@@ -15,6 +15,7 @@ pub(super) fn adapters(
     let mut targets = BTreeSet::new();
     let mut invoked = false;
     let mut enum_receiver = false;
+    let mut object_receiver = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -27,6 +28,9 @@ pub(super) fn adapters(
                 enum_receiver |= receiver
                     .as_ref()
                     .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
+                object_receiver |= receiver
+                    .as_ref()
+                    .is_some_and(|r| matches!(r.ty, Type::Deque(_)));
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });
@@ -38,6 +42,7 @@ pub(super) fn adapters(
     for (name, kind) in [("callable", 6)]
         .into_iter()
         .chain(enum_receiver.then_some(("callable_enum", 10)))
+        .chain(object_receiver.then_some(("callable_object", 5)))
     {
         writeln!(
             output.entry_buffer(),
@@ -102,7 +107,12 @@ pub(super) fn adapters(
         if scalar {
             body.push_str("  %tag = ptrtoint ptr %context to i64\n");
         } else if owns_receiver {
-            body.push_str("  call void @imre_record_retain(ptr %context)\n");
+            let family = if matches!(function.locals[function.params[0]], Type::Deque(_)) {
+                "object"
+            } else {
+                "record"
+            };
+            writeln!(body, "  call void @imre_{family}_retain(ptr %context)").unwrap();
         }
         if cold && owns_receiver {
             // The callee now owns self. A temporary bound method must not keep
@@ -139,7 +149,17 @@ impl Emitter<'_, '_> {
         let scalar = receiver
             .as_ref()
             .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
-        let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
+        let layout = if scalar {
+            "callable_enum"
+        } else if receiver
+            .as_ref()
+            .is_some_and(|r| matches!(r.ty, Type::Deque(_)))
+        {
+            "callable_object"
+        } else {
+            "callable"
+        };
+        let result = self.record_with_layout(ty, layout);
         let target = self.output.adapter_ref(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.instruction(format!(

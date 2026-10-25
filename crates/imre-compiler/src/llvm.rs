@@ -3186,7 +3186,7 @@ impl Emitter<'_, '_> {
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 }
-                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::Path | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Deque(_) => {
                     let operation = if left.ty == Type::Path {
                         "path"
                     } else {
@@ -3267,7 +3267,6 @@ impl Emitter<'_, '_> {
                     right.operand
                 )),
                 Type::ListInt
-                | Type::Deque(_)
                 | Type::StringKeys
                 | Type::Iterator
                 | Type::ByteOutput

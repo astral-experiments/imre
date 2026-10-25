@@ -4941,13 +4941,8 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
-                if self.types.deque_element(receiver.ty).is_some()
-                    && attribute.attr.as_str() == "maxlen"
-                {
-                    return Ok(Expr {
-                        ty: self.types.optional(Type::Int),
-                        kind: ExprKind::Builtin(Builtin::DequeMaxlen, vec![receiver]),
-                    });
+                if let Some(element) = self.types.deque_element(receiver.ty) {
+                    return self.deque_attribute(attribute, receiver, element);
                 }
                 if let Type::NamedException(class) = receiver.ty
                     && attribute.attr.as_str() == "args"

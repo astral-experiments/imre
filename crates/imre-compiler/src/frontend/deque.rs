@@ -3,6 +3,79 @@
 use super::*;
 
 impl Checker<'_> {
+    /// A saved method owns the receiver that was evaluated at attribute access.
+    /// Its adapter has the same typed arguments as the corresponding direct call.
+    pub(super) fn deque_attribute(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+        receiver: Expr,
+        element: Type,
+    ) -> Result<Expr, String> {
+        let name = attribute.attr.as_str();
+        let (builtin, parameters, returns) = match name {
+            "maxlen" => {
+                return Ok(Expr {
+                    ty: self.types.optional(Type::Int),
+                    kind: ExprKind::Builtin(Builtin::DequeMaxlen, vec![receiver]),
+                });
+            }
+            "append" | "appendleft" => (
+                Builtin::DequeAppend {
+                    left: name == "appendleft",
+                    extending: false,
+                },
+                vec![element],
+                Type::None,
+            ),
+            "pop" | "popleft" => (
+                Builtin::DequePop {
+                    left: name == "popleft",
+                },
+                vec![],
+                element,
+            ),
+            "clear" => (Builtin::DequeClear, vec![], Type::None),
+            "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
+            _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
+        };
+        let mut locals = vec![receiver.ty];
+        locals.extend(&parameters);
+        let arguments = locals
+            .iter()
+            .enumerate()
+            .map(|(slot, &ty)| Expr {
+                ty,
+                kind: ExprKind::Local(slot),
+            })
+            .collect();
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    returns,
+                    locals,
+                    body: vec![Statement::Return(Expr {
+                        ty: returns,
+                        kind: ExprKind::Builtin(builtin, arguments),
+                    })],
+                },
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: error(self.source, attribute, "recursive deque method adapter"),
+            },
+        );
+        Ok(Expr {
+            ty: self.types.callable(parameters, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: Some(Box::new(receiver)),
+            },
+        })
+    }
+
     pub(super) fn deque_new(
         &mut self,
         call: &ast::ExprCall,
