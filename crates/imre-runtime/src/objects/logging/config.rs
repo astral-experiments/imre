@@ -498,7 +498,13 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             format!("{path} is an empty file"),
         ));
     }
-    let bytes = std::fs::read(path).map_err(|_| Error::string_key(Str::from("formatters")))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+            Error::allocation()
+        } else {
+            Error::string_key(Str::from("formatters"))
+        }
+    })?;
     let encoding = encoding
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_else(|| "utf-8".into());
