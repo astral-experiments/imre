@@ -165,9 +165,9 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind splitlines/isspace after evaluating the receiver; an explicit
+    /// Bind splitlines and no-argument text predicates after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
-    pub(super) fn line_method(
+    pub(super) fn splitlines_or_predicate(
         &mut self,
         receiver: Expr,
         name: &str,
@@ -193,7 +193,12 @@ impl Checker<'_> {
                     _ => ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
                 }
             } else {
-                ExprKind::Builtin(Builtin::Text(TextOperation::IsSpace), vec![receiver])
+                let predicate = match name {
+                    "isspace" => TextOperation::IsSpace,
+                    "isupper" => TextOperation::IsUpper,
+                    _ => unreachable!("resolved text predicate"),
+                };
+                ExprKind::Builtin(Builtin::Text(predicate), vec![receiver])
             };
             return Ok(Expr { ty: returns, kind });
         }
@@ -236,9 +241,9 @@ impl Checker<'_> {
             values.push(self.expr(&kw.value)?);
         }
         let message = if !split && !args.keywords.is_empty() {
-            "str.isspace() takes no keyword arguments".to_owned()
+            format!("str.{name}() takes no keyword arguments")
         } else if !split {
-            format!("str.isspace() takes no arguments ({count} given)")
+            format!("str.{name}() takes no arguments ({count} given)")
         } else if count > 1 {
             let qualifier = if args.args.is_empty() { "keyword " } else { "" };
             format!("splitlines() takes at most 1 {qualifier}argument ({count} given)")
@@ -257,6 +262,141 @@ impl Checker<'_> {
         });
         Ok(Expr {
             ty: returns,
+            kind: ExprKind::Builtin(Builtin::RaiseException, values),
+        })
+    }
+
+    fn translation_argument(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
+        if let ast::Expr::Dict(dict) = argument {
+            if dict.items.is_empty() {
+                // The empty literal has no observable key/value layout.
+                return self.dictionary(dict, Some((Type::Int, Type::Int)));
+            }
+            // Choose the storage before lowering any operands. The ordinary dictionary
+            // constructor then still evaluates every key and value once, in source order.
+            let scalar = |e: &ast::Expr| {
+                if matches!(e, ast::Expr::NoneLiteral(_)) {
+                    Some(Type::None)
+                } else {
+                    self.graph.session.scalar_type(self.module, e)
+                }
+            };
+            let shape = (|| {
+                let key = scalar(dict.items[0].key.as_ref()?)?;
+                if !self.types.hashable_key(key) {
+                    return None;
+                }
+                let mut members = Vec::new();
+                let mut nullable = false;
+                for item in &dict.items {
+                    if scalar(item.key.as_ref()?)? != key {
+                        return None;
+                    }
+                    let value = scalar(&item.value)?;
+                    if value == Type::None {
+                        nullable = true;
+                    } else if !members.contains(&value) {
+                        members.push(value);
+                    }
+                }
+                let value = match members.as_slice() {
+                    [] => Type::None,
+                    [one] => *one,
+                    [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.types.string_or_int(),
+                    members => self.types.union(members)?,
+                };
+                Some((
+                    key,
+                    if nullable {
+                        self.types.optional(value)
+                    } else {
+                        value
+                    },
+                ))
+            })();
+            if let Some(shape) = shape {
+                return self.dictionary(dict, Some(shape));
+            }
+        }
+        self.expr(argument)
+    }
+
+    /// Preserve ordinal lookup semantics only for plain tables without Python callbacks.
+    pub(super) fn translate_method(
+        &mut self,
+        source: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if let ([table], []) = (args.args.as_ref(), args.keywords.as_ref()) {
+            let value = self.translation_argument(table)?;
+            let Some((key, member)) = self.types.mapping(value.ty) else {
+                return Err(error(
+                    self.source,
+                    table,
+                    "str.translate requires an exact plain dictionary",
+                ));
+            };
+            let member = self.types.payload(member).unwrap_or(member);
+            if self.types.is_counter(value.ty)
+                || self.types.is_default_list_dict(value.ty)
+                || !matches!(key, Type::Int | Type::Str | Type::Bytes | Type::Tuple(_))
+                || matches!(member, Type::StrEnum(_))
+            {
+                return Err(error(
+                    self.source,
+                    table,
+                    "unsupported str.translate dictionary layout or missing-key protocol",
+                ));
+            }
+            self.graph.checked_overload(self.module, call.range());
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(
+                    Builtin::Text(TextOperation::Translate),
+                    vec![source, value],
+                ),
+            });
+        }
+        self.graph
+            .checked_missing_argument(self.module, call.range());
+        for kw in &args.keywords {
+            if kw.arg.as_deref() == Some("table") {
+                self.graph
+                    .checked_positional_keyword(self.module, kw.range());
+            }
+        }
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for extra in args.args.iter().skip(1) {
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
+        }
+        let mut values = vec![source];
+        for argument in &args.args {
+            values.push(self.translation_argument(argument)?);
+        }
+        for kw in &args.keywords {
+            values.push(self.translation_argument(&kw.value)?);
+        }
+        let message = if args.keywords.is_empty() {
+            format!(
+                "str.translate() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            "str.translate() takes no keyword arguments".into()
+        };
+        values.push(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        });
+        Ok(Expr {
+            ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::RaiseException, values),
         })
     }

@@ -6,6 +6,7 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
@@ -14,7 +15,9 @@ mod contexts;
 mod copying;
 mod csv;
 mod deferred_diff;
+mod deque;
 mod difflib;
+mod errno;
 pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
@@ -41,6 +44,7 @@ mod text;
 pub(crate) use text::short_string;
 mod unions;
 mod values;
+mod warnings;
 mod words;
 mod zipfile;
 
@@ -52,6 +56,11 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
+pub(crate) fn literal_string(text: &str) -> Rc<Str> {
+    self::text::owned_string(text)
+}
 use words::{OwnedWord, Words};
 
 // All C ints fit in the immediate representation. Heap integers cannot fit.
@@ -75,6 +84,8 @@ enum Storage {
     Plain,
     StrDescriptor(u32),
     Sequence(Words),
+    Deque(Box<deque::Deque>),
+    DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
@@ -87,6 +98,9 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     SimpleNamespace(Rc<Object>),
     Sha256(Box<sha2::Sha256>),
+    NativeModule(errno::Module),
+    ModuleNamespace(Rc<errno::Registry>),
+    ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     Exception(exceptions::Exception),
     ExceptionField(OwnedWord),
@@ -117,6 +131,7 @@ enum Storage {
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonDecoder(Rc<Object>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.

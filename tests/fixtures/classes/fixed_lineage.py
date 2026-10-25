@@ -43,6 +43,45 @@ class MoreRows(Rows):
         return len(self.entries) + len(self.added)
 
 
+class Trail:
+    marks: str
+
+    def __init__(self) -> None:
+        self.marks = ""
+
+    def mark(self, value: str) -> str:
+        self.marks = self.marks + value
+        return value
+
+    def tag(self) -> str:
+        return "base"
+
+    def render(self, first: str, second: str) -> str:
+        self.marks = self.marks + "R"
+        return first + self.tag() + second
+
+
+class Middle(Trail):
+    def render(self, first: str, second: str) -> str:
+        self.marks = self.marks + "M"
+        return super().render(second=self.mark(second), first=self.mark(first))
+
+    def stop(self) -> str:
+        self.marks = self.marks + "!"
+        raise ValueError("deliberate")
+
+    def interrupted(self) -> str:
+        return super().render(second=self.mark("S"), first=self.stop())
+
+
+class Leaf(Middle):
+    def tag(self) -> str:
+        return "leaf"
+
+    def through_middle(self) -> str:
+        return super().render("x", "y")
+
+
 def from_base(rows: Rows) -> None:
     count: Callable[[], int] = rows.count
     print(count())
@@ -63,6 +102,15 @@ def run() -> None:
         if line == "+first":
             rows.lines.append("third")
     print(bool(MoreRows([], entries)))
+    middle = Middle()
+    leaf = Leaf()
+    print(middle.render("a", "b") + " " + middle.marks)
+    print(leaf.render("a", "b") + " " + leaf.marks)
+    print(leaf.through_middle() + " " + leaf.marks)
+    try:
+        leaf.interrupted()
+    except ValueError as exc:
+        print(str(exc) + " " + leaf.marks)
 
 
 run()
