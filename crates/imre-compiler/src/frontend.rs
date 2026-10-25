@@ -28,6 +28,7 @@ mod documents;
 mod enums;
 mod expansions;
 mod fixed_tuples;
+mod fnmatch;
 mod function_caches;
 mod functools;
 mod hashlib;
@@ -442,13 +443,18 @@ pub(crate) fn lower_with_owners(
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
-                && !(name == "open"
-                    && matches!(
-                        binding,
+                && !matches!(
+                    (name.as_str(), binding),
+                    (
+                        "open",
                         Binding::Intrinsic(
                             Intrinsic::GzipOpen | Intrinsic::Fd(ir::FdOperation::Open)
                         )
-                    ))
+                    ) | (
+                        "filter",
+                        Binding::Intrinsic(Intrinsic::Fnmatch(ir::FnmatchOperation::Filter { .. }))
+                    )
+                )
             {
                 return Err(module.error(
                     module.parsed.syntax(),
@@ -5965,6 +5971,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Fnmatch(operation))) => {
+                return self.fnmatch_call(operation, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexSub)) => return self.sub_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),

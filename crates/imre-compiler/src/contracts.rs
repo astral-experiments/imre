@@ -104,6 +104,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::Fnmatch(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
@@ -733,6 +734,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_fnmatch_translate"
+                | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_hash_new"
                 | "imre_toml_keys"

@@ -668,6 +668,10 @@ Missing entries and an already-removed root are tolerated. Descendant symlinks a
 
 Construction creates the directory immediately. A local can hold the manager before entering it. A normal or exceptional exit recursively removes the directory. If the last owner goes away before entering, cleanup is best effort. A conditional can choose between `TemporaryDirectory()` and `contextlib.nullcontext(path)`. The temporary branch yields its string name and the other branch yields the supplied `Path`. Passing that value to `Path(...)` accepts either representation. Constructor options remain limited to `dir`, `prefix`, and `suffix`.
 
+### Filename patterns
+
+The POSIX `fnmatch` module supports `fnmatch`, `fnmatchcase`, `filter`, `filterfalse`, and `translate`. Match filenames and patterns as strings or as bytes. A slash or leading dot is an ordinary character. The filters accept supported iterables, keep the original items in order, and raise `TypeError` at the first str/bytes mismatch. See the [complete CPython fnmatch cases and native results](../benchmarks/cpython_stdlib/full/fnmatch/README.md).
+
 ## UTF-8 files and process arguments
 
 `open(path)` and `open(path, "r")` read text using strict UTF-8. `open(path, "w")` creates or truncates the file and writes UTF-8. All three accept an explicit `encoding="utf-8"`. The path can be a string or a native `Path`. Each call returns a sealed `typing.TextIO` handle. The handle can be passed, returned, or stored in a field or container. All aliases observe the same open or closed state.

@@ -783,6 +783,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Fnmatch(FnmatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -1006,8 +1007,17 @@ pub(crate) enum PathOperation {
     },
 }
 
-/// POSIX lexical operations preserve raw str or bytes spellings.
+/// Shell filename operations do not interpret path separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FnmatchOperation {
+    Match { normcase: bool },
+    Filter { inverse: bool },
+    Translate,
+    Parts,
+}
+
+/// POSIX lexical operations preserve raw str or bytes spellings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PosixPathOperation {
     Join,
     MixedJoin { path_in_tail: bool },

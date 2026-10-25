@@ -3921,6 +3921,61 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
+            Builtin::Fnmatch(operation) => {
+                use crate::ir::FnmatchOperation;
+                let first = &args[0].value;
+                match operation {
+                    FnmatchOperation::Parts => {
+                        let tuple = self.record(returns);
+                        self.line(format!(
+                            "call void @imre_fnmatch_parts(ptr {}, ptr {}, ptr {}, ptr {})",
+                            first.operand,
+                            args[1].value.operand,
+                            args[2].value.operand,
+                            tuple.operand
+                        ));
+                        tuple
+                    }
+                    FnmatchOperation::Translate => {
+                        let name = if first.ty == Type::Bytes {
+                            "imre_fnmatch_translate_bytes"
+                        } else {
+                            "imre_fnmatch_translate"
+                        };
+                        self.call(name, returns, &[first])
+                    }
+                    FnmatchOperation::Match { .. } => {
+                        let pat = &args[1].value;
+                        let value = self.checked_instruction(format!(
+                            "call i32 @imre_fnmatch(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(first.ty == Type::Bytes),
+                            u32::from(pat.ty == Type::Bytes)
+                        ));
+                        Value {
+                            ty: Type::Bool,
+                            operand: self.instruction(format!("icmp ne i32 {value}, 0")),
+                            small_integer: false,
+                        }
+                    }
+                    FnmatchOperation::Filter { inverse } => {
+                        let pat = &args[1].value;
+                        let operand = self.checked_instruction(format!(
+                            "call ptr @imre_fnmatch_filter(ptr {}, ptr {}, i32 {}, i32 {})",
+                            first.operand,
+                            pat.operand,
+                            u32::from(pat.ty == Type::Bytes),
+                            u32::from(*inverse)
+                        ));
+                        self.owned(Value {
+                            ty: returns,
+                            operand,
+                            small_integer: false,
+                        })
+                    }
+                }
+            }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::TimeSleep => {
                 self.void_call("imre_time_sleep", &[&args[0].value]);
@@ -6611,6 +6666,11 @@ declare i32 @imre_path_text_exists(ptr)
 declare i32 @imre_path_exists(ptr)
 declare i32 @imre_path_is_file(ptr)
 declare i32 @imre_path_match(ptr, ptr, i64, i32)
+declare i32 @imre_fnmatch(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_filter(ptr, ptr, i32, i32)
+declare ptr @imre_fnmatch_translate(ptr)
+declare ptr @imre_fnmatch_translate_bytes(ptr)
+declare void @imre_fnmatch_parts(ptr, ptr, ptr, ptr)
 declare i32 @imre_path_match_object(ptr, ptr, i64, i32)
 declare ptr @imre_pure_path_new(i32)
 declare ptr @imre_path_join_object(ptr, ptr)
