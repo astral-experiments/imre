@@ -35,31 +35,41 @@ fn is_final_sigma(before: &str, after: &str) -> bool {
         && !after.chars().find(significant).is_some_and(is_cased)
 }
 
-fn lowercase(source: &str) -> Result<Str> {
+/// CPython titlecases just the first code point for capitalize, then lowercases
+/// the rest in the context of the original string (not of the suffix alone).
+fn convert(source: &str, capitalize: bool) -> Result<Str> {
     if source.is_ascii() {
         let mut result = Str::try_new(source).map_err(|_| Error::allocation())?;
-        result.as_mut_str().make_ascii_lowercase();
+        let ascii = result.as_mut_str();
+        ascii.make_ascii_lowercase();
+        if capitalize && let Some(first) = ascii.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
         return Ok(result);
     }
     let mut result = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
     for (i, ch) in source.char_indices() {
-        let mapping = if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
-            ['ς' as u32, 0]
+        let mapping = if capitalize && i == 0 {
+            unicode_case_mapping::to_titlecase(ch)
+        } else if ch == 'Σ' && is_final_sigma(&source[..i], &source[i + ch.len_utf8()..]) {
+            ['ς' as u32, 0, 0]
         } else {
-            unicode_case_mapping::to_lowercase(ch)
+            let [a, b] = unicode_case_mapping::to_lowercase(ch);
+            [a, b, 0]
         };
-        let first = if mapping[0] == 0 {
-            ch
+        if mapping[0] == 0 {
+            result
+                .try_reserve(ch.len_utf8())
+                .map_err(|_| Error::allocation())?;
+            result.push(ch);
         } else {
-            char::from_u32(mapping[0]).unwrap()
-        };
-        let second = (mapping[1] != 0).then(|| char::from_u32(mapping[1]).unwrap());
-        result
-            .try_reserve(first.len_utf8() + second.map_or(0, char::len_utf8))
-            .map_err(|_| Error::allocation())?;
-        result.push(first);
-        if let Some(second) = second {
-            result.push(second);
+            for value in mapping.into_iter().take_while(|v| *v != 0) {
+                let mapped = char::from_u32(value).unwrap();
+                result
+                    .try_reserve(mapped.len_utf8())
+                    .map_err(|_| Error::allocation())?;
+                result.push(mapped);
+            }
         }
     }
     Ok(result)
@@ -74,7 +84,21 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        lowercase(source).map(|s| Rc::into_raw(Rc::new(s))),
+        convert(source, false).map(|s| Rc::into_raw(Rc::new(s))),
+        std::ptr::null(),
+    )
+}
+
+/// Titlecase the first character and lowercase the rest of a native string.
+///
+/// # Safety
+/// The caller roots the immutable input string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
+    // SAFETY: the caller roots the string.
+    let source = unsafe { &*value };
+    finish(
+        convert(source, true).map(|s| Rc::into_raw(Rc::new(s))),
         std::ptr::null(),
     )
 }
