@@ -1204,6 +1204,11 @@ a native Counter raises `NotImplementedError`.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
+Its `default_factory` can be read and set to `list` or `None` through a typed
+defaultdict. An explicit `__missing__(key)` call runs the list factory, then
+returns the stored object if the key already exists. With no factory it raises
+`KeyError` for any key of the declared type, even one present in the mapping.
+
 `collections.ChainMap[K, V]` accepts dictionaries with matching key and value
 types and exposes them in its mutable `maps` list. A no-argument constructor
 starts with a fresh dictionary. Replacing `maps` affects all aliases of the

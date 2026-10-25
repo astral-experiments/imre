@@ -32,6 +32,7 @@ mod copying;
 mod counter;
 mod csv;
 mod dataclass_values;
+mod defaultdict;
 mod defaultdict_factory;
 mod deque;
 mod dispatch;
@@ -6403,6 +6404,11 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
+                if attribute.attr.as_str() == "default_factory"
+                    && self.types.is_default_list_dict(receiver.ty)
+                {
+                    return self.default_factory(receiver, attribute);
+                }
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }
@@ -6976,6 +6982,20 @@ impl<'a> Checker<'a> {
         }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__missing__"
+            && self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+        {
+            let Some((owner, rest)) = call.arguments.args.split_first() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "defaultdict.__missing__ requires a receiver",
+                ));
+            };
+            let receiver = self.expr(owner)?;
+            return self.defaultdict_missing(call, receiver, rest);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "most_common"
@@ -7909,6 +7929,11 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if attribute.attr.as_str() == "__missing__"
+                && self.types.is_default_list_dict(receiver.ty)
+            {
+                return self.defaultdict_missing(call, receiver, &call.arguments.args);
             }
             if self.types.is_counter(receiver.ty) {
                 match attribute.attr.as_str() {
