@@ -43,3 +43,20 @@ def exercise(flag: bool) -> None:
 
 exercise(True)
 exercise(False)
+
+
+def local_registry() -> None:
+    def local_base(value: str) -> str:
+        return "local base"
+
+    def local_text(value: str) -> str:
+        return "local text"
+
+    registry = singledispatch(local_base)
+    print(registry.__wrapped__ is local_base)
+    print(registry.register(str, local_text) is local_text)
+    print(registry.dispatch(str) is local_text)
+    print(registry("item"))
+
+
+local_registry()

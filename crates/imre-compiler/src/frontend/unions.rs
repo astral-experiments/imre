@@ -20,6 +20,15 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            let Type::Tuple(layout) = self.types.tuple(vec![ty]) else {
+                unreachable!()
+            };
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::AnnotationMember(layout), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -146,6 +155,7 @@ impl Checker<'_> {
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {
                 "str" => InstanceType::Exact(Type::Str),
+                "type" => InstanceType::Exact(Type::BuiltinClass),
                 "bytes" => InstanceType::Exact(Type::Bytes),
                 "int" => InstanceType::Exact(Type::Int),
                 "bool" => InstanceType::Exact(Type::Bool),
@@ -288,6 +298,9 @@ impl Checker<'_> {
     }
 
     fn instance_members(&self, ty: Type) -> Vec<Type> {
+        if matches!(ty, Type::AnnotationValue(_)) {
+            return self.types.children(ty);
+        }
         let concrete = self.types.payload(ty).unwrap_or(ty);
         let mut members = self
             .types

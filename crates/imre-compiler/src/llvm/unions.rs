@@ -87,6 +87,21 @@ impl Emitter<'_, '_> {
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            let kind = self.instruction(format!(
+                "call i32 @imre_annotation_kind(ptr {})",
+                value.operand
+            ));
+            let mut result = "false".to_string();
+            for member in self.module.types.children(value.ty) {
+                if classes.iter().any(|class| class.accepts(member)) {
+                    let tag = super::representation_kind(member, &self.module.types);
+                    let is_member = self.instruction(format!("icmp eq i32 {kind}, {tag}"));
+                    result = self.instruction(format!("or i1 {result}, {is_member}"));
+                }
+            }
+            return result;
+        }
         if let Some(payload) = self.module.types.payload(value.ty) {
             let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
             let (inspect, end) = (self.label(), self.label());

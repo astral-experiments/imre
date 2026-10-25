@@ -115,6 +115,10 @@ impl Types {
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
+            Type::AnnotationValue(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Tuple(fields))
+                if fields.iter().all(|t| matches!(t, Type::BuiltinClass | Type::Str | Type::None | Type::ForwardRef(_))))
+            }
             Type::Callable(id) => matches!(
                 storage.shapes.get(id),
                 Some(Shape::Callable(..) | Shape::CachedCallable(_) | Shape::DispatchCallable(_))
@@ -894,7 +898,7 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Type::ForwardRef(id) = ty {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
         if let Type::SimpleNamespace(id) = ty {

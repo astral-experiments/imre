@@ -113,14 +113,17 @@ fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
 impl Checker<'_> {
     /// An unbound function cannot retain its dispatcher through a captured receiver.
     fn dispatch_target(&mut self, node: &ast::Expr) -> Result<Expr, String> {
-        let value = if let Some(binding) = self.local_function_binding(node) {
-            binding
-                .target(self.source, node)?
-                .callback(self.types, self.source, node)?
-        } else {
-            self.expr(node)?
+        let value = self.expr(node)?;
+        let unbound = match &value.kind {
+            ExprKind::Callable { receiver: None, .. }
+            | ExprKind::Builtin(Builtin::StaticFunction(_), _) => true,
+            // Only noncapturing local definitions have a function object slot.
+            ExprKind::Local(slot) => {
+                self.local_function_binding(node).and_then(|b| b.value_slot) == Some(*slot)
+            }
+            _ => false,
         };
-        if !matches!(value.kind, ExprKind::Callable { receiver: None, .. }) {
+        if !unbound {
             return Err(error(
                 self.source,
                 node,

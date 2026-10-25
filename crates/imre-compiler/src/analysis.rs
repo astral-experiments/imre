@@ -510,6 +510,7 @@ struct CheckedFile<'db> {
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
     Call(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
     MissingArgument(TextRange),
@@ -527,6 +528,7 @@ impl CheckedDiagnostic {
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
             Self::ExcessArgument(range) => (range, 6),
+            Self::DeferredName(range) => (range, 7),
         };
         (range.start(), range.end(), kind)
     }
@@ -537,6 +539,7 @@ impl CheckedDiagnostic {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
