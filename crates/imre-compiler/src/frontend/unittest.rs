@@ -278,8 +278,13 @@ impl Checker<'_> {
         class: usize,
         receiver: &Expr,
     ) -> Result<Option<Expr>, String> {
-        if !self.unittest_case(class) || call.arguments.args.len() > 1 {
+        if !self.unittest_case(class) {
             return Ok(None);
+        }
+        if call.arguments.args.len() > 1 {
+            return self
+                .unittest_callable_raises(call, class, receiver)
+                .map(Some);
         }
         let this = call
             .func
@@ -398,6 +403,337 @@ impl Checker<'_> {
                 clear,
             },
         }))
+    }
+
+    /// Capture a forwarded value before entering the callback's exception
+    /// handler. Reads from these synthetic locals cannot repeat user code.
+    fn unittest_argument(
+        &mut self,
+        arg: &ast::Expr,
+        body: &mut Vec<Statement>,
+        locals: &mut Vec<(String, usize)>,
+        discarded: bool,
+    ) -> Result<ast::Expr, String> {
+        // A rejected call still constructs its arguments. An unused empty
+        // container has no element from which to infer a storage layout.
+        let value = match arg {
+            ast::Expr::Dict(d) if discarded && d.items.is_empty() => {
+                self.expr_expected(arg, self.types.dict(Type::Str, Type::Int))?
+            }
+            ast::Expr::List(l) if discarded && l.elts.is_empty() => {
+                self.expr_expected(arg, Type::ListInt)?
+            }
+            _ => self.expr(arg)?,
+        };
+        let slot = self.hidden(value.ty);
+        let name = format!("@unittest_arg{slot}");
+        self.names.insert(name.clone(), slot);
+        self.assigned.insert(slot);
+        body.push(Statement::Assign(slot, value));
+        locals.push((name.clone(), slot));
+        Ok(ast::Expr::Name(ast::ExprName {
+            node_index: ast::AtomicNodeIndex::NONE,
+            range: arg.range(),
+            id: name.into(),
+            ctx: ast::ExprContext::Load,
+        }))
+    }
+
+    /// Raise at the Python binding or invocation boundary, after its inputs have
+    /// run. A regular call also gives expression scopes a normal cleanup edge.
+    fn unittest_call_type_error(&mut self, message: String) -> Statement {
+        let module = self
+            .graph
+            .modules
+            .iter()
+            .find(|m| m.bundled && m.name == "unittest")
+            .unwrap();
+        let Binding::Definition(def) = module.bindings["_raise_call_type_error"] else {
+            unreachable!()
+        };
+        let id = self.functions[&def].id;
+        self.calls.insert(id);
+        Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                id,
+                ir::CallArgs::positional(vec![unpacking::string(message)]),
+            ),
+        })
+    }
+
+    /// Callable assertRaises catches the invocation only, after the case,
+    /// category, bound receiver and all forwarded arguments have been evaluated.
+    fn unittest_callable_raises(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments.args;
+        if args.iter().any(ast::Expr::is_starred_expr) {
+            return Err(error(
+                self.source,
+                call,
+                "callable assertRaises requires explicit positional arguments",
+            ));
+        }
+        let this = call
+            .func
+            .as_attribute_expr()
+            .and_then(|a| a.value.as_name_expr())
+            .map(|n| (n.id.as_str(), class));
+        let case = self.hidden(receiver.ty);
+        let mut body = vec![Statement::Assign(case, receiver.clone())];
+        let expected = self.unittest_expected(&args[0], &mut body, this)?;
+        let mut locals = Vec::new();
+        let checked = (|| {
+            let target = &args[1];
+            let mut callee = target.clone();
+            let lexical = target
+                .as_name_expr()
+                .is_some_and(|n| self.names.contains_key(n.id.as_str()));
+            let binding = if lexical { None } else { self.resolve(target) };
+            let mut noncallable = None;
+            let mut binding_error = None;
+            let mut lambda_invocation = None;
+            let nargs = args.len() - 2;
+            let keys = &call.arguments.keywords;
+            let label = match binding {
+                Some(Binding::Definition(def)) => {
+                    match &self.graph.modules[def.module].parsed.syntax().body[def.statement] {
+                        ast::Stmt::FunctionDef(f) => {
+                            binding_error = call_binding_errors::arity_error(f, None, nargs, keys);
+                            f.name.to_string()
+                        }
+                        ast::Stmt::ClassDef(c) => c.name.to_string(),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "assertRaises needs a known callable name",
+                            ));
+                        }
+                    }
+                }
+                Some(Binding::Intrinsic(_)) => {
+                    if let Some(attr) = target.as_attribute_expr() {
+                        attr.attr.to_string()
+                    } else {
+                        let spelling = target
+                            .as_name_expr()
+                            .ok_or_else(|| {
+                                error(self.source, target, "unknown intrinsic callback")
+                            })?
+                            .id
+                            .as_str();
+                        self.graph.modules[self.module]
+                            .parsed
+                            .syntax()
+                            .body
+                            .iter()
+                            .find_map(|stmt| {
+                                let ast::Stmt::ImportFrom(import) = stmt else {
+                                    return None;
+                                };
+                                import
+                                    .names
+                                    .iter()
+                                    .find(|a| {
+                                        a.asname.as_ref().unwrap_or(&a.name).as_str() == spelling
+                                    })
+                                    .map(|a| a.name.to_string())
+                            })
+                            .unwrap_or_else(|| spelling.to_owned())
+                    }
+                }
+                _ => match &mut callee {
+                    ast::Expr::Attribute(attr) => {
+                        let unbound = if attr
+                            .value
+                            .as_name_expr()
+                            .is_some_and(|n| self.names.contains_key(n.id.as_str()))
+                        {
+                            None
+                        } else if let Some(Binding::Definition(def)) = self.resolve(&attr.value) {
+                            self.classes.declarations.ids.get(&def).copied()
+                        } else {
+                            None
+                        };
+                        let owner = if let Some(class) = unbound {
+                            class
+                        } else {
+                            let root =
+                                self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
+                            let slot = locals.last().unwrap().1;
+                            let Type::Class(owner) = self.locals[slot] else {
+                                return Err(error(
+                                    self.source,
+                                    target,
+                                    "assertRaises needs a fixed native method receiver",
+                                ));
+                            };
+                            *attr.value = root;
+                            owner
+                        };
+                        if self.classes.methods[owner]
+                            .get(attr.attr.as_str())
+                            .is_some_and(|s| {
+                                s.method.is_some_and(|m| {
+                                    m.kind(&self.classes.declarations)
+                                        == crate::classes::MethodKind::Property
+                                })
+                            })
+                        {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "assertRaises needs the property to resolve its callable before the arguments",
+                            ));
+                        }
+                        binding_error = self.assertion_callback_arity(
+                            owner,
+                            attr.attr.as_str(),
+                            unbound.is_none(),
+                            nargs,
+                            keys,
+                        );
+                        attr.attr.to_string()
+                    }
+                    ast::Expr::Lambda(lambda) => {
+                        if lambda.parameters.is_none() && nargs == 0 && keys.is_empty() {
+                            // A direct zero-argument lambda needs no escaping closure.
+                            // Read its captured slots when the protected invocation runs.
+                            lambda_invocation = Some(self.pull_lambda(lambda)?);
+                        } else {
+                            callee =
+                                self.unittest_argument(target, &mut body, &mut locals, false)?;
+                        }
+                        "<lambda>".into()
+                    }
+                    ast::Expr::Name(name) if !lexical && binding.is_none() => name.id.to_string(),
+                    _ => {
+                        callee = self.unittest_argument(target, &mut body, &mut locals, false)?;
+                        let ty = self.locals[locals.last().unwrap().1];
+                        if let Some(name) = self.stored_assertion_name(ty) {
+                            name.to_owned()
+                        } else {
+                            let name = match ty {
+                                Type::None => "NoneType",
+                                Type::Bool => "bool",
+                                Type::Int => "int",
+                                Type::Float => "float",
+                                Type::Str | Type::StrLiteral(_) => "str",
+                                Type::Bytes => "bytes",
+                                Type::List(_) | Type::ListInt => "list",
+                                Type::Dict(_) => "dict",
+                                Type::Set(_) => "set",
+                                Type::Tuple(_) => "tuple",
+                                _ => {
+                                    return Err(error(
+                                        self.source,
+                                        target,
+                                        "assertRaises needs a known function or bound method",
+                                    ));
+                                }
+                            };
+                            noncallable = Some(format!("'{name}' object is not callable"));
+                            String::new()
+                        }
+                    }
+                },
+            };
+            let mut forwarded = call.arguments.clone();
+            let discarded = noncallable.is_some()
+                || binding_error.is_some()
+                || expected.is_none()
+                || keys
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some("expected_exception"));
+            forwarded.args = args[2..]
+                .iter()
+                .map(|arg| self.unittest_argument(arg, &mut body, &mut locals, discarded))
+                .collect::<Result<_, _>>()?;
+            let mut duplicate = false;
+            for kw in &mut forwarded.keywords {
+                if kw.arg.as_deref() == Some("expected_exception") {
+                    self.unittest_expected(&kw.value, &mut body, this)?;
+                    duplicate = true;
+                } else {
+                    kw.value =
+                        self.unittest_argument(&kw.value, &mut body, &mut locals, discarded)?;
+                }
+            }
+            if duplicate || expected.is_none() {
+                let message = if duplicate {
+                    "TestCase.assertRaises() got multiple values for argument 'expected_exception'"
+                } else {
+                    "assertRaises() arg 1 must be an exception type or tuple of exception types"
+                };
+                body.push(self.unittest_call_type_error(message.into()));
+                return Ok(());
+            }
+            let expected = expected.unwrap();
+            let action = if let Some(message) = noncallable.or(binding_error) {
+                self.unittest_call_type_error(message)
+            } else if let Some(invocation) = lambda_invocation {
+                Statement::Expr(invocation)
+            } else {
+                Statement::Expr(self.call(&ast::ExprCall {
+                    node_index: ast::AtomicNodeIndex::NONE,
+                    range_start: call.range_start,
+                    func: Box::new(callee),
+                    arguments: forwarded,
+                })?)
+            };
+            let missing = self.classes.methods[class]["_raise_missing_callable"].id;
+            self.calls.insert(missing);
+            let failure = Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Call(
+                    missing,
+                    ir::CallArgs::positional(vec![
+                        self.local(case),
+                        unpacking::string(expected.label),
+                        unpacking::string(label),
+                    ]),
+                ),
+            });
+            if expected.kinds.is_empty() {
+                // An empty tuple never catches, unlike a bare except clause.
+                body.extend([action, failure]);
+            } else {
+                body.push(Statement::Try {
+                    body: vec![action],
+                    handlers: vec![ir::ExceptHandler {
+                        kinds: expected.kinds,
+                        name: None,
+                        body: vec![],
+                    }],
+                    orelse: vec![failure],
+                    finalbody: vec![],
+                });
+            }
+            Ok(())
+        })();
+        let mut clear = vec![case];
+        for (name, slot) in locals {
+            self.names.remove(&name);
+            self.assigned.remove(&slot);
+            clear.push(slot);
+        }
+        checked?;
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+            },
+        })
     }
 
     /// A normal exit (including return, break and continue) must raise an
