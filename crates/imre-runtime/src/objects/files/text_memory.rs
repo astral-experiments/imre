@@ -169,9 +169,11 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_string_io_value(file: *const Object) -> *const Str {
     // SAFETY: only independently owned results escape the rooted object.
-    let result = unsafe { object(file) }
-        .0
-        .with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data));
+    let result = unsafe {
+        object(file)
+            .0
+            .with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data))
+    };
     finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
 }
 
@@ -195,9 +197,11 @@ pub unsafe extern "C" fn imre_string_io_read(
             usize::try_from(native_size(&n)?).ok()
         };
         // SAFETY: the file remains rooted for this synchronous read.
-        unsafe { object(file) }
-            .0
-            .with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
+        unsafe {
+            object(file)
+                .0
+                .with_mut(|s| s.file_mut().text_memory()?.read(limit, line))
+        }
     })();
     finish(result.map(|s| Rc::into_raw(Rc::new(s))), std::ptr::null())
 }
@@ -223,33 +227,35 @@ pub unsafe extern "C" fn imre_string_io_seek(
         })?;
         let whence = c_int(whence)?;
         // SAFETY: the rooted file outlives this mutation.
-        unsafe { object(file) }.0.with_mut(|s| {
-            let m = s.file_mut().text_memory()?;
-            m.pos = match (whence, pos) {
-                (0, p) if p >= 0 => p as usize,
-                (0, _) => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        format!("Negative seek position {pos}"),
-                    ));
-                }
-                (1, 0) => m.pos,
-                (2, 0) => m.data.len(),
-                (1 | 2, _) => {
-                    return Err(Error::new(
-                        Kind::OSError,
-                        "Can't do nonzero cur-relative seeks",
-                    ));
-                }
-                _ => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        format!("Invalid whence ({whence}, should be 0, 1 or 2)"),
-                    ));
-                }
-            };
-            Ok(Int::from_usize(m.pos).into_raw())
-        })
+        unsafe {
+            object(file).0.with_mut(|s| {
+                let m = s.file_mut().text_memory()?;
+                m.pos = match (whence, pos) {
+                    (0, p) if p >= 0 => p as usize,
+                    (0, _) => {
+                        return Err(Error::new(
+                            Kind::ValueError,
+                            format!("Negative seek position {pos}"),
+                        ));
+                    }
+                    (1, 0) => m.pos,
+                    (2, 0) => m.data.len(),
+                    (1 | 2, _) => {
+                        return Err(Error::new(
+                            Kind::OSError,
+                            "Can't do nonzero cur-relative seeks",
+                        ));
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            Kind::ValueError,
+                            format!("Invalid whence ({whence}, should be 0, 1 or 2)"),
+                        ));
+                    }
+                };
+                Ok(Int::from_usize(m.pos).into_raw())
+            })
+        }
     })();
     finish(result, 0)
 }
@@ -274,19 +280,21 @@ pub unsafe extern "C" fn imre_string_io_position(
             Some(native_size(&n)?)
         };
         // SAFETY: the caller retains the file throughout the borrow.
-        unsafe { object(file) }.0.with_mut(|s| {
-            let m = s.file_mut().text_memory()?;
-            let n = match size {
-                Some(n) => usize::try_from(n).map_err(|_| {
-                    Error::new(Kind::ValueError, format!("Negative size value {n}"))
-                })?,
-                None => m.pos,
-            };
-            if truncate {
-                m.data.truncate(n);
-            }
-            Ok(Int::from_usize(n).into_raw())
-        })
+        unsafe {
+            object(file).0.with_mut(|s| {
+                let m = s.file_mut().text_memory()?;
+                let n = match size {
+                    Some(n) => usize::try_from(n).map_err(|_| {
+                        Error::new(Kind::ValueError, format!("Negative size value {n}"))
+                    })?,
+                    None => m.pos,
+                };
+                if truncate {
+                    m.data.truncate(n);
+                }
+                Ok(Int::from_usize(n).into_raw())
+            })
+        }
     })();
     finish(result, 0)
 }
