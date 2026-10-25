@@ -8,8 +8,8 @@
     "denominator": 54,
     "distinct_ids": 54,
     "counts": {
-      "fully-native": 11,
-      "reference-only": 43
+      "fully-native": 15,
+      "reference-only": 39
     },
     "records": [
       {
@@ -449,16 +449,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_invalid_placeholders against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "208eebccafa73f9ed7e3609cf501593962e99597142a6ce0691a1b1c35cd811d",
+          "source_assertions": 5,
+          "negative_control": "ValueError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
@@ -516,16 +523,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments_safe against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "5b89c62856baa0b950d127d8a683aeaab0955b49cfacfc99690a41af6bcdef8c",
+          "source_assertions": 8,
+          "negative_control": "TypeError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
@@ -568,31 +582,45 @@
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "db161b9aaf460af58744612fa309984dbbdc534a25b0ac5aef9ebb9bd392fe4d",
+          "source_assertions": 3,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
         "occurrence": 1,
         "opt_level": 0,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_braces against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "d71b3864d9bc265c2d644668acd384b709773ea8bd9d4dd4ae937f47c673d926",
+          "source_assertions": 2,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
@@ -910,8 +938,8 @@
     "denominator": 54,
     "distinct_ids": 54,
     "counts": {
-      "fully-native": 11,
-      "reference-only": 43
+      "fully-native": 15,
+      "reference-only": 39
     },
     "records": [
       {
@@ -1351,16 +1379,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_invalid_placeholders",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_invalid_placeholders against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "208eebccafa73f9ed7e3609cf501593962e99597142a6ce0691a1b1c35cd811d",
+          "source_assertions": 5,
+          "negative_control": "ValueError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_invalid_with_no_lines",
@@ -1418,16 +1453,23 @@
         "id": "test.test_string.test_string.TestTemplate.test_keyword_arguments_safe",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_keyword_arguments_safe against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "5b89c62856baa0b950d127d8a683aeaab0955b49cfacfc99690a41af6bcdef8c",
+          "source_assertions": 8,
+          "negative_control": "TypeError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_pattern_override",
@@ -1470,31 +1512,45 @@
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "db161b9aaf460af58744612fa309984dbbdc534a25b0ac5aef9ebb9bd392fe4d",
+          "source_assertions": 3,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_braces",
         "occurrence": 1,
         "opt_level": 3,
-        "fixture_variant": "upstream discovery",
+        "fixture_variant": "original method, native unittest.TestCase callbacks",
         "reference": "pass",
-        "outcome": "not-run",
+        "outcome": "pass",
         "roles": {
-          "body": "unobserved",
-          "assertions": "unobserved",
-          "operation": "unobserved",
-          "fixture": "unobserved"
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
         },
-        "classification": "reference-only"
+        "evidence": {
+          "operation": "compiled test_regular_templates_with_braces against the bundled string module",
+          "fixture": "unchanged method on native unittest.TestCase; separate repaired-input copy fails in assertRaises",
+          "method_sha256": "d71b3864d9bc265c2d644668acd384b709773ea8bd9d4dd4ae937f47c673d926",
+          "source_assertions": 2,
+          "negative_control": "KeyError not raised by substitute"
+        },
+        "classification": "fully-native"
       },
       {
         "id": "test.test_string.test_string.TestTemplate.test_regular_templates_with_non_letters",
