@@ -343,6 +343,32 @@ impl Checker<'_> {
                         vec![value, receiver],
                     )));
                 }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
+                    let Some((params, returns)) = self.types.signature(value.ty) else {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable",
+                        ));
+                    };
+                    if !params.is_empty()
+                        || !(matches!(returns, Type::None | Type::Int)
+                            || returns == self.types.optional(Type::Int))
+                    {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable returning int or None",
+                        ));
+                    }
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                            returns_none: returns == Type::None,
+                        }),
+                        vec![value, receiver],
+                    )));
+                }
                 if let Some(class) =
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {

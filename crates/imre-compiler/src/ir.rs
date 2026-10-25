@@ -1867,6 +1867,10 @@ pub(crate) enum ProcessOperation {
         poll: bool,
     },
     PopenSetStatus,
+    PopenSetPoll {
+        returns_none: bool,
+    },
+    PopenDeletePoll,
     PopenWait,
     PopenCommunicate {
         text: bool,

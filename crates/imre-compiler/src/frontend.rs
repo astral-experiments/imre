@@ -4448,6 +4448,16 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
+                            statements.push(Statement::Expr(Expr {
+                                ty: Type::None,
+                                kind: ExprKind::Builtin(
+                                    Builtin::Process(ir::ProcessOperation::PopenDeletePoll),
+                                    vec![receiver],
+                                ),
+                            }));
+                            continue;
+                        }
                         if let Some(class) =
                             self.mutable_instance_data(receiver.ty, attr.attr.as_str())
                         {

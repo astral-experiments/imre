@@ -9,6 +9,7 @@ use std::cell::RefCell;
 mod active;
 mod communicate;
 mod control;
+mod poll;
 mod selector;
 
 pub(super) use active::cleanup;
@@ -77,6 +78,7 @@ impl Default for Redirects {
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
+    poll_override: Option<poll::Override>,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
@@ -492,6 +494,7 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         control: Arc::new(ChildControl::new(child)),
         communication: Default::default(),
         finalized: false,
+        poll_override: None,
     })
 }
 
@@ -710,23 +713,26 @@ pub unsafe extern "C" fn imre_child_wait(
 }
 
 /// # Safety
+/// The caller roots the integer until conversion; conversion can raise OverflowError.
+unsafe fn signal_number(signal: usize) -> Result<i32> {
+    // SAFETY: the caller supplied a rooted Python integer.
+    unsafe { Int::borrow(signal) }
+        .as_small()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
+
+/// # Safety
 /// The control stays rooted, and the signal integer belongs to the caller thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal: usize) {
     // SAFETY: no language state from the Popen owner is accessed while signaling.
-    let result = unsafe {
-        (*control).signal(|| {
-            Int::borrow(signal)
-                .as_small()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large to convert to C int",
-                    )
-                })
-        })
-    };
+    let result = unsafe { (*control).signal(|| signal_number(signal)) };
     finish(result, ());
 }
 
@@ -734,8 +740,13 @@ pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal:
 /// Legacy entry point: the caller roots this Popen on its owner thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_status(handle: *const Object, poll: bool) -> usize {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_status(imre_popen_control(handle), poll) }
+    // SAFETY: clone the callable under the borrow, then invoke it after releasing the borrow.
+    unsafe {
+        if poll && let Some(callback) = with_process(handle, |p| p.poll_override.clone()) {
+            return callback.invoke();
+        }
+        imre_child_status(imre_popen_control(handle), poll)
+    }
 }
 
 /// # Safety
@@ -750,8 +761,12 @@ pub unsafe extern "C" fn imre_popen_wait(handle: *const Object, kind: u32, word:
 /// Legacy entry point: the handle and signal integer stay rooted on this thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_signal(handle: *const Object, signal: usize) {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_signal(imre_popen_control(handle), signal) }
+    // SAFETY: the handle and signal stay rooted across the optional user callback.
+    unsafe {
+        if !poll::imre_popen_signal_override(handle, signal) {
+            imre_child_signal(imre_popen_control(handle), signal);
+        }
+    }
 }
 
 /// # Safety
