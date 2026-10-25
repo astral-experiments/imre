@@ -51,6 +51,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::ForwardRef(_)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -115,6 +116,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::ForwardRef(_)
             | Self::BuiltinClass
             | Self::StrLiteral(_)
             | Self::Bytes
@@ -715,9 +717,11 @@ impl Emitter<'_, '_> {
             Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(..) => {
-                "record"
-            }
+            Type::Class(_)
+            | Type::Tuple(_)
+            | Type::Callable(_)
+            | Type::ForwardRef(_)
+            | Type::CompletedProcess(..) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -3206,6 +3210,18 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::ForwardRef(_) => {
+                    let equal = self.instruction(format!(
+                        "call i32 @imre_forward_ref_equal(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    let pred = if matches!(op, Compare::Equal) {
+                        "ne"
+                    } else {
+                        "eq"
+                    };
+                    self.instruction(format!("icmp {pred} i32 {equal}, 0"))
+                }
                 Type::Int if left.small_integer && right.small_integer => self.instruction(
                     format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
                 ),
@@ -3563,6 +3579,31 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if let Builtin::ForwardRefField(index) = builtin {
+            let [reference] = expressions else {
+                unreachable!()
+            };
+            let Type::ForwardRef(id) = reference.ty else {
+                unreachable!()
+            };
+            let frame = Expr {
+                ty: Type::Tuple(id),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
+            };
+            return self.expression(&Expr {
+                ty: returns,
+                kind: ExprKind::Field(Box::new(frame), *index),
+            });
+        }
+        if matches!(builtin, Builtin::NewForwardRef) {
+            let Type::ForwardRef(id) = returns else {
+                unreachable!()
+            };
+            return Value {
+                ty: returns,
+                ..self.record_from_fields(Type::Tuple(id), expressions)
+            };
+        }
         if matches!(
             builtin,
             Builtin::LiteralStringView
@@ -3698,7 +3739,9 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::LiteralStringView
+            Builtin::ForwardRefField(_)
+            | Builtin::NewForwardRef
+            | Builtin::LiteralStringView
             | Builtin::ClassNameView
             | Builtin::DictAsBase
             | Builtin::RecordView
@@ -4044,11 +4087,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::WarningFilter(category) => {
+            Builtin::WarningFilter { category, invalid } => {
+                let append = self.instruction(format!("zext i1 {} to i32", args[6].value.operand));
                 self.checked_line(format!(
-                    "call void @imre_warning_simplefilter(ptr {}, i32 {category})",
-                    args[0].value.operand
+                    "call void @imre_warning_filter(ptr {}, ptr {}, ptr {}, ptr {}, ptr {}, i64 {}, i32 {append}, i32 {category}, i32 {invalid})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand,
+                    args[3].value.operand, args[4].value.operand, args[5].value.operand
                 ));
+                none()
+            }
+            Builtin::WarningReset => {
+                self.void_call("imre_warning_reset", &[]);
                 none()
             }
             Builtin::TimeSleep => {
@@ -4347,6 +4396,17 @@ impl Emitter<'_, '_> {
             Builtin::UnionProject => {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_project(value, returns);
+            }
+            Builtin::IsBuiltinSubclass => {
+                let result = self.instruction(format!(
+                    "call i32 @imre_builtin_issubclass(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {result}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::IsInstance(classes) => Value {
                 ty: Type::Bool,
@@ -5433,6 +5493,11 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
+            Builtin::DictFromKeysTarget => self.call(
+                "imre_dict_fromkeys_target",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::CounterNew => {
                 let (key, _) = self.module.types.mapping(returns).unwrap();
@@ -5782,6 +5847,7 @@ impl Emitter<'_, '_> {
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
                     Type::ListInt
+                    | Type::ForwardRef(_)
                     | Type::BuiltinClass
                     | Type::Class(_)
                     | Type::List(_)
@@ -6029,6 +6095,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::ForwardRef(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -6107,6 +6174,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::ForwardRef(_)
             | Type::BuiltinClass
             | Type::StrLiteral(_)
             | Type::Bytes
@@ -6700,6 +6768,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
         Type::BuiltinClass => 11,
+        Type::ForwardRef(_) => 12,
         Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
@@ -6895,7 +6964,8 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare double @imre_wall_time()
-declare void @imre_warning_simplefilter(ptr, i32)
+declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
+declare void @imre_warning_reset()
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_text(ptr,ptr)
@@ -7043,6 +7113,8 @@ declare i64 @imre_path_write_bytes(ptr, ptr)
 declare void @imre_path_mkdir(ptr, i64, i32, i32)
 declare void @imre_path_unlink(ptr, i32)
 declare void @imre_path_rmdir(ptr)
+declare ptr @imre_path_readlink(ptr)
+declare void @imre_path_link(ptr, i64, i32, i32)
 declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
@@ -7207,6 +7279,8 @@ declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
+declare i32 @imre_forward_ref_equal(ptr, ptr) nounwind
+declare i32 @imre_builtin_issubclass(ptr, ptr) nounwind
 declare i32 @imre_sequence_equal(ptr, ptr) nounwind
 declare i32 @imre_tuple_compare(ptr, ptr) nounwind
 declare ptr @imre_value_repr(i64, i32)
@@ -7281,6 +7355,7 @@ declare ptr @imre_namespace_dict(ptr)
 declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
+declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare i64 @imre_deep_copy(i64, i32)
 declare ptr @imre_record_shallow_copy(ptr)
 declare ptr @imre_default_list_dict_new(i32, i32)
@@ -7335,6 +7410,7 @@ declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
+declare ptr @imre_str_translate(ptr, ptr)
 declare ptr @imre_str_unquote(ptr)
 declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)

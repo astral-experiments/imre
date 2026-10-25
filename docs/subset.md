@@ -313,6 +313,8 @@ The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as 
 
 `str.expandtabs(tabsize=8)` counts Unicode code points, resets the column on CR or LF, and removes tabs for zero or negative widths. Converting the width happens before inspecting the text. Integers, booleans, and fixed classes with an integer-returning `__index__` are supported; values outside the platform C `int` range raise `OverflowError`. A string with no tabs retains its identity. A user `__index__` returning a boolean is rejected because Python's configurable deprecation warning is not supported.
 
+`str.translate(table)` looks up each Unicode ordinal in an exact plain dictionary. A missing ordinal keeps the character; `None` deletes it; an integer selects a code point, and a string can replace the character with any number of characters. An invalid value raises only when its key is hit. Tables use supported homogeneous or optional value layouts, and integer keys or provably distinct string, bytes or tuple keys. An inline ordinal table may mix strings, integers and `None`; the same value layout handles a closed string-or-integer result (such as `logging.getLevelName(name)`). User lookup callbacks, sequence tables, `str.maketrans`, and surrogate output are outside this subset.
+
 The bundled `string` module exports its nine ASCII character sets in CPython order (`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`). `string.capwords(s, sep=None)` accepts native strings, collapses Python whitespace by default, and preserves empty fields with an explicit separator. `Formatter`, `Template`, `string.templatelib`, and arbitrary module reflection are outside this subset.
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
@@ -553,6 +555,14 @@ The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes
 
 ## Function arguments and defaults
 
+An ordinary wrapper can forward `**options` once to a statically known function
+that it calls by name. Supply all of that function's positional arguments;
+its remaining keyword-only parameters must have immutable scalar defaults.
+For example, `def report(value, **options): return format_row(value, **options)`
+accepts the same optional named arguments as `format_row`. Caller expressions
+still run in source order. Reading, changing, or returning the keyword
+dictionary requires general variadic support and is rejected.
+
 First-party functions, instance methods, and constructors accept positional and named arguments. Parameters before `/` are positional-only; parameters after a bare `*` are keyword-only. Other parameters accept either form. Imported aliases and re-exports retain the defining signature. Every call is bound during compilation, including checks for missing, duplicate, unexpected, or incorrectly typed arguments.
 
 ```python
@@ -606,6 +616,8 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 `textwrap.indent(text, prefix, predicate=None)` preserves line endings, including CRLF and Unicode line separators. By default it prefixes lines that contain a non-whitespace character. An optional `Callable[[str], bool]` receives each complete line, including its terminator. Errors raised by the predicate stop iteration.
 
+`textwrap.TextWrapper`, `wrap`, `fill`, and `shorten` support string input, explicit wrapping options, and mutation of a wrapper between calls. Word splitting follows CPython's whitespace and hyphen rules, including its Unicode word characters. Boolean options also accept integers; when choosing how to split, CPython checks whether `break_on_hyphens` is the singleton `True`. A dynamically assembled keyword dictionary still needs the compiler's normal keyword-unpacking support.
+
 ## Immutable bytes
 
 `hashlib.sha256(data=b"", *, usedforsecurity=True)` constructs a mutable SHA-256 hash from exact bytes. `update(data)` adds bytes and returns `None`. `digest()` returns 32 bytes and `hexdigest()` returns 64 lowercase hexadecimal digits; neither prevents further updates. An assignment shares the same hash, while `copy()` creates an independent state. The read-only attributes are `name`, `digest_size`, and `block_size`. Both values of the boolean `usedforsecurity` select the same SHA-256 implementation. The named constructor `hashlib.new(name, data=b"", *, usedforsecurity=True)` resolves SHA-256 aliases at runtime. `hashlib.algorithms_available` is a shared mutable set of the provider’s supported canonical names (currently `sha256`); adding a name to the set does not install a new algorithm. Unknown names raise `ValueError`. The immediate `sha256(data).hexdigest()` spelling can hash the bytes directly without allocating a mutable object.
@@ -652,6 +664,8 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
+
+On POSIX, `new_link.symlink_to(target, target_is_directory=False)` and `new_link.hardlink_to(target)` accept strings, bytes, native paths, and typed `__fspath__` methods returning strings or bytes. Hard links follow a symlink source. Relative symlink targets retain their original spelling on disk; `readlink()` returns that target as a fresh Path without following it. OS failures retain the two converted pathnames. Reading a target containing undecodable bytes still needs surrogateescape support. An OS error involving a `StrEnum` source currently retains its text, losing the enum identity.
 
 Concrete paths expose `info`, a view with `exists()`, `is_dir()`, `is_file()`, and `is_symlink()`. The first three accept the keyword-only `follow_symlinks` flag. A saved view retains its results after filesystem changes; a new `Path(p)` starts with an empty cache. Paths from `iterdir()` use the file type reported by the directory scan. Calling these predicates on a path directly queries the filesystem again.
 
@@ -1008,13 +1022,19 @@ methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
+`dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
+It evaluates the value once, defaults it to `None`, and shares that object
+among all keys. A bound call uses the receiver's class without copying its
+entries. A native defaultdict produces a new mapping with no default factory;
+a native Counter raises `NotImplementedError`.
+
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
 `set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.
 
-`set(cursor)` consumes a native iterator from its current position and owns each distinct element. An empty `set()` in a conditional can take its element type from the other branch.
+`set(cursor)` consumes a native iterator from its current position and owns each distinct element. `set` can also consume ranges, generator expressions and typed iterator pipelines directly. An empty `set()` in a conditional can take its element type from the other branch.
 
 Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 

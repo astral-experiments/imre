@@ -17,12 +17,6 @@ use std::sync::Arc;
 
 type Pipes = [Option<Rc<Object>>; 3];
 
-fn returncode(status: ExitStatus) -> i32 {
-    status
-        .code()
-        .unwrap_or_else(|| -status.signal().unwrap_or(0))
-}
-
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
