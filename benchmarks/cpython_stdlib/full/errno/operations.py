@@ -89,6 +89,12 @@ def main() -> None:
         print(isinstance(item, dict))
     print(getattr(errno, "unknown_name", False) == 0)
     print(getattr(errno, "unknown_name", b"fallback") == b"fallback")
+    for name in ["errorcode", "__dict__", "__annotations__", "__spec__"]:
+        try:
+            print(getattr(errno, name) in reverse)
+        except TypeError as exc:
+            print(str(exc))
+            print(repr(exc))
     for sample in ["", "!?A", "A1", "ǅ", "Aǅ", "Aʕ", "A꟎", "A𖺠"]:
         print(sample.isupper())
 

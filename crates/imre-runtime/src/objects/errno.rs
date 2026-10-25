@@ -496,7 +496,8 @@ pub unsafe extern "C" fn imre_errno_member_contains(
     member: *const Object,
     mapping: *const Object,
 ) -> u32 {
-    with_member(member, |m| match m {
+    with_member(member, |m| {
+        match m {
         // SAFETY: the tagged integer and concrete integer-key dictionary are valid.
         Member::Number(n) => unsafe {
             imre_dict_contains(mapping, Int::small(i64::from(*n)).unwrap().0)
@@ -516,9 +517,10 @@ pub unsafe extern "C" fn imre_errno_member_contains(
         | Member::Class
         | Member::Bound(..) => 0,
         Member::Dictionary(_) | Member::Namespace(_) => {
-            Error::new(Kind::TypeError, "unhashable type: 'dict'").returning(0)
+            Error::new(Kind::TypeError, "cannot use 'dict' as a dict key (unhashable type: 'dict')").returning(0)
         }
-        Member::Spec => Error::new(Kind::TypeError, "unhashable type: 'ModuleSpec'").returning(0),
+        Member::Spec => Error::new(Kind::TypeError, "cannot use '_frozen_importlib.ModuleSpec' as a dict key (unhashable type: 'ModuleSpec')").returning(0),
+    }
     })
 }
 
