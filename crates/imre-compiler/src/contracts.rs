@@ -293,6 +293,7 @@ impl Builtin {
             | Self::Str
             | Self::NominalIdentity
             | Self::StrEnumMember { .. }
+            | Self::ClassNameView
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString

@@ -80,6 +80,7 @@ impl Types {
             Type::AsyncProcess(bits) => bits <= 3,
             Type::Int
             | Type::Float
+            | Type::BuiltinClass
             | Type::Bool
             | Type::Str
             | Type::Bytes

@@ -229,7 +229,7 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
         match raw & !NULLABLE {
             0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
-            3 => *(left as *const Str) == *(right as *const Str),
+            3 | 11 => *(left as *const Str) == *(right as *const Str),
             4 => {
                 if left == right {
                     return true;
@@ -452,6 +452,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
             10 => super::string_enums::write_repr(output, word),
+            11 => write!(output, "<class '{}'>", *(word as *const Str)).unwrap(),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
                 output.push_str(if value == 0 { "False" } else { "True" });

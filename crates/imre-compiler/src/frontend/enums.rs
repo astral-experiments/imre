@@ -149,6 +149,19 @@ impl Checker<'_> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if types == [Type::BuiltinClass; 2] {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Compare(
+                    vec![left, right],
+                    vec![if op == ast::CmpOp::Is {
+                        Compare::Equal
+                    } else {
+                        Compare::NotEqual
+                    }],
+                ),
+            });
+        }
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
