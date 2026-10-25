@@ -48,6 +48,11 @@ pub struct RecordSemantics {
 }
 
 impl RecordDescriptor {
+    pub(super) fn is_value_struct(&self) -> bool {
+        // SAFETY: the compiler emits immutable metadata for the lifetime of the program.
+        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 8 != 0) }
+    }
+
     /// Only records with a pure TOML hash reserve an extra untraced cache word.
     pub(super) fn has_toml_hash(&self) -> bool {
         // SAFETY: every descriptor used by the runtime owns static metadata or null.
@@ -55,8 +60,16 @@ impl RecordDescriptor {
     }
 
     fn allocated_words(&self) -> usize {
+        // These struct-sequence attributes contain only raw numbers. They are
+        // neither Python tuple elements nor owners to be visited during release.
+        // SAFETY: a non-null semantics pointer refers to the descriptor's permanent metadata.
+        let stat_words = if unsafe { self.semantics.as_ref() }.is_some_and(|s| s.flags & 8 != 0) {
+            super::os::stat_result::EXTRA_WORDS
+        } else {
+            0
+        };
         self.length
-            .checked_add(usize::from(self.has_toml_hash()))
+            .checked_add(usize::from(self.has_toml_hash()) + stat_words)
             .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"))
     }
 }

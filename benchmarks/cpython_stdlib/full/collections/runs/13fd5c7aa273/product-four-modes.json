@@ -1,0 +1,56 @@
+{
+  "containers/count_elements.py": {
+    "O0-reachable-0": {
+      "lines": 24,
+      "stdout_sha256": "01f95f23398fe833c82d99f77876ddd9de7055149f2768040ed1b06314a37f8b"
+    },
+    "O0-reachable-1": {
+      "lines": 24,
+      "stdout_sha256": "01f95f23398fe833c82d99f77876ddd9de7055149f2768040ed1b06314a37f8b"
+    },
+    "O3-reachable-0": {
+      "lines": 24,
+      "stdout_sha256": "01f95f23398fe833c82d99f77876ddd9de7055149f2768040ed1b06314a37f8b"
+    },
+    "O3-reachable-1": {
+      "lines": 24,
+      "stdout_sha256": "01f95f23398fe833c82d99f77876ddd9de7055149f2768040ed1b06314a37f8b"
+    }
+  },
+  "classes/mapping_abc.py": {
+    "O0-reachable-0": {
+      "lines": 33,
+      "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+    },
+    "O0-reachable-1": {
+      "lines": 33,
+      "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+    },
+    "O3-reachable-0": {
+      "lines": 33,
+      "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+    },
+    "O3-reachable-1": {
+      "lines": 33,
+      "stdout_sha256": "38637d1d0aecd6e2289971902dffd8a5ccc50c6362b42fe6765e9cfc5e867a78"
+    }
+  },
+  "classes/mapping_alias.py": {
+    "O0-reachable-0": {
+      "lines": 14,
+      "stdout_sha256": "8d75aad84b9ab52ae3aa21b94a790ea907415be06b5dc7eca0178373423afe7d"
+    },
+    "O0-reachable-1": {
+      "lines": 14,
+      "stdout_sha256": "8d75aad84b9ab52ae3aa21b94a790ea907415be06b5dc7eca0178373423afe7d"
+    },
+    "O3-reachable-0": {
+      "lines": 14,
+      "stdout_sha256": "8d75aad84b9ab52ae3aa21b94a790ea907415be06b5dc7eca0178373423afe7d"
+    },
+    "O3-reachable-1": {
+      "lines": 14,
+      "stdout_sha256": "8d75aad84b9ab52ae3aa21b94a790ea907415be06b5dc7eca0178373423afe7d"
+    }
+  }
+}

@@ -153,6 +153,9 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
+            return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
+        }
         match self.resolve(expression) {
             Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
                 return Ok(vec![InstanceType::ForwardRef]);
@@ -171,6 +174,22 @@ impl Checker<'_> {
         }
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
+        }
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);

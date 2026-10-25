@@ -10,7 +10,7 @@
     "test_tupleargs",
     "test_unicode_values"
   ],
-  "default_pattern_callable_assertions": [
+  "native_callable_assertions": [
     "test_invalid_placeholders",
     "test_keyword_arguments_safe",
     "test_regular_templates",

@@ -1,6 +1,8 @@
 //! POSIX descriptors are integers in the program's descriptor table. A call
 //! can observe a closed number or a number subsequently reused by the kernel.
 
+mod credentials;
+
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
 use super::{Bytes, Int, Str, c_int};
@@ -10,6 +12,7 @@ use std::io;
 use std::rc::Rc;
 
 pub(super) mod links;
+pub(super) mod stat_result;
 
 /// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
 pub(super) fn metadata(
