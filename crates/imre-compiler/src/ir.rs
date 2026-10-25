@@ -361,6 +361,7 @@ impl std::fmt::Display for Type {
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Scalar) => "None, bool, int or str",
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
@@ -1357,6 +1358,8 @@ pub(crate) enum StringIoOperation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
     Any,
+    /// A tagged Python scalar whose container equality does not depend on object identity.
+    Scalar,
     Map,
     List,
 }
