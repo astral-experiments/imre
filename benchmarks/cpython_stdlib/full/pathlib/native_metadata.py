@@ -16,16 +16,15 @@ def metadata_adapters(tools, work):
             raise ValueError(f'unexpected concrete pathlib fixture: {case.id()}')
         directory = work / case.id()
         directory.mkdir()
-        fixture = f'''from pathlib import {ctor}
-class NativeCase:
+        fixture = f'''import unittest
+from pathlib import {ctor}
+class NativeCase(unittest.TestCase):
     base: str
     def __init__(self) -> None:
+        super().__init__()
         self.base = {case.base!r}
     def cls(self, name: str) -> {ctor}:
         return {ctor}(name)
-    def assertFalse(self, value: bool) -> None:
-        if value:
-            raise AssertionError('expected a cached false result')
 '''
         return native_method(tools, directory, MODULE, 'PathTest', case.id(), fixture,
                              operation=('imre', 'Path.info queries before and after a native filesystem mutation'))(case, original)
