@@ -7,11 +7,10 @@ use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, symlink};
 use std::path::Path;
-use std::rc::Rc;
 
 use super::super::exceptions::{Error, Filename, Kind, finish, push_string_repr};
 use super::super::files::{close_file, errno_error, errno_with_filenames};
-use super::super::{Bytes, Object, Str, acquire_rc, bytes, paths};
+use super::super::{Bytes, Object, Str, bytes, paths};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -237,7 +236,7 @@ unsafe fn retain_handle(value: *const (), tag: u32) -> usize {
         match tag {
             0 => StrOwner::increment_strong_count(value.cast::<Str>()),
             1 => crate::retain_bytes(value.cast::<Bytes>()),
-            2 => Rc::increment_strong_count(value.cast::<Object>()),
+            2 => crate::ObjectOwner::increment_strong_count(value.cast::<Object>()),
             _ => unreachable!(),
         }
     }

@@ -1,7 +1,7 @@
 //! Reentrant I/O locks for logging handlers. The mutex protects bookkeeping only;
 //! Python code runs with an owner recorded, never with the Rust guard borrowed.
 
-use super::{Error, Int, Kind, Object, Rc, Result, Storage, StorageCell, finish, object};
+use super::{Error, Int, Kind, Object, Result, Storage, StorageCell, finish, object};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
@@ -124,9 +124,9 @@ fn timeout(blocking: bool, seconds: f64) -> Result<Option<Duration>> {
 /// Allocate an unlocked handle owned independently of its handler.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_log_lock_new() -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::HandlerLock(
-        Arc::default(),
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::HandlerLock(Arc::default()),
+    ))))
 }
 
 /// # Safety

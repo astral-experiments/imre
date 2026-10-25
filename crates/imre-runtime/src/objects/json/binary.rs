@@ -135,7 +135,6 @@ pub unsafe extern "C" fn imre_json_loads_bytes(bytes: *const Bytes) -> *const Ob
 mod tests {
     use super::*;
     use crate::objects::exceptions::{imre_error_take, imre_exception_repr};
-    use std::rc::Rc;
 
     #[test]
     fn invalid_utf8_retains_the_original_bytes() {
@@ -155,8 +154,9 @@ mod tests {
         drop(bytes);
         // SAFETY: take and repr each transfer one owner, and the exception stays rooted.
         let (error, repr) = unsafe {
-            let error = Rc::from_raw(imre_error_take());
-            let repr = crate::StrOwner::from_raw(imre_exception_repr(Rc::as_ptr(&error)));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            let repr =
+                crate::StrOwner::from_raw(imre_exception_repr(crate::ObjectOwner::as_ptr(&error)));
             (error, repr)
         };
         assert_eq!(

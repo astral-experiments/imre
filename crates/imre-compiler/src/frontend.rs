@@ -23,6 +23,7 @@ mod cached_properties;
 mod calendar;
 mod call_binding_errors;
 mod callables;
+mod caller_cache;
 mod calls;
 mod chainmap;
 mod class_data;
@@ -119,6 +120,7 @@ mod warnings;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
+pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -549,6 +551,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
 pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
+    lower_with_caller_cache(graph, None)
+}
+
+pub(crate) fn lower_with_caller_cache(
+    graph: &SourceGraph,
+    mut cache: Option<&mut CallerCache>,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -883,6 +892,9 @@ pub(crate) fn lower_with_owners(
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.validate_abi(&definitions, &globals);
+    }
     let mut functions = Vec::new();
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -891,138 +903,26 @@ pub(crate) fn lower_with_owners(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let result = (|| {
-            let mut checker = Checker::new(
-                graph,
-                *module_id,
-                &signatures,
-                &classes,
-                &types,
-                &helpers,
-                &globals,
-            );
-            checker.returns = signature.returns;
-            checker.interactive_names =
-                module.is_doctest_case() && definition.name.as_str() == "_run_case";
-            checker.asynchronous = signature.asynchronous;
-            checker.method_context(signature.method);
-            checker.generator_item = classes.producer_items.get(&signature.id).copied();
-            let mut params = Vec::new();
-            for (parameter, signature) in
-                closed_calls::parameters(&definition.parameters).zip(&signature.params)
-            {
-                let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
-                checker.assigned.insert(slot);
-                params.push(slot);
-            }
-            if let Some(keyword) = &definition.parameters.kwarg {
-                let parameter = signature.params.last().expect("keyword-rest signature");
-                let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
-                checker.assigned.insert(slot);
-                params.push(slot);
-            }
-            let (mut body, falls_through) = if module.archive.is_some() {
-                let args = params.iter().map(|&slot| checker.local(slot)).collect();
-                let kind = |ty| match ty {
-                    Type::None => Ok(0),
-                    Type::Int => Ok(1),
-                    Type::Bytes => Ok(2),
-                    Type::ListInt => Ok(3),
-                    Type::Callable(_)
-                        if types.signature(ty) == Some((vec![Type::Int], Type::Int)) =>
-                    {
-                        Ok(4)
-                    }
-                    _ => Err(error(
-                        &module.source,
-                        definition,
-                        "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
-                    )),
-                };
-                let call = Builtin::ExtensionCall {
-                    module: module.name.rsplit('.').next().unwrap().to_owned(),
-                    method: definition.name.to_string(),
-                    kinds: signature
-                        .params
-                        .iter()
-                        .map(|p| kind(p.ty))
-                        .collect::<Result<_, _>>()?,
-                    result_kind: kind(signature.returns)?,
-                };
-                (
-                    vec![Statement::Return(Expr {
-                        ty: signature.returns,
-                        kind: ExprKind::Builtin(call, args),
-                    })],
-                    false,
-                )
-            } else if classes.keyword_copies.contains(&signature.id) {
-                let class = signature.method.unwrap().class;
-                let value = checker.dispatch_record(
-                    class,
-                    checker.local(params[0]),
-                    definition,
-                    |checker, class, receiver| {
-                        checker.copy_with_keywords(class, receiver, &[], definition)
-                    },
-                )?;
-                (vec![Statement::Return(value)], false)
-            } else if signature.method.is_some_and(|m| {
-                definition.name.as_str() == "__post_init__"
-                    && checker.normalized_record_input(m.class).is_some()
-            }) {
-                // The generated initializer stores the normalized field on all input paths.
-                (vec![], true)
-            } else {
-                checker.function_body(&definition.body)?
-            };
-            if let Some(context) = signature.method
-                && let class = &classes.declarations.definitions[context.class]
-                && class.generated_initializer
-                && class.initializer == Some(context.index)
-                && let Some(post) = classes.methods[context.class].get("__post_init__")
-            {
-                checker.calls.insert(post.id);
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Call(
-                        post.id,
-                        ir::CallArgs::positional(vec![checker.local(params[0])]),
-                    ),
-                }));
-            }
-            if falls_through && types.payload(signature.returns).is_some() {
-                body.push(Statement::Return(Expr {
-                    ty: signature.returns,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }));
-            } else if falls_through && signature.returns != Type::None {
-                return Err(error(
-                    &module.source,
-                    definition,
-                    "not every path returns the declared type",
-                ));
-            }
-            if classes.generators.contains(&signature.id) {
-                body = checker.generator_body(body);
-            }
-            Ok((
-                ir::Function {
-                    params,
-                    returns: signature.returns,
-                    locals: checker.locals,
-                    body,
-                },
-                checker.calls,
-                checker.class_reads.into_inner(),
-                checker.zip_sums,
-            ))
-        })();
-        let (function, calls, reads, sums) =
-            result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let checker = Checker::new(
+            graph,
+            *module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        let result = match cache.as_deref_mut() {
+            Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
+            _ => lower_body(checker, definition, signature),
+        };
+        let (body, sums) = result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let LoweredBody {
+            function,
+            calls,
+            class_reads: reads,
+            ..
+        } = body;
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
             helpers.finish(
@@ -1174,6 +1074,9 @@ pub(crate) fn lower_with_owners(
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
     Ok((
         ir::Module {
             ignore_python_environment: graph
@@ -1190,6 +1093,143 @@ pub(crate) fn lower_with_owners(
             entry,
         },
         owners,
+    ))
+}
+
+#[derive(Clone)]
+struct LoweredBody {
+    function: ir::Function,
+    calls: HashSet<usize>,
+    class_reads: HashSet<DefinitionId>,
+    default_reads: Option<Vec<caller_cache::DefaultId>>,
+}
+
+type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
+
+fn lower_body(
+    mut checker: Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+) -> BodyResult {
+    #[cfg(test)]
+    caller_cache::record_lowering(definition.name.as_str());
+    let module = &checker.graph.modules[checker.module];
+    let classes = checker.classes;
+    let types = checker.types;
+    checker.returns = signature.returns;
+    checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
+    checker.asynchronous = signature.asynchronous;
+    checker.method_context(signature.method);
+    checker.generator_item = classes.producer_items.get(&signature.id).copied();
+    let mut params = Vec::new();
+    for (parameter, signature) in
+        closed_calls::parameters(&definition.parameters).zip(&signature.params)
+    {
+        let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
+        checker.assigned.insert(slot);
+        params.push(slot);
+    }
+    if let Some(keyword) = &definition.parameters.kwarg {
+        let parameter = signature.params.last().expect("keyword-rest signature");
+        let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
+        checker.assigned.insert(slot);
+        params.push(slot);
+    }
+    let (mut body, falls_through) = if module.archive.is_some() {
+        let args = params.iter().map(|&slot| checker.local(slot)).collect();
+        let kind = |ty| match ty {
+            Type::None => Ok(0),
+            Type::Int => Ok(1),
+            Type::Bytes => Ok(2),
+            Type::ListInt => Ok(3),
+            Type::Callable(_) if types.signature(ty) == Some((vec![Type::Int], Type::Int)) => Ok(4),
+            _ => Err(error(
+                &module.source,
+                definition,
+                "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
+            )),
+        };
+        let call = Builtin::ExtensionCall {
+            module: module.name.rsplit('.').next().unwrap().to_owned(),
+            method: definition.name.to_string(),
+            kinds: signature
+                .params
+                .iter()
+                .map(|p| kind(p.ty))
+                .collect::<Result<_, _>>()?,
+            result_kind: kind(signature.returns)?,
+        };
+        (
+            vec![Statement::Return(Expr {
+                ty: signature.returns,
+                kind: ExprKind::Builtin(call, args),
+            })],
+            false,
+        )
+    } else if classes.keyword_copies.contains(&signature.id) {
+        let class = signature.method.unwrap().class;
+        let value = checker.dispatch_record(
+            class,
+            checker.local(params[0]),
+            definition,
+            |checker, class, receiver| checker.copy_with_keywords(class, receiver, &[], definition),
+        )?;
+        (vec![Statement::Return(value)], false)
+    } else if signature.method.is_some_and(|m| {
+        definition.name.as_str() == "__post_init__"
+            && checker.normalized_record_input(m.class).is_some()
+    }) {
+        // The generated initializer stores the normalized field on all input paths.
+        (vec![], true)
+    } else {
+        checker.function_body(&definition.body)?
+    };
+    if let Some(context) = signature.method
+        && let class = &classes.declarations.definitions[context.class]
+        && class.generated_initializer
+        && class.initializer == Some(context.index)
+        && let Some(post) = classes.methods[context.class].get("__post_init__")
+    {
+        checker.calls.insert(post.id);
+        body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                post.id,
+                ir::CallArgs::positional(vec![checker.local(params[0])]),
+            ),
+        }));
+    }
+    if falls_through && types.payload(signature.returns).is_some() {
+        body.push(Statement::Return(Expr {
+            ty: signature.returns,
+            kind: ExprKind::Absent(Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            })),
+        }));
+    } else if falls_through && signature.returns != Type::None {
+        return Err(error(
+            &module.source,
+            definition,
+            "not every path returns the declared type",
+        ));
+    }
+    if classes.generators.contains(&signature.id) {
+        body = checker.generator_body(body);
+    }
+    Ok((
+        LoweredBody {
+            function: ir::Function {
+                params,
+                returns: signature.returns,
+                locals: checker.locals,
+                body,
+            },
+            calls: checker.calls,
+            class_reads: checker.class_reads.into_inner(),
+            default_reads: checker.default_reads,
+        },
+        checker.zip_sums,
     ))
 }
 
@@ -2126,6 +2166,7 @@ struct Checker<'a> {
     assigned: assignments::Assigned,
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
+    default_reads: Option<Vec<caller_cache::DefaultId>>,
     loop_breaks: Vec<Option<LocalState>>,
     block_depth: usize,
     in_finally: bool,
@@ -2193,6 +2234,7 @@ impl<'a> Checker<'a> {
             assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
             class_reads: Default::default(),
+            default_reads: None,
             loop_breaks: Vec::new(),
             block_depth: 0,
             in_finally: false,
@@ -7004,6 +7046,9 @@ impl<'a> Checker<'a> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
+        if let Some(registration) = self.immediate_registration(call)? {
+            return Ok(registration);
+        }
         if call
             .func
             .as_name_expr()
@@ -7447,6 +7492,11 @@ impl<'a> Checker<'a> {
                         .expect("an overloaded definition has a stub object"),
                 );
                 return self.invoke(call, callable);
+            }
+            if let Some(slot) = binding.value_slot
+                && self.types.dispatcher(self.locals[slot]).is_some()
+            {
+                return self.invoke(call, self.local(slot));
             }
             if let Some(definition) = binding.generic.clone() {
                 return self.call_generic_awaitable(call, &definition);

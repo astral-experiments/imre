@@ -1,7 +1,6 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
 use crate::StrOwner;
-use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{AsciiEscape, Escape};
@@ -28,12 +27,12 @@ pub(super) struct ByteOutput {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_byte_output_new() -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ByteOutput(
-        ByteOutput {
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::ByteOutput(ByteOutput {
             bytes: Vec::new(),
             invalid: false,
-        },
-    )))))
+        }),
+    ))))
 }
 
 /// Hints at most 256 bytes per private buffer. A loop can break or raise before
@@ -584,6 +583,7 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
         .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
         .map_err(|error| {
+            // SAFETY: this exact bytes input remains rooted; acquire takes an owner for the error.
             decode_owned_error(unsafe { crate::acquire_bytes(value as usize) }, error)
         });
     finish(result, std::ptr::null())
@@ -693,9 +693,9 @@ impl BytesIterator {
 pub unsafe extern "C" fn imre_bytes_iter(value: *const Bytes) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
     let owner = unsafe { crate::acquire_bytes(value as usize) };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::BytesIterator(
-        BytesIterator { owner, position: 0 },
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::BytesIterator(BytesIterator { owner, position: 0 }),
+    ))))
 }
 
 #[cfg(test)]
@@ -705,6 +705,7 @@ mod tests {
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };
     use crate::{BigInt, MAX_SMALL, MIN_SMALL};
+    use std::rc::Rc;
 
     /// Consumes one indexing failure and checks the exact public diagnostic.
     fn assert_index_error(expected: &str) {
@@ -713,12 +714,13 @@ mod tests {
         // SAFETY: taking the pending exception transfers one live owner, and
         // message extraction returns another independently owned string.
         unsafe {
-            let error = Rc::from_raw(error);
+            let error = crate::ObjectOwner::from_raw(error);
             assert_eq!(
-                imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), Kind::IndexError as u32),
                 1
             );
-            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -813,12 +815,12 @@ mod tests {
         assert!(unsafe { imre_bytes_decode_ascii(crate::BytesOwner::as_ptr(&input)) }.is_null());
         drop(input);
         // SAFETY: taking the pending error transfers its owner.
-        let error = unsafe { Rc::from_raw(imre_error_take()) };
+        let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
         // SAFETY: error roots the exception, and repr transfers a new string owner.
         let repr = unsafe {
-            crate::StrOwner::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
-                &error,
-            )))
+            crate::StrOwner::from_raw(crate::objects::exceptions::imre_exception_repr(
+                crate::ObjectOwner::as_ptr(&error),
+            ))
         };
         assert_eq!(
             repr.as_str(),
@@ -853,15 +855,21 @@ mod tests {
             // before the next call, and failed validation acquires no owner.
             unsafe {
                 assert!(imre_bytes_decode(crate::BytesOwner::as_ptr(&source)).is_null());
-                let ordinary = Rc::from_raw(imre_error_take());
-                let expected = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
+                let ordinary = crate::ObjectOwner::from_raw(imre_error_take());
+                let expected = StrOwner::from_raw(imre_exception_message(
+                    crate::ObjectOwner::as_ptr(&ordinary),
+                ));
                 assert!(imre_bytes_validate_utf8(crate::BytesOwner::as_ptr(&source)).is_null());
-                let error = Rc::from_raw(imre_error_take());
+                let error = crate::ObjectOwner::from_raw(imre_error_take());
                 assert_eq!(
-                    imre_exception_matches(Rc::as_ptr(&error), Kind::UnicodeDecodeError as u32),
+                    imre_exception_matches(
+                        crate::ObjectOwner::as_ptr(&error),
+                        Kind::UnicodeDecodeError as u32
+                    ),
                     1
                 );
-                let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                let message =
+                    StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
                 assert_eq!(message, expected);
                 // Both failures own the original bytes for exception repr, without copying them.
                 assert_eq!(crate::BytesOwner::strong_count(&source), 3);
@@ -877,9 +885,15 @@ mod tests {
     fn byte_output_transfers_its_allocation_at_conversion() {
         // SAFETY: the sole owner roots this private builder through conversion.
         unsafe {
-            let output = Rc::from_raw(imre_byte_output_new());
+            let output = crate::ObjectOwner::from_raw(imre_byte_output_new());
             imre_byte_output_reserve_range(std::ptr::null(), 1, 2001, 3, 2);
-            imre_byte_output_reserve_range(Rc::as_ptr(&output), 1, 2001, 3, usize::MAX);
+            imre_byte_output_reserve_range(
+                crate::ObjectOwner::as_ptr(&output),
+                1,
+                2001,
+                3,
+                usize::MAX,
+            );
             output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
@@ -887,14 +901,19 @@ mod tests {
                 assert_eq!(output.bytes.capacity(), 256);
                 assert!(output.bytes.is_empty());
             });
-            assert_eq!(imre_byte_output_append_pair(Rc::as_ptr(&output), 1, 511), 1);
+            assert_eq!(
+                imre_byte_output_append_pair(crate::ObjectOwner::as_ptr(&output), 1, 511),
+                1
+            );
             let buffer = output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
                 };
                 output.bytes.as_ptr()
             });
-            let result = crate::BytesOwner::from_raw(imre_byte_output_finish(Rc::as_ptr(&output)));
+            let result = crate::BytesOwner::from_raw(imre_byte_output_finish(
+                crate::ObjectOwner::as_ptr(&output),
+            ));
             drop(output);
             assert_eq!(result.as_slice().as_ptr(), buffer);
             assert_eq!(result.as_slice(), [0, 255]);
@@ -952,12 +971,17 @@ mod tests {
                 // conversion transfers only a pending exception owner.
                 unsafe {
                     assert!(imre_bytes_list(Rc::as_ptr(&source)).is_null());
-                    let error = Rc::from_raw(imre_error_take());
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
-                        imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                        imre_exception_matches(
+                            crate::ObjectOwner::as_ptr(&error),
+                            Kind::ValueError as u32
+                        ),
                         1
                     );
-                    let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                    let message = StrOwner::from_raw(imre_exception_message(
+                        crate::ObjectOwner::as_ptr(&error),
+                    ));
                     assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
                     source.0.with(|values| {
                         assert_eq!(values.len(), 129);

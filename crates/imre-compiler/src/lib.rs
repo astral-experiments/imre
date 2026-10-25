@@ -167,7 +167,7 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     let mut graph = options.load_graph(path, module_root, filesystem)?;
@@ -212,11 +212,13 @@ pub struct UnitCompilation {
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
-/// Each call resolves imports and runs Imre's preflight, lowering and requested code generation
-/// against the current files. Changing the module root or resolved file set starts a new database.
+/// A change confined to literal `int` or `bool` defaults on explicitly typed top-level functions
+/// can also reuse completed caller bodies that did not consume those defaults. Each call resolves
+/// imports, checks the whole program and runs the requested code generation against current files.
 #[derive(Default)]
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
+    callers: frontend::CallerCache,
 }
 
 impl IncrementalCompiler {
@@ -226,7 +228,7 @@ impl IncrementalCompiler {
             path,
             module_root,
             &CompileOptions::default(),
-            Some(&mut self.cache),
+            Some(self),
             Default::default(),
         )
     }
@@ -250,7 +252,7 @@ impl IncrementalCompiler {
         options: &CompileOptions,
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        watch::check(&mut self.cache, path, module_root, options, report)
+        watch::check(self, path, module_root, options, report)
     }
 
     /// Watches the current revision and declarations in installed extension wheels.
@@ -279,7 +281,7 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         options: &CompileOptions,
     ) -> Result<UnitCompilation, String> {
-        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+        compile_file_units_with(path, module_root, options, Some(self))
     }
 }
 
@@ -296,7 +298,7 @@ fn compile_file_units_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
     let mut graph = options.load_graph(path, module_root, Default::default())?;
     let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
@@ -341,23 +343,28 @@ fn checked_lower(
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(cache) = cache else {
+    let Some(compiler) = cache else {
         return checked_lower(graph);
     };
-    cache.restore_hints(graph)?;
-    let lowered = frontend::lower_with_owners(graph);
-    cache.retain_hints(graph, lowered.is_ok());
-    let lowered = lowered?;
-    let (skipped, overloads) = graph.diagnostic_scopes();
-    cache.check_scopes(
-        &mut graph.session,
-        &graph.inputs,
-        skipped.as_deref(),
-        &overloads,
-    )?;
-    Ok(lowered)
+    compiler.cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_caller_cache(graph, compiler.callers.prepare(graph));
+    compiler.cache.retain_hints(graph, lowered.is_ok());
+    let checked = lowered.and_then(|lowered| {
+        let (skipped, overloads) = graph.diagnostic_scopes();
+        compiler.cache.check_scopes(
+            &mut graph.session,
+            &graph.inputs,
+            skipped.as_deref(),
+            &overloads,
+        )?;
+        Ok(lowered)
+    });
+    if checked.is_err() {
+        compiler.callers = frontend::CallerCache::default();
+    }
+    checked
 }
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {

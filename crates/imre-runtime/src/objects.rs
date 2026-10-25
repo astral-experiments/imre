@@ -107,7 +107,7 @@ enum Storage {
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
-    ChainMap(Rc<Object>),
+    ChainMap(crate::ObjectOwner),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
@@ -119,7 +119,7 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
     TupleBuffer(Vec<OwnedWord>),
-    SimpleNamespace(Rc<Object>),
+    SimpleNamespace(crate::ObjectOwner),
     SourceModule {
         name: crate::StrOwner,
         filename: crate::StrOwner,
@@ -133,8 +133,8 @@ enum Storage {
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),
-    ZipFile(Box<zipfile::Archive>),
-    ZipInfo(Rc<zipfile::Info>),
+    ZipFile(allocator_api2::boxed::Box<zipfile::Archive>),
+    ZipInfo(crate::Shared<zipfile::Info>),
     Popen(Box<processes::Popen>),
     ProcessSelectorClass(bool),
     AsyncProcess(Box<processes::AsyncProcess>),
@@ -163,10 +163,11 @@ enum Storage {
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
-    JsonDecoder(Rc<Object>),
+    JsonDecoder(crate::ObjectOwner),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
+#[cfg(test)]
 unsafe fn acquire_rc<T>(word: usize) -> Rc<T> {
     if word == 0 {
         fail("TypeError", "unexpected null runtime handle");
@@ -218,7 +219,7 @@ impl Storage {
 pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller roots this allocation.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { crate::ObjectOwner::increment_strong_count(value) };
     }
 }
 
@@ -228,21 +229,21 @@ pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_object_release(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live strong reference.
-        release_object_owner(unsafe { Rc::from_raw(value) });
+        release_object_owner(unsafe { crate::ObjectOwner::from_raw(value) });
     }
 }
 
 /// Give a live Popen's final language owner to subprocess._active before its
 /// allocation is destroyed. All other object owners follow the usual Rc drop.
-fn release_object_owner(owner: Rc<Object>) {
-    if Rc::strong_count(&owner) == 1 {
+fn release_object_owner(owner: crate::ObjectOwner) {
+    if crate::ObjectOwner::strong_count(&owner) == 1 {
         processes::retain_live_owner(&owner);
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
-    Rc::into_raw(Words::new(kind).into_object())
+    crate::ObjectOwner::into_raw(Words::new(kind).into_object())
 }
 
 /// Remember a mock history's `_CallList` identity across aliases and resets.
@@ -625,7 +626,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
         })
     };
     finish(
-        result.map(|values| Rc::into_raw(values.into_object())),
+        result.map(|values| crate::ObjectOwner::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }
@@ -1196,7 +1197,7 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     {
         text::push_part(&mut result, &value, part);
     }
-    Rc::into_raw(result.into_object())
+    crate::ObjectOwner::into_raw(result.into_object())
 }
 
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
@@ -1333,9 +1334,9 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
     // SAFETY: acquire a strong reference while the caller still roots the input.
     let owner: StrOwner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     let offsets = LineOffsets::new(&owner);
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LineIterator(
-        LineIterator { owner, offsets },
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::LineIterator(LineIterator { owner, offsets }),
+    ))))
 }
 
 /// Splits Python line boundaries without retaining separators. CRLF is one
@@ -1404,7 +1405,7 @@ fn split_lines(
             .map_err(|_| Error::allocation())?;
         result.values.push(StrOwner::into_raw(own(range)?) as usize);
     }
-    Ok(Rc::into_raw(result.into_object()))
+    Ok(crate::ObjectOwner::into_raw(result.into_object()))
 }
 
 #[cfg(test)]
@@ -1708,13 +1709,17 @@ mod tests {
             // SAFETY: taking pending transfers one exception owner; retrieving
             // its message returns one independent string owner, both adopted once.
             unsafe {
-                let error = Rc::from_raw(exceptions::imre_error_take());
+                let error = crate::ObjectOwner::from_raw(exceptions::imre_error_take());
                 assert_eq!(
-                    exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                    exceptions::imre_exception_matches(
+                        crate::ObjectOwner::as_ptr(&error),
+                        Kind::IndexError as u32
+                    ),
                     1,
                 );
-                let message =
-                    StrOwner::from_raw(exceptions::imre_exception_message(Rc::as_ptr(&error)));
+                let message = StrOwner::from_raw(exceptions::imre_exception_message(
+                    crate::ObjectOwner::as_ptr(&error),
+                ));
                 assert_eq!(message.as_str(), expected);
             }
             assert_eq!(exceptions::imre_error_pending(), 0);
@@ -1877,9 +1882,12 @@ mod tests {
             let restored = StrOwner::from_raw(pointer);
             assert!(StrOwner::ptr_eq(&restored, &alias));
             assert_eq!(restored.as_str(), "preserved");
-            let error = Rc::from_raw(exceptions::imre_error_take());
+            let error = crate::ObjectOwner::from_raw(exceptions::imre_error_take());
             assert_eq!(
-                exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::MemoryError as u32),
+                exceptions::imre_exception_matches(
+                    crate::ObjectOwner::as_ptr(&error),
+                    Kind::MemoryError as u32
+                ),
                 1
             );
         }
@@ -2377,7 +2385,8 @@ mod tests {
             // SAFETY: the source is rooted; the returned sequence transfers one
             // owner, and inspection copies strings without retaining storage refs.
             let actual = unsafe {
-                let result = Rc::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
+                let result =
+                    crate::ObjectOwner::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
                 result.0.with(|storage| {
                     storage
                         .sequence()
