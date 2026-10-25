@@ -84,20 +84,20 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
-        if value.ty == Type::ExitCode {
+        if value.ty == Type::ExceptionField {
             // The view retains its heterogeneous payload. None is not a class
             // accepted by this subset, and bool is also an instance of int.
-            let mut mask = [Type::None, Type::Bool, Type::Int, Type::Str]
-                .iter()
-                .enumerate()
-                .filter(|(_, ty)| classes.iter().any(|class| class.accepts(**ty)))
-                .fold(0, |mask, (kind, _)| mask | 1 << kind);
-            if classes
-                .iter()
-                .any(|class| matches!(class, InstanceType::Tuple))
-            {
-                mask |= 1 << 6;
-            }
+            let mask = [
+                (0, Type::None),
+                (1, Type::Bool),
+                (2, Type::Int),
+                (3, Type::Str),
+                (6, Type::Tuple(0)),
+                (8, Type::Bytes),
+            ]
+            .iter()
+            .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
+            .fold(0, |mask, (kind, _)| mask | 1 << *kind);
             let kind = self.instruction(format!(
                 "call i32 @imre_system_exit_code_kind(ptr {})",
                 value.operand
@@ -155,7 +155,10 @@ impl Emitter<'_, '_> {
             } else if let InstanceType::Exception(kind) = class
                 && matches!(
                     value.ty,
-                    Type::Exception | Type::TimeoutExpired | Type::NamedException(_)
+                    Type::Exception
+                        | Type::ImportException
+                        | Type::TimeoutExpired
+                        | Type::NamedException(_)
                 )
             {
                 let matched = self.instruction(format!(

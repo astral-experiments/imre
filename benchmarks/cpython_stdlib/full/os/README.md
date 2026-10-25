@@ -19,3 +19,18 @@ done
 ```
 
 A user namespace mapping only the caller's UID/GID can cause `ChownFileTests.test_chown_gid` and `test_chown_without_permission` to get `EINVAL` for unmapped IDs. The recorded OS run used the normal devbox user's IDs; neither test was skipped.
+
+## Descriptor execution
+
+[Linux results](descriptors-linux.json) report 15 distinct methods at both `-O0` and `-O3`:
+
+| Suite | Native body, assertions and OS operations; CPython fixtures | Host body and assertions; native OS operations |
+| --- | ---: | ---: |
+| `test_os` | 9 | 3 |
+| `test_posix` | 1 | 2 |
+
+The [shared runner](../../SUITE_RUNNER.md) runs each original module and instance fixture. In particular, `FileTests` removes its test file, `PosixTester` creates one and installs warning filters, and both modules have teardown hooks. The native child inherits this working directory and uses the same test filename. It registers descriptors for reverse-order cleanup and closes them in a `finally` block; the adapter accepts only `os.close` registrations. The invalid-descriptor fixture opens and closes a real descriptor inside Imre. Every row names the CPython hooks; none is counted as an entirely native fixture.
+
+For the five host-driven methods, compiled Imre code shares the host process's descriptor table with upstream `fcntl` and file objects. The host supplies an independent check; the operations under test execute in Imre. The older `native_os.py` getcwd/fspath results are separate.
+
+Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.
