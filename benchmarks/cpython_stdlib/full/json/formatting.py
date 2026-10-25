@@ -92,6 +92,19 @@ except ValueError as exc:
         return self.operation("loads", value, {})
 
 
+def formatting_method(native, source):
+    """Bind the original host method to the measured native formatter calls."""
+    def execute(case, original):
+        start = len(native.calls)
+        case.json, case.loads, case.dumps = native, native.loads, native.dumps
+        original()
+        operations = native.calls[start:]
+        if len(operations) != METHODS[source]:
+            raise AssertionError((source, len(operations), METHODS[source]))
+        return {"source": source, "execution": "host-driven", "native_calls": operations}
+    return execute
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("imre", "runtime", "clang", "result"):
@@ -110,15 +123,7 @@ def main():
                 if source not in METHODS:
                     continue
 
-                def execute(case, original, source=source):
-                    start = len(native.calls)
-                    case.json, case.loads, case.dumps = native, native.loads, native.dumps
-                    original()
-                    operations = native.calls[start:]
-                    if len(operations) != METHODS[source]:
-                        raise AssertionError((source, len(operations), METHODS[source]))
-                    return {"source": source, "execution": "host-driven", "native_calls": operations}
-                executions[case.id()] = execute
+                executions[case.id()] = formatting_method(native, source)
             evidence, failures, skips = run_in_fixtures(load_suite("test.test_json"), executions)
             if failures or skips or executions.keys() != evidence.keys():
                 print(level, failures, skips, file=sys.stderr)
