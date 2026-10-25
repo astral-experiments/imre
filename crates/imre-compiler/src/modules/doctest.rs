@@ -172,14 +172,16 @@ fn prompts(doc: &str) -> Vec<String> {
             continue;
         };
         let mut source = String::from(first.strip_prefix(' ').unwrap_or(first));
-        source.push('\n');
         while i < lines.len() {
             let Some(next) = lines[i].trim_start_matches(' ').strip_prefix("...") else {
                 break;
             };
-            source.push_str(next.strip_prefix(' ').unwrap_or(next));
             source.push('\n');
+            source.push_str(next.strip_prefix(' ').unwrap_or(next));
             i += 1;
+        }
+        if !source.ends_with('\n') {
+            source.push('\n');
         }
         let trimmed = source.trim();
         if !trimmed.is_empty() && !(trimmed.starts_with('#') && !trimmed.contains('\n')) {

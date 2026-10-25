@@ -1524,6 +1524,7 @@ mod tests {
                 buffer: Vec::with_capacity(capacity),
                 written: 0,
                 line_buffered: false,
+                captures: Vec::new(),
             };
             output.write_all(b"abc").unwrap();
             assert_eq!(output.stdout.is_empty(), capacity != 0);
@@ -1562,6 +1563,7 @@ mod tests {
             buffer: Vec::with_capacity(16),
             written: 0,
             line_buffered: false,
+            captures: Vec::new(),
         };
         output.write_all(b"partial").unwrap();
         assert_eq!(

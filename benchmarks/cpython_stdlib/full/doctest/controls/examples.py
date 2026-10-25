@@ -6,6 +6,7 @@
     [3, 7]
     >>> for value in values:
     ...     print(value)
+    ...
     3
     7
     >>> saved = 9
