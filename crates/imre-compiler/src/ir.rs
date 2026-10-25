@@ -67,6 +67,7 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    LogRecord,
     Logger,
     TimedFileHandler,
     ClockTime,
@@ -177,6 +178,7 @@ impl std::fmt::Display for Type {
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
@@ -510,6 +512,7 @@ pub(crate) enum Builtin {
     WallTime,
     Logging(LogOperation),
     Timed(TimedOperation),
+    LogRecord(LogRecordOperation),
     Input,
     Chr,
     Int,
@@ -957,6 +960,19 @@ pub(crate) enum TimedOperation {
     FilesToDelete,
     ShouldRollover,
     DoRollover,
+}
+
+/// Operations on a record with individually owned, named Python fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LogRecordOperation {
+    New,
+    Put,
+    Update,
+    Read,
+    Message,
+    Repr,
+    Flag,
+    SetFlag,
 }
 
 /// Operations on the native logging registry and its named loggers.

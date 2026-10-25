@@ -158,6 +158,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
+            Self::LogRecord(_) => Contract::new(true, PreservesLists),
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
@@ -657,6 +658,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_deletions"
                 | "imre_log_file_should_roll"
                 | "imre_log_file_roll"
+                | "imre_logrecord_message"
                 | "imre_log_config"
                 | "imre_log_config_named"
                 | "imre_log_check_level"

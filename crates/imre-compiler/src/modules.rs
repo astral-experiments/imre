@@ -114,6 +114,9 @@ pub(crate) enum Intrinsic {
     AddLevelName,
     LevelNamesMapping,
     LevelMap { names: bool },
+    LogRecord,
+    MakeLogRecord,
+    LogRecordFlag(u8),
     BasicConfig,
     LogLevel(i64),
     Abc,
@@ -321,6 +324,12 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
+            (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
+            (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
+            (Self::Logging, "logAsyncioTasks") => Intrinsic::LogRecordFlag(8),
+            (Self::Logging, "makeLogRecord") => Intrinsic::MakeLogRecord,
             (Self::Logging, "getLogger") => Intrinsic::GetLogger,
             (Self::Logging, "getLevelName") => Intrinsic::GetLevelName,
             (Self::Logging, "addLevelName") => Intrinsic::AddLevelName,

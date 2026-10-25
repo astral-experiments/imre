@@ -81,6 +81,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
@@ -133,6 +134,7 @@ impl Type {
             | Self::Popen(..)
             | Self::AsyncProcess(_)
             | Self::TextIO
+            | Self::LogRecord
             | Self::Logger
             | Self::TimedFileHandler
             | Self::ClockTime
@@ -713,6 +715,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -3306,6 +3309,7 @@ impl Emitter<'_, '_> {
                 | Type::Semaphore
                 | Type::Popen(..)
                 | Type::AsyncProcess(_)
+                | Type::LogRecord
                 | Type::Logger
                 | Type::RegexPattern
                 | Type::JsonRoot
@@ -3674,6 +3678,66 @@ impl Emitter<'_, '_> {
                     none()
                 } else {
                     self.call(name, returns, &values)
+                }
+            }
+            Builtin::LogRecord(operation) => {
+                use crate::ir::LogRecordOperation::*;
+                match operation {
+                    Flag => self.call("imre_logrecord_flag", returns, &[&args[0].value]),
+                    SetFlag => {
+                        self.void_call(
+                            "imre_logrecord_set_flag",
+                            &[&args[0].value, &args[1].value],
+                        );
+                        none()
+                    }
+                    New | Put => {
+                        let mut operands = Vec::new();
+                        for (i, arg) in args.iter().enumerate() {
+                            if *operation == Put && i < 2 {
+                                operands.push(format!("ptr {}", arg.value.operand));
+                            } else {
+                                let word = self.word(&arg.value);
+                                let tag = representation_kind(arg.value.ty, &self.module.types);
+                                operands.push(format!("i64 {word}, i32 {tag}"));
+                            }
+                        }
+                        let args = operands.join(", ");
+                        if *operation == Put {
+                            self.checked_line(format!("call void @imre_logrecord_put({args})"));
+                            none()
+                        } else {
+                            let result = self.checked_instruction(format!(
+                                "call ptr @imre_logrecord_new({args})"
+                            ));
+                            self.owned(Value {
+                                ty: returns,
+                                operand: result,
+                                small_integer: false,
+                            })
+                        }
+                    }
+                    Read => {
+                        let kind = representation_kind(returns, &self.module.types);
+                        let word = self.checked_instruction(format!(
+                            "call i64 @imre_logrecord_read(ptr {}, ptr {}, i32 {kind})",
+                            args[0].value.operand, args[1].value.operand
+                        ));
+                        self.unpack_word(word, returns)
+                    }
+                    Update => {
+                        self.void_call("imre_logrecord_update", &[&args[0].value, &args[1].value]);
+                        none()
+                    }
+                    Message | Repr => self.call(
+                        if *operation == Message {
+                            "imre_logrecord_message"
+                        } else {
+                            "imre_logrecord_repr"
+                        },
+                        returns,
+                        &[&args[0].value],
+                    ),
                 }
             }
             Builtin::Logging(operation) => {
@@ -5070,6 +5134,7 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::Popen(..)
                     | Type::AsyncProcess(_)
+                    | Type::LogRecord
                     | Type::Logger
                     | Type::TimedFileHandler
                     | Type::ClockTime
@@ -5310,6 +5375,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -5376,6 +5442,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::Popen(..)
             | Type::AsyncProcess(_)
+            | Type::LogRecord
             | Type::Logger
             | Type::TimedFileHandler
             | Type::ClockTime
@@ -5940,6 +6007,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::Popen(..)
         | Type::AsyncProcess(_)
+        | Type::LogRecord
         | Type::Logger
         | Type::TimedFileHandler
         | Type::ClockTime
@@ -6505,6 +6573,14 @@ declare double @imre_log_file_compute_float(ptr, double)
 declare ptr @imre_log_file_deletions(ptr)
 declare i1 @imre_log_file_should_roll(ptr)
 declare void @imre_log_file_roll(ptr)
+declare i1 @imre_logrecord_flag(i64)
+declare void @imre_logrecord_set_flag(i64,i1)
+declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)
+declare void @imre_logrecord_put(ptr,ptr,i64,i32)
+declare void @imre_logrecord_update(ptr,ptr)
+declare i64 @imre_logrecord_read(ptr,ptr,i32)
+declare ptr @imre_logrecord_message(ptr)
+declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
