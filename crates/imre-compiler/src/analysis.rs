@@ -171,7 +171,7 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
-        settings.python_version.version = ruff_python_ast::PythonVersion::PY314;
+        settings.python_version.version = crate::version::LANGUAGE;
         let mut roots = vec![SystemPathBuf::from(root)];
         for path in extension_roots {
             let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;

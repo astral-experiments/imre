@@ -4467,6 +4467,18 @@ impl Emitter<'_, '_> {
             ),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysVersionInfo { implementation } => {
+                let root = if *implementation {
+                    "sys_implementation_version"
+                } else {
+                    "sys_language_version"
+                };
+                self.tuple(
+                    returns,
+                    &crate::version::tuple_items(*implementation),
+                    Some(root),
+                )
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::DocCaptureStart => {
