@@ -256,6 +256,15 @@ impl Session {
             .load(&self.db)
     }
 
+    /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
+    pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
+        let file = self.files[module];
+        let original = ruff_db::source::source_text(&self.db, file);
+        let value = original.with_text(source, &Default::default());
+        file.set_source_text_override(&mut self.db).to(Some(value));
+        self.parsed(file)
+    }
+
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     fn diagnostic_copy(&self) -> Result<Self, String> {
