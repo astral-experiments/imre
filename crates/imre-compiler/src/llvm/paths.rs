@@ -150,10 +150,16 @@ impl Emitter<'_, '_> {
                 })
             }
             PathOperation::Link(kind) => {
-                let bytes = u32::from(args[1].value.ty == Type::Bytes);
+                let target = &args[1].value;
+                let tag = match target.ty {
+                    Type::Bytes => 1,
+                    Type::Union(_) => 2, // tagged str | bytes protocol result
+                    _ => 0,
+                };
+                let word = self.word(target);
                 self.checked_line(format!(
-                    "call void @imre_path_link(ptr {}, ptr {}, i32 {bytes}, i32 {})",
-                    args[0].value.operand, args[1].value.operand, kind as u32,
+                    "call void @imre_path_link(ptr {}, i64 {word}, i32 {tag}, i32 {})",
+                    args[0].value.operand, kind as u32,
                 ));
                 none()
             }

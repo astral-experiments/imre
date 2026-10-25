@@ -68,12 +68,17 @@ descriptor_constants! {
 ///
 /// # Safety
 /// `value` is the rooted str, bytes or Path selected by `tag`.
-unsafe fn syscall_path(value: *const (), tag: u32, function: &str) -> Result<(CString, Filename)> {
+unsafe fn syscall_path(
+    value: *const (),
+    tag: u32,
+    function: &str,
+    parameter: &str,
+) -> Result<(CString, Filename)> {
     let terminated = |bytes: &[u8]| {
         CString::new(bytes).map_err(|_| {
             Error::new(
                 Kind::ValueError,
-                format!("{function}: embedded null character in path"),
+                format!("{function}: embedded null character in {parameter}"),
             )
         })
     };
@@ -108,7 +113,7 @@ pub unsafe extern "C" fn imre_os_open(
     finish(
         (|| {
             // SAFETY: the caller's representation tag describes this rooted path.
-            let (name, path) = unsafe { syscall_path(path, bytes, "open") }?;
+            let (name, path) = unsafe { syscall_path(path, bytes, "open", "path") }?;
             let flags = c_int(flags)? | libc::O_CLOEXEC;
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
@@ -139,7 +144,7 @@ pub unsafe extern "C" fn imre_os_unlink(value: *const (), tag: u32, fd: usize, r
     let result = (|| {
         let function = if remove == 0 { "unlink" } else { "remove" };
         // SAFETY: the path's owner stays live through the syscall and error rendering.
-        let (path, name) = unsafe { syscall_path(value, tag, function) }?;
+        let (path, name) = unsafe { syscall_path(value, tag, function, "path") }?;
         // SAFETY: fd is a rooted optional integer.
         let dir_fd = unsafe { directory_fd(fd) }?;
         // SAFETY: the zero-terminated path is owned until unlinkat returns.

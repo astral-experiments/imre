@@ -710,17 +710,44 @@ impl Checker<'_> {
         let arguments =
             self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
                 if matches!(name, "symlink_to" | "hardlink_to") {
-                    if index == 0 {
-                        checker.fspath_argument(value)
-                    } else {
-                        checker.expr(value)
-                    }
+                    checker.expr(value)
                 } else if name == "replace" {
                     checker.path_argument(value)
                 } else {
                     checker.expr_expected(value, params[index].ty)
                 }
             })?;
+        if let PathOperation::Link(link) = kind {
+            let mut scope = calls::ArgumentScope::default();
+            // The Python method receives every expression before os.link/os.symlink
+            // asks for a filename or the truth of target_is_directory.
+            let values: Vec<_> = arguments
+                .values
+                .into_iter()
+                .map(|v| scope.hold(self, v))
+                .collect();
+            let mut args: Vec<_> = arguments.order.iter().map(|&i| values[i].clone()).collect();
+            let symlink = matches!(link, ir::PathLink::Symlink);
+            let operation_name = if symlink { "symlink" } else { "link" };
+            let source = self.syscall_fspath(args[1].clone(), &call.func, operation_name, "src")?;
+            args[1] = scope.hold(self, source);
+            if symlink {
+                let flag = args.pop().unwrap();
+                if flag.ty != Type::Bool {
+                    scope.hold(
+                        self,
+                        operation(
+                            PathOperation::Link(ir::PathLink::CheckSymlink),
+                            Type::None,
+                            args.clone(),
+                        ),
+                    );
+                    let flag = self.truth_value(flag);
+                    scope.hold(self, flag);
+                }
+            }
+            return Ok(scope.finish(operation(kind, returns, args)));
+        }
         Ok(self.ordered_path_operation(kind, returns, arguments))
     }
 
@@ -890,24 +917,11 @@ impl Checker<'_> {
             body.push(Statement::Assign(slot, value));
             clear.push(slot);
         }
-        let mut args: Vec<_> = arguments
+        let args: Vec<_> = arguments
             .order
             .iter()
             .map(|&index| self.local(clear[index]))
             .collect();
-        if matches!(kind, PathOperation::Link(ir::PathLink::Symlink)) {
-            let flag = args.pop().unwrap();
-            if flag.ty != Type::Bool {
-                // POSIX ignores the flag, but Python first converts both names,
-                // then asks for its truth value. A NUL must not invoke __bool__.
-                body.push(Statement::Expr(operation(
-                    PathOperation::Link(ir::PathLink::CheckSymlink),
-                    Type::None,
-                    args.clone(),
-                )));
-                body.push(Statement::Expr(self.truth_value(flag)));
-            }
-        }
         Expr {
             ty: returns,
             kind: ExprKind::Scope {
