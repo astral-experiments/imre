@@ -48,7 +48,7 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.attributes.insert(name);
             } else if self.graph.session.data_attribute(self.module, expr) {
                 self.found.properties.insert(name);
-            } else {
+            } else if !self.graph.session.sealed_native_method(self.module, attr) {
                 self.found.instance_attributes.insert(name.clone());
                 self.found.attributes.insert(name);
             }
@@ -460,6 +460,13 @@ run()
         assert!(
             reachable(&source.replace("print(Used().value())", "print(Used().unused())")).is_err()
         );
+    }
+
+    #[test]
+    fn bound_native_methods_do_not_retain_unrelated_methods_with_the_same_name() {
+        let source = "from pathlib import Path\nclass Local:\n    def __init__(self) -> None:\n        pass\n    def exists(self):\n        return globals()\nlocal = Local()\nprint(Path('.').exists())\n";
+        reachable(source).unwrap();
+        assert!(reachable(&source.replace("Path('.').exists()", "local.exists()")).is_err());
     }
 
     #[test]

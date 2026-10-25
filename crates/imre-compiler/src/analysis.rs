@@ -257,6 +257,46 @@ impl Session {
         )
     }
 
+    /// Bound methods on these sealed native receiver layouts cannot dispatch to a
+    /// first-party class. Source subclasses of those layouts are rejected by the
+    /// fixed-class collector. Unknowns, unions, protocols and first-party
+    /// receivers keep the ordinary conservative name-based roots.
+    pub(crate) fn sealed_native_method(
+        &self,
+        module: usize,
+        attr: &ruff_python_ast::ExprAttribute,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
+        self.used_hints.set(true);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        if !matches!(attr.inferred_type(&model), Some(Ty::BoundMethod(_))) {
+            return false;
+        }
+        let Some(receiver @ Ty::NominalInstance(_)) = attr.value.inferred_type(&model) else {
+            return false;
+        };
+        let Some(class) = receiver.definition(&self.db, &ProgramEnvironment::from_file(program))
+        else {
+            return false;
+        };
+        let Some(range) = class.focus_range(&self.db) else {
+            return false;
+        };
+        let Some(path) = range.file().path(&self.db).as_vendored_path() else {
+            return false;
+        };
+        // Use the bundled stdlib source identity, never a user-controlled module name.
+        let path = path
+            .as_str()
+            .strip_suffix("/__init__.pyi")
+            .or_else(|| path.as_str().strip_suffix(".pyi"));
+        matches!(
+            path.and_then(|path| path.rsplit('/').next()),
+            Some("zipfile" | "io" | "_io" | "pathlib" | "re" | "gzip" | "hashlib" | "_hashlib")
+        )
+    }
+
     /// Get a scalar layout hint for an append operand in its own lexical scope.
     pub(crate) fn scalar_type(
         &self,
