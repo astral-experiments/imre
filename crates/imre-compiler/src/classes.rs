@@ -41,6 +41,12 @@ pub(crate) enum ExceptionAlias {
     Named(DefinitionId),
 }
 
+#[derive(Clone)]
+pub(crate) enum ClassValue {
+    Binding(Binding),
+    String(String),
+}
+
 pub(crate) struct Class {
     pub(crate) definition: DefinitionId,
     pub(crate) name: String,
@@ -58,7 +64,7 @@ pub(crate) struct Class {
     pub(crate) dataclass: Option<DataclassOptions>,
     pub(crate) enum_members: Option<enums::Members>,
     pub(crate) exception_aliases: HashMap<String, ExceptionAlias>,
-    pub(crate) static_bindings: HashMap<String, Binding>,
+    pub(crate) static_bindings: HashMap<String, ClassValue>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: Option<usize>,
@@ -492,12 +498,8 @@ fn collect_class(
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
-                    && let Some(binding) = class_static_binding(
-                        graph,
-                        definition.module,
-                        &assign.value,
-                        &class_bindings,
-                    ) =>
+                    && let Some(binding) =
+                        class_value(graph, definition.module, &assign.value, &class_bindings)? =>
             {
                 if !names.insert(name.id.to_string())
                     || name.id.starts_with("__")
@@ -551,6 +553,15 @@ fn collect_class(
         && let Some(init) = initializer
     {
         inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+    }
+    if fields
+        .iter()
+        .any(|field| static_bindings.contains_key(&field.name))
+    {
+        return Err(module.error(
+            node,
+            "an instance field cannot shadow a fixed class binding",
+        ));
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
@@ -668,6 +679,20 @@ pub(crate) fn property_accessors<'a>(
         }
         _ => None,
     }
+}
+
+/// These values can be read through the class or an instance without running a descriptor.
+fn class_value(
+    graph: &SourceGraph,
+    module: usize,
+    expr: &ast::Expr,
+    locals: &HashSet<String>,
+) -> Result<Option<ClassValue>, String> {
+    if let ast::Expr::StringLiteral(value) = expr {
+        crate::frontend::check_string(value, &graph.modules[module].source)?;
+        return Ok(Some(ClassValue::String(value.value.to_str().to_owned())));
+    }
+    Ok(class_static_binding(graph, module, expr, locals).map(ClassValue::Binding))
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
