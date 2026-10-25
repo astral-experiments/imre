@@ -868,6 +868,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
                 | "imre_exception_field_repr"
+                | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"
                 | "imre_exception_field_index"
                 | "imre_exception_formatter_result"

@@ -4621,6 +4621,9 @@ impl Emitter<'_, '_> {
                     "call i32 @{function}(ptr {}, i32 {kind}, i64 {word})",
                     args[i].value.operand
                 ));
+                if matches!(builtin, Builtin::SystemExitCodeEqual { .. }) {
+                    self.check_error();
+                }
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
@@ -8328,6 +8331,18 @@ mod tests {
                 .0
                 .contains("call void @imre_object_release(")
         );
+    }
+
+    #[test]
+    fn boxed_equality_checks_errors_before_using_the_result() {
+        let body = function_body(
+            "from collections.abc import Mapping\n\ndef check(left: Mapping[str, object], right: Mapping[str, object]) -> None:\n    print(left['x'] == right['x'])\ncheck({'x': (1, 2)}, {'x': (3, 4)})\n",
+        );
+        let (_, result) = body
+            .split_once("call i32 @imre_system_exit_code_equal(")
+            .unwrap();
+        let (before_test, _) = result.split_once("icmp ne i32").unwrap();
+        assert!(before_test.contains("call i32 @imre_error_pending()"));
     }
 
     #[test]
