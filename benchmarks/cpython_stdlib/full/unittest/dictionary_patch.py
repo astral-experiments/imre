@@ -34,6 +34,9 @@ print(mapping["before"])
 active = scope.start()
 active["during"] = "body"
 print(mapping["during"])
-print(scope.stop() is False)
+stopped = scope.stop()
+if stopped is None:
+    raise AssertionError("a started patch must restore its mapping and return False")
+print(stopped)
 print("during" in alias)
 print(scope.stop() is None)
