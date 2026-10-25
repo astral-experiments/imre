@@ -1004,6 +1004,7 @@ pub(crate) enum Builtin {
         reverse: bool,
     },
     CounterNew,
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
