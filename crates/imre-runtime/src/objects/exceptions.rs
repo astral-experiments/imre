@@ -1776,6 +1776,10 @@ pub extern "C" fn imre_exception_reraise() {
 /// teardown. A failed best-effort stdout flush preserves the original error.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_unhandled() -> i32 {
+    enum ExitText {
+        Original(Rc<Str>),
+        Rendered(String),
+    }
     let pending = take_pending();
     let active = ACTIVE.with(RefCell::take);
     drop(active);
@@ -1797,7 +1801,15 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                     let integer = crate::Int::borrow(code.word);
                     (integer.big().to_i64().unwrap_or(-1) as i32, None)
                 }
-                Some(code) => (1, Some(imports::word_text(code.kind, code.word, false))),
+                Some(code) if code.kind == WordKind::new(3) => {
+                    (1, Some(ExitText::Original(acquire_rc(code.word))))
+                }
+                Some(code) => (
+                    1,
+                    Some(ExitText::Rendered(
+                        imports::word_repr(code.kind, code.word).unwrap_or_default(),
+                    )),
+                ),
             };
             Some((status, message))
         })
@@ -1807,7 +1819,10 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         let _ = crate::sys::flush_stderr();
         if let Some(message) = message {
             // A failed diagnostic still emits a newline and preserves the exit status.
-            let text = message.as_deref().map_or("", Str::as_str);
+            let text = match &message {
+                ExitText::Original(text) => text.as_str(),
+                ExitText::Rendered(text) => text,
+            };
             let _ = writeln!(io::stderr().lock(), "{text}");
         }
         return status;

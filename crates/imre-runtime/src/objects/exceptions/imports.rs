@@ -77,12 +77,19 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
         // SAFETY: the owning field roots the exact string.
         return Ok(unsafe { acquire_rc(word) });
     }
+    word_repr(kind, word).map(|result| Rc::new(result.into()))
+}
+
+pub(super) fn word_repr(
+    kind: WordKind,
+    word: usize,
+) -> std::result::Result<String, std::fmt::Error> {
     let mut result = String::new();
     // SAFETY: only concrete, representable field types reach this routine.
     unsafe {
         values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind)?;
     }
-    Ok(Rc::new(result.into()))
+    Ok(result)
 }
 
 // A tuple may store an optional scalar in its nullable representation. Views
