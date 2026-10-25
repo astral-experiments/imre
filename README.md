@@ -59,6 +59,7 @@ Imre supports:
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.
 - Use IPv4 TCP sockets on POSIX: bind and accept local connections, connect, exchange bytes, duplicate sockets, and control descriptor blocking and inheritance.
+- Serve one blocking TCP request with [socketserver.TCPServer](benchmarks/cpython_stdlib/full/socketserver/README.md) and a Python handler subclass.
 - Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:

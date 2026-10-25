@@ -762,6 +762,9 @@ impl IntrinsicModule {
                 "SO_RCVBUF" => "so_rcvbuf",
                 "SO_LINGER" => "so_linger",
                 "MSG_PEEK" => "msg_peek",
+                "SHUT_RD" => "shut_rd",
+                "SHUT_WR" => "shut_wr",
+                "SHUT_RDWR" => "shut_rdwr",
 
                 _ => return None,
             }),
@@ -2303,6 +2306,7 @@ impl<'a> Loader<'a> {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),

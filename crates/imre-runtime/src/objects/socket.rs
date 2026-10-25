@@ -92,6 +92,9 @@ socket_constants! {
     imre_socket_so_rcvbuf = libc::SO_RCVBUF,
     imre_socket_so_linger = libc::SO_LINGER,
     imre_socket_msg_peek = libc::MSG_PEEK,
+    imre_socket_shut_rd = libc::SHUT_RD,
+    imre_socket_shut_wr = libc::SHUT_WR,
+    imre_socket_shut_rdwr = libc::SHUT_RDWR,
 
     imre_socket_default_backlog = if libc::SOMAXCONN < 128 { libc::SOMAXCONN } else { 128 },
 }
@@ -262,6 +265,17 @@ pub extern "C" fn imre_socket_listen(s: &Object, backlog: usize) {
         c_int(backlog).and_then(|n| {
             // SAFETY: listen takes only scalar arguments.
             checked(unsafe { libc::listen(fd(s), n.max(0)) }).map_err(errno_error)
+        }),
+        0,
+    );
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
+    finish(
+        c_int(how).and_then(|how| {
+            // SAFETY: shutdown takes scalar values and never relinquishes the descriptor.
+            checked(unsafe { libc::shutdown(fd(s), how) }).map_err(errno_error)
         }),
         0,
     );
