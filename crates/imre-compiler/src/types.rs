@@ -82,6 +82,9 @@ impl Types {
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
+            Type::SimpleNamespace(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Dict(Type::Str, _)))
+            }
             Type::Cursor(id) => matches!(storage.shapes.get(id), Some(Shape::Cursor(_))),
             Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
             Type::CacheState(id) => matches!(storage.shapes.get(id), Some(Shape::Dict(..))),
@@ -200,6 +203,7 @@ impl Types {
                 | Type::Optional(child_id)
                 | Type::Coroutine(child_id)
                 | Type::Task(child_id)
+                | Type::SimpleNamespace(child_id)
                 | Type::DirectoryContext(child_id)
                 | Type::Popen(_, _, child_id)
                 | Type::Union(child_id) = child
@@ -482,6 +486,7 @@ impl Types {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
             Type::Class(id) if self.0.borrow().custom_truth.contains(&id) => None,
+            Type::SimpleNamespace(_) => Some(true),
             Type::Class(_)
             | Type::Callable(_)
             | Type::Enum(_)
@@ -835,6 +840,9 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
+        if let Type::SimpleNamespace(id) = ty {
+            return vec![Type::Dict(id)];
+        }
         if let Some(element) = self
             .element(ty)
             .or_else(|| self.payload(ty))

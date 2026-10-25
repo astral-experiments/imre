@@ -63,6 +63,17 @@ pub unsafe extern "C" fn imre_str_contains(needle: *const Str, text: *const Str)
     unsafe { u32::from((&*text).contains((&*needle).as_str())) }
 }
 
+/// Tests a nonempty Python string against the shared Unicode whitespace table.
+///
+/// # Safety
+/// The immutable string is rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive and no character reference escapes.
+    let value = unsafe { &*value };
+    u32::from(!value.is_empty() && value.chars().all(python_whitespace))
+}
+
 /// Removes the common space/tab prefix after the caller has evaluated its text.
 /// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
 ///
