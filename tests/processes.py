@@ -32,10 +32,7 @@ REJECTED = {
     "missing_args": "run(capture_output=True, encoding='utf-8')",
     "duplicate_args": "run(['command'], args=['other'], capture_output=True, encoding='utf-8')",
     "extra_positional": "run(['command'], True, capture_output=True, encoding='utf-8')",
-    "string_args": "run('command', capture_output=True, encoding='utf-8')",
-    "bytes_args": "run(b'command', capture_output=True, encoding='utf-8')",
     "integer_args": "run([1], capture_output=True, encoding='utf-8')",
-    "path_args": "run([Path('command')], capture_output=True, encoding='utf-8')",
     "optional_args": "args: list[str] | None = None\nrun(args, capture_output=True, encoding='utf-8')",
     "expanded_args": "run(*[['command']], capture_output=True, encoding='utf-8')",
     "expanded_kwargs": "run(['command'], capture_output=True, encoding='utf-8', **{'check': True})",
@@ -44,7 +41,6 @@ REJECTED = {
     "dynamic_encoding": "encoding = 'utf-8'\nrun(['command'], capture_output=True, encoding=encoding)",
     "dynamic_text": "text = True\nrun(['command'], capture_output=True, encoding='utf-8', text=text)",
     "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
-    "wrong_cwd": "run(['command'], capture_output=True, encoding='utf-8', cwd=b'directory')",
     "wrong_env": "run(['command'], capture_output=True, encoding='utf-8', env={'KEY': 1})",
     "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
     "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
@@ -77,15 +73,9 @@ REJECTED = {
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
 }
 for name, value in {
-    "shell": "True",
-    "input": "'data'",
     "stdin": "0",
     "stdout": "1",
     "stderr": "2",
-    "errors": "'replace'",
-    "universal_newlines": "True",
-    "executable": "'command'",
-    "close_fds": "False",
 }.items():
     REJECTED[f"unsupported_{name}"] = f"run(['command'], capture_output=True, encoding='utf-8', {name}={value})"
 for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():

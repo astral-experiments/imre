@@ -365,7 +365,7 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess(_) => {
+                        Type::Class(_) | Type::CompletedProcess(..) => {
                             self.record_text(item, call)?
                         }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {

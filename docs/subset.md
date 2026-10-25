@@ -208,7 +208,10 @@ Select a value into a concrete scalar or
 with literal-key `.get()`, scalar or empty-list defaults, and nested iteration.
 Original array roots keep their mutable list identity. Malformed JSON raises
 `json.JSONDecodeError`, with the original decoded `doc`, short `msg`, character
-offset `pos`, and one-based `lineno` and `colno`. Nesting is limited to 128 containers. Strings use
+offset `pos`, and one-based `lineno` and `colno`. The standard decoder uses a heap stack for
+deep input and raises `RecursionError` above 50,000 open containers. CPython's accelerator
+and pure decoder reach different limits depending on the platform and recursion context.
+The explicit typed schema decoder and the encoder retain their 128-container limit. Strings use
 Unicode scalar values. Integers retain their exact precision. The standard
 reader also recognizes `NaN`, `Infinity`, and `-Infinity`.
 
@@ -561,6 +564,12 @@ Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins
 
 ## F-strings and repr
 
+The string `%` operator accepts an exact integer or string operand. A text
+operand supports `%s`, `%r`, `%a`, and a single Unicode character for `%c`.
+Literal widths and precisions count Unicode characters. Escaped percent signs
+do not consume an operand. A missing argument or a conversion which requires a
+number raises a Python exception.
+
 F-strings interpolate exact `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed builtin exception values, fixed records, and lists of values with a supported representation. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
 
 ```python
@@ -596,6 +605,8 @@ A string template can substitute named `str` and `int` arguments, as in `url.for
 
 `bytes()` returns empty bytes; `bytes(count)` creates that many zero bytes; `bytes(list_of_ints)` checks each integer is in 0 through 255; and `bytes(existing_bytes)` preserves its value. Counts must fit a native signed index before the nonnegative check: negative representable counts raise `ValueError`, unrepresentable counts raise `OverflowError`, and out-of-range list values raise `ValueError`. Booleans do not satisfy these exact integer inputs. Other iterable constructors and the string-plus-encoding constructor are outside this milestone.
 
+For `needle in data` and `needle not in data`, a bytes needle searches for a contiguous subsequence (an empty needle always matches). An integer or bool tests for one byte. Integers outside 0 through 255 raise `ValueError`, even for empty data. Exact `None`, text, float, list, tuple, dictionary and set needles raise `TypeError`. User-defined index or buffer protocols and mutable buffer exporters such as `bytearray`, `memoryview` and `array.array` are outside this subset.
+
 Indexing uses exact integer indexes, including negative indexes, and returns an `int` in 0 through 255. Out-of-range indexes raise `IndexError`. Slicing follows the sequence rules above and returns bytes. Iteration, comprehensions, and loop-head `enumerate` yield integers in byte order while retaining the original immutable source independently of rebinding. Concatenation requires two byte values; repetition accepts bytes and an exact integer in either order. Repetition converts the count to a native signed index even for empty input and rejects an overflowing result. All six comparisons use unsigned-byte lexicographic order. `print`, `str`, and scalar f-strings use Python's `b'...'` representation, including quote selection and hexadecimal escaping.
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
@@ -603,6 +614,8 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 `text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
 
 ## Native paths and directory traversal
+
+On Linux and macOS, `stat` exposes the POSIX mode constants, `S_IFMT`, `S_IMODE`, the file-type predicates, and `filemode`. These accept positional integer modes, including arbitrary-precision inputs: the accelerated CPython rules raise `OverflowError` when a value does not fit the platform's unsigned mode type. Direct calls also accept booleans. Darwin's whiteout type and file flags use Darwin values. [CPython parity and exact test coverage](../benchmarks/cpython_stdlib/full/stat/README.md).
 
 On POSIX, `os.devnull` is `"/dev/null"`. `os.path.commonpath(paths)` compares path components for lists of `str`, `bytes`, or native `Path` objects and literal list or tuple displays. It removes redundant separators and `.` components, preserves `..`, and rejects an empty sequence, mixed string and byte paths, or mixed absolute and relative paths.
 
@@ -700,6 +713,8 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 `sys.argv` and `sys.orig_argv` are independent mutable lists, each shared across aliases and modules. In a standalone executable both start with the arguments passed to its main function. With `imre run`, `sys.argv` starts with the source path followed by the program arguments after `--`; `sys.orig_argv` contains the actual Imre command, flags, and program arguments. Element writes and list mutation are supported; rebinding a module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
 
+`imre [-I] [-B] [-X utf8[=0|1]] -c CODE [ARG ...]` compiles the command in memory and runs it as `__main__`. Python 3.14's command dedent applies before parsing. The program sees `['-c', *args]` in `sys.argv`; `sys.orig_argv` preserves the complete invocation, including the original indentation and option spelling. `sys.executable` identifies the Imre launcher. Commands may import supported source modules from the working directory and `PYTHONPATH`. `-I` excludes the working directory and ignores `PYTHONPATH` and other Python startup environment flags. The selected `isolated`, `ignore_environment`, `safe_path`, `no_user_site`, `dont_write_bytecode`, and `utf8_mode` fields are available through `sys.flags` in command mode. The native compiler's existing text, filesystem, and import restrictions still apply. `IMRE_ENCODED_FLAGS` and `IMREFLAGS` select the native compiler and linker settings independently of Python startup flags.
+
 ## Command-line options
 
 A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. An explicit `list[str]` supplies the arguments to parse; omitting it or passing `None` reads `sys.argv[1:]`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
@@ -777,12 +792,18 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
-On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. Open flags use the runtime target's values.
+On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. `os.lseek(fd, position, whence)` reads or moves the shared offset. The runtime supplies the platform's open flags and `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `SEEK_DATA`, and `SEEK_HOLE` constants.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
-`shlex.split(text)` returns POSIX shell words with Python’s default quoting,
-escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
+`shlex.split(s, comments=False, posix=True)` accepts a string or `None`
+and boolean mode flags. `shlex.quote(s)` quotes a POSIX shell word;
+`shlex.join(split_command)` quotes each item from a supported iterable before
+requesting the next. Both handle false scalar values and concrete containers
+before checking their type, as CPython does. The stateful `shlex.shlex` lexer
+is unsupported.
+
+A discarded `subprocess.run(argv, check=True,
 stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
 the child is running. Failure raises `CalledProcessError` with uncaptured
 streams set to `None`. A handler around direct calls with the same stream mode,
@@ -954,6 +975,11 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
 
+`mapping.clear()` removes every entry in place and returns `None`. Aliases see
+the empty dictionary; a `Counter` still returns zero for a missing key, and a
+`defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
+methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
+
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
@@ -1058,8 +1084,11 @@ User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
 Python method resolution order. A class that carries fields can use an ordinary
 typed initializer or a dataclass initializer with `__post_init__`. Its constructor
-must call `super().__init__(message)` once with a string. Keyword arguments,
-typed fields, `.args` on the concrete exception, and custom `__str__` and
+must initialize its base exactly once. An explicit `Exception.__init__(self, ...)`
+or `BaseException.__init__(self, ...)` keeps the positional arguments in `.args`,
+including `None`, booleans, integers, strings, bytes, and fixed tuples of those
+values. The `super().__init__` form accepts zero arguments, one string, or
+multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
 such a constructor. Inheriting a user payload layout, dynamic constructors, and
 reinitializing an exception are outside this subset.
@@ -1299,6 +1328,18 @@ accepts nested tuples and exposes the original exception as `caught.exception`.
 A stored context can be entered later. Normal exit, return, break, and continue
 raise the missing-exception assertion; unrelated exceptions propagate.
 The callable form and runtime-selected exception classes need further support.
+
+`unittest.main()` discovers the compiled entry module's statically bound
+`TestCase` subclasses, including imports, aliases and inherited tests. It uses
+the default lexicographic order and makes a separate instance for each method.
+Its native runner calls `setUp`, the selected method and `tearDown`; a setup
+failure prevents the latter two. Skipped tests, assertion failures and other
+errors are reported separately. The default, `-v`, `-q` and `-f` modes return
+normal unittest exit codes, including 5 for an empty suite. Only zero-argument
+direct calls and the inherited initializer are supported. Custom loaders,
+module and class hooks, decorated tests, and named command-line selections
+require further support. Caught failures report their messages without CPython
+traceback frames.
 
 The [shared suite runner](../benchmarks/cpython_stdlib/SUITE_RUNNER.md) shows
 which parts of a complete pinned test run natively. The full CPython unittest
