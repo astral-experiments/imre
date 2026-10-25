@@ -185,7 +185,7 @@ class NullHandler(Handler):
 
     def __init__(self, level: _Level = 0) -> None:
         super().__init__(level)
-        self.lock = None
+        self.createLock()
 
     def handle(self, record: LogRecord | None):
         pass
