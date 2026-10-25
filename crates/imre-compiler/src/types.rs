@@ -866,6 +866,11 @@ impl Types {
         Some(element)
     }
 
+    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
+        self.element(ty).or_else(|| self.deque_element(ty))
+    }
+
     pub(crate) fn set(&self, element: Type) -> Type {
         Type::Set(self.intern(Shape::Set(element)))
     }

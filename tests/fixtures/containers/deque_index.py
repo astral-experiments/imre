@@ -1,0 +1,71 @@
+from collections import deque
+
+
+def receiver(values: deque[str]) -> deque[str]:
+    print("receiver")
+    return values
+
+
+def key() -> int:
+    print("key")
+    return -1
+
+
+def replacement() -> str:
+    print("rhs")
+    return "replacement"
+
+
+values = deque("abcd", maxlen=4)
+values.popleft()
+values.append("e")
+receiver(values)[key()] = replacement()
+print(values[False])
+print(values[True])
+print(values[-1])
+get = values.__getitem__
+put = values.__setitem__
+erase = values.__delitem__
+put(-2, "third")
+print(get(-2))
+original = values
+values = deque("other")
+erase(1)
+print(get(1))
+print(len(original))
+print(len(values))
+
+for index in [-4, 3, -1267650600228229401496703205376, 1267650600228229401496703205376]:
+    try:
+        print(original[index])
+    except IndexError as error:
+        print(str(error))
+    try:
+        original[index] = "wrong"
+    except IndexError as error:
+        print(str(error))
+    try:
+        del original[index]
+    except IndexError as error:
+        print(str(error))
+
+numbers = deque(range(6), maxlen=6)
+for entry in numbers:
+    numbers[-1] += 1
+    print(entry)
+try:
+    for entry in numbers:
+        del numbers[-2]
+except RuntimeError as error:
+    print(str(error))
+for value in numbers:
+    print(value)
+print(2 in numbers)
+print(4 not in numbers)
+
+nested = deque([[1], [2]])
+kept = nested[0]
+nested[0] = nested[-1]
+del nested[-1]
+print(kept[0])
+print(nested[0][0])
