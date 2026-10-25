@@ -338,10 +338,15 @@ impl Module {
         let mut argv = false;
         let mut original = false;
         for function in self.functions.iter().chain([&self.entry]) {
-            walk_expressions(&function.body, &mut |value| match value.kind {
+            walk_expressions(&function.body, &mut |value| match &value.kind {
                 ExprKind::Builtin(Builtin::SysArgv, _) => argv = true,
                 ExprKind::Builtin(Builtin::SysOrigArgv, _) => original = true,
                 ExprKind::Builtin(Builtin::Linecache(..), _) => linecache = true,
+                ExprKind::Builtin(Builtin::WarningFormat { .. }, args)
+                    if args[5].ty != Type::Str =>
+                {
+                    linecache = true
+                }
                 _ => {}
             });
         }
@@ -671,6 +676,13 @@ pub(crate) enum Builtin {
         invalid: u32,
     },
     WarningReset,
+    WarningFormat {
+        entry: Type,
+        environment: bool,
+    },
+    WarningWrite {
+        stdout: bool,
+    },
     PercentScalar,
     Logging(LogOperation),
     Timed(TimedOperation),

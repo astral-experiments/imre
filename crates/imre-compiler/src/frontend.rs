@@ -6822,6 +6822,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::WarningFilter { simple })) => {
                 return self.warning_filter(call, simple);
             }
+            Some(Binding::Intrinsic(Intrinsic::WarningDisplay { show })) => {
+                return self.warning_display(call, show);
+            }
             Some(Binding::Intrinsic(Intrinsic::WarningReset)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
