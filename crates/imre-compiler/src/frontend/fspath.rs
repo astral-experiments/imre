@@ -136,7 +136,7 @@ impl Checker<'_> {
         Ok(self.fspath_type_error(value, returned_by, syscall))
     }
 
-    fn exact_fspath(
+    pub(super) fn exact_fspath(
         &mut self,
         id: usize,
         receiver: Expr,
@@ -160,15 +160,7 @@ impl Checker<'_> {
         returned_by: Option<usize>,
         syscall: Option<(&str, &str)>,
     ) -> Expr {
-        let actual = match evaluated.ty {
-            Type::None => "NoneType".to_owned(),
-            Type::List(_) | Type::ListInt | Type::ByteOutput => "list".to_owned(),
-            Type::Dict(_) => "dict".to_owned(),
-            Type::Set(_) => "set".to_owned(),
-            Type::Tuple(_) => "tuple".to_owned(),
-            Type::Class(id) => self.classes.declarations.definitions[id].name.clone(),
-            ty => self.type_name(ty),
-        };
+        let actual = self.path_argument_type_name(evaluated.ty);
         let message = match (returned_by, syscall) {
             (Some(id), _) => format!(
                 "expected {}.__fspath__() to return str or bytes, not {actual}",
@@ -189,6 +181,18 @@ impl Checker<'_> {
         Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::RaiseException, vec![evaluated, exception]),
+        }
+    }
+    /// Use the Python object type name when reporting an invalid filesystem operand.
+    pub(super) fn path_argument_type_name(&self, ty: Type) -> String {
+        match ty {
+            Type::None => "NoneType".to_owned(),
+            Type::List(_) | Type::ListInt | Type::ByteOutput => "list".to_owned(),
+            Type::Dict(_) => "dict".to_owned(),
+            Type::Set(_) => "set".to_owned(),
+            Type::Tuple(_) => "tuple".to_owned(),
+            Type::Class(id) => self.classes.declarations.definitions[id].name.clone(),
+            ty => self.type_name(ty),
         }
     }
 }
