@@ -29,6 +29,7 @@ mod functools;
 mod hashlib;
 mod inference;
 mod iterables;
+mod itertools;
 mod json;
 mod literals;
 mod local_functions;
@@ -4257,11 +4258,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
-                Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
+                Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
+                        Intrinsic::OsName => Builtin::OsName,
                         _ => Builtin::SysPlatform,
                     };
                     return Ok(Expr {
@@ -4958,6 +4960,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Self::exception_record(receiver)
                 };
+                let receiver = self.checked_record_receiver(receiver, attribute);
                 if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     match attribute.attr.as_str() {
                         "name" => {
@@ -5372,6 +5375,10 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
+            Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
+                return self.cursor_length_hint(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Repeat)) => return self.repeat_cursor(call),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
@@ -5552,6 +5559,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let receiver = Self::exception_record(receiver);
+            let receiver = self.checked_record_receiver(receiver, attribute);
             if let Type::Class(class) = receiver.ty {
                 if self.classes.declarations.definitions[class]
                     .exception_aliases
@@ -5932,6 +5940,8 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
+            "next" => return self.next_cursor(call),
+            "iter" if call.arguments.args.len() == 1 => return self.iter_cursor(call),
             "sum" => return self.sum_call(call),
             "min" | "max" => return self.extremum_call(call, name.id == "min"),
             "any" | "all" => return self.quantifier_call(call, name.id == "all"),

@@ -58,6 +58,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
@@ -106,6 +107,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::Cursor(_)
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
@@ -682,6 +684,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -3269,6 +3272,7 @@ impl Emitter<'_, '_> {
                 Type::ListInt
                 | Type::StringKeys
                 | Type::Iterator
+                | Type::Cursor(_)
                 | Type::ByteOutput
                 | Type::Callable(_)
                 | Type::EventLoop
@@ -3907,6 +3911,7 @@ impl Emitter<'_, '_> {
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::OsName => self.call("imre_os_name", returns, &[]),
             Builtin::SysStreamWrite { stderr } => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -4541,6 +4546,24 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::CursorLengthHint => self.call(
+                "imre_cursor_length_hint",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::Repeat => {
+                let value = &args[0].value;
+                let word = self.word(value);
+                let kind = representation_kind(value.ty, &self.module.types);
+                let times = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_repeat(i32 {kind}, i64 {word}, i64 {times})"
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::BytesIter => self.call("imre_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
             Builtin::SplitLinesIter => self.call(
@@ -4853,6 +4876,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::StringKeys
                     | Type::Iterator
+                    | Type::Cursor(_)
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
@@ -5003,7 +5027,10 @@ impl Emitter<'_, '_> {
     /// or replaces an output owner; nested loops can safely reuse both scratch
     /// words after this synchronous conversion.
     fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
-        debug_assert_eq!(self.locals[iterator], Type::Iterator);
+        debug_assert!(matches!(
+            self.locals[iterator],
+            Type::Iterator | Type::Cursor(_)
+        ));
         debug_assert_eq!(self.locals[ready], Type::Bool);
         debug_assert_ne!(iterator, key);
         debug_assert_ne!(iterator, ready);
@@ -5075,6 +5102,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -5134,6 +5162,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::Cursor(_)
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
@@ -5695,6 +5724,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::StringKeys
         | Type::Iterator
+        | Type::Cursor(_)
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
@@ -6204,6 +6234,7 @@ declare void @imre_args_init(i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_argv()
 declare ptr @imre_sys_platform()
+declare ptr @imre_os_name()
 declare i64 @imre_sys_stream_write(i32, ptr)
 declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
@@ -6252,6 +6283,8 @@ declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
 declare ptr @imre_str_slice(ptr, i64, i64, i64)
+declare i64 @imre_cursor_length_hint(ptr, i64)
+declare ptr @imre_repeat(i32, i64, i64)
 declare ptr @imre_str_iter(ptr)
 declare ptr @imre_str_reverse_iter(ptr)
 declare ptr @imre_str_int_list(ptr)

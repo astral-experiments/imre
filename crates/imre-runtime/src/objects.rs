@@ -16,6 +16,7 @@ mod difflib;
 pub(crate) mod exceptions;
 mod files;
 mod hashlib;
+mod itertools;
 mod json;
 mod logging;
 mod mappings;
@@ -53,6 +54,7 @@ enum Storage {
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    Repeat(itertools::Repeat),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),

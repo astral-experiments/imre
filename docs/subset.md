@@ -67,6 +67,12 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
 
+`itertools.repeat(object[, times])` retains the original object. Aliases, `iter(it)`,
+`next(it[, default])`, and ordinary loop and list consumers share its position.
+Omitting `times` repeats forever; a nonpositive integer exhausts immediately.
+`operator.length_hint(it[, default])` returns the remaining finite count or the
+default for an unbounded repeat. A finite repeat's repr shows the current count.
+
 `itertools.chain` accepts a fixed number of positional iterables with one exact
 element type. A loop, comprehension, or immediate consumer can use the chain.
 It evaluates source expressions left to right, then acquires each iterator on
@@ -631,13 +637,13 @@ if args.output:
     args.output.write_text(args.input.read_text())
 ```
 
-Each positional declaration consumes one `str` or `Path`. A final positional with `nargs="+"` consumes one or more values and stores them in a list. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required`, `nargs="+"` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
+Positional and named arguments accept `nargs="?"`, `"*"`, `"+"`, or a positive integer. A fixed count (including `1`), `"*"`, or `"+"` produces a list. An earlier positional reserves enough values for the following positionals. A named option with `nargs="?"` uses its `const` when present without a value and its default when omitted. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
 Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
-Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations, a variadic positional before a subcommand, and nested or optional subcommands are outside this grammar.
+Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations and nested or optional subcommands are outside this grammar.
 
 ## Standard logging
 
@@ -701,7 +707,7 @@ remain available when the program accesses them.
 
 `sys.getdefaultencoding()` and `sys.getfilesystemencoding()` return the native text encoding (`"utf-8"`). The native standard streams expose that encoding as `.encoding`, including through `sys.__stdin__`, `sys.__stdout__` and `sys.__stderr__`.
 
-`sys.platform` gives the target platform name. `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
+`sys.platform` gives the target platform name; `os.name` gives its OS interface (`posix` or `nt`). `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
@@ -789,6 +795,8 @@ class Counter:
 Ordinary class bodies contain field annotations without defaults, typed methods, and optional docstrings. An instance method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameter and return types follow the same inference rules as direct functions; an initializer must return `None`. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. Ordinary classes use identity for `==` and `!=`; distinct nominal classes compare unequal.
 
 An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+
+When a checked guard narrows an optional record stored in a mutable field, each subsequent attribute read checks the current field; clearing it through an alias produces the usual `AttributeError`.
 
 `@property` marks a read-only getter with only `self`. Each access calls it again, preserving mutation, ownership, and exceptions. Setters and deleters are unsupported. An ordinary fixed class can use `@functools.cached_property` on a getter with an annotated result: the first successful read caches the value on that instance, including `None`. A failed getter runs again on the next read. Overriding or deleting the cached attribute is unsupported. `@classmethod` binds a first positional parameter named `cls` to the declaring class; `cls(...)` and `cls.method(...)` resolve statically. `@staticmethod` has no implicit parameter. Class/static methods work through either a class or an instance, and an instance expression still evaluates before arguments. `Class.method(instance, ...)` also supports unbound instance methods. `typing.Self`, including aliases and quoted annotations, means the owning class in method annotations; it is not a runtime type object or a stored class value.
 
