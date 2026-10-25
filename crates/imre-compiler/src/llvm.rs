@@ -85,6 +85,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
+            | Self::HandlerLock
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -152,6 +153,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::StringIO
+            | Self::HandlerLock
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -744,6 +746,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::EventLoop
             | Type::Coroutine(_)
             | Type::Task(_)
@@ -3400,6 +3403,7 @@ impl Emitter<'_, '_> {
                 | Type::TimeoutExpired
                 | Type::TextIO
                 | Type::StringIO
+                | Type::HandlerLock
                 | Type::CompletedProcess(..)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
@@ -3944,6 +3948,16 @@ impl Emitter<'_, '_> {
                 let name = match operation {
                     Get => "imre_log_get",
                     HandlerRename => "imre_log_handler_rename",
+                    LockNew => "imre_log_lock_new",
+                    LockAcquire => "imre_log_lock_acquire",
+                    LockAcquireInt => "imre_log_lock_acquire_int",
+                    LockRelease => "imre_log_lock_release",
+                    LockCount => "imre_log_lock_count",
+                    LockOwned => "imre_log_lock_owned",
+                    LockLocked => "imre_log_lock_locked",
+                    LockEnter => "imre_log_lock_enter",
+                    LockExit => "imre_log_lock_exit",
+                    LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
@@ -5970,6 +5984,7 @@ impl Emitter<'_, '_> {
                     | Type::PurePath(_)
                     | Type::TextIO
                     | Type::StringIO
+                    | Type::HandlerLock
                     | Type::EventLoop
                     | Type::Coroutine(_)
                     | Type::Task(_)
@@ -6224,6 +6239,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6305,6 +6321,7 @@ impl Emitter<'_, '_> {
             | Type::PurePath(_)
             | Type::TextIO
             | Type::StringIO
+            | Type::HandlerLock
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -6900,6 +6917,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::PurePath(_)
         | Type::TextIO
         | Type::StringIO
+        | Type::HandlerLock
         | Type::EventLoop
         | Type::Coroutine(_)
         | Type::Task(_)
@@ -7655,6 +7673,16 @@ declare ptr @imre_logrecord_message(ptr)
 declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
 declare void @imre_log_handler_rename(ptr, i64, i64)
+declare ptr @imre_log_lock_new()
+declare i1 @imre_log_lock_acquire(ptr, i1, double)
+declare i1 @imre_log_lock_acquire_int(ptr, i1, i64)
+declare void @imre_log_lock_release(ptr)
+declare i1 @imre_log_lock_enter(i64)
+declare void @imre_log_lock_exit(i64)
+declare i1 @imre_log_lock_owned(ptr)
+declare i1 @imre_log_lock_locked(ptr)
+declare i64 @imre_log_lock_count(ptr)
+declare void @imre_log_lock_reset(ptr)
 declare i64 @imre_log_handler_lookup(ptr)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)

@@ -2,7 +2,7 @@
 
 import os.path
 from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _lookup_handler, _rename_handler
+from imre._logging import _Level, _Lock, _lookup_handler, _rename_handler
 from pathlib import Path
 from typing import TextIO
 
@@ -45,6 +45,7 @@ class Handler:
     level: int
     formatter: Formatter | None
     filters: list[Filter]
+    lock: _Lock | None
 
     def __init__(self, level: _Level = 0) -> None:
         self.filters = []
@@ -52,6 +53,26 @@ class Handler:
         self.level = _handler_level(level)
         self.formatter = None
         self._closed = False
+        self.createLock()
+
+    def createLock(self) -> None:
+        self.lock = _Lock()
+
+    def acquire(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.acquire()
+
+    def release(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.release()
+
+    def _at_fork_reinit(self) -> None:
+        lock = self.lock
+        if lock is None:
+            raise AttributeError("'NoneType' object has no attribute '_at_fork_reinit'")
+        lock._at_fork_reinit()
 
     def get_name(self) -> str | None:
         return self._name
@@ -178,6 +199,20 @@ class FileHandler:
                     stream.close()
         finally:
             self._closed = True
+
+
+class NullHandler(Handler):
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
 
 
 class BufferingFormatter:

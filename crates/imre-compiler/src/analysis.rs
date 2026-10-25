@@ -520,6 +520,7 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     Decorator(TextRange),
+    OptionalLockContext(TextRange),
     Call(TextRange),
     Keyword(TextRange),
     TupleListRead(TextRange),
@@ -533,6 +534,7 @@ impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
             Self::Decorator(range) => (range, 0),
+            Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
             Self::Keyword(range) => (range, 2),
             Self::TupleListRead(range) => (range, 3),
@@ -550,6 +552,9 @@ impl CheckedDiagnostic {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::OptionalLockContext(expr) => {
+                diagnostic == "invalid-context-manager" && expr == range
+            }
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
