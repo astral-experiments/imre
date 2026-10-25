@@ -61,3 +61,25 @@ skips. The whole-file compile blocker applies to all IDs; it is not an extra
 row in the denominator. The mixed-stream and sys exit fixtures in the drivers
 are not upstream test IDs. No sibling's PR is included: #302 concerns child
 CLI execution, and #405/#409 concern standard-stream errors and finalization.
+
+## Live process handles
+
+[native_bodies.py](native_bodies.py) compiles the complete, unchanged
+`ContextManagerTests.test_returncode` method with a native assertion adapter.
+Its `Popen`, context exit, wait, and status observation execute in the Imre
+parent; the Python child exits with 100. Both optimization levels executed
+the assertion. This moves one ID from reference-only to fully native: **1
+fully native, 8 host-driven native, 3 child-only, 300 reference-only, 41
+reference skips** in the default Linux inventory. Reproduce at levels 0 and
+3 using:
+
+```sh
+"$CPYTHON" benchmarks/cpython_stdlib/full/subprocess/native_bodies.py \
+    --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" \
+    --opt-level 0 --result /tmp/subprocess-native-0.json
+```
+
+Running regrtest again with `-u cpu -m '*test_leaking_fds_on_error'` passes
+both previously gated IDs on CPython, each performing 1,024 failed launches.
+They remain eligible for native execution. This supplemental run does not
+change the results of the default reference command.

@@ -99,7 +99,10 @@ jobs:
           sparse-checkout: Lib/test
           persist-credentials: false
       - name: Run pinned unittest methods against native Imre
-        run: python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
+        run: |
+          python3 benchmarks/cpython_stdlib/test_suite_evidence.py
+          python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
       - name: Check sys streams and exits with vendored CPython methods
         run: |
           python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
@@ -145,10 +148,13 @@ jobs:
         run: |
           for opt in 0 3; do
             python3 benchmarks/cpython_stdlib/full/itertools/native.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt" --result "$RUNNER_TEMP/itertools-O$opt.json"
-            target/release/imre build benchmarks/cpython_stdlib/full/itertools/repeat.py --opt-level "$opt" -o "$RUNNER_TEMP/repeat"
-            "$RUNNER_TEMP/repeat" > "$RUNNER_TEMP/repeat.native"
-            python3 benchmarks/cpython_stdlib/full/itertools/repeat.py > "$RUNNER_TEMP/repeat.reference"
-            diff -u "$RUNNER_TEMP/repeat.reference" "$RUNNER_TEMP/repeat.native"
+            for exercise in repeat sources; do
+              src="benchmarks/cpython_stdlib/full/itertools/$exercise.py"
+              target/release/imre build "$src" --opt-level "$opt" -o "$RUNNER_TEMP/iterator"
+              "$RUNNER_TEMP/iterator" > "$RUNNER_TEMP/iterator.native"
+              python3 "$src" > "$RUNNER_TEMP/iterator.reference"
+              diff -u "$RUNNER_TEMP/iterator.reference" "$RUNNER_TEMP/iterator.native"
+            done
           done
       - name: Run vendored CPython Counter methods in native Imre
         run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"

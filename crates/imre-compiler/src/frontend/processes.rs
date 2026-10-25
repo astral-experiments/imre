@@ -61,9 +61,15 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
     impl<'ast> Visitor<'ast> for Deadlines<'_> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
             if let ast::Expr::Call(call) = expr
-                && self.graph.resolve(self.module, &call.func)
-                    == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                && let Some(deadline) = timeout_argument(call)
+                && let Some(deadline) = match self.graph.resolve(self.module, &call.func) {
+                    Some(Binding::Intrinsic(Intrinsic::SubprocessRun)) => timeout_argument(call),
+                    _ if matches!(&*call.func, ast::Expr::Attribute(a) if a.attr.as_str() == "wait") => {
+                        timeout_argument(call)
+                            .or_else(|| call.arguments.args.first())
+                            .filter(|d| !matches!(d, ast::Expr::NoneLiteral(_)))
+                    }
+                    _ => None,
+                }
             {
                 if integer_deadline(deadline) {
                     self.int = true;
@@ -178,6 +184,17 @@ pub(super) fn process_error_view(
                     unreachable!()
                 };
                 (capture, types.list(Type::Str))
+            }
+            ExprKind::Builtin(Builtin::Process(ProcessOperation::PopenWait), _) => {
+                timed = true;
+                (
+                    ProcessCapture {
+                        stdout: false,
+                        stderr: false,
+                        text: false,
+                    },
+                    types.list(Type::Str),
+                )
             }
             ExprKind::Builtin(Builtin::Process(ProcessOperation::CheckReturnCode), args) => {
                 let Type::CompletedProcess(capture) = args[0].ty else {
@@ -635,6 +652,145 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
     }
 
+    pub(super) fn popen(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let directory = self.types.optional(Type::Str);
+        let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
+        let (streams, capture) = stream_plan(self.graph, self.module, call)
+            .map_err(|message| error(self.source, call, message))?;
+        let params = [
+            ("args", self.types.list(Type::Str), None),
+            ("cwd", directory, Some(absent(directory))),
+            ("env", environment, Some(absent(environment))),
+            ("stdout", Type::Bool, Some(boolean(false))),
+            ("stderr", Type::Bool, Some(boolean(false))),
+            ("text", Type::Bool, Some(boolean(false))),
+            ("encoding", Type::Bool, Some(boolean(false))),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, ty, default))| Parameter {
+            name: name.to_owned(),
+            ty,
+            default,
+            sign_only: false,
+            kind: if index == 0 {
+                ParameterKind::PositionalOrKeyword
+            } else {
+                ParameterKind::KeywordOnly
+            },
+        })
+        .collect::<Vec<_>>();
+        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+            match index {
+                1 => checker.optional_path_argument(arg),
+                3.. => Ok(boolean(false)), // effect-free literals checked by stream_plan
+                _ => checker.expr_expected(arg, params[index].ty),
+            }
+        })?;
+        Ok(self.ordered_builtin(
+            Builtin::Process(ProcessOperation::Popen { streams }),
+            Type::Popen(capture),
+            args,
+        ))
+    }
+
+    pub(super) fn popen_attribute(
+        &self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let (op, ty) = match attr.attr.as_str() {
+            "args" => (ProcessOperation::PopenArgs, self.types.list(Type::Str)),
+            "pid" => (ProcessOperation::PopenPid, Type::Int),
+            "returncode" => (
+                ProcessOperation::PopenStatus { poll: false },
+                self.types.optional(Type::Int),
+            ),
+            _ => return Err(error(self.source, attr, "unsupported Popen attribute")),
+        };
+        Ok(operation(op, ty, vec![receiver]))
+    }
+
+    pub(super) fn popen_method(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let mut args = vec![receiver];
+        let (op, ty) = match attr.attr.as_str() {
+            "poll" if call.arguments.is_empty() => (
+                ProcessOperation::PopenStatus { poll: true },
+                self.types.optional(Type::Int),
+            ),
+            "wait" => {
+                let timeout = self.types.optional(Type::Float);
+                let param = Parameter {
+                    name: "timeout".into(),
+                    ty: timeout,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(absent(timeout)),
+                    sign_only: false,
+                };
+                let values =
+                    self.arguments_with(call, &[param], args.pop(), |checker, _, argument| {
+                        checker.deadline_value(argument)
+                    })?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenWait),
+                    Type::Int,
+                    values,
+                ));
+            }
+            "send_signal" => {
+                let param = Parameter {
+                    name: "sig".into(),
+                    ty: Type::Int,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: None,
+                    sign_only: false,
+                };
+                let values = self.arguments(call, &[param], args.pop())?;
+                return Ok(self.ordered_builtin(
+                    Builtin::Process(ProcessOperation::PopenSignal),
+                    Type::None,
+                    values,
+                ));
+            }
+            name @ ("kill" | "terminate") if call.arguments.is_empty() => {
+                args.push(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int(if name == "kill" { "9" } else { "15" }.into()),
+                });
+                (ProcessOperation::PopenSignal, Type::None)
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "unsupported Popen method or arguments",
+                ));
+            }
+        };
+        Ok(operation(op, ty, args))
+    }
+
+    fn deadline_value(&mut self, argument: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(argument)?;
+        if integer_deadline(argument) && value.ty == Type::Int {
+            return Ok(value);
+        }
+        let timeout = self.types.optional(Type::Float);
+        if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
+            return Err(error(
+                self.source,
+                argument,
+                "process timeout requires an integer literal or float | None seconds",
+            ));
+        }
+        self.coerce(value, timeout, argument)
+    }
+
     /// Literal mode arguments establish each output’s exact representation. Dynamic values are
     /// rooted in source order before their permutation into the runtime ABI.
     pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -675,20 +831,7 @@ impl Checker<'_> {
                 1 => checker.optional_path_argument(argument),
                 // stream_plan has already checked these effect-free static options.
                 4..=6 | 8 | 9 => Ok(boolean(false)),
-                7 => {
-                    let value = checker.expr(argument)?;
-                    if integer_deadline(argument) && value.ty == Type::Int {
-                        return Ok(value);
-                    }
-                    if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
-                        return Err(error(
-                            checker.source,
-                            argument,
-                            "process timeout requires an integer literal or float | None seconds",
-                        ));
-                    }
-                    checker.coerce(value, timeout, argument)
-                }
+                7 => checker.deadline_value(argument),
                 _ => checker.expr_expected(argument, params[index].ty),
             }
         })?;

@@ -360,6 +360,17 @@ enum Escape {
 fn escaped(input: &mut Input<'_>, output: &mut String, in_class: bool) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
     let value = match c {
+        'w' | 'W' => {
+            // Python uses Unicode letters, numbers and the literal underscore.
+            // Rust's shorthand additionally includes marks, connector characters,
+            // and join controls, all of which Python treats as non-word.
+            output.push_str(if c == 'w' {
+                r"[\p{L}\p{N}_]"
+            } else {
+                r"[^\p{L}\p{N}_]"
+            });
+            return Ok(Escape::Class);
+        }
         'd' | 'D' => {
             output.push_str(if c == 'd' { r"\p{Nd}" } else { r"\P{Nd}" });
             return Ok(Escape::Class);
@@ -528,7 +539,6 @@ mod tests {
         for source in [
             r"a$b",
             r"\1",
-            r"\w",
             r"\b",
             r"(?=a)",
             r"(?P<a>x)(?P=a)",
@@ -552,6 +562,8 @@ mod tests {
             r"[a-z]{2,4}?",
             r"[\-\]]+",
             r"(?P<empty>x*)?",
+            r"\w",
+            r"[^\W]",
             r"(a)+",
         ] {
             assert!(translate(source, false).is_ok(), "{source}");

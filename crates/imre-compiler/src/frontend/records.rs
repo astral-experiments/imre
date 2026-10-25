@@ -494,6 +494,14 @@ pub(super) fn record_factories(
     Ok(())
 }
 
+/// The next initializer in the lexical class lineage, independent of the
+/// concrete receiver used for inherited method specialization.
+#[derive(Clone, Copy)]
+pub(super) enum BaseInitializer {
+    Object,
+    Record(usize),
+}
+
 impl Checker<'_> {
     /// A checked type for a mutable field can become stale through an alias.
     /// Load the field once per attribute access and raise Python's AttributeError
@@ -595,10 +603,13 @@ impl Checker<'_> {
                 return None;
             }
             let owner = self.classes.declarations.ids[&record.method_origins[context.index]];
-            self.classes.declarations.definitions[owner]
-                .bases
-                .first()
-                .copied()
+            Some(
+                self.classes.declarations.definitions[owner]
+                    .bases
+                    .first()
+                    .copied()
+                    .map_or(BaseInitializer::Object, BaseInitializer::Record),
+            )
         });
         self.class_receiver = context.and_then(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
@@ -825,6 +836,13 @@ impl Checker<'_> {
                         .map_err(|message| error(self.source, attribute, message))?;
                 }
                 self.calls.insert(signature.id);
+                if let Some(&(ready, value)) = self
+                    .classes
+                    .cached_properties
+                    .get(&(class, signature.method.unwrap().index))
+                {
+                    return Ok(self.cached_property(receiver, &signature, ready, value));
+                }
                 Ok(Expr {
                     ty: signature.returns,
                     kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
@@ -1104,8 +1122,26 @@ impl Checker<'_> {
                 },
             });
         }
+        // An initializer defined at the root of a checked record lineage finds
+        // object.__init__, including when that initializer runs on a subclass.
+        if matches!(self.super_initializer, Some(BaseInitializer::Object))
+            && !self.names.contains_key("super")
+            && !self.graph.modules[self.module]
+                .bindings
+                .contains_key("super")
+            && call.arguments.is_empty()
+        {
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+        }
         let base = self
             .super_initializer
+            .and_then(|base| match base {
+                BaseInitializer::Record(base) => Some(base),
+                BaseInitializer::Object => None,
+            })
             .filter(|_| {
                 !self.names.contains_key("super")
                     && !self.graph.modules[self.module]
