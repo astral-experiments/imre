@@ -49,7 +49,7 @@ with io.BytesIO(Path(sys.argv[1]).read_bytes()) as buffer:
 CONTROL = '''import io
 import sys
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 def check(archive: ZipFile) -> None:
     entries = archive.infolist()
@@ -87,6 +87,18 @@ with open(sys.argv[1], "rb") as file:
     print(repr(file.read(4)))
     print(file.tell())
 with io.BytesIO(path.read_bytes()) as mem:
+    with ZipFile(mem) as limits:
+        for entry in limits.infolist()[:2]:
+            with limits.open(entry) as member:
+                try:
+                    print(repr(member.read(2**63)))
+                except OverflowError:
+                    print("overflow")
+                print(repr((member.tell(), mem.tell())))
+                try:
+                    print(repr(member.read(1)))
+                except BadZipFile:
+                    print("bad CRC")
     with ZipFile(mem) as buffered:
         print(repr(buffered.filename))
         check(buffered)

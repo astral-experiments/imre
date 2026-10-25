@@ -718,6 +718,7 @@ fn namespace_class(
         abc: false,
         mapping: false,
         dataclass: Some(DataclassOptions {
+            slots: false,
             init: false,
             eq: true,
             repr: true,
