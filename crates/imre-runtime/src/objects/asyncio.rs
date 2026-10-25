@@ -10,7 +10,7 @@ use std::rc::Weak;
 
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 
-use super::exceptions::{replace_pending, swap_active, take_pending};
+use super::exceptions::{replace_pending, swap_active, take_pending, wrap_stop_iteration};
 use super::records::imre_record_retain;
 use super::words::{OwnedWord, WordKind};
 use super::*;
@@ -32,7 +32,7 @@ impl Call {
         // the frame roots its borrowed parameters through the whole native call.
         let word = unsafe { (self.callback)(self.frame.word as *const usize) };
         match take_pending() {
-            Some(error) => Err(error),
+            Some(error) => Err(wrap_stop_iteration(error, "coroutine raised StopIteration")),
             // SAFETY: successful generated calls transfer an exact owned result.
             None => Ok(unsafe { OwnedWord::from_owned(word, self.kind) }),
         }

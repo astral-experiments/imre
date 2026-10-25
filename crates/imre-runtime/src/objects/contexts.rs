@@ -7,8 +7,8 @@ use std::rc::Rc;
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 
 use super::exceptions::{
-    active_exception, generator_error, propagates_context_exception, replace_pending, swap_active,
-    take_pending,
+    active_exception, propagates_context_exception, replace_pending, swap_active, take_pending,
+    wrap_stop_iteration,
 };
 use super::records::imre_record_retain;
 use super::words::WordKind;
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn imre_context_new(
         // SAFETY: the frame roots this thunk's exact parameters.
         unsafe { callback(frame.word as *const usize) };
         drop(frame);
-        take_pending().map(generator_error)
+        take_pending().map(|error| wrap_stop_iteration(error, "generator raised StopIteration"))
     });
     let manager = Rc::new(Manager {
         fiber: RefCell::new(Some(fiber)),
