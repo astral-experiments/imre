@@ -647,6 +647,9 @@ impl Checker<'_> {
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
+        if self.unbound_assert_root(expression).is_some() {
+            return None;
+        }
         if let ast::Expr::Attribute(attr) = expression
             && let Some(binding) = self.fixed_class_binding(attr)
         {

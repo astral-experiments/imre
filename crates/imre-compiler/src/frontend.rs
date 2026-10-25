@@ -1947,6 +1947,8 @@ struct Checker<'a> {
     returns: Type,
     nullable_assignments: HashMap<String, Type>,
     bound_flags: HashMap<String, usize>,
+    omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
+    omitted_assert_free: HashMap<String, unbound_locals::Binding>,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
@@ -2008,6 +2010,8 @@ impl<'a> Checker<'a> {
             returns: Type::None,
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
+            omitted_assert_locals: HashMap::new(),
+            omitted_assert_free: HashMap::new(),
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
@@ -2367,6 +2371,9 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        if let Some(name) = self.unbound_assert_root(expression) {
+            return self.omitted_assert_read(name, Some(expected), expression);
+        }
         if self.present_subscripts.contains(&expression.range()) {
             let value = self.expr(expression)?;
             if self.types.payload(value.ty) == Some(expected) {
@@ -3629,6 +3636,12 @@ impl<'a> Checker<'a> {
         }
 
         if self.block_depth == 0 && !self.module_scope {
+            if self.graph.python_optimization() > 0 && !self.interactive_names {
+                let (omitted, live) = unbound_locals::omitted_assert_bindings(statements);
+                self.omitted_assert_locals = omitted;
+                self.omitted_assert_free
+                    .retain(|name, _| !live.contains(name));
+            }
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
             let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
@@ -4944,6 +4957,9 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(name) = self.unbound_assert_root(expression) {
+            return self.omitted_assert_read(name, None, expression);
+        }
         // Calls and binary operators recursively check their operands. Keep
         // the large general expression frame off both paths in debug builds.
         match expression {
