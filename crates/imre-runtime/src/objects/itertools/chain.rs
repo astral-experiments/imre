@@ -8,8 +8,8 @@ enum Modes {
 }
 
 pub(in crate::objects) struct Chain {
-    outer: RefCell<Option<Rc<Object>>>,
-    active: RefCell<Option<Rc<Object>>>,
+    pub(super) outer: RefCell<Option<Rc<Object>>>,
+    pub(super) active: RefCell<Option<Rc<Object>>>,
     modes: Modes,
 }
 
@@ -22,42 +22,62 @@ impl Chain {
         })))
     }
 
-    pub(super) fn next(&self) -> Result<Option<OwnedWord>, Error> {
-        loop {
-            // Do not hold storage borrows while polling another iterator.
-            let active = self.active.borrow().clone();
-            if let Some(active) = active {
-                if let Some(item) = next_item(&active)? {
-                    return Ok(Some(item));
+    /// The outer cursor stops on errors; an inner cursor can continue after an error.
+    pub(super) fn advance(&self, frame: &mut PullFrame, item: Option<ItemResult>) -> Advance {
+        if let Some(item) = item {
+            let item = match item {
+                Err(error) if error.is_kind(Kind::StopIteration) => Ok(None),
+                other => other,
+            };
+            match frame {
+                PullFrame::ChainInner => match item {
+                    Ok(None) => {
+                        self.active.take();
+                    }
+                    other => return Advance::Return(other),
+                },
+                PullFrame::ChainOuter => {
+                    let inner = match item {
+                        Ok(Some(inner)) => inner,
+                        ended => {
+                            self.outer.take();
+                            return Advance::Return(ended);
+                        }
+                    };
+                    let mode = match &self.modes {
+                        Modes::Uniform(mode) => *mode,
+                        Modes::Positional(modes, index) => {
+                            let i = index.get();
+                            index.set(i + 1);
+                            u32::from(modes[i])
+                        }
+                    };
+                    // SAFETY: the compiler's mode describes this rooted source word.
+                    match unsafe { sources::try_acquire(mode, inner.word) } {
+                        Ok(active) => {
+                            self.active.replace(Some(Rc::clone(&active)));
+                            *frame = PullFrame::ChainInner;
+                            return Advance::Pull(active);
+                        }
+                        Err(error) => {
+                            self.outer.take();
+                            return Advance::Return(Err(error));
+                        }
+                    }
                 }
-                self.active.take();
+                _ => unreachable!(),
             }
-            let Some(outer) = self.outer.borrow().clone() else {
-                return Ok(None);
-            };
-            let inner = match next_item(&outer) {
-                Ok(Some(inner)) => inner,
-                ended => {
-                    self.outer.take();
-                    return ended;
-                }
-            };
-            let mode = match &self.modes {
-                Modes::Uniform(mode) => *mode,
-                Modes::Positional(modes, index) => {
-                    let i = index.get();
-                    index.set(i + 1);
-                    u32::from(modes[i])
-                }
-            };
-            // SAFETY: the compiler's mode describes this rooted source word.
-            match unsafe { sources::try_acquire(mode, inner.word) } {
-                Ok(active) => self.active.replace(Some(active)),
-                Err(error) => {
-                    self.outer.take();
-                    return Err(error);
-                }
-            };
+        }
+        let outer = self.outer.borrow();
+        let Some(outer) = outer.as_ref() else {
+            return Advance::Return(Ok(None));
+        };
+        if let Some(active) = self.active.borrow().as_ref() {
+            *frame = PullFrame::ChainInner;
+            Advance::Pull(Rc::clone(active))
+        } else {
+            *frame = PullFrame::ChainOuter;
+            Advance::Pull(Rc::clone(outer))
         }
     }
 }

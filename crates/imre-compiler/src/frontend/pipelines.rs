@@ -208,6 +208,7 @@ impl Checker<'_> {
             return Ok(Some(Iteration::Prepared(self.sentinel_input(call)?)));
         }
         if self.is_chain_from_iterable(call)
+            || self.is_expanded_chain(call)
             || matches!(
                 self.resolve(&call.func),
                 Some(Binding::Intrinsic(

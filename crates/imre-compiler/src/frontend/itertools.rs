@@ -111,46 +111,62 @@ impl Checker<'_> {
                 && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Chain)))
     }
 
+    pub(super) fn is_expanded_chain(&self, call: &ast::ExprCall) -> bool {
+        self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            && call
+                .arguments
+                .args
+                .iter()
+                .any(|arg| matches!(arg, ast::Expr::Starred(_)))
+    }
+
     pub(super) fn chain_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
-        let (op, input, element) = if self.is_chain_from_iterable(call) {
-            let [outer] = call.arguments.args.as_ref() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "chain.from_iterable takes one iterable",
-                ));
-            };
-            let source = self.cursor_source_value(outer)?;
-            let inner = self.chain_element(source.ty, outer)?.unwrap_or(Type::Int);
-            (
-                Builtin::ChainFrom(inner),
-                source,
-                self.chain_element(inner, call)?,
-            )
-        } else {
-            let mut values = Vec::new();
-            let mut element = None;
-            for arg in &call.arguments.args {
-                let value = self.cursor_source_value(arg)?;
-                if let Some(ty) = self.chain_element(value.ty, arg)? {
-                    if let Some(previous) = element {
-                        self.expect(previous, ty, arg)?;
+        let (op, input, element) =
+            if self.is_chain_from_iterable(call) || self.is_expanded_chain(call) {
+                let source = if self.is_chain_from_iterable(call) {
+                    let [outer] = call.arguments.args.as_ref() else {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "chain.from_iterable takes one iterable",
+                        ));
+                    };
+                    self.cursor_source_value(outer)?
+                } else {
+                    // A starred call consumes its outer inputs at construction, but
+                    // the resulting arguments still refer to their original objects.
+                    self.expanded_sequence(&call.arguments.args, None, false, call)?
+                };
+                let inner = self.chain_element(source.ty, call)?.unwrap_or(Type::Int);
+                (
+                    Builtin::ChainFrom(inner),
+                    source,
+                    self.chain_element(inner, call)?,
+                )
+            } else {
+                let mut values = Vec::new();
+                let mut element = None;
+                for arg in &call.arguments.args {
+                    let value = self.cursor_source_value(arg)?;
+                    if let Some(ty) = self.chain_element(value.ty, arg)? {
+                        if let Some(previous) = element {
+                            self.expect(previous, ty, arg)?;
+                        }
+                        element = Some(ty);
                     }
-                    element = Some(ty);
+                    values.push(value);
                 }
-                values.push(value);
-            }
-            let ty = self.types.tuple(values.iter().map(|e| e.ty).collect());
-            (
-                Builtin::Chain,
-                Expr {
-                    ty,
-                    kind: ExprKind::Tuple(values),
-                },
-                element,
-            )
-        };
+                let ty = self.types.tuple(values.iter().map(|e| e.ty).collect());
+                (
+                    Builtin::Chain,
+                    Expr {
+                        ty,
+                        kind: ExprKind::Tuple(values),
+                    },
+                    element,
+                )
+            };
         Ok(Expr {
             ty: self.types.cursor(element.unwrap_or(Type::Int)),
             kind: ExprKind::Builtin(op, vec![input]),

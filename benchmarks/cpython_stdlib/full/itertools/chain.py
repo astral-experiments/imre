@@ -1,6 +1,6 @@
 """Constructor, source acquisition, and error timing; compare stdout with CPython."""
 
-from itertools import chain, islice
+from itertools import batched, chain, islice
 
 items = [1, 2]
 later = {3: 0}
@@ -73,3 +73,18 @@ print(next(inner))
 print("".join(doubled))
 empty = chain()
 print(next(empty, 99))
+
+# A starred call snapshots the outer arguments; from_iterable holds it live.
+first = [1]
+outer_lists = [first]
+spread = chain(*outer_lists)
+live = chain.from_iterable(outer_lists)
+outer_lists.append([99])
+first.append(2)
+print(list(spread))
+print(list(live))
+print(list(chain([0], *outer_lists, [3])))
+
+# The original batched test expands a list of tuples whose lengths differ.
+batches = list(batched('ABCDEFG', 3))
+print(''.join(chain(*batches)))

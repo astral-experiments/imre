@@ -5928,7 +5928,7 @@ impl<'a> Checker<'a> {
         if let Some(suite) = self.doctest_suite(call)? {
             return Ok(suite);
         }
-        if self.is_chain_from_iterable(call) {
+        if self.is_chain_from_iterable(call) || self.is_expanded_chain(call) {
             return self.chain_cursor(call);
         }
         if let Some(value) = self.sys_call(call)? {

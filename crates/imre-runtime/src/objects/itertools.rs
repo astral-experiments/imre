@@ -128,38 +128,34 @@ enum PullFrame {
     #[default]
     Empty,
     Batch(batched::Partial),
+    ChainOuter,
+    ChainInner,
 }
 
 impl Drop for Adapter {
     fn drop(&mut self) {
-        let mut source = self.take_source();
-        while let Some(cursor) = source {
-            let Ok(cursor) = Rc::try_unwrap(cursor) else {
-                break;
-            };
-            let Storage::IteratorAdapter(state) = cursor.0.into_inner() else {
-                break;
-            };
-            let Ok(mut state) = Rc::try_unwrap(state) else {
-                break;
-            };
-            // Detach the next owner before this adapter's fields are destroyed.
-            source = state.take_source();
+        // Join the same iterative release traversal used by tuples and lists.
+        // A chain can retain two cursors, either of which may have other owners.
+        let source = match self {
+            Self::Tee(fork) => fork.take_source(),
+            Self::Batched(batch) => batch.take_source(),
+            Self::Chain(chain) => {
+                if let Some(outer) = chain.outer.get_mut().take() {
+                    records::release_object_word(outer);
+                }
+                chain.active.get_mut().take()
+            }
+            Self::Slice(slice) => slice.source.get_mut().take(),
+            Self::Cycle(cycle) => cycle.source.get_mut().take(),
+            _ => None,
+        };
+        if let Some(source) = source {
+            records::release_object_word(source);
         }
     }
 }
 
 impl Adapter {
-    fn take_source(&mut self) -> Option<Rc<Object>> {
-        match self {
-            Self::Tee(fork) => fork.take_source(),
-            Self::Batched(batch) => batch.take_source(),
-            Self::Slice(slice) => slice.source.get_mut().take(),
-            Self::Cycle(cycle) => cycle.source.get_mut().take(),
-            _ => None,
-        }
-    }
-
     pub(super) fn write_repr(&self, output: &mut String, owner: *const Object) {
         use std::fmt::Write;
         let name = match self {
@@ -203,6 +199,7 @@ impl Adapter {
             Self::Slice(slice) => slice.advance(item),
             Self::Cycle(cycle) => cycle.advance(item),
             Self::Batched(batch) => batch.advance(frame, item),
+            Self::Chain(chain) => chain.advance(frame, item),
             _ => unreachable!("only composed cursors request source items"),
         }
     }
@@ -230,6 +227,7 @@ impl Adapter {
                                         | Self::Slice(_)
                                         | Self::Cycle(_)
                                         | Self::Batched(_)
+                                        | Self::Chain(_)
                                 ) =>
                             {
                                 Some(Rc::clone(state))
@@ -276,8 +274,7 @@ impl Adapter {
                     )))
                 }
             }
-            Self::Chain(chain) => chain.next(),
-            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) | Self::Batched(_) => {
+            Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) | Self::Batched(_) | Self::Chain(_) => {
                 self.next_composed()
             }
             Self::PathWalk(walk) => walk.next(),
