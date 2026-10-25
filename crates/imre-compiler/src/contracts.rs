@@ -448,6 +448,8 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysThreadInfo
+            | Self::SysThreadText { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::OsName

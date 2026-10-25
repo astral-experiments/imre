@@ -58,7 +58,6 @@ SysModuleTest.test_sys_flags_no_instantiation	blocked	The flags value and its ty
 SysModuleTest.test_sys_ignores_cleaning_up_user_data	blocked	Storing a user object on sys and finalizing its failing destructor quietly needs mutable module attributes and native shutdown ownership.
 SysModuleTest.test_sys_tracebacklimit	blocked	Real chained native frames must be formatted or suppressed according to mutable sys.tracebacklimit on uncaught errors.
 SysModuleTest.test_sys_version_info_no_instantiation	blocked	Needs a real version-info type object and its construction error, in addition to exposed tuple fields and indexing.
-SysModuleTest.test_thread_info	blocked	Expose a real thread_info struct sequence (name, lock, version) for the native target, with index, len and field access.
 TestRemoteExec.test_new_namespace_for_each_remote_exec	blocked	Each injected script must run in a new globals dictionary distinct from the target's __main__.__dict__.
 TestRemoteExec.test_remote_exec	blocked	Inject and execute the actual script at a safe point in the waiting target; no native debugger transport exists.
 TestRemoteExec.test_remote_exec_bytes	blocked	The same cross-process operation must accept a bytes path without involving a CPython child.
