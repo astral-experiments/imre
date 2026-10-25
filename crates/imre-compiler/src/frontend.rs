@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod functools;
 mod hashlib;
 mod inference;
 mod iterables;
@@ -5125,6 +5126,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Reduce)) => return self.reduce_call(call),
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
