@@ -1,6 +1,7 @@
 """Run unchanged CPython timed handler routines against persistent native handlers."""
 import argparse
 import ast
+import json
 import os
 from contextlib import ExitStack
 from pathlib import Path
@@ -14,23 +15,21 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path.insert(0, str(STDLIB))
 from upstream import verify_upstream
+from suite_inventory import cases, load_suite
+from suite_native import Toolchain, native_method, run_in_fixtures
 
 
-DAILY_FIXTURE = '''import datetime
+DAILY_FIXTURE = """import datetime
 import logging.handlers
-import sys
+import unittest
 
-class Case:
+class NativeCase(unittest.TestCase):
     fn: str
 
-    def __init__(self, filename: str) -> None:
-        self.fn = filename
-
-    def assertEqual(self, actual: int, expected: int) -> None:
-        if actual != expected:
-            raise AssertionError("rollover time differs")
-
-'''
+    def __init__(self) -> None:
+        super().__init__()
+        self.fn = FILENAME
+"""
 
 
 class Driver:
@@ -88,6 +87,7 @@ def main():
     parser.add_argument("--opt-level", choices=("0", "1", "2", "3"), default="3")
     parser.add_argument("--cpython-source", type=Path)
     parser.add_argument("--sanitize", action="store_true")
+    parser.add_argument("--result", type=Path)
     args = parser.parse_args()
     verify_upstream()
     if args.cpython_source:
@@ -126,32 +126,53 @@ def main():
             return run.stdout, run.stderr, files
         assert rotate([build(lifecycle)]) == rotate([sys.executable, lifecycle])
         binary = build(HERE / "timed_driver.py")
-        # This complete body only needs a filename and integer equality. Compile
-        # it directly as well as running it with the original host fixture.
-        source = (vendored / "test_logging.py").read_text()
-        node = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)
-                    and n.name == cls.__name__)
-        name = "test_compute_rollover_daily_attime"
-        node = next(n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == name)
-        body = "".join(source.splitlines(keepends=True)[node.lineno - 1:node.end_lineno])
-        daily = Path(work) / "daily.py"
-        daily.write_text(DAILY_FIXTURE + body + f"\nCase(sys.argv[1]).{name}()\n")
-        subprocess.run([build(daily), Path(work) / "daily.log"], cwd=work, check=True, timeout=30)
-        print("native body and operations", f"test.test_logging.{cls.__name__}.{name}")
-        for name in names:
+        prefix = "test.test_logging." + cls.__name__ + "."
+        executions = {}
+        def drive(case, method):
             with ExitStack() as stack:
                 driver = Driver(binary, stack)
                 native = SimpleNamespace(handlers=SimpleNamespace(TimedRotatingFileHandler=driver.new))
-                case = cls(name)
-                method = getattr(case, name)
-                def check():
-                    with patch.object(test_logging, "logging", native):
-                        method()
-                setattr(case, name, check)
-                result = case.run()
-                if not result.wasSuccessful() or result.skipped or not driver.operations:
-                    raise AssertionError((case.id(), result.errors, result.failures, result.skipped))
-                print("host-driven native operations", case.id(), driver.operations)
+                with patch.object(test_logging, "logging", native):
+                    method()
+                if not driver.operations:
+                    raise AssertionError(f"no native logging calls in {case.id()}")
+                return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
+                        "fixture_execution": "CPython module/class/instance hooks", "native_calls": driver.operations}
+        executions.update((prefix + name, drive) for name in names)
+        suite = load_suite("test.test_logging")
+        denominator = len(list(cases(suite)))
+        assert denominator == 272
+        evidence, failures, skips = run_in_fixtures(suite, executions)
+        if failures or skips or set(evidence) != set(executions):
+            raise AssertionError((failures, skips, set(evidence)))
+        daily = prefix + "test_compute_rollover_daily_attime"
+        tools = Toolchain(args.imre, args.runtime, args.clang, int(args.opt_level))
+        if args.sanitize:
+            # The shared toolchain accepts ordinary builds. Keep the exact same
+            # method builder and fixtures when requesting a sanitized executable.
+            class Sanitized:
+                def build(self, source, directory):
+                    path = directory / "sanitized_daily.py"
+                    path.write_bytes(source)
+                    return build(path)
+            tools = Sanitized()
+        def compile_in_fixture(case, method):
+            # setUp creates a unique real file, and tearDown removes that file.
+            fixture = DAILY_FIXTURE.replace("FILENAME", repr(case.fn))
+            execute = native_method(tools, Path(work), vendored / "test_logging.py",
+                                    cls.__name__, daily, fixture)
+            return execute(case, method)
+        native, failures, skips = run_in_fixtures(load_suite("test.test_logging"),
+                                                 {daily: compile_in_fixture})
+        if failures or skips or set(native) != {daily}:
+            raise AssertionError((failures, skips, set(native)))
+        evidence[daily].extend(native[daily])
+        for case_id in sorted(evidence):
+            for entry in evidence[case_id]:
+                print(entry["execution"], case_id, entry.get("native_calls", ""))
+        if args.result:
+            args.result.write_text(json.dumps({"optimization": int(args.opt_level),
+                "reference_denominator": denominator, "evidence": evidence}, indent=2, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

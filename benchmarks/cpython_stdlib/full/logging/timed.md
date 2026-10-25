@@ -5,7 +5,9 @@ IDs. One native driver retains all handlers for a method, starts under that
 method's timezone, and uses its real temporary files. The host provides
 unittest, datetime inputs, and assertions. Constructors, scheduling, deletion
 selection, and close run in the Imre executable. The daily `atTime` method
-also compiles verbatim with a filename fixture and native integer assertions.
+also compiles verbatim through the shared runner with native unittest integer
+assertions. Its original CPython module, class and instance hooks still run;
+the child receives the filename created by that exact instance’s setUp.
 Count that ID only once.
 
 At `-O0` and `-O3`, the 18 `test_compute_rollover_*` methods,
