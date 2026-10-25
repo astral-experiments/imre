@@ -32,15 +32,15 @@ and calls its `debug()` method. CPython supplies the comparison transcript;
 it never evaluates an example for the native executable. A matching empty
 suite contributes zero test cases.
 
-The [Linux execution report](execution-linux.json) was produced on the base
-containing [#517](https://github.com/astral-sh/imre/pull/517). There,
+The [Linux execution report](execution-linux.json) was reproduced on repaired
+main `fce4734` with this doctest implementation. There,
 the complete native `json` case blocks on example 7 (`from io import
 StringIO`), the encoder case on example 1 (`from json.encoder import
 JSONEncoder`), and the batched case on its module export. Direct suite
 controls do not exercise the original package or unittest fixtures.
 The [whole-suite probe](../check_suite_startup.py) checks those separately.
 
-With the native `ImportError` implementation on main `ec80860`, all eight
+With the native `ImportError` implementation on repaired main `fce4734`, all eight
 [untouched import and runner probes](startup-linux.json) reach
 `Lib/test/support/__init__.py:6` and stop on its `annotationlib` import.
 Those probes execute zero test cases.
