@@ -56,6 +56,6 @@ types = ["Fixed-layout `SimpleNamespace` construction and attributes.","benchmar
 typing = ["Selected annotations and aliases, including `Callable`, `Literal`, `Self` and `Union`.","docs/subset.md"]
 unittest = ["Selected `TestCase` assertions, fixtures, discovery and result handling.","benchmarks/cpython_stdlib/full/unittest/README.md"]
 urllib = ["`urllib.parse.unquote` on strings with the default UTF-8 replacement behavior.","tests/fixtures/text/unquote.py"]
-warnings = ["Warning filters and matching for supported native warnings.","benchmarks/cpython_stdlib/full/warnings/README.md"]
+warnings = ["Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`.","benchmarks/cpython_stdlib/full/warnings/README.md"]
 zipfile = ["Read stored and deflated members and report CRC failures.","benchmarks/cpython_stdlib/native_zip_members.py"]
 zlib = ["`error` exception identity on compressed-input paths; this does not imply a general compression API.","tests/fixtures/files/stream_errors.py"]
