@@ -1581,6 +1581,21 @@ pub(crate) enum ProcessOperation {
     DestInSrc,
     IgnorePatterns,
     TreeErrorArgs,
+    MakeArchive,
+    UnpackArchive,
+    ArchiveFormats {
+        unpack: bool,
+        row: Type,
+    },
+    UnregisterArchive(bool),
+    /// The module and statement identify a single source-level function object.
+    SetArchiveRoot((usize, usize)),
+    RegisterArchive {
+        unpack: bool,
+        frame: Option<Type>,
+        keyword_value: Option<Type>,
+        root_flag: Option<(usize, usize)>,
+    },
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

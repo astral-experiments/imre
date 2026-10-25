@@ -124,6 +124,28 @@ pub(super) struct Archive {
 }
 
 impl Archive {
+    /// `shutil.unpack_archive` probes the trailer before opening the directory:
+    /// a non-ZIP gets ReadError, while corrupt directory or member data keeps its ZIP error.
+    pub(super) fn for_extraction(file: std::fs::File) -> Result<Option<Self>> {
+        if let Err(error) = directory::find_directory(&mut &file) {
+            return if error.is_kind(Kind::BadZipFile) {
+                Ok(None)
+            } else {
+                Err(error)
+            };
+        }
+        Self::open(Source::Owned(Rc::new(file)), None).map(Some)
+    }
+
+    pub(super) fn for_filenames(&self, mut visit: impl FnMut(&Str) -> Result<()>) -> Result<()> {
+        self.for_infos(|infos| {
+            for &word in infos {
+                // SAFETY: the ordered file list retains a live ZipInfo for every name.
+                visit(&unsafe { object(word as *const Object) }.zip_info().filename)?;
+            }
+            Ok(())
+        })
+    }
     fn open(source: Source, filename: Option<Rc<Str>>) -> Result<Self> {
         let entries = source.directory()?;
         let mut list = Words::new(5);
@@ -193,7 +215,7 @@ impl Archive {
         })
     }
 
-    fn member_by_name(&self, name: &Str) -> Result<Member> {
+    pub(super) fn member_by_name(&self, name: &Str) -> Result<Member> {
         let source = self.source()?;
         Member::open(source, self.get(name)?.zip_info(), || string_repr(name))
     }
