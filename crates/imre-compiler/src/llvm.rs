@@ -65,7 +65,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExitCode
+            | Self::ExceptionField
+            | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
@@ -118,7 +119,8 @@ impl Type {
             | Self::ByteOutput
             | Self::Exception
             | Self::NamedException(_)
-            | Self::ExitCode
+            | Self::ExceptionField
+            | Self::ImportException
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
@@ -703,7 +705,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -3310,7 +3313,8 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::Exception
                 | Type::NamedException(_)
-                | Type::ExitCode
+                | Type::ExceptionField
+                | Type::ImportException
                 | Type::TimeoutExpired
                 | Type::TextIO
                 | Type::CompletedProcess(_)
@@ -3950,6 +3954,44 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            Builtin::FunctionCacheProbe(id, capacity) => {
+                let key = self.key_word(&args[0].value);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.checked_instruction(format!(
+                        "call i1 @imre_function_cache_probe(i64 {id}, i64 {key}, i64 {capacity})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::FunctionCacheInsert(id, capacity) => {
+                let key = self.key_word(&args[0].value);
+                let value = self.word(&args[1].value);
+                self.checked_line(format!("call void @imre_function_cache_insert(i64 {id}, i64 {key}, i64 {value}, i64 {capacity})"));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
+            Builtin::FunctionCacheStat(id, field) => {
+                let operand = self.instruction(format!(
+                    "call i64 @imre_function_cache_stat(i64 {id}, i32 {field})"
+                ));
+                self.owned(Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            Builtin::FunctionCacheClear(id) => {
+                self.line(format!("call void @imre_function_cache_clear(i64 {id})"));
+                Value {
+                    ty: Type::None,
+                    operand: "0".into(),
+                    small_integer: false,
+                }
+            }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashRecord => Value {
                 ty: Type::Int,
@@ -4430,6 +4472,60 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ImportErrorNew { kind, fields } => {
+                let desc = if *kind >= 256 {
+                    format!(
+                        "@{}",
+                        self.output.global_ref(format!("exception_type_{kind}"))
+                    )
+                } else {
+                    "null".into()
+                };
+                let fields = fields
+                    .map(|idx| {
+                        idx.map_or_else(
+                            || "i32 0, i64 0".into(),
+                            |idx| {
+                                let arg = &args[idx].value;
+                                let kind = representation_kind(arg.ty, &self.module.types);
+                                let word = self.word(arg);
+                                format!("i32 {kind}, i64 {word}")
+                            },
+                        )
+                    })
+                    .join(", ");
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_import_error_new(i32 {kind}, ptr {desc}, ptr {}, {fields})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::ImportErrorReset => {
+                self.void_call("imre_import_error_reset", &[&args[0].value, &args[1].value]);
+                none()
+            }
+            Builtin::ImportErrorField(field) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @imre_import_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::ExceptionFieldRepr => {
+                self.call("imre_exception_field_repr", returns, &[&args[0].value])
+            }
+            Builtin::ExceptionFieldLen => {
+                self.call("imre_exception_field_len", returns, &[&args[0].value])
+            }
+            Builtin::ExceptionFieldIndex => self.call(
+                "imre_exception_field_index",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ExceptionArgument(kind) => {
                 let arg = &args[0].value;
                 let word = self.word(arg);
@@ -4519,9 +4615,6 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Repr if args[0].value.ty == Type::ExitCode => {
-                self.call("imre_system_exit_code_repr", Type::Str, &[&args[0].value])
-            }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
                 Type::Path | Type::PurePath(_) => {
@@ -4547,10 +4640,13 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("imre_none_str", Type::Str, &[]),
-                Type::ExitCode => {
+                Type::ExceptionField => {
                     self.call("imre_system_exit_code_text", Type::Str, &[&args[0].value])
                 }
-                Type::Exception | Type::TimeoutExpired | Type::NamedException(_) => {
+                Type::Exception
+                | Type::ImportException
+                | Type::TimeoutExpired
+                | Type::NamedException(_) => {
                     self.call("imre_exception_message", Type::Str, &[&args[0].value])
                 }
                 Type::Class(_) => self.value_repr(&args[0].value),
@@ -5164,7 +5260,7 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
-                    Type::ExitCode => {
+                    Type::ExceptionField => {
                         let bit = self.instruction(format!(
                             "call i32 @imre_system_exit_code_equal(ptr {}, i32 0, i64 0)",
                             args[0].value.operand
@@ -5214,7 +5310,8 @@ impl Emitter<'_, '_> {
                     | Type::ByteOutput
                     | Type::Exception
                     | Type::NamedException(_)
-                    | Type::ExitCode
+                    | Type::ExceptionField
+                    | Type::ImportException
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::PurePath(_)
@@ -5454,7 +5551,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -5521,7 +5619,8 @@ impl Emitter<'_, '_> {
             | Type::ByteOutput
             | Type::Exception
             | Type::NamedException(_)
-            | Type::ExitCode
+            | Type::ExceptionField
+            | Type::ImportException
             | Type::TimeoutExpired
             | Type::Path
             | Type::PurePath(_)
@@ -6102,7 +6201,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ByteOutput
         | Type::Exception
         | Type::NamedException(_)
-        | Type::ExitCode
+        | Type::ExceptionField
+        | Type::ImportException
         | Type::TimeoutExpired
         | Type::Path
         | Type::PurePath(_)
@@ -6283,6 +6383,10 @@ declare ptr @imre_async_semaphore(i64)
 declare void @imre_async_permit(ptr, i1 zeroext)
 declare ptr @imre_json_empty_object()
 declare ptr @imre_function_cache(i64, i32, i32)
+declare i1 @imre_function_cache_probe(i64, i64, i64)
+declare void @imre_function_cache_insert(i64, i64, i64, i64)
+declare i64 @imre_function_cache_stat(i64, i32)
+declare void @imre_function_cache_clear(i64)
 declare i64 @imre_document(i32, i64, i64, i64)
 declare i64 @imre_string_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
@@ -6304,6 +6408,27 @@ declare ptr @imre_async_process_communicate(ptr, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
+declare void @imre_os_close(i64)
+declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
+@imre_os_o_rdonly = external constant i64
+@imre_os_o_wronly = external constant i64
+@imre_os_o_rdwr = external constant i64
+@imre_os_o_append = external constant i64
+@imre_os_o_creat = external constant i64
+@imre_os_o_excl = external constant i64
+@imre_os_o_trunc = external constant i64
+@imre_os_o_cloexec = external constant i64
+@imre_os_o_directory = external constant i64
+@imre_os_o_nofollow = external constant i64
+@imre_os_o_nonblock = external constant i64
+declare i64 @imre_os_dup(i64)
+declare i64 @imre_os_dup2(i64, i64, i64)
+declare void @imre_os_pipe(ptr)
+declare i32 @imre_os_isatty(i64)
+declare i32 @imre_os_get_blocking(i64)
+declare void @imre_os_set_blocking(i64, i64)
+declare i32 @imre_os_get_inheritable(i64)
+declare void @imre_os_set_inheritable(i64, i64)
 declare ptr @imre_shutil_which(ptr, i64, ptr, i32, i32)
 declare ptr @imre_shutil_copyfile(ptr, i32, ptr, i32, i32)
 declare void @imre_subprocess_check(ptr)
@@ -6454,6 +6579,12 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
+declare ptr @imre_import_error_field(ptr, i32)
+declare void @imre_import_error_reset(ptr, ptr)
+declare ptr @imre_exception_field_repr(ptr)
+declare i64 @imre_exception_field_len(ptr)
+declare ptr @imre_exception_field_index(ptr, i64)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
@@ -6656,7 +6787,6 @@ declare ptr @imre_system_exit_new(i32, i64)
 declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
 declare ptr @imre_system_exit_code_text(ptr)
-declare ptr @imre_system_exit_code_repr(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
 declare i32 @imre_system_exit_code_truth(ptr)
 declare void @imre_args_clear()

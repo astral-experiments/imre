@@ -1,0 +1,81 @@
+//! Lower public OS descriptor calls with rooted arguments.
+use super::*;
+use crate::ir::FdOperation;
+
+impl Emitter<'_, '_> {
+    pub(super) fn os_open_flag(&mut self, name: &str) -> Value {
+        // The runtime stores target-specific open flags as tagged ints.
+        let operand = self.instruction(format!("load i64, ptr @imre_os_o_{name}"));
+        Value {
+            ty: Type::Int,
+            operand,
+            small_integer: true,
+        }
+    }
+
+    pub(super) fn os_descriptor(
+        &mut self,
+        op: FdOperation,
+        args: &[Operand],
+        returns: Type,
+    ) -> Value {
+        let name = match op {
+            FdOperation::Open => {
+                let bytes = u32::from(args[0].value.ty == Type::Bytes);
+                let dir_fd = if args[3].value.ty == Type::None {
+                    "0"
+                } else {
+                    &args[3].value.operand
+                };
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_os_open(ptr {}, i32 {bytes}, i64 {}, i64 {}, i64 {dir_fd})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                return Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                };
+            }
+            FdOperation::Pipe => {
+                let tuple = self.record(returns);
+                self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand));
+                return tuple;
+            }
+            FdOperation::Close => "close",
+            FdOperation::Dup => "dup",
+            FdOperation::Dup2 => "dup2",
+            FdOperation::Isatty => "isatty",
+            FdOperation::GetBlocking => "get_blocking",
+            FdOperation::SetBlocking => "set_blocking",
+            FdOperation::GetInheritable => "get_inheritable",
+            FdOperation::SetInheritable => "set_inheritable",
+        };
+        let args = args
+            .iter()
+            .map(|arg| format!("i64 {}", arg.value.operand))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let repr = match returns {
+            Type::None => "void",
+            Type::Bool => "i32",
+            _ => "i64",
+        };
+        let call = format!("call {repr} @imre_os_{name}({args})");
+        if returns == Type::None {
+            self.checked_line(call);
+            return none();
+        }
+        let raw = self.checked_instruction(call);
+        let operand = if returns == Type::Bool {
+            self.instruction(format!("trunc i32 {raw} to i1"))
+        } else {
+            raw
+        };
+        self.owned(Value {
+            ty: returns,
+            operand,
+            small_integer: false,
+        })
+    }
+}

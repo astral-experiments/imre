@@ -4,6 +4,13 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 
 ## Accepted source
 
+Module functions with annotated results can use `functools.cache` or
+`functools.lru_cache` with a literal capacity. The native cache accepts fixed
+positional arguments with immutable key types. Bounded caches evict the least
+recently used key; zero disables storage, and `None` keeps all results.
+`cache_clear()` resets entries and counters. `cache_info()` supports unpacking
+and indexing the four snapshot fields.
+
 | Area | Supported behavior |
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
@@ -725,6 +732,8 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
+On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. Open flags use the runtime target's values.
+
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
 `shlex.split(text)` returns POSIX shell words with Python’s default quoting,
@@ -985,6 +994,16 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 ## Exceptions and cleanup
 
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
+
+`ImportError` and its subclass `ModuleNotFoundError` retain their positional
+arguments in `.args`. The keyword-only `name`, `path`, and `name_from` attributes
+default to `None`; `.msg` is the sole positional argument, or `None`. Arguments
+can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
+values. On a constructed or narrowed import exception, these fields support
+`str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
+support length and integer indexing. Reinitializing an instance resets omitted
+fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
+and pickling remain outside this subset.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
