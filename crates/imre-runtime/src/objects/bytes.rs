@@ -1,5 +1,6 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
+use crate::StrOwner;
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
@@ -225,7 +226,7 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    Rc::into_raw(Rc::new(repr(unsafe { &*value })))
+    StrOwner::into_raw(StrOwner::new(repr(unsafe { &*value })))
 }
 
 /// # Safety
@@ -517,14 +518,31 @@ pub unsafe extern "C" fn imre_str_encode(value: *const Str) -> *const Bytes {
     unsafe { imre_bytes_literal(value.as_ptr(), value.len()) }
 }
 
+/// A borrowed file buffer must become the immutable input in a codec exception.
+pub(super) fn owned_input(value: &[u8]) -> Result<Rc<Bytes>> {
+    let mut bytes = allocate(value.len())?;
+    bytes.extend_from_slice(value);
+    Ok(Rc::new(bytes))
+}
+
 /// A borrowed slice must become the immutable byte object in the exception arguments.
 pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
-    let mut bytes = match allocate(value.len()) {
-        Ok(bytes) => bytes,
-        Err(error) => return error,
-    };
-    bytes.extend_from_slice(value);
-    decode_owned_error(Rc::new(bytes), error)
+    match owned_input(value) {
+        Ok(bytes) => decode_owned_error(bytes, error),
+        Err(error) => error,
+    }
+}
+
+pub(super) fn ascii_decode_error(bytes: Rc<Bytes>, index: usize) -> Error {
+    let byte = bytes[index];
+    let reason = "ordinal not in range(128)";
+    Error::unicode_decode(
+        "ascii",
+        bytes,
+        index..index + 1,
+        reason,
+        format!("'ascii' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
+    )
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
@@ -546,9 +564,9 @@ pub(super) fn decode_owned_error(value: Rc<Bytes>, error: std::str::Utf8Error) -
         format!("bytes in position {start}-{}", end - 1)
     };
     Error::unicode_decode(
+        "utf-8",
         value,
-        start,
-        end,
+        start..end,
         reason,
         format!("'utf-8' codec can't decode {location}: {reason}"),
     )
@@ -561,7 +579,7 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
     // SAFETY: immutable bytes remain rooted throughout decoding and error rendering.
     let bytes = unsafe { &*value };
     let result = std::str::from_utf8(bytes)
-        .map(|text| Rc::into_raw(Rc::new(Str::from(text))))
+        .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
         .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error));
     finish(result, std::ptr::null())
@@ -575,17 +593,16 @@ pub unsafe extern "C" fn imre_bytes_decode(value: *const Bytes) -> *const Str {
 pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const Str {
     // SAFETY: the exact bytes remain owned by the caller.
     let data = unsafe { &*value };
-    let result = if let Some((i, byte)) = data.iter().enumerate().find(|(_, b)| !b.is_ascii()) {
-        Err(Error::new(
-            Kind::UnicodeDecodeError,
-            format!(
-                "'ascii' codec can't decode byte 0x{byte:02x} in position {i}: ordinal not in range(128)"
-            ),
+    let result = if let Some(index) = data.iter().position(|b| !b.is_ascii()) {
+        // SAFETY: the original immutable bytes are still owned by this caller.
+        Err(ascii_decode_error(
+            unsafe { acquire_rc(value as usize) },
+            index,
         ))
     } else {
         let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
         Str::try_new(text)
-            .map(|s| Rc::into_raw(Rc::new(s)))
+            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation())
     };
     finish(result, std::ptr::null())
@@ -623,7 +640,9 @@ pub unsafe extern "C" fn imre_bytes_decode_splitlines(value: *const Bytes) -> *c
     let result = std::str::from_utf8(bytes)
         // SAFETY: this caller still roots the exact byte object passed to the failing decode.
         .map_err(|error| decode_owned_error(unsafe { super::acquire_rc(value as usize) }, error))
-        .and_then(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])));
+        .and_then(|text| {
+            super::split_lines(text, |range| super::text::try_owned_string(&text[range]))
+        });
     finish(result, std::ptr::null())
 }
 
@@ -695,7 +714,7 @@ mod tests {
                 imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
                 1
             );
-            let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+            let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(imre_error_pending(), 0);
@@ -780,6 +799,30 @@ mod tests {
     }
 
     #[test]
+    fn ascii_decode_error_retains_its_input_and_offsets() {
+        let input = Rc::new(b"a\xffb".to_vec());
+        let original = Rc::downgrade(&input);
+        // SAFETY: input roots the bytes until the decoder returns.
+        assert!(unsafe { imre_bytes_decode_ascii(Rc::as_ptr(&input)) }.is_null());
+        drop(input);
+        // SAFETY: taking the pending error transfers its owner.
+        let error = unsafe { Rc::from_raw(imre_error_take()) };
+        // SAFETY: error roots the exception, and repr transfers a new string owner.
+        let repr = unsafe {
+            Rc::from_raw(crate::objects::exceptions::imre_exception_repr(Rc::as_ptr(
+                &error,
+            )))
+        };
+        assert_eq!(
+            repr.as_str(),
+            r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
+        );
+        assert!(original.upgrade().is_some());
+        drop(error);
+        assert!(original.upgrade().is_none());
+    }
+
+    #[test]
     fn utf8_validation_preserves_identity_ownership_and_decode_errors() {
         for text in ["", "ascii\0", "é\u{10ffff}"] {
             let source = Rc::new(text.as_bytes().to_vec());
@@ -804,14 +847,14 @@ mod tests {
             unsafe {
                 assert!(imre_bytes_decode(Rc::as_ptr(&source)).is_null());
                 let ordinary = Rc::from_raw(imre_error_take());
-                let expected = Rc::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
+                let expected = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&ordinary)));
                 assert!(imre_bytes_validate_utf8(Rc::as_ptr(&source)).is_null());
                 let error = Rc::from_raw(imre_error_take());
                 assert_eq!(
                     imre_exception_matches(Rc::as_ptr(&error), Kind::UnicodeDecodeError as u32),
                     1
                 );
-                let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
                 assert_eq!(message, expected);
                 // Both failures own the original bytes for exception repr, without copying them.
                 assert_eq!(Rc::strong_count(&source), 3);
@@ -907,7 +950,7 @@ mod tests {
                         imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
                         1
                     );
-                    let message = Rc::from_raw(imre_exception_message(Rc::as_ptr(&error)));
+                    let message = StrOwner::from_raw(imre_exception_message(Rc::as_ptr(&error)));
                     assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
                     source.0.with(|values| {
                         assert_eq!(values.len(), 129);

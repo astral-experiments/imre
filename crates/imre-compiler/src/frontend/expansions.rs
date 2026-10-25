@@ -283,6 +283,25 @@ impl Checker<'_> {
         tuple: &ast::ExprTuple,
         expected: Option<&[Type]>,
     ) -> Result<Expr, String> {
+        let runtime_width = tuple.elts.iter().any(|entry| {
+            let ast::Expr::Starred(star) = entry else {
+                return false;
+            };
+            self.graph
+                .session
+                .tuple_spread_width(self.module, star.start())
+                .is_none()
+        });
+        if runtime_width {
+            if expected.is_some() {
+                return Err(error(
+                    self.source,
+                    tuple,
+                    "a tuple display with runtime width cannot guarantee a fixed layout",
+                ));
+            }
+            return self.runtime_tuple_display(tuple);
+        }
         let mut scope = calls::ArgumentScope::default();
         let mut values = Vec::new();
         for entry in &tuple.elts {
@@ -369,6 +388,84 @@ impl Checker<'_> {
         }))
     }
 
+    /// Capture each spread completely before evaluating the next expression.
+    fn runtime_tuple_display(&mut self, tuple: &ast::ExprTuple) -> Result<Expr, String> {
+        let buffer = self.hidden(Type::TupleBuffer);
+        let mut body = vec![Statement::Assign(
+            buffer,
+            Expr {
+                ty: Type::TupleBuffer,
+                kind: ExprKind::Builtin(Builtin::TupleBufferNew, vec![]),
+            },
+        )];
+        let mut parts = Vec::new();
+        let push = |checker: &Self, value: Expr| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::TupleBufferPush,
+                    vec![checker.local(buffer), value],
+                ),
+            })
+        };
+        for entry in &tuple.elts {
+            if let ast::Expr::Starred(star) = entry {
+                let input = self.expansion_input(&star.value, None)?;
+                if let Iteration::Container { iterable, .. } = &input {
+                    let scalar = match iterable.ty {
+                        Type::Int => Some("int"),
+                        Type::Bool => Some("bool"),
+                        Type::None => Some("NoneType"),
+                        Type::Float => Some("float"),
+                        _ => None,
+                    };
+                    if let Some(name) = scalar {
+                        self.graph
+                            .checked_non_iterable_spread(self.module, star.value.range());
+                        let exception = Expr {
+                            ty: Type::Exception,
+                            kind: ExprKind::Exception {
+                                kind: exception_kind("TypeError").unwrap(),
+                                message: Some(Box::new(unpacking::string(format!(
+                                    "Value after * must be an iterable, not {name}"
+                                )))),
+                            },
+                        };
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::RaiseException,
+                                vec![iterable.clone(), exception],
+                            ),
+                        }));
+                        continue;
+                    }
+                }
+                let fixed = matches!(&input, Iteration::Container { iterable, items: false, start: None } if self.types.fields(iterable.ty).is_some());
+                body.extend(self.expand_items(input, entry, |checker, value| {
+                    parts.push((value.ty, !fixed));
+                    Ok(vec![push(checker, value)])
+                })?);
+            } else {
+                let value = self.expr(entry)?;
+                parts.push((value.ty, false));
+                body.push(push(self, value));
+            }
+        }
+        let ty = self.types.display_tuple(parts);
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::TupleBufferFinish, vec![self.local(buffer)]),
+                }),
+                clear: vec![buffer],
+            },
+        })
+    }
+
     /// The right operand may mutate or rebind the left before either list is copied.
     pub(super) fn concat_lists(
         &mut self,
@@ -435,21 +532,40 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(destination, receiver)];
         // CPython reserves space on acquiring an iterator with no length hint,
         // even when its first pull stops or raises. A reentrant sort observes it.
-        let unhinted = match &input {
-            Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
-            Iteration::Container { iterable, .. } => {
-                matches!(iterable.ty, Type::TextIO | Type::BinaryIO | Type::CsvReader)
+        let reserve = Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
+        });
+        let before = match &input {
+            Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
+                let mut eager = Vec::new();
+                if self.locals[list.value] == self.locals[destination] {
+                    eager.push(Statement::Assign(
+                        list.value,
+                        self.list_snapshot(self.local(list.value)),
+                    ));
+                }
+                vec![Statement::If(
+                    self.local(list.selected),
+                    eager,
+                    vec![reserve],
+                )]
             }
-            Iteration::Range(_) => false,
-        };
-        let before = if unhinted {
-            vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
-            })]
-        } else {
-            Vec::new()
+            Iteration::Prepared(_)
+                if !matches!(source, ast::Expr::Call(call)
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")) =>
+            {
+                vec![reserve]
+            }
+            Iteration::Container { iterable, .. }
+                if matches!(
+                    iterable.ty,
+                    Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+                ) =>
+            {
+                vec![reserve]
+            }
+            _ => Vec::new(),
         };
         body.extend(
             self.expand_items_after(input, node, before, |checker, value| {
@@ -561,14 +677,8 @@ impl Checker<'_> {
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"
+                && self.class_reference(&attribute.value).is_none()
             {
-                if self.class_reference(&attribute.value).is_some() {
-                    return Ok(Iteration::Container {
-                        iterable: self.call(call)?,
-                        items: false,
-                        start: None,
-                    });
-                }
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
@@ -579,11 +689,8 @@ impl Checker<'_> {
                 });
                 let iterable = self.boolean_operand(&attribute.value, hint)?;
                 if let Type::Class(class) = iterable.ty {
-                    return Ok(Iteration::Container {
-                        iterable: self.class_method_call(call, attribute, class, Some(iterable))?,
-                        items: false,
-                        start: None,
-                    });
+                    let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
+                    return self.iteration_value(iterable, false, call);
                 }
                 let iterable = if matches!(iterable.ty, Type::Document(_)) {
                     self.document_map(iterable)
@@ -609,14 +716,7 @@ impl Checker<'_> {
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
         let iterable = self.iteration_expression(expression, hint)?;
-        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
-            return Ok(Iteration::Prepared(prepared));
-        }
-        Ok(Iteration::Container {
-            iterable,
-            items: false,
-            start: None,
-        })
+        self.iteration_value(iterable, false, expression)
     }
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the

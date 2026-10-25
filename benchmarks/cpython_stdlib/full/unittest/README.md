@@ -58,16 +58,36 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 0 fully native passes, 8 native bodies with host
-fixtures, 9 host-driven native operations (36 calls), 3 compile blockers,
-1,068 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 8 fully native passes, 8 native bodies with host
+fixtures, 9 host-driven native operations (36 calls), 10 compile blockers,
+1,053 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
+
+The [native loader example](NATIVE_LOADER.md) exercises the same original
+constructor with native default fixtures and identifies the seven blocked methods.
 
 Three additional complete equality methods are attempted at each level.
 `testAssertMultiLineEqualTruncates` constructs a TestCase with a method name;
 `testAssertEqual_diffThreshold` and `testAssertEqual_shorten` both reach
 `addCleanup`. Each record retains the original passing reference,
 the native diagnostic, source line, and method hash.
+
+The [callable assertion control](callable_protocol.py) verifies that only the
+actual invocation belongs inside the catch: the case, bound receiver and
+forwarded arguments run first. It covers argument errors, noncallables,
+lambda names, a zero-argument lambda that reads local variables, an empty
+tuple, custom failure classes and the identity of a mismatched exception.
+Two full original callable methods are also attempted:
+`test_case.Test_TestCase.testAssertRaisesCallable` still needs a locally
+declared exception class and `test_assertions.Test_Assertions.test_assertRaises`
+needs an unannotated local function. Their complete methods remain in the report.
+
+The [stored assertion control](bound_assertions.py) exercises aliases, including
+one kept in a list and one invoked as another assertion's callback. The
+[binding control](callable_binding.py) checks missing and excess arguments,
+bound and unbound methods, duplicate arguments, and exceptions raised while
+evaluating operands. Both compare actual messages and side effects with the
+pinned interpreter and add no upstream IDs.
 
 The [context control](context_protocol.py) compares caught errors, stored managers, argument order and early exits with CPython at both levels. It adds no upstream IDs.
 
@@ -80,3 +100,55 @@ UnicodeEncodeError and shutil's OSError subclasses. The default gate also checks
 the identity, name and path of [structured import errors](https://github.com/astral-sh/imre/pull/590)
 and [csv.Error](https://github.com/astral-sh/imre/pull/468) against unrelated handlers.
 These controls must compile, run, and match the reference; they contribute no upstream IDs.
+
+## Native mock calls
+
+The unchanged [MockTest methods](upstream/Lib/test/test_unittest/testmock/testmock.py)
+`test_assert_not_called`, `test_assert_called` and `test_assert_called_once`
+exercise repeated child lookup, call counts, and positive and negative assertion outcomes.
+`test_ordered_call_signature` uses the inherited string assertion to verify the
+representation of the recorded call, including keyword order. The [mock control](mock_protocol.py) checks
+call order, keyword order, nested return values, exception side effects, and complete
+failure text. The original method, recording, assertions, and default fixture
+lifecycle execute in the native binary. CPython supplies discovery and the reference.
+
+`import unittest.mock`, `from unittest import mock`, and
+`from unittest.mock import Mock` expose the same native implementation.
+For example, `stream.write(b"data")` followed by
+`stream.write.assert_called_once_with(b"data")` records and checks the actual
+argument. This is useful independently of installing a patch. The current recorder
+accepts None, bool, int, str, and bytes; an unsupported argument is a compile
+diagnostic. `assert_any_call` searches the complete argument history for that mock;
+`assert_called_with` checks only its last call. The [reset control](mock_reset.py)
+checks both decisions after a reset, previously held call lists, child identity,
+and the different reset rules for children and cached return values. The mock
+tree can keep an exception instance as its `side_effect`.
+
+A Mock stored in an imported module records calls during module initialization,
+through an imported alias, and through the module attribute. The [import control](mock_globals/case.py)
+checks that all three calls share one history and compares the failed
+`assert_called_once()` message with CPython.
+
+`test_assert_any_call`, `test_assert_called_with` and
+`test_assert_called_once_with` exercise the callable form of
+`TestCase.assertRaises` on real Mock methods. The last also calls a lambda
+that reads its local mock after a reset. These three complete methods use
+the same [native default fixture entry](../../SUITE_RUNNER.md#running-a-method-with-native-default-fixtures)
+as the four above. Each receipt includes its verbose case ID, one-test summary,
+source blob, and complete method hash.
+
+Five additional original Mock methods have measured compile blockers. One
+reaches `TestCase.assertNotIn`. The three reset methods need constructor
+arguments (`parent` or `return_value`) or assign a mock as its own return value.
+`test_assert_called_exception_message` also reaches positional `str.format` at
+upstream `testmock.py:533`.
+The evidence records retain their original CPython passes, exact source lines,
+method hashes, and each native diagnostic. These are ordinary blockers.
+
+The subprocess and shutil owners retain their original suite evidence:
+an imported mock or an assertion control does not verify their product operations.
+
+The [default-fixture audit](DEFAULT_FIXTURE_AUDIT.md) records what happens when
+the shared entry attempts every original occurrence with the full CPython test
+package available. Each record identifies the native outcome or the first
+fixture or compiler blocker for that entry.

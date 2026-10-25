@@ -1,0 +1,14 @@
+{
+  "module": "test.test_select",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 6,
+  "reference": {
+    "test.test_select.SelectTestCase.test_disallow_instantiation": "pass",
+    "test.test_select.SelectTestCase.test_errno": "pass",
+    "test.test_select.SelectTestCase.test_error_conditions": "pass",
+    "test.test_select.SelectTestCase.test_returned_list_identity": "pass",
+    "test.test_select.SelectTestCase.test_select": "pass",
+    "test.test_select.SelectTestCase.test_select_mutated": "pass"
+  }
+}

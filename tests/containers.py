@@ -8,6 +8,9 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import comparison_allocation
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "containers"
 ITEM = """
 class Item:
@@ -987,6 +990,9 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-containers-") as directory:
         temporary = Path(directory)
+        # GNU ld's allocator wrappers run on the native Linux host; ASan supplies its own allocator.
+        if sys.platform.startswith("linux") and args.target is None and not args.sanitize:
+            passed += comparison_allocation.check(args, temporary)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
