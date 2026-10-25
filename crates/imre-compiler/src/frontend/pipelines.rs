@@ -55,35 +55,18 @@ impl Checker<'_> {
         if let Some(element) = self.types.cursor_element(value.ty) {
             return Ok(Some(self.prepare_cursor(value.clone(), element)));
         }
-        let (function, mut args, returns) = match (&value.kind, value.ty) {
-            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
-                (*id, args.clone(), value.ty)
-            }
-            (_, Type::Class(class))
-                if let Some(method) = self.classes.methods[class].get("__iter__") =>
-            {
-                (
-                    method.id,
-                    ir::CallArgs::positional(vec![value.clone()]),
-                    method.returns,
-                )
-            }
-            _ => return Ok(None),
-        };
-        self.calls.insert(function);
         let mut evaluate = Vec::new();
         let mut roots = Vec::new();
-        for arg in &mut args.values {
-            let slot = self.hidden(arg.ty);
-            evaluate.push(Statement::Assign(
-                slot,
-                std::mem::replace(arg, self.local(slot)),
-            ));
-            roots.push(slot);
-        }
-        let call = Expr {
-            ty: returns,
-            kind: ExprKind::Call(function, args),
+        let call = if self.is_delegated_call(value) {
+            self.capture_delegated_call(value.clone(), &mut evaluate, &mut roots)
+        } else if let Type::Class(class) = value.ty
+            && self.classes.has_record_iterator(class)
+        {
+            let mut receiver = value.clone();
+            evaluate.push(self.capture_generator_operand(&mut receiver, &mut roots));
+            self.record_primitive(receiver, "__iter__", &[], node)?
+        } else {
+            return Ok(None);
         };
         let mut prepared = self.prepare_container(call, false, node, false)?;
         let started = self.hidden(Type::Bool);
@@ -100,6 +83,76 @@ impl Checker<'_> {
         prepared.clear.push(started);
         prepared.clear.extend(roots);
         Ok(Some(prepared))
+    }
+
+    /// Every possible selected method must be a generator before its body can be delayed.
+    fn is_delegated_call(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Call(id, _) => self.classes.generators.contains(id),
+            ExprKind::Scope { value, .. } => self.is_delegated_call(value),
+            ExprKind::Conditional(_, yes, no) => {
+                self.is_delegated_call(yes) && self.is_delegated_call(no)
+            }
+            _ => false,
+        }
+    }
+
+    /// Evaluate dispatch and argument binding at construction. The returned expression
+    /// invokes only the selected method, using those captured operands on the first pull.
+    fn capture_delegated_call(
+        &mut self,
+        mut call: Expr,
+        evaluate: &mut Vec<Statement>,
+        roots: &mut Vec<usize>,
+    ) -> Expr {
+        match call.kind {
+            ExprKind::Call(id, ref mut args) => {
+                for arg in &mut args.values {
+                    evaluate.push(self.capture_generator_operand(arg, roots));
+                }
+                self.calls.insert(id);
+                call
+            }
+            ExprKind::Scope {
+                mut body,
+                value,
+                clear,
+            } => {
+                let delayed = self.capture_delegated_call(*value, &mut body, roots);
+                evaluate.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Scope {
+                        body,
+                        value: Box::new(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                        clear,
+                    },
+                }));
+                delayed
+            }
+            ExprKind::Conditional(mut test, yes, no) => {
+                evaluate.push(self.capture_generator_operand(&mut test, roots));
+                let mut on_yes = Vec::new();
+                let mut on_no = Vec::new();
+                let yes = self.capture_delegated_call(*yes, &mut on_yes, roots);
+                let no = self.capture_delegated_call(*no, &mut on_no, roots);
+                evaluate.push(Statement::If((*test).clone(), on_yes, on_no));
+                Expr {
+                    ty: call.ty,
+                    kind: ExprKind::Conditional(test, Box::new(yes), Box::new(no)),
+                }
+            }
+            _ => unreachable!("expected a delegated generator call"),
+        }
+    }
+
+    /// Keep one evaluated operand live until the prepared iterator is released.
+    fn capture_generator_operand(&mut self, value: &mut Expr, roots: &mut Vec<usize>) -> Statement {
+        let slot = self.hidden(value.ty);
+        roots.push(slot);
+        Statement::Assign(slot, std::mem::replace(value, self.local(slot)))
     }
 }
 
@@ -151,6 +204,23 @@ fn not(value: Expr) -> Expr {
         ty: Type::Bool,
         kind: ExprKind::Not(Box::new(value)),
     }
+}
+
+/// Handle exhaustion only inside the iterator or generator operation being pulled.
+fn catch_stop_iteration(body: Vec<Statement>, on_stop: Vec<Statement>) -> Vec<Statement> {
+    if !crate::effects::may_raise_locally(&body) {
+        return body;
+    }
+    vec![Statement::Try {
+        body,
+        handlers: vec![ir::ExceptHandler {
+            kinds: vec![exception_kind("StopIteration").unwrap()],
+            name: None,
+            body: on_stop,
+        }],
+        orelse: Vec::new(),
+        finalbody: Vec::new(),
+    }]
 }
 
 fn raise_value_error(message: String) -> Statement {
@@ -260,11 +330,8 @@ impl Checker<'_> {
         {
             let raw = self.expr(&attribute.value)?;
             if let Type::Class(class) = raw.ty {
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(raw))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, raw)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             let source = if matches!(raw.ty, Type::Document(_)) {
                 self.document_map(raw)
@@ -314,13 +381,8 @@ impl Checker<'_> {
                 )));
             }
             if let Type::Class(class) = receiver.ty {
-                // A first-party method with the same spelling returns an ordinary
-                // value. Preserve its length hint and list.extend's alias snapshot.
-                return Ok(Some(Iteration::Container {
-                    iterable: self.class_method_call(call, attribute, class, Some(receiver))?,
-                    items: false,
-                    start: None,
-                }));
+                let iterable = self.iteration_method_call(call, attribute, class, receiver)?;
+                return self.iteration_value(iterable, false, call).map(Some);
             }
             return Err(error(
                 self.source,
@@ -1790,7 +1852,7 @@ impl Checker<'_> {
             let mut step = inputs[index].next.clone();
             step.push(Statement::If(
                 self.local(inputs[index].ready),
-                available,
+                self.generator_body(available),
                 exhausted,
             ));
             cases = vec![Statement::If(
@@ -1824,6 +1886,28 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// Convert StopIteration escaping suspended generator code, retaining its cause.
+    pub(super) fn generator_body(&self, body: Vec<Statement>) -> Vec<Statement> {
+        let error = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("RuntimeError").unwrap(),
+                message: Some(Box::new(unpacking::string(
+                    "generator raised StopIteration",
+                ))),
+            },
+        };
+        let cause = Expr {
+            ty: self.types.optional(Type::Exception),
+            kind: ExprKind::Builtin(Builtin::ActiveException, Vec::new()),
+        };
+        let converted = Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![error, cause]),
+        }));
+        catch_stop_iteration(body, vec![converted])
     }
 
     /// Captures the callable before its source, then invokes it only after each
@@ -1914,35 +1998,27 @@ impl Checker<'_> {
         input.evaluate.append(&mut input.acquire);
         if filter {
             let ready = self.hidden(Type::Bool);
-            let done = self.hidden(Type::Bool);
             let mut step = std::mem::take(&mut input.next);
-            step.push(Statement::If(
-                self.local(input.ready),
+            let predicate = catch_stop_iteration(
                 vec![Statement::If(
                     self.test_truth(operation, call)?,
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
-                vec![Statement::Assign(done, boolean(true))],
+                vec![Statement::Clear(input.value), Statement::Break],
+            );
+            step.push(Statement::If(
+                self.local(input.ready),
+                predicate,
+                vec![Statement::Break],
             ));
-            input.evaluate.push(Statement::Assign(done, boolean(false)));
             input.next = vec![
                 Statement::Clear(input.value),
                 Statement::Assign(ready, boolean(false)),
-                Statement::While(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Boolean(
-                            true,
-                            vec![not(self.local(ready)), not(self.local(done))],
-                        ),
-                    },
-                    step,
-                    Vec::new(),
-                ),
+                Statement::While(not(self.local(ready)), step, Vec::new()),
             ];
             input.ready = ready;
-            input.clear.extend([ready, done]);
+            input.clear.push(ready);
             if truth_filter && let Some(payload) = self.types.payload(input_type) {
                 let value = self.hidden(payload);
                 input.next.push(Statement::If(
@@ -1965,18 +2041,25 @@ impl Checker<'_> {
             }
         } else {
             let value = self.hidden(operation.ty);
-            input.next.push(Statement::If(
-                self.local(input.ready),
-                vec![
-                    Statement::Assign(value, operation),
-                    Statement::Clear(input.value),
-                ],
-                Vec::new(),
-            ));
+            // The source can use its ready slot to latch exhaustion. A failed
+            // callback ends this map pull without changing the source cursor.
+            let ready = self.hidden(Type::Bool);
+            input
+                .next
+                .push(Statement::Assign(ready, self.local(input.ready)));
+            let mut mapped = catch_stop_iteration(
+                vec![Statement::Assign(value, operation)],
+                vec![Statement::Assign(ready, boolean(false))],
+            );
+            mapped.push(Statement::Clear(input.value));
+            input
+                .next
+                .push(Statement::If(self.local(ready), mapped, Vec::new()));
             input.next.insert(0, Statement::Clear(value));
             input.value = value;
+            input.ready = ready;
             input.elementless = false;
-            input.clear.push(value);
+            input.clear.extend([value, ready]);
         }
         Ok(input)
     }

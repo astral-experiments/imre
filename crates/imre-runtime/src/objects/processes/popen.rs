@@ -121,10 +121,19 @@ struct ChildConfig {
     new_session: bool,
 }
 
+/// Bit 19 adds the exact pass_fds collection after the bit-18 prefix.
+#[repr(C)]
+struct PassFdsConfig {
+    child: ChildConfig,
+    keep: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
+    keep: Option<(usize, u32)>,
 }
 
 impl LaunchConfig {
@@ -141,17 +150,24 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let keep = (streams & (1 << 19) != 0).then(|| {
+                // SAFETY: bit 19 promises the complete pass_fds trailer.
+                let full = unsafe { &*config.cast::<PassFdsConfig>() };
+                (full.keep, full.kind)
+            });
             // SAFETY: bit 18 promises the full child settings layout.
             let config = unsafe { &*config.cast::<ChildConfig>() };
             LaunchExtras {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
+                keep,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
                 // SAFETY: a borrowed stream promises the three-word extension.
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
+                keep: None,
             }
         } else {
             LaunchExtras::default()
@@ -301,27 +317,44 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
         let Some((group, mask, new_session)) = extras.child else {
             return Ok(ChildAttributes::default());
         };
-        // SAFETY: the group is a nullable integer (None uses a zero word);
-        // the mask is an exact integer. Both owners span the launch.
-        let group = if group == 0 {
-            -1
-        } else {
-            // SAFETY: a non-null group is a rooted integer.
-            let group = unsafe { Int::borrow(group) };
-            c_int(&group).ok_or_else(c_int_overflow)?
-        };
-        // SAFETY: the caller roots the requested mask through spawn.
+        let group = (group != 0).then(|| {
+            // SAFETY: a non-null group is a rooted Python integer.
+            unsafe { Int::borrow(group) }
+        });
+        // SAFETY: the caller roots the requested mask and descriptor collection.
         let mask = unsafe { Int::borrow(mask) };
-        if may_spawn && !new_session && group == -1 && mask.big().sign() == num_bigint::Sign::Minus
-        {
-            // posix_spawn inherits the mask without narrowing a negative Python integer.
+        let direct = may_spawn
+            && !new_session
+            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+            && mask.big().sign() == num_bigint::Sign::Minus
+            && extras.keep.is_none_or(|(word, kind)| {
+                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+                !unsafe { super::pass_fds::nonempty(word, kind) }
+            });
+        if direct {
             return Ok(ChildAttributes::default());
         }
+        // Fork/exec iterates pass_fds before C narrows the group and mask.
+        if extras.keep.is_some_and(|(_, kind)| kind == 0) {
+            return Err(Error::new(
+                Kind::TypeError,
+                "'NoneType' object is not iterable",
+            ));
+        }
+        let group = group
+            .as_ref()
+            .map_or(Ok(-1), |n| c_int(n).ok_or_else(c_int_overflow))?;
         let mask = c_int(&mask).ok_or_else(c_int_overflow)?;
+        let keep = match extras.keep {
+            // SAFETY: the bit-19 trailer retains the collection and its exact kind.
+            Some((word, kind)) => unsafe { super::pass_fds::copy(word, kind)? },
+            None => Vec::new(),
+        };
         Ok(ChildAttributes {
             new_session,
             group,
             mask: (mask >= 0).then_some(mask as libc::mode_t),
+            keep,
         })
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.

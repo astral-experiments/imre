@@ -10,6 +10,7 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule
 
 #[derive(Clone, Copy)]
 pub(crate) struct DataclassOptions {
+    pub(crate) value_struct: bool,
     pub(crate) init: bool,
     pub(crate) eq: bool,
     pub(crate) repr: bool,
@@ -51,19 +52,25 @@ pub(super) fn options(
         ast::Expr::Call(call) => (&*call.func, Some(&call.arguments)),
         expression => (expression, None),
     };
-    if graph.resolve(module_id, target) != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
+    let binding = graph.resolve(module_id, target);
+    let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
+    if value_struct && arguments.is_some() {
+        return Err(module.error(decorator, "use bare @imre.struct without options"));
+    }
+    if !value_struct && binding != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
         return Err(module.error(
             decorator,
             "only the sealed @dataclasses.dataclass decorator is supported",
         ));
     }
     let mut options = DataclassOptions {
+        value_struct,
         init: true,
         eq: true,
         repr: true,
-        frozen: false,
+        frozen: value_struct,
         kw_only: false,
-        slots: false,
+        slots: value_struct,
     };
     if let Some(arguments) = arguments {
         if !arguments.args.is_empty() {
