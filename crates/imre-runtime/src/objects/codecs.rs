@@ -306,6 +306,12 @@ fn decoding_error(
         "strict" | "surrogatepass" => return Err(strict()),
         "replace" => text.push('\u{fffd}'),
         "ignore" => (),
+        "namereplace" | "xmlcharrefreplace" => {
+            return Err(Error::new(
+                Kind::TypeError,
+                "don't know how to handle UnicodeDecodeError in error callback",
+            ));
+        }
         "backslashreplace" => {
             for byte in bytes {
                 use std::fmt::Write;
