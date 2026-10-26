@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 77 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 40 modules with recorded suites, 94 complete test executions pass natively at both optimization levels; 15,068 of 15,215 upstream executions have a classification.
+**At a glance:** 78 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 40 modules with recorded suites, 94 complete test executions pass natively at both optimization levels; 15,068 of 15,215 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -70,7 +70,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `signal` | Yes | `SIGINT` and `SIGTERM` constants for supported event-loop handlers. [Evidence](../tests/fixtures/processes/async_gather_cancel.py) | — | — | — |
 | `site` | Yes | `getsitepackages()` returns the site-packages directory under the interpreter’s prefix. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `socket` | Yes | Bind an IPv4 TCP listener to port zero, accept a client, read bytes, and send a reply. [Evidence](../tests/fixtures/socket/listener.py) | [0 / 746](../benchmarks/cpython_stdlib/full/socket/) | 7 | 2 |
-| `socketserver` | Yes | Handle one loopback connection with a synchronous TCPServer and a request-handler subclass. [Evidence](../tests/fixtures/socketserver/echo.py) | [0 / 27](../benchmarks/cpython_stdlib/full/socketserver/) | 2 | 1 |
+| `socketserver` | Yes | Serve consecutive TCP clients with a polled listener and buffered request streams. [Evidence](../tests/fixtures/socketserver/boxed_stream.py) | [0 / 27](../benchmarks/cpython_stdlib/full/socketserver/) | 2 | 1 |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
 | `struct` | Yes | Unpack an unsigned 64-bit big-endian integer with `unpack(">Q", data)`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
@@ -87,6 +87,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
 | `urllib` | Yes | `urllib.parse.urlsplit` with named result fields, and `quote` and `unquote` with codec options for strings and bytes. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 3 | 5 |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
+| `weakref` | Yes | Callback-free proxy for source-defined records, including cached identity, attribute and call forwarding, and ReferenceError after the referent is released. [Evidence](../tests/fixtures/classes/weak_proxy.py) | — | — | — |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
 | `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
 
@@ -199,7 +200,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `uuid` |
 | `venv` |
 | `wave` |
-| `weakref` |
 | `webbrowser` |
 | `winreg` |
 | `wsgiref` |

@@ -29,7 +29,7 @@ impl Context {
         value.map_or(Ok(default), |id| self.truth(id))
     }
 
-    fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+    pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }

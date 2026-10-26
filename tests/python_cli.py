@@ -132,6 +132,20 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
+        compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
+
+        # Bundled children must respect the selected package's __path__.
+        shadow = root / "shadow"
+        (shadow / "http").mkdir(parents=True)
+        (shadow / "http" / "__init__.py").write_text("marker = 17\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys, http\nsys.path\nassert http.marker == 17\n"
+            "try:\n    import http.client\nexcept ModuleNotFoundError:\n    print('local package')\n"
+        )
+        compare("-B", shadow_entry)
+
         # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
         compare(
             "-c",
@@ -313,6 +327,7 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_ast.py",
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
@@ -322,11 +337,13 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_type_identity.py",
             "boxed_class_attribute.py",
+            "boxed_request_strings.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
             "boxed_item_assignment.py",
+            "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())

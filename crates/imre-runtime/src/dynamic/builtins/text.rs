@@ -71,23 +71,6 @@ fn integer(source: &str, mut base: u32) -> Result<crate::Int> {
     Ok(crate::Int::new(if negative { -value } else { value }))
 }
 
-fn encoding(ctx: &Context, id: Option<Id>) -> Result<bool> {
-    let name = id
-        .map(|x| ctx.str_value(x))
-        .transpose()?
-        .unwrap_or("utf-8")
-        .to_ascii_lowercase()
-        .replace('_', "-");
-    match name.as_str() {
-        "utf8" | "utf-8" | "u8" => Ok(false),
-        "ascii" | "us-ascii" => Ok(true),
-        _ => Err(Error::new(
-            "LookupError",
-            format!("unknown encoding: {name}"),
-        )),
-    }
-}
-
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
         && ctx.str_value(id)? != "strict"
@@ -114,11 +97,15 @@ fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) ->
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {
     let text = ctx.str_value(id)?;
-    strict(ctx, errors)?;
-    if encoding(ctx, encoding_id)? && !text.is_ascii() {
-        return Err(Error::new("UnicodeEncodeError", "non-ASCII character"));
-    }
-    Ok(text.as_bytes().to_vec())
+    let encoding = encoding_id
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    let errors = errors
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("strict");
+    Ok(crate::objects::Codec::encode_str(text, encoding, errors)?)
 }
 
 pub(super) fn construct(
@@ -485,13 +472,24 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
 
 pub(super) fn method(
     ctx: &mut Context,
+    owner: &str,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args
-        .split_first()
-        .ok_or_else(|| type_error("missing string receiver"))?;
+    let (&receiver, args) = args.split_first().ok_or_else(|| {
+        if owner == "str" {
+            type_error(format!("unbound method str.{name}() needs an argument"))
+        } else {
+            type_error("missing string receiver")
+        }
+    })?;
+    if owner == "str" && ctx.str_value(receiver).is_err() {
+        return Err(type_error(format!(
+            "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    }
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
@@ -501,6 +499,45 @@ pub(super) fn method(
             let b = encode(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
         };
+    }
+    if name == "find" {
+        if !kwargs.is_empty() {
+            return Err(type_error("str.find() takes no keyword arguments"));
+        }
+        let Some(&needle) = args.first() else {
+            return Err(type_error("find expected at least 1 argument, got 0"));
+        };
+        if args.len() > 3 {
+            return Err(type_error(format!(
+                "find expected at most 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if ctx.str_value(needle).is_err() {
+            let kind = if needle == NONE {
+                "None"
+            } else {
+                ctx.type_name(needle)
+            };
+            return Err(type_error(format!(
+                "find() argument 1 must be str, not {kind}"
+            )));
+        }
+        let mut bound = |arg: Option<&Id>| match arg {
+            None | Some(&NONE) => Ok(None),
+            Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
+                type_error("slice indices must be integers or None or have an __index__ method")
+            }),
+        };
+        let start = bound(args.get(1))?;
+        let end = bound(args.get(2))?;
+        let found = crate::objects::find_text(
+            ctx.str_value(receiver)?,
+            ctx.str_value(needle)?,
+            start.as_ref(),
+            end.as_ref(),
+        );
+        return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
         && let Value::Bytes(data) = ctx.heap.get(receiver)
@@ -529,6 +566,36 @@ pub(super) fn method(
         "format" => {
             let result = format_string(ctx, &source, args, kwargs)?;
             Ok(ctx.text(result))
+        }
+        "partition" | "rpartition" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!(
+                    "str.{name}() takes no keyword arguments"
+                )));
+            }
+            let [separator] = args else {
+                return Err(type_error(format!(
+                    "str.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let sep = ctx.str_value(*separator).map_err(|_| {
+                type_error(format!("must be str, not {}", ctx.type_name(*separator)))
+            })?;
+            let reverse = name == "rpartition";
+            let fields = if let Some((before, after)) =
+                crate::objects::partition_text(&source, sep, reverse)?
+            {
+                vec![ctx.text(before), *separator, ctx.text(after)]
+            } else {
+                let empty = ctx.text("");
+                if reverse {
+                    vec![empty, empty, receiver]
+                } else {
+                    vec![receiver, empty, empty]
+                }
+            };
+            Ok(ctx.alloc(Value::Tuple(fields)))
         }
         "split" | "rsplit" => {
             let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;

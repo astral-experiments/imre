@@ -120,6 +120,7 @@ pub(super) fn field(
         name: name.to_owned(),
         annotation: (*node.annotation).clone(),
         default: None,
+        weak_proxy: false,
         kw_only: options.is_some_and(|options| options.kw_only),
         repr: true,
         compare: true,
