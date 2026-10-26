@@ -403,6 +403,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_itertools_count.py",
             "boxed_dict_subclasses.py",
+            "boxed_recursive_equality.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_python_iterators.py",

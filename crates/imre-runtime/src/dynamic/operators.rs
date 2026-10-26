@@ -143,17 +143,118 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
-    /// Compare arbitrary boxed values and surface recursive context comparisons.
-    fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
-        let mut exhausted = false;
-        let result = self.equal_inner(a, b, usize::MAX, &mut exhausted);
-        if exhausted {
-            return Err(Error::new(
-                "RecursionError",
-                "maximum comparison depth exceeded",
-            ));
+    /// Walk arbitrary container pairs without tying their depth to the Rust stack.
+    pub(super) fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
+        use std::{borrow::Cow, collections::HashSet};
+
+        enum Children<'a> {
+            Sequence(Cow<'a, [Id]>, Cow<'a, [Id]>, usize),
+            Dict(std::slice::Iter<'a, (Id, Id)>, &'a [(Id, Id)]),
+            Context(
+                std::collections::hash_map::Iter<'a, Id, Id>,
+                &'a HashMap<Id, Id>,
+            ),
         }
-        Ok(result)
+        let sequence = |id| match self.heap.get(id) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                Some(Cow::Borrowed(v.as_slice()))
+            }
+            Value::Instance { .. } => self.sequence(id).map(Cow::Owned),
+            _ => None,
+        };
+        let mut active = HashSet::new();
+        let mut frames = Vec::new();
+        let mut pair = Some((a, b));
+        loop {
+            if let Some((a, b)) = pair.take()
+                && a != b
+            {
+                let a = self.dict_storage(a).unwrap_or(a);
+                let b = self.dict_storage(b).unwrap_or(b);
+                let children = match (self.heap.get(a), self.heap.get(b)) {
+                    (Value::List(_), right) if !matches!(right, Value::List(_)) => {
+                        return Ok(false);
+                    }
+                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => return Ok(false),
+                    (
+                        Value::Dict(x) | Value::DefaultDict { entries: x, .. },
+                        Value::Dict(y) | Value::DefaultDict { entries: y, .. },
+                    ) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        Some(Children::Dict(x.iter(), y))
+                    }
+                    (Value::Context(x), Value::Context(y)) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        (!std::rc::Rc::ptr_eq(x, y)).then(|| Children::Context(x.iter(), y))
+                    }
+                    _ => match (sequence(a), sequence(b)) {
+                        (Some(x), Some(y)) => {
+                            if x.len() != y.len() {
+                                return Ok(false);
+                            }
+                            Some(Children::Sequence(x, y, 0))
+                        }
+                        _ if self.equal(a, b) => None,
+                        _ => return Ok(false),
+                    },
+                };
+                if let Some(children) = children {
+                    let memory = |_| Error::new("MemoryError", "");
+                    active.try_reserve(1).map_err(memory)?;
+                    if !active.insert((a, b)) {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum comparison depth exceeded",
+                        ));
+                    }
+                    frames.try_reserve(1).map_err(memory)?;
+                    frames.push(((a, b), children));
+                }
+            }
+            while let Some((parents, children)) = frames.last_mut() {
+                pair = match children {
+                    Children::Sequence(x, y, index) => x.get(*index).map(|&left| {
+                        let right = y[*index];
+                        *index += 1;
+                        (left, right)
+                    }),
+                    Children::Dict(items, other) => {
+                        if let Some(&(key, value)) = items.next() {
+                            let Some(&(_, right)) =
+                                other.iter().find(|&&(k, _)| self.equal(key, k))
+                            else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                    Children::Context(items, other) => {
+                        if let Some((key, &value)) = items.next() {
+                            let Some(&right) = other.get(key) else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if pair.is_some() {
+                    break;
+                }
+                active.remove(parents);
+                frames.pop();
+            }
+            if pair.is_none() {
+                return Ok(true);
+            }
+        }
     }
 
     /// Compare child values within the caller's remaining recursion budget.
