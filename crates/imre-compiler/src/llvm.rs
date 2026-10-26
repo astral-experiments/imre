@@ -10596,6 +10596,56 @@ print(show("x"))
     }
 
     #[test]
+    fn hash_allocation_errors_precede_use_of_the_result() {
+        let llvm = compile(
+            r#"
+import hashlib
+
+def probe(data: bytes) -> None:
+    one = hashlib.sha1(data)
+    two = hashlib.sha256(data)
+    named = hashlib.new("sha1", data)
+    one.copy()
+    two.digest()
+    named.hexdigest()
+    one.name
+    hashlib.sha1(data).hexdigest()
+    hashlib.sha256(data).hexdigest()
+    print("sha1" in hashlib.algorithms_available)
+
+probe(b"abc")
+"#,
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        for symbol in [
+            "imre_sha1_new",
+            "imre_sha256_new",
+            "imre_hash_new",
+            "imre_hash_copy",
+            "imre_hash_digest",
+            "imre_hash_hexdigest",
+            "imre_hash_name",
+            "imre_sha1_hex",
+            "imre_sha256_hex",
+            "imre_hash_algorithms_available",
+        ] {
+            let call = format!("call ptr @{symbol}(");
+            let (_, following) = llvm
+                .split_once(&call)
+                .unwrap_or_else(|| panic!("missing {symbol}"));
+            assert!(
+                following
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .contains("@imre_error_pending()"),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
     fn tuple_key_lookup_errors_precede_use_of_the_result() {
         let body = function_body(
             r#"
