@@ -1,0 +1,79 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "reference_bytes_hex": "666f6fc2800a",
+  "levels": {
+    "0": {
+      "roles": {
+        "body": "cpython",
+        "assertions": "cpython",
+        "operation": "imre",
+        "fixture": "mixed"
+      },
+      "evidence": {
+        "operation": "Native named logger, UTF-8 FileHandler construction, attachment, warning, removal and close",
+        "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child; CPython ran the original temporary-file helper, read, assertion and cleanup",
+        "opt_level": 0,
+        "method_sha256": "0b4d311648b55f0e4ba2b4944d4429497ea7a1270d3b454dbdd86030fc46c565",
+        "native_calls": [
+          "getLogger",
+          "FileHandler",
+          "addHandler",
+          "warning",
+          "removeHandler",
+          "close"
+        ],
+        "file_hex": "666f6fc2800a",
+        "reference_bytes_hex": "666f6fc2800a",
+        "native_body_blockers": [
+          {
+            "source": "Lib/test/test_logging.py:594:20",
+            "statement": "def make_temp_file(*args, **kwargs):",
+            "diagnostic": "a variadic positional parameter requires an exact element annotation"
+          },
+          {
+            "source": "Lib/test/test_logging.py:2298:16",
+            "statement": "if os.path.isfile(fn):",
+            "diagnostic": "name is not a local value; globals and first-class functions are unsupported"
+          }
+        ]
+      }
+    },
+    "3": {
+      "roles": {
+        "body": "cpython",
+        "assertions": "cpython",
+        "operation": "imre",
+        "fixture": "mixed"
+      },
+      "evidence": {
+        "operation": "Native named logger, UTF-8 FileHandler construction, attachment, warning, removal and close",
+        "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child; CPython ran the original temporary-file helper, read, assertion and cleanup",
+        "opt_level": 3,
+        "method_sha256": "0b4d311648b55f0e4ba2b4944d4429497ea7a1270d3b454dbdd86030fc46c565",
+        "native_calls": [
+          "getLogger",
+          "FileHandler",
+          "addHandler",
+          "warning",
+          "removeHandler",
+          "close"
+        ],
+        "file_hex": "666f6fc2800a",
+        "reference_bytes_hex": "666f6fc2800a",
+        "native_body_blockers": [
+          {
+            "source": "Lib/test/test_logging.py:594:20",
+            "statement": "def make_temp_file(*args, **kwargs):",
+            "diagnostic": "a variadic positional parameter requires an exact element annotation"
+          },
+          {
+            "source": "Lib/test/test_logging.py:2298:16",
+            "statement": "if os.path.isfile(fn):",
+            "diagnostic": "name is not a local value; globals and first-class functions are unsupported"
+          }
+        ]
+      }
+    }
+  }
+}
