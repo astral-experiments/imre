@@ -700,5 +700,6 @@ jobs:
               paths processes argparse_cli
             )
           fi
-          python3 tests/run_suites.py --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
+          python3 tests/run_suites_children.py
+          python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
             -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
