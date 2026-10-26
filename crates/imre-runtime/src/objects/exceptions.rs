@@ -2916,23 +2916,25 @@ mod tests {
 
         assert_eq!(imre_error_pending(), 0);
         let code = new_exception(Kind::ValueError, Payload::Empty);
-        code.0.with_mut(|storage| {
-            let Storage::Exception(exception) = storage else {
-                unreachable!()
-            };
-            exception.details_mut().layout = Some(Rc::new(NamedPayload {
-                // The failing formatter never reads its record argument.
-                record: unsafe { OwnedWord::from_owned(0, WordKind::new(0)) },
-                text: Some(failed_text),
-                repr: None,
-                dataclass_repr: false,
-                takes_record_owner: false,
-            }));
-        });
+        // SAFETY: `code` is fresh and unescaped, and the failing formatter never
+        // reads the dummy record word.
+        unsafe {
+            code.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!()
+                };
+                exception.details_mut().layout = Some(Rc::new(NamedPayload {
+                    record: OwnedWord::from_owned(0, WordKind::new(0)),
+                    text: Some(failed_text),
+                    repr: None,
+                    dataclass_repr: false,
+                    takes_record_owner: false,
+                }));
+            });
+        }
         // SAFETY: the local object owner roots the exception during acquisition.
-        let code_word = unsafe {
-            WordKind::new(5).acquire(crate::ObjectOwner::as_ptr(&code) as usize)
-        };
+        let code_word =
+            unsafe { WordKind::new(5).acquire(crate::ObjectOwner::as_ptr(&code) as usize) };
         replace_pending(Some(new_exception(
             Kind::SystemExit,
             Payload::Exit(Some(code_word)),
@@ -2941,5 +2943,4 @@ mod tests {
         assert_eq!(imre_error_unhandled(), 1);
         assert_eq!(imre_error_pending(), 0);
     }
-
 }
