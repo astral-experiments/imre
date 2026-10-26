@@ -686,7 +686,6 @@ impl Types {
                     self.string_literal(strings)
                 }
             }
-            [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.string_or_int(),
             choices @ [_, _, ..]
                 if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
                     && choices
