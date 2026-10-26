@@ -3,8 +3,23 @@ class Index:
         return -3
 
 
+class DescriptorOwner:
+    partition = str.partition
+
+
 def current():
     text = "é🦊:東:🦊"
+    print(str.find(text, ":"), str.partition(text, ":"), str.rpartition(text, ":"))
+    print(str.partition is str.partition)
+    try:
+        DescriptorOwner().partition(":")
+    except TypeError as error:
+        print(error)
+    for method in (str.find, str.partition, str.rpartition):
+        try:
+            method(None, ":")
+        except TypeError as error:
+            print(error)
     for method in (text.partition, text.rpartition):
         separator = ":"
         result = method(separator)

@@ -489,9 +489,19 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args
-        .split_first()
-        .ok_or_else(|| type_error("missing string receiver"))?;
+    let (&receiver, args) = args.split_first().ok_or_else(|| {
+        if STR_DESCRIPTORS.contains(&name) {
+            type_error(format!("unbound method str.{name}() needs an argument"))
+        } else {
+            type_error("missing string receiver")
+        }
+    })?;
+    if STR_DESCRIPTORS.contains(&name) && ctx.str_value(receiver).is_err() {
+        return Err(type_error(format!(
+            "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    }
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {

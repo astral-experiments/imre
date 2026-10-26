@@ -109,15 +109,15 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
+pub(super) const STR_DESCRIPTORS: &[&str] = &["find", "partition", "rpartition"];
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::Str(_) if STR_DESCRIPTORS.contains(&attr) => "str",
         Value::Str(_)
             if matches!(
                 attr,
                 "format"
-                    | "find"
-                    | "partition"
-                    | "rpartition"
                     | "split"
                     | "rsplit"
                     | "splitlines"
