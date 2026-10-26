@@ -5081,6 +5081,18 @@ impl Emitter<'_, '_> {
                 &crate::version::implementation_values(&self.module.types),
                 Some("sys_implementation"),
             ),
+            Builtin::CanElideMapperFrames(mappers) => Value {
+                ty: Type::Bool,
+                operand: u8::from(mappers.iter().all(|&id| {
+                    !self
+                        .module
+                        .source_frames
+                        .get(id)
+                        .is_some_and(Option::is_some)
+                }))
+                .to_string(),
+                small_integer: false,
+            },
             Builtin::SysGetFrameModuleName => {
                 self.call("imre_sys_getframemodulename", returns, &[&args[0].value])
             }

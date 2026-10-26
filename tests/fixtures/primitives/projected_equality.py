@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 
 
@@ -92,6 +93,22 @@ def label(value: bool | None) -> str:
     return "True" if value else "False"
 
 
+def bounded_projection(rows: list[Box], others: list[Cell]) -> None:
+    depth = 0
+    while sys._getframemodulename(depth) is not None:
+        depth += 1
+    old_limit = sys.getrecursionlimit()
+    for extra in (1, 2, 1):
+        sys.setrecursionlimit(depth + extra)
+        try:
+            result = int(compare(rows, others))
+        except RecursionError:
+            result = -9
+        finally:
+            sys.setrecursionlimit(old_limit)
+        print(result)
+
+
 big = 100000000000000000000000000000000000003
 first = Cell("β", big)
 second = Cell("λ", -big)
@@ -123,3 +140,7 @@ try:
     print(checked_equal([two], [one]))
 except ValueError as error:
     print(str(error))
+
+bounded_projection([], [])
+bounded_projection([one], [first])
+bounded_projection([one, two], [first, second])

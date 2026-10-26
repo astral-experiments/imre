@@ -160,6 +160,7 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
     ))
 }
 struct Input {
+    mapper: usize,
     list: Expr,
     item: Type,
     // Each path ends in a scalar, in Python tuple field order.
@@ -191,7 +192,19 @@ impl Checker<'_> {
             && a.result == b.result
             && a.fields.len() == b.fields.len()
         {
-            body.extend(self.short_projected_comparison(a, b, answers));
+            // Reading the scalar fields directly also skips the two Python mapper calls.
+            let untracked = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::CanElideMapperFrames([a.mapper, b.mapper]),
+                    Vec::new(),
+                ),
+            };
+            body.push(Statement::If(
+                untracked,
+                self.short_projected_comparison(a, b, answers),
+                Vec::new(),
+            ));
         }
         let (suffix, suffix_falls) = self.block(&stmts[at..])?;
         body.extend(suffix);
@@ -282,6 +295,7 @@ impl Checker<'_> {
             _ => field_types == [result],
         };
         (compatible && !fields.is_empty()).then_some(Input {
+            mapper: signature.id,
             list,
             item,
             fields,
