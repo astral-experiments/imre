@@ -45,3 +45,7 @@ def current():
             call()
         except (TypeError, AttributeError) as exc:
             print(str(exc))
+
+
+if __name__ == "__main__":
+    current()
