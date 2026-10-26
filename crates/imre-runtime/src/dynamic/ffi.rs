@@ -337,6 +337,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
+        typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -560,6 +561,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
         ctx.modules
             .values()
             .chain(ctx.classes.values())
+            .chain(ctx.typing.roots())
             .chain(ctx.builtins.values())
             .chain(ctx.codec_entries.roots())
             .copied()

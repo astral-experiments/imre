@@ -83,6 +83,7 @@ pub(crate) use text::{UrlInput, urlquote, urlsplit};
 pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
+pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 mod warnings;

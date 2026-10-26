@@ -517,7 +517,7 @@ pub(super) fn call(
         "isinstance" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
-            Ok(boolean(ctx.instance_of(args[0], args[1])))
+            Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
         "ord" => {
             if !kwargs.is_empty() {

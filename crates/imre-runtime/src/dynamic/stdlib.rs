@@ -212,6 +212,17 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("_collections_abc", "Callable") => {
+            super::typing::named_class(ctx, "collections.abc", "Callable")
+        }
+        (
+            "typing",
+            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
+            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+        ) => ctx.builtin(&format!("typing.{name}")),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
@@ -396,6 +407,24 @@ pub(super) fn call(
     }
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("typing.") {
+        return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "types.GenericAlias" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "GenericAlias() takes no keyword arguments",
+            ));
+        }
+        let [origin, parameters] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("GenericAlias expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {

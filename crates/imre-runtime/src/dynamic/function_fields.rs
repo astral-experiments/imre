@@ -5,6 +5,7 @@ use super::value::{Error, Id, NONE, Result, Value};
 
 #[derive(Clone, Copy)]
 pub(super) struct FunctionFields {
+    pub first_line: u32,
     pub name: Id,
     pub qualname: Id,
     pub module: Id,
@@ -25,6 +26,7 @@ impl FunctionFields {
         annotate: Id,
     ) -> Self {
         Self {
+            first_line: ctx.heap.current_line().unwrap_or(0),
             name,
             qualname,
             doc,

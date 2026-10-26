@@ -37,12 +37,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
     let scope = ctx.scope("io", Some(module));
-    let ancestors = ctx.lineage(base);
-    let owner = ctx.alloc(Value::Class {
-        name: format!("io.{name}"),
-        scope,
-        ancestors,
-    });
+    let owner = ctx
+        .allocate_class(format!("io.{name}"), scope, vec![base])
+        .expect("a single I/O base has a linearization");
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
