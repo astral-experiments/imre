@@ -66,7 +66,10 @@ impl Context {
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
         let (kind, message) = error.into_parts();
-        Self::new(kind, message.to_string())
+        match message {
+            Ok(message) => Self::new(kind, message.to_string()),
+            Err(_) => Self::new("MemoryError", String::new()),
+        }
     }
 }
 
