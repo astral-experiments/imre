@@ -1,6 +1,7 @@
 import copy
 from copy import copy as duplicate
 from collections import Counter, defaultdict
+from http import HTTPStatus
 
 def build(events: list[int]) -> list[list[int]]:
     events.append(1)
@@ -56,5 +57,6 @@ def main() -> None:
     print(copy.copy("abc"))
     print(copy.copy(b"xy"))
     print(copy.copy(None) is None)
+    assert copy.copy(HTTPStatus.OK) is HTTPStatus.OK
 
 main()

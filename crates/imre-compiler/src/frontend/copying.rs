@@ -12,6 +12,7 @@ fn atomic(ty: Type) -> bool {
             | Type::Str
             | Type::StrLiteral(_)
             | Type::Bytes
+            | Type::IntEnum(_)
             | Type::StrEnum(_)
             | Type::Enum(_)
     )

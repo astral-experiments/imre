@@ -1,5 +1,6 @@
 import copy
 from collections import defaultdict
+from http import HTTPStatus
 
 
 def maybe(value: list[int] | None) -> list[int] | None:
@@ -57,6 +58,8 @@ def main() -> None:
         print(nullable is leaf)
         print(repr(nullable))
     print(maybe(None) is None)
+    assert copy.deepcopy(HTTPStatus.OK) is HTTPStatus.OK
+    assert copy.deepcopy([HTTPStatus.OK])[0] is HTTPStatus.OK
     s = {("x", 2), ("y", 3)}
     sets = [s, s]
     copied = copy.deepcopy(sets)
