@@ -674,6 +674,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart

@@ -110,6 +110,7 @@ pub(crate) enum IntrinsicModule {
     Selectors,
     Os,
     Posix,
+    OsPath,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -278,6 +279,7 @@ pub(crate) enum Intrinsic {
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
+    OsSeparator { alternate: bool, posix: bool },
     ErrnoAttribute,
     ErrnoFrom(usize),
     ModuleType,
@@ -521,7 +523,8 @@ impl IntrinsicModule {
             "selectors" => Some(Self::Selectors),
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
-            "os.path" | "posixpath" => Some(Self::PosixPath),
+            "os.path" => Some(Self::OsPath),
+            "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
@@ -577,9 +580,20 @@ impl IntrinsicModule {
         if self == Self::Sys && name == "_jit" {
             return Some(Binding::IntrinsicModule(Self::SysJit));
         }
+        if matches!(self, Self::Os | Self::OsPath | Self::PosixPath)
+            && matches!(name, "sep" | "altsep")
+        {
+            return Some(Binding::Intrinsic(Intrinsic::OsSeparator {
+                alternate: name == "altsep",
+                posix: self == Self::PosixPath,
+            }));
+        }
+        if self == Self::OsPath {
+            return Self::PosixPath.symbol(name);
+        }
         if self == Self::Os {
             if name == "path" {
-                return Some(Binding::IntrinsicModule(Self::PosixPath));
+                return Some(Binding::IntrinsicModule(Self::OsPath));
             }
             if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
