@@ -45,6 +45,29 @@ def extract(source: str, dest: str, /, **weights: int) -> None:
     print(len(weights))
     weights["edited"] = 9
 
+def no_extra(source: str, dest: str, *unused: int) -> None:
+    assert len(unused) == 0
+    print("no extra paths")
+
+def one_extra(source: str, *paths: str, tag: str = "default") -> None:
+    assert len(paths) == 1
+    for path in paths:
+        print(source + ":" + path + ":" + tag)
+
+def all_paths(*paths: str, **labels: str) -> None:
+    assert len(paths) == 2 and len(labels) == 1
+    joined = ""
+    for path in paths:
+        joined += path + ":"
+    print(joined + labels["paths"])
+    labels["seen"] = "this call"
+
+def pack_paths(base: str, *parts: str, dry_run: int, logger: None, owner: str | None, group: str | None) -> str:
+    assert len(parts) == 1 and dry_run == 0
+    for part in parts:
+        print(base + ":" + part)
+    return base + ".packed"
+
 try:
     shutil.register_archive_format("xxx", 1)
 except TypeError as error:
@@ -109,6 +132,19 @@ shutil.register_unpack_format("weights", [".weights"], extract, [("source", 7), 
 shutil.unpack_archive("example.weights", "out")
 shutil.unpack_archive("example.weights", "out")
 shutil.unregister_unpack_format("weights")
+shutil.register_unpack_format("zero", [".zero"], no_extra)
+shutil.unpack_archive("example.zero", "out")
+shutil.unregister_unpack_format("zero")
+shutil.register_unpack_format("one", [".one"], one_extra, [("tag", "custom")])
+shutil.unpack_archive("example.one", "dest")
+shutil.unregister_unpack_format("one")
+shutil.register_unpack_format("two", [".two"], all_paths, [("paths", "keyword")])
+shutil.unpack_archive("first.two", "dest1")
+shutil.unpack_archive("second.two", "dest2")
+shutil.unregister_unpack_format("two")
+shutil.register_archive_format("parts", pack_paths)
+print(shutil.make_archive("third", "parts", base_dir="leaf"))
+shutil.unregister_archive_format("parts")
 '''
 
 def main():
@@ -133,10 +169,12 @@ def main():
         assert b"pack kwargs\nabsent\nabsent\n0\n" in expected
         assert b"capture() got multiple values for argument 'directory'\n" in expected
         assert expected.count(b"unpack kwargs\n7\n2\n2\n")==2
+        assert b"no extra paths\nexample.one:dest:custom\n" in expected
+        assert b"first.two:dest1:keyword\nsecond.two:dest2:keyword\nthird:leaf\nthird.packed\n" in expected
         for level in (0,3):
             exe=build(args,root,f"native-{level}",SOURCE,level);actual=run([str(exe)])
             assert actual==expected,(actual,expected)
-            print(f"O{level}: registration, real cwd changes, dry run and original callback errors matched")
+            print(f"O{level}: registration, cwd restoration, callback errors, *args and **kwargs matched")
 
 if __name__=="__main__":
     main()

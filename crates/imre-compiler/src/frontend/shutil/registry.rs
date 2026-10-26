@@ -155,6 +155,7 @@ impl Checker<'_> {
                 self.helpers.finish(
                     id,
                     comprehensions::Helper {
+                        source_frame: false,
                         module: self.module,
                         calls: HashSet::new(),
                         class_reads: HashSet::new(),

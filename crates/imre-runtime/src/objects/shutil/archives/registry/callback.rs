@@ -13,6 +13,7 @@ pub(in super::super) struct Callback {
     extras: OwnedWord,
     nonstring_keys: bool,
     keyword_value_kind: Option<WordKind>,
+    positional_value_kind: Option<WordKind>,
     pub(super) root_flag: Option<&'static AtomicU8>,
 }
 
@@ -124,6 +125,37 @@ fn stored(v: OwnedWord, want: WordKind) -> Result<OwnedWord> {
     ))
 }
 
+/// Build the typed sequence that an ordinary native variadic call receives.
+fn positional_rest(
+    kind: WordKind,
+    values: impl ExactSizeIterator<Item = OwnedWord>,
+) -> Result<OwnedWord> {
+    if kind.raw() == 2 {
+        let mut ints = Vec::new();
+        ints.try_reserve_exact(values.len())
+            .map_err(|_| Error::allocation())?;
+        for value in values {
+            ints.push(Int(stored(value, kind)?.into_word()));
+        }
+        // SAFETY: the frame takes the newly owned specialized list.
+        return Ok(unsafe {
+            OwnedWord::from_owned(crate::new_list(ints) as usize, WordKind::new(4))
+        });
+    }
+    let mut words = Words::new(kind.raw());
+    words
+        .values
+        .try_reserve(values.len())
+        .map_err(|_| Error::allocation())?;
+    for value in values {
+        words.values.push(stored(value, kind)?.into_word());
+    }
+    let owner = ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
+        .map_err(|_| Error::allocation())?;
+    // SAFETY: the frame takes the newly owned native sequence.
+    Ok(unsafe { OwnedWord::from_owned(ObjectOwner::into_raw(owner) as usize, WordKind::new(5)) })
+}
+
 impl Callback {
     /// # Safety
     /// The compiler supplies matching live records and a fixed native adapter.
@@ -135,6 +167,7 @@ impl Callback {
         extras: usize,
         extras_kind: u32,
         rest_kind: u32,
+        positional_kind: u32,
     ) -> Self {
         // SAFETY: acquire the original values; the adapter and its layout are static.
         unsafe {
@@ -146,6 +179,8 @@ impl Callback {
                 extras: WordKind::new(extras_kind & 0xffff).acquire(extras),
                 nonstring_keys: extras_kind & 0x10000 != 0,
                 keyword_value_kind: (rest_kind != u32::MAX).then(|| WordKind::new(rest_kind)),
+                positional_value_kind: (positional_kind != u32::MAX)
+                    .then(|| WordKind::new(positional_kind)),
                 root_flag: None,
             }
         }
@@ -352,8 +387,17 @@ impl Callback {
             .iter()
             .take_while(|(_, mode, _)| matches!(text(mode), "/" | ""))
             .count();
-        for (i, value) in positional_values.into_iter().enumerate().take(positional) {
-            bound[i] = Some(value);
+        let mut values = positional_values.into_iter();
+        for slot in &mut bound[..positional] {
+            let Some(value) = values.next() else { break };
+            *slot = Some(value);
+        }
+        if let Some(kind) = self.positional_value_kind {
+            let index = params
+                .iter()
+                .position(|(_, mode, _)| text(mode) == "*args")
+                .expect("positional rest slot");
+            bound[index] = Some(positional_rest(kind, values)?);
         }
         let rest = self.keyword_value_kind.map(|kind| {
             let index = params
@@ -386,7 +430,7 @@ impl Callback {
                 )));
             }
         }
-        if positional < 2 {
+        if positional < 2 && self.positional_value_kind.is_none() {
             let plural = if positional == 1 { "" } else { "s" };
             return Err(type_error(format!(
                 "{short}() takes {positional} positional argument{plural} but 2 were given"
