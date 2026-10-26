@@ -210,6 +210,84 @@ fn resolve(host: &str) -> Result<Ipv4Addr> {
     Ok(Ipv4Addr::from(octets))
 }
 
+/// Reverse resolution must consider aliases before falling back to the primary name.
+/// Copy both while the legacy resolver's hostent is protected.
+fn fqdn(name: &str) -> Result<String> {
+    use std::net::{IpAddr, ToSocketAddrs};
+    use std::sync::Mutex;
+    unsafe extern "C" {
+        fn gethostbyaddr(
+            addr: *const libc::c_void,
+            len: libc::socklen_t,
+            family: libc::c_int,
+        ) -> *mut libc::hostent;
+    }
+    static REVERSE: Mutex<()> = Mutex::new(());
+    let mut name = name.trim().to_owned();
+    if name.is_empty() || name == "0.0.0.0" {
+        let mut buffer = [0u8; 256];
+        let n = buffer.len() - 1;
+        // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
+        checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) })
+            .map_err(errno_error)?;
+        name = CStr::from_bytes_until_nul(&buffer)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+    }
+    if name.as_bytes().contains(&0) {
+        return Err(Error::new(
+            Kind::TypeError,
+            "gethostbyaddr() argument 1 must be encoded string without null bytes",
+        ));
+    }
+    let addr = name.parse::<IpAddr>().ok().or_else(|| {
+        (name.as_str(), 0)
+            .to_socket_addrs()
+            .ok()?
+            .next()
+            .map(|address| address.ip())
+    });
+    let Some(addr) = addr else {
+        return Ok(name);
+    };
+    let _guard = REVERSE.lock().unwrap_or_else(|error| error.into_inner());
+    // SAFETY: the address bytes live through gethostbyaddr. Its terminated name
+    // and aliases remain valid until another legacy lookup on this thread.
+    unsafe {
+        let host = match addr {
+            IpAddr::V4(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 4, libc::AF_INET),
+            IpAddr::V6(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 16, libc::AF_INET6),
+        };
+        if host.is_null() || (*host).h_name.is_null() {
+            return Ok(name);
+        }
+        let primary = CStr::from_ptr((*host).h_name)
+            .to_string_lossy()
+            .into_owned();
+        if primary.contains('.') {
+            return Ok(primary);
+        }
+        let mut aliases = (*host).h_aliases;
+        while !aliases.is_null() && !(*aliases).is_null() {
+            let alias = CStr::from_ptr(*aliases).to_string_lossy();
+            if alias.contains('.') {
+                return Ok(alias.into_owned());
+            }
+            aliases = aliases.add(1);
+        }
+        Ok(primary)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_socket_getfqdn(name: &Str) -> *const Str {
+    finish(
+        fqdn(name).map(|name| crate::StrOwner::into_raw(crate::StrOwner::new(Str::from(name)))),
+        ptr::null(),
+    )
+}
+
 fn address(host: &str, port: usize, name: &str) -> Result<libc::sockaddr_in> {
     let port_error = || {
         Error::new(

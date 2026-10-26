@@ -20,6 +20,7 @@ pub(super) struct Reachable {
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
     instance_attributes: HashSet<String>,
+    http_commands: bool,
 }
 
 struct References<'a> {
@@ -99,6 +100,15 @@ impl<'a> Visitor<'a> for References<'_> {
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func).is_none()
+            && call.func.as_name_expr().is_some_and(|n| n.id == "getattr")
+            && call.arguments.keywords.is_empty()
+            && let [_, key] = call.arguments.args.as_slice()
+            && http_command_key(key)
+        {
+            self.found.http_commands = true;
+        }
+        if let ast::Expr::Call(call) = expr
             && (self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii))
                 || (matches!(call.func.as_ref(), ast::Expr::Name(name) if matches!(name.id.as_str(), "ascii" | "repr" | "str" | "print"))
@@ -121,11 +131,16 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.instance_attributes.insert(method.to_owned());
             }
         }
-        if matches!(expr, ast::Expr::Subscript(s) if s.ctx == ast::ExprContext::Store) {
-            self.found.attributes.insert("__setitem__".to_owned());
-            self.found
-                .instance_attributes
-                .insert("__setitem__".to_owned());
+        if let ast::Expr::Subscript(sub) = expr {
+            let method = match sub.ctx {
+                ast::ExprContext::Store => Some("__setitem__"),
+                ast::ExprContext::Load => Some("__getitem__"),
+                _ => None,
+            };
+            if let Some(method) = method {
+                self.found.attributes.insert(method.to_owned());
+                self.found.instance_attributes.insert(method.to_owned());
+            }
         }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
@@ -331,6 +346,7 @@ impl Reachable {
                 found.methods.len(),
                 found.attributes.len(),
                 found.properties.len(),
+                found.http_commands,
             );
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
@@ -358,6 +374,17 @@ impl Reachable {
                     // constructing the descriptor, even when no method is explicitly called.
                     let mut accessors = HashSet::new();
                     for item in &class.body {
+                        // Binding a setter reads the preceding property, even when
+                        // no later code reads the descriptor through an instance.
+                        if let ast::Stmt::FunctionDef(method) = item
+                            && method.decorator_list.iter().any(|d| {
+                                matches!(&d.expression,
+                                ast::Expr::Attribute(a) if a.attr.as_str() == "setter" &&
+                                a.value.as_name_expr().is_some_and(|n| n.id == method.name.id))
+                            })
+                        {
+                            accessors.insert(method.name.as_str());
+                        }
                         if let ast::Stmt::Assign(assign) = item
                             && let Some((get, set)) =
                                 crate::classes::property_accessors(graph, id.module, &assign.value)
@@ -423,6 +450,9 @@ impl Reachable {
                                 || (source.is_bundled("selectors")
                                     && class.name.as_str() == "PollSelector"
                                     && name == "close")
+                                || (refs.found.http_commands
+                                    && (name.starts_with("do_") || name == "__getattr__")
+                                    && graph.is_http_handler(id))
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
@@ -456,6 +486,7 @@ impl Reachable {
                     found.methods.len(),
                     found.attributes.len(),
                     found.properties.len(),
+                    found.http_commands,
                 )
             {
                 break;
@@ -740,6 +771,29 @@ fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
                 .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
                 .is_some()
     })
+}
+
+/// The HTTP dispatcher constructs a method name from a fixed prefix and the request command.
+pub(crate) fn http_command_key(key: &ast::Expr) -> bool {
+    matches!(key, ast::Expr::BinOp(add) if add.op == ast::Operator::Add &&
+        matches!(&*add.left, ast::Expr::StringLiteral(lit) if lit.value.to_str() == "do_"))
+}
+
+impl SourceGraph {
+    pub(crate) fn is_http_handler(&self, class: DefinitionId) -> bool {
+        let is_base = |id: DefinitionId| {
+            let module = &self.modules[id.module];
+            module.is_bundled("http.server")
+                && matches!(&module.parsed.syntax().body[id.statement],
+                ast::Stmt::ClassDef(c) if c.name.as_str() == "BaseHTTPRequestHandler")
+        };
+        is_base(class)
+            || has_base(
+                self,
+                class,
+                |module, base| matches!(self.resolve_type(module, base), Some(Binding::Definition(parent)) if is_base(parent)),
+            )
+    }
 }
 
 /// Walk the finite class graph before fixed layouts are resolved.

@@ -1,13 +1,13 @@
 {
-  "compiler_sha256": "28db98c00ff30944b72e787ed34c7b4d1861f7cf693f672db910dcc92a0f337d",
-  "runtime_sha256": "6269abc02e7ef7fb6bfcb43b8d50b9b9deb525c13d3cee0e614216d6e29d473d",
+  "compiler_sha256": "875d774c436d95c242acd6acecfe883ca3200328f0628699f5f1cae727823e04",
+  "runtime_sha256": "85262465beefa34bd0a6bc4e06d6e5642fc91e9f72c82893ae60b8a8cdfed1f0",
   "worker_sha256": "58da4fcc2de3741d05b5e2da832fd94054ecd8efc57d6fa08365336ec181b0af",
   "suites": {
     "httplib": [
       {
         "opt_level": 0,
         "reachable_only": false,
-        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:10:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"",
         "methods": {
           "test_dir_with_added_behavior_on_status": {
             "outcome": "blocked",
@@ -85,7 +85,7 @@
       {
         "opt_level": 0,
         "reachable_only": true,
-        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:10:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"",
         "methods": {
           "test_dir_with_added_behavior_on_status": {
             "outcome": "blocked",
@@ -163,7 +163,7 @@
       {
         "opt_level": 3,
         "reachable_only": false,
-        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:10:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"",
         "methods": {
           "test_dir_with_added_behavior_on_status": {
             "outcome": "blocked",
@@ -241,7 +241,7 @@
       {
         "opt_level": 3,
         "reachable_only": true,
-        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:10:1: Imre: standard-library imports and shadowing are unsupported: \"threading\"",
         "methods": {
           "test_dir_with_added_behavior_on_status": {
             "outcome": "blocked",
@@ -321,30 +321,174 @@
       {
         "opt_level": 0,
         "reachable_only": false,
-        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: module \"http.server\" has no static binding \"HTTPSServer\"",
         "methods": {},
-        "hosted": {}
+        "hosted": {},
+        "server": {
+          "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
+          "host_cases": [
+            "BaseHTTPServerTestCase.test_command",
+            "BaseHTTPServerTestCase.test_request_line_trimming",
+            "BaseHTTPServerTestCase.test_version_bogus",
+            "BaseHTTPServerTestCase.test_version_digits",
+            "BaseHTTPServerTestCase.test_version_signs_and_underscores",
+            "BaseHTTPServerTestCase.test_major_version_number_too_long",
+            "BaseHTTPServerTestCase.test_minor_version_number_too_long",
+            "BaseHTTPServerTestCase.test_version_none_get",
+            "BaseHTTPServerTestCase.test_version_none",
+            "BaseHTTPServerTestCase.test_version_invalid",
+            "BaseHTTPServerTestCase.test_send_blank",
+            "BaseHTTPServerTestCase.test_header_close",
+            "BaseHTTPServerTestCase.test_header_keep_alive",
+            "BaseHTTPServerTestCase.test_handler",
+            "BaseHTTPServerTestCase.test_return_header_keep_alive",
+            "BaseHTTPServerTestCase.test_internal_key_error",
+            "BaseHTTPServerTestCase.test_return_custom_status",
+            "BaseHTTPServerTestCase.test_return_explain_error",
+            "BaseHTTPServerTestCase.test_latin1_header",
+            "BaseHTTPServerTestCase.test_error_content_length",
+            "BaseHTTPServerTestCase.test_send_error",
+            "BaseHTTPServerTestCase.test_head_via_send_error",
+            "HTTP09ServerTestCase.test_simple_get",
+            "HTTP09ServerTestCase.test_invalid_request",
+            "HTTP09ServerTestCase.test_single_request"
+          ],
+          "native_case": "BaseHTTPRequestHandlerTestCase.test_date_time_string",
+          "controls": [
+            "wrong 200 in do_TEST",
+            "incorrect date in the native original assertion"
+          ]
+        }
       },
       {
         "opt_level": 0,
         "reachable_only": true,
-        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: module \"http.server\" has no static binding \"HTTPSServer\"",
         "methods": {},
-        "hosted": {}
+        "hosted": {},
+        "server": {
+          "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
+          "host_cases": [
+            "BaseHTTPServerTestCase.test_command",
+            "BaseHTTPServerTestCase.test_request_line_trimming",
+            "BaseHTTPServerTestCase.test_version_bogus",
+            "BaseHTTPServerTestCase.test_version_digits",
+            "BaseHTTPServerTestCase.test_version_signs_and_underscores",
+            "BaseHTTPServerTestCase.test_major_version_number_too_long",
+            "BaseHTTPServerTestCase.test_minor_version_number_too_long",
+            "BaseHTTPServerTestCase.test_version_none_get",
+            "BaseHTTPServerTestCase.test_version_none",
+            "BaseHTTPServerTestCase.test_version_invalid",
+            "BaseHTTPServerTestCase.test_send_blank",
+            "BaseHTTPServerTestCase.test_header_close",
+            "BaseHTTPServerTestCase.test_header_keep_alive",
+            "BaseHTTPServerTestCase.test_handler",
+            "BaseHTTPServerTestCase.test_return_header_keep_alive",
+            "BaseHTTPServerTestCase.test_internal_key_error",
+            "BaseHTTPServerTestCase.test_return_custom_status",
+            "BaseHTTPServerTestCase.test_return_explain_error",
+            "BaseHTTPServerTestCase.test_latin1_header",
+            "BaseHTTPServerTestCase.test_error_content_length",
+            "BaseHTTPServerTestCase.test_send_error",
+            "BaseHTTPServerTestCase.test_head_via_send_error",
+            "HTTP09ServerTestCase.test_simple_get",
+            "HTTP09ServerTestCase.test_invalid_request",
+            "HTTP09ServerTestCase.test_single_request"
+          ],
+          "native_case": "BaseHTTPRequestHandlerTestCase.test_date_time_string",
+          "controls": [
+            "wrong 200 in do_TEST",
+            "incorrect date in the native original assertion"
+          ]
+        }
       },
       {
         "opt_level": 3,
         "reachable_only": false,
-        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: module \"http.server\" has no static binding \"HTTPSServer\"",
         "methods": {},
-        "hosted": {}
+        "hosted": {},
+        "server": {
+          "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
+          "host_cases": [
+            "BaseHTTPServerTestCase.test_command",
+            "BaseHTTPServerTestCase.test_request_line_trimming",
+            "BaseHTTPServerTestCase.test_version_bogus",
+            "BaseHTTPServerTestCase.test_version_digits",
+            "BaseHTTPServerTestCase.test_version_signs_and_underscores",
+            "BaseHTTPServerTestCase.test_major_version_number_too_long",
+            "BaseHTTPServerTestCase.test_minor_version_number_too_long",
+            "BaseHTTPServerTestCase.test_version_none_get",
+            "BaseHTTPServerTestCase.test_version_none",
+            "BaseHTTPServerTestCase.test_version_invalid",
+            "BaseHTTPServerTestCase.test_send_blank",
+            "BaseHTTPServerTestCase.test_header_close",
+            "BaseHTTPServerTestCase.test_header_keep_alive",
+            "BaseHTTPServerTestCase.test_handler",
+            "BaseHTTPServerTestCase.test_return_header_keep_alive",
+            "BaseHTTPServerTestCase.test_internal_key_error",
+            "BaseHTTPServerTestCase.test_return_custom_status",
+            "BaseHTTPServerTestCase.test_return_explain_error",
+            "BaseHTTPServerTestCase.test_latin1_header",
+            "BaseHTTPServerTestCase.test_error_content_length",
+            "BaseHTTPServerTestCase.test_send_error",
+            "BaseHTTPServerTestCase.test_head_via_send_error",
+            "HTTP09ServerTestCase.test_simple_get",
+            "HTTP09ServerTestCase.test_invalid_request",
+            "HTTP09ServerTestCase.test_single_request"
+          ],
+          "native_case": "BaseHTTPRequestHandlerTestCase.test_date_time_string",
+          "controls": [
+            "wrong 200 in do_TEST",
+            "incorrect date in the native original assertion"
+          ]
+        }
       },
       {
         "opt_level": 3,
         "reachable_only": true,
-        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: module \"http.server\" has no static binding \"HTTPSServer\"",
         "methods": {},
-        "hosted": {}
+        "hosted": {},
+        "server": {
+          "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
+          "host_cases": [
+            "BaseHTTPServerTestCase.test_command",
+            "BaseHTTPServerTestCase.test_request_line_trimming",
+            "BaseHTTPServerTestCase.test_version_bogus",
+            "BaseHTTPServerTestCase.test_version_digits",
+            "BaseHTTPServerTestCase.test_version_signs_and_underscores",
+            "BaseHTTPServerTestCase.test_major_version_number_too_long",
+            "BaseHTTPServerTestCase.test_minor_version_number_too_long",
+            "BaseHTTPServerTestCase.test_version_none_get",
+            "BaseHTTPServerTestCase.test_version_none",
+            "BaseHTTPServerTestCase.test_version_invalid",
+            "BaseHTTPServerTestCase.test_send_blank",
+            "BaseHTTPServerTestCase.test_header_close",
+            "BaseHTTPServerTestCase.test_header_keep_alive",
+            "BaseHTTPServerTestCase.test_handler",
+            "BaseHTTPServerTestCase.test_return_header_keep_alive",
+            "BaseHTTPServerTestCase.test_internal_key_error",
+            "BaseHTTPServerTestCase.test_return_custom_status",
+            "BaseHTTPServerTestCase.test_return_explain_error",
+            "BaseHTTPServerTestCase.test_latin1_header",
+            "BaseHTTPServerTestCase.test_error_content_length",
+            "BaseHTTPServerTestCase.test_send_error",
+            "BaseHTTPServerTestCase.test_head_via_send_error",
+            "HTTP09ServerTestCase.test_simple_get",
+            "HTTP09ServerTestCase.test_invalid_request",
+            "HTTP09ServerTestCase.test_single_request"
+          ],
+          "native_case": "BaseHTTPRequestHandlerTestCase.test_date_time_string",
+          "controls": [
+            "wrong 200 in do_TEST",
+            "incorrect date in the native original assertion"
+          ]
+        }
       }
     ],
     "http_cookies": [
