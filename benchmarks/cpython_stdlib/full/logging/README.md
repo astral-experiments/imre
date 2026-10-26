@@ -41,8 +41,8 @@ CPython also accepts assignment to `logger.manager`. Imre rejects that assignmen
 | Imre | Imre | Imre | CPython hooks and native child | 22 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| CPython | CPython | Imre | CPython hooks and native child | 6 |
-| Blocked before execution | | | | 197 |
+| CPython | CPython | Imre | CPython hooks and native child | 7 |
+| Blocked before execution | | | | 196 |
 | Failed while compiling the stock stream identity assertion | | | | 1 |
 | Unchanged reference skip | | | | 3 |
 
@@ -53,6 +53,7 @@ an empty name filter, both buffering formatters, and [FileHandler](files.md)
 delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
+The [plain UTF-8 file method](stream-delivery.md#plain-utf-8-file) checks text written by a native logger and file handler. Its body, file read, and assertion run in CPython.
 `StreamHandlerTest.test_stream_setting` fails to compile its stock `assertIs(old, sys.stderr)`:
 the assertion's diagnostic needs `repr` for a stream. The unchanged CPython method passes.
 Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
@@ -60,7 +61,7 @@ Two more [filename configuration methods](config.md#filename-configuration) chec
 Two [ASCII file configuration methods](config.md#file-encoding-and-errors) check explicit and default error handling. Their bodies and assertions run in CPython, and their file handlers emit in Imre.
 FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
-CPython output helper. The 45 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 46 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
