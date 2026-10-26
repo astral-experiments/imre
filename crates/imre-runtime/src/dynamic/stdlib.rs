@@ -385,7 +385,7 @@ pub(super) fn call(
             1,
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
-        "hashlib.sha1" => (1, &["data"]),
+        "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),

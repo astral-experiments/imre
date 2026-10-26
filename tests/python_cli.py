@@ -338,10 +338,16 @@ def report(text):
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"
             "def factory(data=b''):\n    return hashlib.sha1(data)\n"
+            "class Flag:\n    def __bool__(self):\n        raise ValueError('hash flag')\n"
             "h = factory(b'\\x00a')\nalias = h\nalias.update(b'\\xff')\n"
             "copy = h.copy()\ncopy.update(b'next')\n"
             "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
+            "print(hashlib.sha1(usedforsecurity=False).hexdigest() == factory().hexdigest())\n"
+            "try:\n    hashlib.sha1(b'a', data=b'b', usedforsecurity=Flag())\n"
+            "except TypeError:\n    print('duplicate data')\n"
+            "try:\n    hashlib.sha1('bad', usedforsecurity=Flag())\n"
+            "except ValueError as exc:\n    print(str(exc))\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
