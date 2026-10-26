@@ -1,0 +1,63 @@
+{
+  "public_legacy_feature": "7a620758f5e244f26ddc3140eaca4d5b44246dcc",
+  "replay": "109aefce318c3a9839acf1db4607cc6ca84d39e1",
+  "file": "crates/imre-runtime/src/objects/files/path_text.rs",
+  "original_blob": "6200d2c01c3f92253f6974df381249d0abd27fbf",
+  "replay_blob": "f99cc04e5d2cf9ef26940fcfc5e1cc8059949f8a",
+  "returned_owner": "ObjectOwner = Shared<objects::Object>",
+  "archive_sha256": "94881e351bfca6d5ffc8ee29b31385bf6ec88419d87edb2b7850a7c5507d52f6",
+  "modes": {
+    "production": {
+      "site_sha256": "b763d8f6334575e4ba6e00ea66c1593d192ce101a71b4f6429dcb83175efe4d3",
+      "retained_functions": 7,
+      "fallible_box": true,
+      "fallible_object_owner": true,
+      "into_raw": "Shared<Object>",
+      "allocation_error_edges": 2,
+      "ffi_error_sentinel": "null",
+      "legacy_rc_object": false
+    },
+    "test": {
+      "site_sha256": "aefdd28732c3b1b4517935deb6b53ba4f1a38ba2f5656b9a072aae0244b08eb5",
+      "retained_functions": 7,
+      "fallible_box": true,
+      "fallible_object_owner": true,
+      "into_raw": "Shared<Object>",
+      "allocation_error_edges": 2,
+      "ffi_error_sentinel": "null",
+      "legacy_rc_object": false
+    }
+  },
+  "faults": {
+    "0": {
+      "refused_sizes": [
+        131072,
+        40,
+        40,
+        5,
+        216,
+        64
+      ],
+      "caught": "MemoryError",
+      "retry_bytes": "6f6b",
+      "exit": 0,
+      "leaked_fds": []
+    },
+    "3": {
+      "refused_sizes": [
+        131072,
+        40,
+        40,
+        5,
+        216,
+        64
+      ],
+      "caught": "MemoryError",
+      "retry_bytes": "6f6b",
+      "exit": 0,
+      "leaked_fds": []
+    }
+  },
+  "feature_parent": "af1c218be78e4ef06a1565524f215120fe8a14ce",
+  "touched_logger_storage_files": []
+}
