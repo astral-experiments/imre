@@ -220,11 +220,13 @@ impl Context {
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
-                    IteratorSlice::Bytes(bytes) => bytes
-                        .to_vec()
-                        .into_iter()
-                        .map(|b| self.int(i64::from(b)))
-                        .collect(),
+                    IteratorSlice::Bytes(bytes) => {
+                        let mut values = Vec::with_capacity(bytes.len());
+                        while let Some(byte) = self.next_item(id)? {
+                            values.push(byte);
+                        }
+                        return Ok(values);
+                    }
                 };
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
