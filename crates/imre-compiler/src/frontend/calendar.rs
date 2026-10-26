@@ -131,11 +131,7 @@ impl Checker<'_> {
         let (builtin, args) = match kind {
             C::Date => {
                 let pars = ["year", "month", "day"].map(|name| int(name, false));
-                let args = self.arguments_with(call, &pars, None, |c, _, e| {
-                    let value = powers::integer(c.expr(e)?);
-                    c.expect(Type::Int, value.ty, e)?;
-                    Ok(value)
-                })?;
+                let args = self.arguments_with(call, &pars, None, |c, _, e| c.integer_index(e))?;
                 (Op::Date, args)
             }
             C::Delta => {
@@ -150,7 +146,7 @@ impl Checker<'_> {
                 ]
                 .map(|n| int(n, true));
                 let args = self.arguments_with(call, &pars, None, |c, _, e| {
-                    let v = powers::integer(c.expr(e)?);
+                    let v = powers::integer(Self::enum_integer(c.expr(e)?));
                     if matches!(v.ty, Type::Int | Type::Float) {
                         Ok(v)
                     } else {
@@ -182,9 +178,7 @@ impl Checker<'_> {
                     if i == 7 {
                         return c.expr_expected(e, optzone);
                     }
-                    let v = powers::integer(c.expr(e)?);
-                    c.expect(Type::Int, v.ty, e)?;
-                    Ok(v)
+                    c.integer_index(e)
                 })?;
                 (Op::DateTime, args)
             }
@@ -358,9 +352,7 @@ impl Checker<'_> {
                     timezone_supplied = true;
                     return c.expr_expected(e, zone);
                 }
-                let value = powers::integer(c.expr(e)?);
-                c.expect(Type::Int, value.ty, e)?;
-                Ok(value)
+                c.integer_index(e)
             })?;
             return Ok(self.ordered_builtin(
                 Builtin::Calendar(Op::Replace { timezone_supplied }),
