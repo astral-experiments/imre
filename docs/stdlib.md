@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 71 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 38 modules with recorded suites, 93 complete test executions pass natively at both optimization levels; 14,998 of 15,145 upstream executions have a classification.
+**At a glance:** 71 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 39 modules with recorded suites, 94 complete test executions pass natively at both optimization levels; 15,039 of 15,186 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 421 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,557 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 421 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,558 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -19,7 +19,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 5 | 925 |
 | `array` | Yes | `array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`. [Evidence](../tests/fixtures/containers/array_registration.py) | — | — | — |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — | — |
-| `base64` | Yes | `urlsafe_b64encode` on bytes. [Evidence](../benchmarks/cpython_stdlib/native_base64.py) | — | — | — |
+| `base64` | Yes | `b64encode`, `b64decode`, alternate alphabets and strict validation for immutable inputs, plus URL-safe encoding. [Evidence](../benchmarks/cpython_stdlib/full/base64/README.md) | [1 / 41](../benchmarks/cpython_stdlib/full/base64/) | 0 | 1 |
 | `binascii` | Yes | Standard Base64 encoding, strict or permissive decoding of bytes and ASCII text, and the module exception hierarchy. [Evidence](../benchmarks/cpython_stdlib/full/binascii/README.md) | [0 / 93](../benchmarks/cpython_stdlib/full/binascii/) | 2 | 4 |
 | `builtins` | Yes | Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`. [Evidence](../benchmarks/cpython_stdlib/full/builtins/README.md) | [— / 147 (0 assessed)](../benchmarks/cpython_stdlib/full/builtins/) | — | — |
 | `codecs` | Yes | `lookup`, codec names, stateless ASCII, Latin-1 and UTF-8 encoding and decoding, and byte-order marks. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — | — |
