@@ -731,11 +731,13 @@ impl Checker<'_> {
         }
         let mut mode = call.arguments.args.first();
         let mut encoding = None;
+        let mut errors = None;
         let mut newline = None;
         for keyword in &call.arguments.keywords {
             match keyword.arg.as_ref().map(|arg| arg.as_str()) {
                 Some("mode") if mode.is_none() => mode = Some(&keyword.value),
                 Some("encoding") if encoding.is_none() => encoding = Some(keyword),
+                Some("errors") if errors.is_none() => errors = Some(keyword),
                 Some("newline") if newline.is_none() => newline = Some(&keyword.value),
                 _ => {
                     return Err(error(
@@ -772,6 +774,33 @@ impl Checker<'_> {
             _ => file_open_mode(mode),
         }
         .ok_or_else(|| error(self.source, call, "unsupported native Path.open mode"))?;
+        if matches!(builtin, Builtin::TextOpen(1..=3)) {
+            let optional = self.types.optional(Type::Str);
+            let absent = Expr {
+                ty: optional,
+                kind: ExprKind::Absent(Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                })),
+            };
+            let mut params = vec![parameter("mode", Type::Str, Some(unpacking::string("r")))];
+            for name in ["encoding", "errors", "newline"] {
+                params.push(parameter(name, optional, Some(absent.clone())));
+            }
+            let args = self.arguments(call, &params, Some(receiver))?;
+            return Ok(self.ordered_path_operation(
+                PathOperation::OpenTextOutput,
+                Type::TextIO,
+                args,
+            ));
+        }
+        if let Some(errors) = errors {
+            return Err(error(
+                self.source,
+                errors,
+                "Path.open error handlers require a text output mode",
+            ));
+        }
         if let Some(encoding) = encoding {
             if ty == Type::BinaryIO {
                 return Err(error(

@@ -125,7 +125,12 @@ impl Builtin {
             Self::ExceptionFieldRepr
             | Self::ExceptionRepr
             | Self::ExceptionMessage
-            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
+            | Self::Logging(
+                crate::ir::LogOperation::PrintActiveException
+                | crate::ir::LogOperation::DictConfig
+                | crate::ir::LogOperation::DictConfigTyped
+                | crate::ir::LogOperation::FileConfig,
+            ) => {
                 Contract::new(true, Unknown)
             }
             Self::SystemExitFromTuple
@@ -185,6 +190,7 @@ impl Builtin {
                     | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
                     | PathOperation::ReadText
+                    | PathOperation::OpenTextOutput
                     | PathOperation::ReadBytes
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
@@ -265,10 +271,7 @@ impl Builtin {
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
-                    crate::ir::LogOperation::DictConfig
-                        | crate::ir::LogOperation::DictConfigTyped
-                        | crate::ir::LogOperation::FileConfig
-                        | crate::ir::LogOperation::CheckLevel
+                    crate::ir::LogOperation::CheckLevel
                         | crate::ir::LogOperation::WriteStream
                         | crate::ir::LogOperation::FlushStream
                         | crate::ir::LogOperation::LockAcquire
@@ -1163,6 +1166,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_write_text"
                 | "imre_path_read_text_options"
                 | "imre_path_write_text_options"
+                | "imre_path_open_text_output"
                 | "imre_path_write_type_error"
                 | "imre_path_write_bytes_union"
                 | "imre_path_write_text_union"

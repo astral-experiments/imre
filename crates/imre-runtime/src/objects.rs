@@ -150,7 +150,7 @@ enum Storage {
     CodecWriter(allocator_api2::boxed::Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
-    File(Box<files::FileState>),
+    File(files::BoxedFile),
     ZipFile(allocator_api2::boxed::Box<zipfile::Archive>),
     ZipInfo(crate::Shared<zipfile::Info>),
     Popen(Box<processes::Popen>),

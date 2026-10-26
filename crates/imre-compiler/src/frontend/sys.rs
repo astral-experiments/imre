@@ -196,7 +196,7 @@ impl Checker<'_> {
 
     /// Preserve lookup of an optional text stream before evaluating method arguments.
     pub(super) fn optional_stream(&self, value: Expr, name: &str) -> Expr {
-        if self.types.payload(value.ty) == Some(Type::TextIO)
+        if let Some(stream @ (Type::TextIO | Type::TextOutput)) = self.types.payload(value.ty)
             && matches!(
                 name,
                 "write"
@@ -211,7 +211,7 @@ impl Checker<'_> {
             )
         {
             Expr {
-                ty: Type::TextIO,
+                ty: stream,
                 kind: ExprKind::Builtin(
                     Builtin::TextOptionalReceiver,
                     vec![value, unpacking::string(name)],

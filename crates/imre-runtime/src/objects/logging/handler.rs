@@ -1,9 +1,10 @@
-//! Named handlers use weak record references, independently of logger ownership.
+//! Weak handler references support name lookup and shutdown in reverse construction order.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::super::records::weak::WeakRecord;
+use super::super::{exceptions::imre_error_pending, records::imre_record_release};
 use super::Str;
 
 struct Entry {
@@ -12,6 +13,60 @@ struct Entry {
 }
 
 thread_local! { static HANDLERS: RefCell<HashMap<Rc<str>, Entry>> = RefCell::default(); }
+
+#[derive(Clone)]
+struct Registered {
+    handler: WeakRecord,
+    shutdown: unsafe extern "C" fn(*const usize) -> u8,
+    takes_owner: bool,
+}
+
+thread_local! { static REGISTERED: RefCell<Vec<Registered>> = RefCell::default(); }
+
+/// Remember a handler without extending its lifetime.
+///
+/// # Safety
+/// The caller roots the record and supplies its compiled cleanup function and ownership convention.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_handler_register(
+    handler: *const usize,
+    shutdown: unsafe extern "C" fn(*const usize) -> u8,
+    takes_owner: bool,
+) {
+    REGISTERED.with_borrow_mut(|handlers| {
+        if handlers.len() == handlers.capacity() {
+            handlers.retain(|entry| entry.handler.is_live());
+        }
+        handlers.push(Registered {
+            // SAFETY: the initializer roots its receiver.
+            handler: unsafe { WeakRecord::new(handler) },
+            shutdown,
+            takes_owner,
+        });
+    });
+}
+
+/// Close the live handlers in reverse order. A raised callback leaves its exception pending.
+pub(super) fn close_existing() -> bool {
+    HANDLERS.with_borrow_mut(HashMap::clear);
+    let snapshot = REGISTERED.with_borrow(Clone::clone);
+    for entry in snapshot.iter().rev() {
+        if let Some(handler) = entry.handler.upgrade() {
+            // SAFETY: the upgrade supplies the owner required by the callback or roots its borrow.
+            unsafe {
+                (entry.shutdown)(handler);
+                if !entry.takes_owner {
+                    imre_record_release(handler);
+                }
+            }
+            if imre_error_pending() != 0 {
+                return false;
+            }
+        }
+    }
+    REGISTERED.with_borrow_mut(Vec::clear);
+    true
+}
 
 /// Update the weak name map before the caller stores its new name. CPython
 /// removes the old key even when a different handler has since claimed it.

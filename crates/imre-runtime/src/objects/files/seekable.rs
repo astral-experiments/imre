@@ -112,7 +112,9 @@ impl FileState {
     }
 
     pub(super) fn into_object(self) -> crate::ObjectOwner {
-        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(BoxedFile::new(
+            self,
+        )))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {

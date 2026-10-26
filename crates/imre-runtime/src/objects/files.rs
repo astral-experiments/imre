@@ -21,6 +21,8 @@ pub(super) use seekable::disk_offset;
 
 use buffered::{Input, Output};
 
+pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
+
 pub(super) struct FileState {
     fd: Option<RawFd>,
     // Closing a stream releases its descriptor, not its original I/O class.
@@ -156,7 +158,7 @@ impl FileState {
             FileKind::BinaryWrite
         };
         Ok(crate::ObjectOwner::new(Object(StorageCell::new(
-            Storage::File(Box::new(Self {
+            Storage::File(BoxedFile::new(Self {
                 fd: Some(fd),
                 raw: !text && capacity == 0,
                 name: None,
@@ -328,6 +330,9 @@ impl FileState {
         }
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.write(text);
+        }
+        if let Some(Stream::Write(writer)) = self.stream.as_mut() {
+            return writer.write_text(text);
         }
         self.write_bytes(text.as_bytes())
     }
@@ -522,7 +527,7 @@ pub unsafe extern "C" fn imre_text_open(
         mode,
         false,
         false,
-        Some(encoding.map_or("UTF-8", |name| name)),
+        Some((encoding.map_or("UTF-8", |name| name), "strict")),
     );
     finish(
         state.map(|file| crate::ObjectOwner::into_raw(file.into_object())),
@@ -530,14 +535,24 @@ pub unsafe extern "C" fn imre_text_open(
     )
 }
 
-/// Return the wrapper's retained encoding, or a null optional word for StringIO.
+/// Read encoding or errors from the actual output stream, including after close.
 ///
 /// # Safety
-/// The compiler supplies a rooted text file, including after close.
+/// The compiler supplies a rooted text file, StringIO or codec writer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_metadata(file: *const Object, errors: u32) -> *const Str {
-    // SAFETY: the rooted file owns its optional string throughout this read.
+    // SAFETY: the caller roots the stream for both the type check and the read.
     unsafe {
+        if object(file)
+            .0
+            .with(|s| matches!(s, Storage::CodecWriter(_)))
+        {
+            return if errors != 0 {
+                super::codecs::writer::imre_codec_writer_errors(file)
+            } else {
+                super::codecs::writer::imre_codec_writer_encoding(file)
+            };
+        }
         object(file).0.with(|s| {
             let file = s.file();
             (if errors != 0 {
@@ -578,7 +593,7 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
 
 /// The original Python wrapper shares the runtime's stdout/stderr buffer, even through an alias.
 pub(super) fn standard_stream(stderr: bool) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(BoxedFile::new(
         FileState {
             fd: Some(if stderr {
                 io::stderr().as_raw_fd()
@@ -606,22 +621,22 @@ pub(super) fn standard_stream(stderr: bool) -> crate::ObjectOwner {
 pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
     Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
-        Object(StorageCell::new(Storage::File(Box::new(state)))),
+        Object(StorageCell::new(Storage::File(BoxedFile::new(state)))),
     )))
 }
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
-    let encoding = (!binary).then_some(if gzip { "utf-8" } else { "UTF-8" });
+    let encoding = (!binary).then_some((if gzip { "utf-8" } else { "UTF-8" }, "strict"));
     open_state_with_encoding(path, mode, binary, gzip, encoding)
 }
 
-/// The wrapper owns a spelling separate from the caller's encoding argument.
+/// The wrapper owns its encoding and errors spellings, including after close.
 fn open_state_with_encoding(
     path: &StrOwner,
     mode: u32,
     binary: bool,
     gzip: bool,
-    encoding: Option<&str>,
+    encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
     let (file, metadata) = open_file_with(path, mode, |error| {
         errno_with_filenames(
@@ -649,8 +664,12 @@ fn open_state_with_encoding(
         raw: false,
         stream: Some(stream),
         name: Some(path.clone()),
-        encoding: encoding.map(super::literal_string),
-        errors: encoding.map(|_| super::literal_string("strict")),
+        encoding: encoding
+            .map(|(name, _)| super::text::try_owned_string(name))
+            .transpose()?,
+        errors: encoding
+            .map(|(_, policy)| super::text::try_owned_string(policy))
+            .transpose()?,
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -1153,7 +1172,7 @@ mod tests {
         // down the writer guarantees EPIPE even while the child holds the peer.
         writer.shutdown(Shutdown::Write).unwrap();
         let file = File::from(OwnedFd::from(writer));
-        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(BoxedFile::new(
             FileState {
                 fd: Some(file.as_raw_fd()),
                 raw: false,

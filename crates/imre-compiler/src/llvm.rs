@@ -3969,6 +3969,19 @@ impl Emitter<'_, '_> {
             self.release_operand(&list);
             return none();
         }
+        if let Builtin::Logging(ir::LogOperation::HandlerRegister(shutdown)) = builtin {
+            let handler = self.expr(&expressions[0]);
+            let function = &self.module.functions[*shutdown];
+            let takes_owner = self
+                .resource_types
+                .contains(&function.locals[function.params[0]]);
+            let shutdown = self.output.function_ref(*shutdown);
+            self.line(format!(
+                "call void @imre_log_handler_register(ptr {}, ptr @{shutdown}, i1 {takes_owner})",
+                handler.operand
+            ));
+            return handler;
+        }
         if let Builtin::StaticFunction(id) = builtin {
             let root = self.output.global_ref(format!("static_function_{id}"));
             self.static_functions.insert(root.clone());
@@ -4446,6 +4459,7 @@ impl Emitter<'_, '_> {
                 use crate::ir::LogOperation::*;
                 let name = match operation {
                     Get => "imre_log_get",
+                    HandlerRegister(_) => unreachable!(),
                     HandlerRename => "imre_log_handler_rename",
                     LockNew => "imre_log_lock_new",
                     LockAcquire => "imre_log_lock_acquire",
@@ -4458,6 +4472,7 @@ impl Emitter<'_, '_> {
                     LockExit => "imre_log_lock_exit",
                     LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
+                    FileEncodingUsesUtf8 => "imre_sys_utf8_mode",
                     PrintActiveException => "imre_log_print_active_exception",
                     Handlers => "imre_log_handlers",
                     AddHandler => "imre_log_add_handler",
@@ -5136,11 +5151,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::TextMetadata { errors } => {
-                let raw = self.instruction(format!(
+                let lookup = format!(
                     "call ptr @imre_text_metadata(ptr {}, i32 {})",
                     args[0].value.operand,
                     u32::from(*errors)
-                ));
+                );
+                let raw = if args[0].value.ty == Type::TextOutput {
+                    // StringIO returns None; codec writers can raise AttributeError.
+                    self.checked_instruction(lookup)
+                } else {
+                    self.instruction(lookup)
+                };
                 Value {
                     ty: returns,
                     operand: if returns == Type::Str {
@@ -8971,6 +8992,7 @@ declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
 declare i64 @imre_path_write_text(ptr, ptr)
 declare i64 @imre_path_write_text_options(ptr, ptr, i64, i64, i64)
+declare ptr @imre_path_open_text_output(ptr, ptr, i64, i64, i64)
 declare ptr @imre_path_read_text_options(ptr, i64, i64, i64)
 declare i64 @imre_path_write_type_error(ptr)
 declare i64 @imre_path_write_bytes_union(ptr, i64)
@@ -9220,6 +9242,7 @@ declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
+declare i1 @imre_sys_utf8_mode()
 declare void @imre_sys_init_encoding_names()
 declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()
@@ -9686,6 +9709,7 @@ declare i64 @imre_logrecord_read(ptr,ptr,i32)
 declare ptr @imre_logrecord_message(ptr)
 declare ptr @imre_logrecord_repr(ptr)
 declare ptr @imre_log_get(i64)
+declare void @imre_log_handler_register(ptr, ptr, i1)
 declare void @imre_log_handler_rename(ptr, i64, i64)
 declare ptr @imre_log_lock_new()
 declare i1 @imre_log_lock_acquire(ptr, i1, double)

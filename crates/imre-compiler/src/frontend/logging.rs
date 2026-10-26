@@ -72,6 +72,24 @@ impl Checker<'_> {
         Some(Type::Class(*self.classes.declarations.ids.get(&id)?))
     }
 
+    /// Register the completed record so a shutdown callback cannot observe uninitialized fields.
+    pub(super) fn register_logging_handler(&self, class: usize, record: Expr) -> Expr {
+        if let Some(Type::Class(base)) = self.handler_type()
+            && (class == base
+                || self.classes.declarations.definitions[class]
+                    .bases
+                    .contains(&base))
+            && let Some(shutdown) = self.logging_definition("_shutdown_handler")
+        {
+            return operation(
+                Log::HandlerRegister(self.functions[&shutdown].id),
+                record.ty,
+                vec![record],
+            );
+        }
+        record
+    }
+
     pub(super) fn text_output_method(
         &mut self,
         stream: Expr,
@@ -148,6 +166,7 @@ impl Checker<'_> {
                 self.types.optional(handler),
                 vec![required("name", Type::Str)],
             ),
+            Intrinsic::FileEncodingUsesUtf8 => (Log::FileEncodingUsesUtf8, Type::Bool, vec![]),
             Intrinsic::PrintActiveException => (Log::PrintActiveException, Type::None, vec![]),
             _ => unreachable!(),
         };

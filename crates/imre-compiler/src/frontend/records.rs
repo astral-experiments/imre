@@ -1282,17 +1282,14 @@ impl Checker<'_> {
                 kind: ExprKind::Local(slot),
             })
             .collect();
-        let result = self.coerce(
-            Expr {
-                ty: Type::Class(class),
-                kind: ExprKind::Construct {
-                    initializer: constructor,
-                    args: ir::CallArgs::positional(args),
-                },
+        let record = Expr {
+            ty: Type::Class(class),
+            kind: ExprKind::Construct {
+                initializer: constructor,
+                args: ir::CallArgs::positional(args),
             },
-            returns,
-            at,
-        )?;
+        };
+        let result = self.coerce(self.register_logging_handler(class, record), returns, at)?;
         let id = self.helpers.reserve();
         self.types.register_constructor(id, class);
         self.helpers.finish(
@@ -1451,6 +1448,7 @@ impl Checker<'_> {
                 args,
             },
         });
+        let record = self.register_logging_handler(class, record);
         Ok(self.wrap_exception_record(class, record))
     }
 

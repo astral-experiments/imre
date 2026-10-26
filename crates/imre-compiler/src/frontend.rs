@@ -7632,8 +7632,10 @@ impl<'a> Checker<'a> {
                     return Ok(value);
                 }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
-                    && (receiver.ty == Type::TextIO
-                        || self.types.payload(receiver.ty) == Some(Type::TextIO))
+                    && matches!(
+                        self.types.payload(receiver.ty).unwrap_or(receiver.ty),
+                        Type::TextIO | Type::TextOutput
+                    )
                 {
                     return Ok(Expr {
                         ty: self.types.optional(Type::Str),
@@ -8581,6 +8583,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::FileEncodingUsesUtf8
                 | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),
             )) => {
@@ -9982,7 +9985,8 @@ impl<'a> Checker<'a> {
                         | Type::Tuple(_)
                         | Type::VarTuple(_)
                         | Type::StringIterable
-                ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
+                ) || self.types.payload(args[0].ty) == Some(Type::Int)
+                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
