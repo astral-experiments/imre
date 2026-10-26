@@ -110,6 +110,7 @@ mod string_io;
 mod string_lists;
 mod sys;
 mod text;
+mod time;
 mod timed_handlers;
 mod truthiness;
 mod tuple_index;
@@ -1824,6 +1825,7 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::Hunk)) => return Ok(Type::Patch(ir::PatchKind::Hunk)),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::StructTime)) => return Ok(types.struct_time()),
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
             return Ok(types.url_split_result(bytes));
@@ -7169,6 +7171,10 @@ impl<'a> Checker<'a> {
                 if let Some(text) = self.testcase_class_text(attribute)? {
                     return Ok(text);
                 }
+                if self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::StructTime))
+                {
+                    return self.struct_time_class_field(attribute);
+                }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
                 }
@@ -7339,6 +7345,9 @@ impl<'a> Checker<'a> {
                     return Ok(field);
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
+                    if self.types.tuple_origin(receiver.ty) == Some(crate::types::STRUCT_TIME) {
+                        return self.struct_time_field(receiver, attribute, &declaration);
+                    }
                     if self.types.is_stat_result(receiver.ty) {
                         return self.stat_result_attribute(receiver, attribute, &declaration);
                     }
@@ -8660,6 +8669,11 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::WarningReset, vec![]),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) => {
+                return self.clock_parts(call, utc);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Mktime)) => return self.mktime(call),
+            Some(Binding::Intrinsic(Intrinsic::StructTime)) => return self.struct_time_new(call),
             Some(Binding::Intrinsic(Intrinsic::TimeSleep)) => {
                 self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {

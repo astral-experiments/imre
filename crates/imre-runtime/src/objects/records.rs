@@ -95,6 +95,11 @@ impl RecordDescriptor {
         unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 4 != 0) }
     }
 
+    fn has_time_zone(&self) -> bool {
+        // SAFETY: generated record semantics outlive the descriptor.
+        unsafe { self.semantics.as_ref() }.is_some_and(|s| s.kind == 1 && s.flags & 16 != 0)
+    }
+
     fn allocated_words(&self) -> usize {
         // These struct-sequence attributes contain only raw numbers. They are
         // neither Python tuple elements nor owners to be visited during release.
@@ -107,7 +112,11 @@ impl RecordDescriptor {
             0
         };
         self.length
-            .checked_add(usize::from(self.has_toml_hash()) + stat_words)
+            .checked_add(
+                usize::from(self.has_toml_hash())
+                    + stat_words
+                    + 2 * usize::from(self.has_time_zone()),
+            )
             .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"))
     }
 }
@@ -627,6 +636,10 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
     header.drop_weak_anchor();
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
+    if descriptor.has_time_zone() {
+        // SAFETY: the last owner releases both optional attributes of this time tuple.
+        unsafe { super::time::release_extras(payload) };
+    }
     if let Some(block) = header.block() {
         // SAFETY: no live owner can reach this record now. Other records in
         // the block, and an active cursor, keep their own storage alive.

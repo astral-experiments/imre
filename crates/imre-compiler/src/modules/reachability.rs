@@ -51,7 +51,9 @@ impl References<'_> {
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }
-            Some(Binding::Intrinsic(Intrinsic::Fd(crate::ir::FdOperation::Pipe2))) => Some(1),
+            Some(Binding::Intrinsic(
+                Intrinsic::Fd(crate::ir::FdOperation::Pipe2) | Intrinsic::Mktime,
+            )) => Some(1),
             _ => None,
         };
         if let Some(arity) = arity {

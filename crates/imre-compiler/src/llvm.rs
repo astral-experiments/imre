@@ -4715,6 +4715,26 @@ impl Emitter<'_, '_> {
                 };
                 self.call(name, Type::Str, &[&args[0].value, &args[1].value])
             }
+            Builtin::Mktime => self.call("imre_mktime", Type::Float, &[&args[0].value]),
+            Builtin::TimeComponent => {
+                self.call("imre_time_component", Type::Int, &[&args[0].value])
+            }
+            Builtin::TimeExtras => {
+                let payload = &args[0].value.operand;
+                let zone = self.word(&args[1].value);
+                let offset = self.word(&args[2].value);
+                self.line(format!(
+                    "call void @imre_time_extras(ptr {payload}, i64 {zone}, i64 {offset})"
+                ));
+                none()
+            }
+            Builtin::TimeExtra(zone) => {
+                let payload = &args[0].value.operand;
+                let word = self.instruction(format!(
+                    "call i64 @imre_time_extra(ptr {payload}, i1 {zone})"
+                ));
+                self.unpack_word(word, returns)
+            }
             Builtin::ClockParts(utc) => {
                 let layout = self
                     .output
@@ -8805,6 +8825,10 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare ptr @imre_clock_parts(double, i1, ptr)
+declare double @imre_mktime(ptr)
+declare i64 @imre_time_component(i64)
+declare void @imre_time_extras(ptr, i64, i64)
+declare i64 @imre_time_extra(ptr, i1)
 declare double @imre_wall_time()
 declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
 declare void @imre_warning_reset()

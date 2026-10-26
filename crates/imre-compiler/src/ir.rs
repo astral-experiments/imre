@@ -990,6 +990,10 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     ClockParts(bool),
+    Mktime,
+    TimeComponent,
+    TimeExtras,
+    TimeExtra(bool),
     TimeSleep,
     WarningFilter {
         category: u32,

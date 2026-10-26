@@ -10,6 +10,14 @@ use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
+pub(crate) const STRUCT_TIME: TupleOrigin = TupleOrigin::StructSequence(
+    "time.struct_time",
+    &[
+        "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday",
+        "tm_isdst",
+    ],
+);
+
 const STAT_RESULT_NAME: &str = "os.stat_result";
 pub(crate) const STAT_SEQUENCE_FIELDS: [&str; 10] = [
     "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
@@ -1114,6 +1122,10 @@ impl Types {
                     ) || self.payload(field) == Some(Type::Str)
                 })
             })
+    }
+
+    pub(crate) fn struct_time(&self) -> Type {
+        self.namedtuple_layout(STRUCT_TIME, vec![Type::Int; 9])
     }
 
     /// Stat results use ten visible integer slots and a separate tail for named attributes.

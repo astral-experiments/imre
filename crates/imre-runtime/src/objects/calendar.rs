@@ -462,7 +462,7 @@ fn ymd(ord: i128) -> (i32, i32, i32) {
     }
     (low, month, day)
 }
-fn c_component(word: usize) -> Result<i32, Error> {
+pub(super) fn c_component(word: usize) -> Result<i32, Error> {
     // SAFETY: the frontend accepts/roots only exact tagged integers and bools converted to int.
     let value = unsafe { Int::borrow(word) };
     let v = value

@@ -1,0 +1,235 @@
+//! Convert local civil time and preserve the nine sequence fields of struct_time.
+
+use super::*;
+use crate::types::STRUCT_TIME;
+
+impl Checker<'_> {
+    pub(super) fn clock_parts(&mut self, call: &ast::ExprCall, utc: bool) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let stamp = match call.arguments.args.as_ref() {
+            [] => Expr {
+                ty: Type::Float,
+                kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
+            },
+            [arg] => {
+                let val = self.expr(arg)?;
+                match val.ty {
+                    Type::Float => val,
+                    Type::Int | Type::Bool => Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(Builtin::Float, vec![val]),
+                    },
+                    Type::None => self.evaluated_receiver(
+                        Some(val),
+                        Expr {
+                            ty: Type::Float,
+                            kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
+                        },
+                    ),
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            arg,
+                            "a clock timestamp must be an integer or float",
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "a clock conversion takes at most one timestamp",
+                ));
+            }
+        };
+        Ok(Expr {
+            ty: self.types.struct_time(),
+            kind: ExprKind::Builtin(Builtin::ClockParts(utc), vec![stamp]),
+        })
+    }
+}
+
+fn field(record: Expr, index: usize, ty: Type) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Field(Box::new(record), index),
+    }
+}
+
+fn op(builtin: Builtin, ty: Type, args: Vec<Expr>) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(builtin, args),
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn mktime(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [arg] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "mktime takes one positional argument",
+            ));
+        };
+        let value = self.expr(arg)?;
+        let Some(fields) = self.types.library_tuple_fields(value.ty).or_else(|| {
+            matches!(value.ty, Type::Tuple(_))
+                .then(|| self.types.fields(value.ty))
+                .flatten()
+        }) else {
+            return Ok(expandtabs::type_error_after(
+                Type::Float,
+                vec![value],
+                "Tuple or struct_time argument required".into(),
+            ));
+        };
+        if fields.len() != 9 {
+            return Ok(expandtabs::type_error_after(
+                Type::Float,
+                vec![value],
+                "mktime(): illegal time tuple argument".into(),
+            ));
+        }
+        if fields.iter().all(|&ty| ty == Type::Int) {
+            return Ok(op(Builtin::Mktime, Type::Float, vec![value]));
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let record = scope.hold(self, value);
+        let mut words = Vec::new();
+        for (i, ty) in fields.into_iter().enumerate() {
+            let input = field(record.clone(), i, ty);
+            let word = self.index_word(input, arg, false)?;
+            words.push(op(Builtin::TimeComponent, Type::Int, vec![word]));
+        }
+        let tuple = Expr {
+            ty: self.types.tuple(vec![Type::Int; 9]),
+            kind: ExprKind::Tuple(words),
+        };
+        Ok(scope.finish(op(Builtin::Mktime, Type::Float, vec![tuple])))
+    }
+
+    pub(super) fn struct_time_new(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [arg] = call.arguments.args.as_ref() else {
+            return Err(error(self.source, call, "struct_time takes a sequence"));
+        };
+        let mut scope = calls::ArgumentScope::default();
+        let fields = if let ast::Expr::List(list) = arg {
+            let mut fields = Vec::new();
+            for item in &list.elts {
+                let value = self.expr(item)?;
+                fields.push(scope.hold(self, value));
+            }
+            fields
+        } else {
+            let value = self.expr(arg)?;
+            if !matches!(value.ty, Type::Tuple(_)) {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "struct_time needs a concrete sequence",
+                ));
+            }
+            let types = self.types.fields(value.ty).unwrap();
+            let source = scope.hold(self, value);
+            types
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| field(source.clone(), i, ty))
+                .collect()
+        };
+        let length = fields.len();
+        if !(9..=11).contains(&length) {
+            let bound = if length < 9 { "least 9" } else { "most 11" };
+            let message = format!(
+                "time.struct_time() takes an at {bound}-sequence ({length}-sequence given)"
+            );
+            return Ok(scope.finish(expandtabs::type_error_after(
+                self.types.struct_time(),
+                vec![],
+                message,
+            )));
+        }
+        let ty = self
+            .types
+            .namedtuple_layout(STRUCT_TIME, fields[..9].iter().map(|e| e.ty).collect());
+        let result = Expr {
+            ty,
+            kind: ExprKind::Tuple(fields[..9].to_vec()),
+        };
+        if fields.len() == 9 {
+            return Ok(scope.finish(result));
+        }
+        let zone = self.coerce(fields[9].clone(), self.types.optional(Type::Str), arg)?;
+        let empty = Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let offset = self.coerce(
+            fields.get(10).cloned().unwrap_or(empty),
+            self.types.optional(Type::Int),
+            arg,
+        )?;
+        let result = scope.hold(self, result);
+        let attach = op(
+            Builtin::TimeExtras,
+            Type::None,
+            vec![result.clone(), zone, offset],
+        );
+        Ok(scope.finish(self.evaluated_receiver(Some(attach), result)))
+    }
+
+    pub(super) fn struct_time_field(
+        &self,
+        value: Expr,
+        node: &ast::ExprAttribute,
+        declaration: &crate::types::NamedTuple,
+    ) -> Result<Expr, String> {
+        match node.attr.as_str() {
+            "tm_zone" | "tm_gmtoff" => {
+                let zone = node.attr.as_str() == "tm_zone";
+                Ok(op(
+                    Builtin::TimeExtra(zone),
+                    self.types
+                        .optional(if zone { Type::Str } else { Type::Int }),
+                    vec![value],
+                ))
+            }
+            "n_fields" | "n_sequence_fields" | "n_unnamed_fields" => {
+                let n = self.struct_time_class_field(node)?;
+                Ok(self.evaluated_receiver(Some(value), n))
+            }
+            _ => self.namedtuple_instance_attribute(node, value, declaration),
+        }
+    }
+
+    pub(super) fn struct_time_class_field(
+        &self,
+        node: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let n = match node.attr.as_str() {
+            "n_fields" => 11,
+            "n_sequence_fields" => 9,
+            "n_unnamed_fields" => 0,
+            "__name__" => return Ok(unpacking::string("struct_time")),
+            "__module__" => return Ok(unpacking::string("time")),
+            "__match_args__" => {
+                return self.namedtuple_class_attribute(
+                    node,
+                    &self.types.namedtuple_metadata(STRUCT_TIME).unwrap(),
+                );
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    node,
+                    "unsupported time.struct_time class attribute",
+                ));
+            }
+        };
+        Ok(pipelines::integer(n))
+    }
+}
