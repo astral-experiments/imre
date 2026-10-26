@@ -16,6 +16,6 @@ def current():
     except KeyError as caught:
         print(repr(caught))
     try:
-        open("missing-exception-repr-fixture/file")
+        open("missing-exception-repr-fixture/file", "w")
     except FileNotFoundError as caught:
         print(repr(caught), caught.filename)
