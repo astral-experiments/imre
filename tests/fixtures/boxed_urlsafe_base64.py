@@ -2,6 +2,23 @@ import base64
 
 
 def check():
+    class Token(str):
+        pass
+
+    class Rewrite(str):
+        def encode(self, encoding):
+            print("encoding", encoding)
+            return bytearray(b"Yg==")
+
+    class Reject(str):
+        def encode(self, encoding):
+            raise LookupError("from encode")
+
+    for token in (Token("YQ=="), Rewrite("YQ=="), Reject("YQ==")):
+        try:
+            print(list(base64.urlsafe_b64decode(token)))
+        except LookupError as error:
+            print(error.args)
     for raw in (b"", b"a", b"ab", b'{"visits":1}', b"\xfb\xff"):
         encoded = base64.urlsafe_b64encode(s=raw)
         print(encoded.decode("ascii"), encoded.rstrip(b"=").decode("ascii"))
