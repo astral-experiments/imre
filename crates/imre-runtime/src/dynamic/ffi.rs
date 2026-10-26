@@ -366,6 +366,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
+        typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -726,6 +727,7 @@ impl Context {
             self.modules
                 .values()
                 .chain(self.classes.values())
+                .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
