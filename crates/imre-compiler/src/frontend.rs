@@ -2957,6 +2957,10 @@ impl<'a> Checker<'a> {
                         self.json_load_callable(Some(receiver), Some(concrete), expression)?;
                     return self.coerce(value, expected, expression);
                 }
+                if let Some(element) = self.types.deque_element(receiver.ty) {
+                    let value = self.deque_attribute(attribute, receiver, element)?;
+                    return self.coerce(value, expected, expression);
+                }
                 if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
