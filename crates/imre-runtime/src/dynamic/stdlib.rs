@@ -20,6 +20,7 @@ mod operator;
 pub(super) mod readiness;
 mod regex;
 mod socket;
+pub(super) mod urllib;
 
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
@@ -51,6 +52,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "warnings"
             | "subprocess"
             | "socket"
+            | "urllib"
+            | "urllib.parse"
     )
 }
 
@@ -303,6 +306,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps" | "loads")
+        | (
+            "urllib.parse",
+            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
+        )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
@@ -330,6 +337,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(function) = name.strip_prefix("urllib.parse.") {
+        return urllib::call(ctx, function, args, kwargs);
+    }
     if name == "operator.attrgetter" {
         return operator::attrgetter(ctx, args, kwargs);
     }

@@ -74,6 +74,7 @@ mod tempdirs;
 mod text;
 mod time;
 pub(crate) use text::split_parts;
+pub(crate) use text::{UrlInput, urlquote, urlsplit};
 mod typing;
 pub(crate) use text::short_string;
 mod unions;
