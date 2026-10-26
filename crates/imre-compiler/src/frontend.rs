@@ -8777,6 +8777,9 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.binascii_base64(call, op == Intrinsic::BinasciiDecode);
             }
+            Some(Binding::Intrinsic(op @ (Intrinsic::Base64Encode | Intrinsic::Base64Decode))) => {
+                return self.base64_codec(call, op == Intrinsic::Base64Decode);
+            }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
                     call,

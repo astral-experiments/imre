@@ -220,6 +220,8 @@ impl Checker<'_> {
                 ("zlib", "error"),
                 ("tomllib", "TOMLDecodeError"),
                 ("json", "JSONDecodeError"),
+                ("binascii", "Error"),
+                ("binascii", "Incomplete"),
                 ("csv", "Error"),
                 ("socket", "gaierror"),
             ]
