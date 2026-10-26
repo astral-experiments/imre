@@ -63,6 +63,7 @@ unsafe extern "C" {
         sk: u32,
     ) -> *const c_void;
     fn imre_logrecord_dictionary(record: *const c_void) -> *const c_void;
+    fn imre_logrecord_hasattr(record: *const c_void, key: *const c_void) -> bool;
     fn imre_logrecord_field_view(
         record: *const c_void,
         key: *const c_void,
@@ -78,6 +79,7 @@ unsafe extern "C" {
 fn retained_default_and_refused_field_owner() {
     let present = Str::from("msg");
     let missing = Str::from("a missing name too long for an inline string");
+    let qualname = Str::from("__qualname__");
     // SAFETY: each call borrows rooted inputs and each successful transfer is released once.
     unsafe {
         imre_record_error_init();
@@ -107,6 +109,10 @@ fn retained_default_and_refused_field_owner() {
         imre_str_release(other);
         imre_str_release(word);
         assert!(!record.is_null() && !default.is_null());
+        assert!(imre_logrecord_hasattr(
+            record,
+            (&raw const qualname).cast()
+        ));
 
         // Missing data requires no wrapper or temporary AttributeError.
         REFUSE.set(true);
