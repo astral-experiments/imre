@@ -412,6 +412,15 @@ impl Context {
         )
     }
 
+    /// Match an attribute lookup failure using the ordinary exception hierarchy.
+    pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
+        error.kind == "AttributeError"
+            || self
+                .builtins
+                .get("AttributeError")
+                .is_some_and(|&base| self.error_matches(&error.kind, base))
+    }
+
     fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
         let callable = self.bind_attribute(hook, obj, class)?;
         let key = self.text(name);
@@ -428,7 +437,7 @@ impl Context {
             self.default_get_attr(obj, name)
         };
         match attribute {
-            Err(error) if error.kind == "AttributeError" => {
+            Err(error) if self.is_attribute_error(&error) => {
                 let Some(hook) = self.class_attr(class, "__getattr__") else {
                     return Err(error);
                 };

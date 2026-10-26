@@ -477,8 +477,8 @@ pub(super) fn call(
             let attr = attribute_name(ctx, args[1])?;
             match ctx.lookup_attr(args[0], &attr) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
-                Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),
-                Err(e) if e.kind == "AttributeError" && args.len() == 3 => Ok(args[2]),
+                Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
+                Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),
                 result => result,
             }
         }
