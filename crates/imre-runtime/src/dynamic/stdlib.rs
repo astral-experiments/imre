@@ -230,7 +230,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
         ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
-        ("types", "MethodType") => ctx.builtin("method"),
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
