@@ -5,8 +5,8 @@ mod expandtabs;
 mod lowercase;
 mod normalization;
 mod translate;
-mod urlquote;
-mod urlsplit;
+pub(crate) mod urlquote;
+pub(crate) mod urlsplit;
 
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
@@ -16,6 +16,41 @@ use std::mem::ManuallyDrop;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+#[derive(Clone, Copy)]
+pub(crate) enum UrlInput<'a> {
+    Text(&'a str),
+    Bytes(&'a [u8]),
+}
+
+impl<'a> UrlInput<'a> {
+    pub(crate) fn is_unescaped_text(self) -> bool {
+        matches!(self, Self::Text(s) if !s.contains('%'))
+    }
+
+    pub(crate) fn as_bytes(self) -> &'a [u8] {
+        match self {
+            Self::Text(s) => s.as_bytes(),
+            Self::Bytes(b) => b,
+        }
+    }
+
+    /// URL splitting accepts Unicode text and decodes byte components as strict ASCII.
+    pub(crate) fn decoded(self) -> Result<&'a str> {
+        match self {
+            Self::Text(s) => Ok(s),
+            Self::Bytes(b) => {
+                if let Some(i) = b.iter().position(|c| !c.is_ascii()) {
+                    return Err(super::bytes::ascii_decode_error(
+                        super::bytes::owned_input(b)?,
+                        i,
+                    ));
+                }
+                Ok(std::str::from_utf8(b).expect("ASCII is UTF-8"))
+            }
+        }
+    }
+}
 
 /// Borrow the string or bytes layout selected by a URL operation's type tag.
 ///

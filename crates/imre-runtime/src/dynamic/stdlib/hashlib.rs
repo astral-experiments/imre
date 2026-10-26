@@ -4,9 +4,10 @@ use std::rc::Rc;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
 use crate::objects::HashState;
 
-fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
+/// Borrows the bytes of a boxed hash input, including mutable buffers.
+pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(id) {
-        Value::Bytes(data) => Ok(data),
+        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",

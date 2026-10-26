@@ -6,6 +6,7 @@ mod calls;
 mod ffi;
 mod operators;
 mod stdlib;
+mod super_object;
 mod value;
 
 use std::collections::HashMap;
@@ -152,6 +153,8 @@ impl Context {
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
+            class_cell: None,
+            first_argument: None,
             names: HashMap::new(),
             parent,
             module: module.to_owned(),
@@ -179,6 +182,13 @@ impl Context {
             let s = self.scope_data(scope);
             if let Some(id) = s.names.get(name) {
                 return Ok(*id);
+            }
+            if name == "__class__"
+                && s.class_body.is_none()
+                && let Some(cell) = s.class_cell
+                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+            {
+                return Ok(*class);
             }
             if let Some(parent) = s.parent {
                 scope = parent;
@@ -242,6 +252,9 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
+            if name == "urllib" {
+                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            }
             None
         } else {
             let (search, child) = if let Some((parent, child)) = parent {

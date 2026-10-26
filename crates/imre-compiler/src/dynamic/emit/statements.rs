@@ -240,9 +240,12 @@ impl Function<'_, '_> {
         returns: Option<&ast::Expr>,
         body: Body<'_>,
     ) -> String {
-        let code = self.output.code(self.source, body);
         let mut signature =
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
+        if params.is_some() && uses_class_cell(&body) {
+            signature["class_cell"] = json!(true);
+        }
+        let code = self.output.code(self.source, body);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
@@ -535,6 +538,33 @@ fn is_generator(body: &[ast::Stmt]) -> bool {
     let mut yields = Yields::default();
     yields.visit_body(body);
     yields.0
+}
+
+/// A nested function can close over the declaring class through its enclosing method.
+fn uses_class_cell(body: &Body<'_>) -> bool {
+    struct ClassCell(bool);
+    impl<'a> Visitor<'a> for ClassCell {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if !self.0 && !matches!(stmt, ast::Stmt::ClassDef(_)) {
+                visitor::walk_stmt(self, stmt);
+            }
+        }
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if matches!(expr, ast::Expr::Name(n) if matches!(n.id.as_str(), "super" | "__class__"))
+            {
+                self.0 = true;
+            } else if !self.0 {
+                visitor::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut captures = ClassCell(false);
+    match body {
+        Body::Statements(stmts) => captures.visit_body(stmts),
+        Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Namespace(_) | Body::Unsupported(..) => {}
+    }
+    captures.0
 }
 
 fn scalar_annotation(expr: &ast::Expr) -> Option<&'static str> {
