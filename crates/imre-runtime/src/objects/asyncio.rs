@@ -682,7 +682,7 @@ pub unsafe extern "C" fn imre_async_gather(
             // consumed coroutine whose exception appears in multiple slots.
             let mut unique = std::collections::HashMap::new();
             storage
-                .sequence()
+                .sequence_storage()
                 .values
                 .iter()
                 .map(|&handle| {
@@ -784,6 +784,7 @@ pub unsafe extern "C" fn imre_async_cancel(handle: *const Object) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::Shared;
 
     #[test]
     fn failed_gather_append_releases_partial_output() {
@@ -809,17 +810,17 @@ mod tests {
 
     #[test]
     fn failed_integer_gather_append_releases_partial_output() {
-        let integer = Rc::new(num_bigint::BigInt::from(1_u8) << 100_u32);
+        let integer = Shared::new(num_bigint::BigInt::from(1_u8) << 100_u32);
         // SAFETY: the fresh integer list acquires a reference to the rooted BigInt.
         unsafe {
             let output = crate::imre_list_new();
             assert_eq!(
-                crate::imre_list_append(output, Rc::as_ptr(&integer) as usize),
+                crate::imre_list_append(output, Shared::as_ptr(&integer) as usize),
                 1,
             );
-            assert_eq!(Rc::strong_count(&integer), 2);
+            assert_eq!(Shared::strong_count(&integer), 2);
             assert!(!finish_gather_append(output.cast(), 2, 0));
         }
-        assert_eq!(Rc::strong_count(&integer), 1);
+        assert_eq!(Shared::strong_count(&integer), 1);
     }
 }

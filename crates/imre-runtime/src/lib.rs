@@ -1,7 +1,7 @@
 //! Runtime for checked Imre IR on 64-bit hosts.
 //!
 //! Integer handles are either signed 63-bit values tagged with a low one bit, or
-//! live `Rc<BigInt>` pointers to values outside that range. This canonical form
+//! live `Shared<BigInt>` pointers to values outside that range. This canonical form
 //! is always nonzero and lets compiler range proofs imply representation;
 //! extension adapters must normalize incoming integers before exposing them to
 //! generated code.
@@ -32,12 +32,14 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod dynamic;
 mod extensions;
 mod floats;
 mod shared;
 mod string_owner;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
+type ListOwner = Shared<List>;
 type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
@@ -56,7 +58,6 @@ use std::cell::{Cell, RefCell, UnsafeCell};
 use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::AsFd;
-use std::rc::Rc;
 use std::sync::{LazyLock, Mutex, Once};
 
 const MIN_SMALL: i64 = -(1_i64 << 62);
@@ -90,7 +91,14 @@ impl Int {
         {
             return small;
         }
-        Self(Rc::into_raw(Rc::new(value)) as usize)
+        Self(Shared::into_raw(Shared::new(value)) as usize)
+    }
+
+    fn try_from_i64(value: i64) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
+        if let Some(small) = Self::small(value) {
+            return Ok(small);
+        }
+        Shared::try_new(BigInt::from(value)).map(|owner| Self(Shared::into_raw(owner) as usize))
     }
 
     fn small(value: i64) -> Option<Self> {
@@ -108,8 +116,20 @@ impl Int {
         if let Some(value) = self.as_small() {
             Cow::Owned(BigInt::from(value))
         } else {
-            // SAFETY: Int's invariant owns a live Rc<BigInt> for an untagged handle.
+            // SAFETY: Int's invariant owns a live Shared<BigInt> for an untagged handle.
             Cow::Borrowed(unsafe { &*(self.0 as *const BigInt) })
+        }
+    }
+
+    fn to_i64(&self) -> Option<i64> {
+        self.as_small().or_else(|| self.big().to_i64())
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if let (Some(x), Some(y)) = (self.as_small(), other.as_small()) {
+            x.cmp(&y)
+        } else {
+            self.big().cmp(&other.big())
         }
     }
 
@@ -123,11 +143,27 @@ impl Int {
     }
 }
 
+impl From<i64> for Int {
+    fn from(value: i64) -> Self {
+        Self::small(value).unwrap_or_else(|| Self::new(BigInt::from(value)))
+    }
+}
+
+impl std::fmt::Display for Int {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(small) = self.as_small() {
+            small.fmt(f)
+        } else {
+            self.big().fmt(f)
+        }
+    }
+}
+
 impl Clone for Int {
     fn clone(&self) -> Self {
         if self.as_small().is_none() {
             // SAFETY: the original Int owns a live strong reference.
-            unsafe { Rc::increment_strong_count(self.0 as *const BigInt) };
+            unsafe { Shared::increment_strong_count(self.0 as *const BigInt) };
         }
         Self(self.0)
     }
@@ -137,7 +173,7 @@ impl Drop for Int {
     fn drop(&mut self) {
         if self.as_small().is_none() {
             // SAFETY: this Int owns exactly the reference being released.
-            unsafe { Rc::decrement_strong_count(self.0 as *const BigInt) };
+            unsafe { Shared::decrement_strong_count(self.0 as *const BigInt) };
         }
     }
 }
@@ -229,15 +265,14 @@ thread_local! {
     };
     // Headers contain neither element owners nor buffer capacity. Only unique
     // allocations without Weak references enter these bounded slots.
-    static LIST_HEADERS: RefCell<[Option<Rc<List>>; 2]> = const {
+    static LIST_HEADERS: RefCell<[Option<ListOwner>; 2]> = const {
         RefCell::new([None, None])
     };
 }
 
-/// Publishes a fresh list identity, reusing an unobservable empty header when
-/// available. Live aliases and Weak references never enter the private cache.
-fn new_list(values: Vec<Int>) -> *const List {
-    let cached = LIST_HEADERS
+/// Reuses an unobservable list header and installs the supplied buffer.
+fn cached_list(values: &mut Vec<Int>) -> Option<ListOwner> {
+    let mut owner = LIST_HEADERS
         .try_with(|headers| {
             let Ok(mut headers) = headers.try_borrow_mut() else {
                 return None;
@@ -246,25 +281,31 @@ fn new_list(values: Vec<Int>) -> *const List {
             std::mem::replace(&mut headers[0], next)
         })
         .ok()
-        .flatten();
-    let owner = if let Some(mut owner) = cached {
-        let list = Rc::get_mut(&mut owner).expect("cached list header is unique");
-        let storage = list.0.0.get_mut();
-        debug_assert!(storage.is_empty() && storage.capacity() == 0);
-        *storage = values;
-        owner
-    } else {
-        Rc::new(List::new(values))
-    };
-    Rc::into_raw(owner)
+        .flatten()?;
+    let list = ListOwner::get_mut(&mut owner).expect("cached list header is unique");
+    let storage = list.0.0.get_mut();
+    debug_assert!(storage.is_empty() && storage.capacity() == 0);
+    std::mem::swap(storage, values);
+    Some(owner)
+}
+
+fn try_new_list(
+    mut values: Vec<Int>,
+) -> std::result::Result<ListOwner, allocator_api2::alloc::AllocError> {
+    cached_list(&mut values).map_or_else(|| ListOwner::try_new(List::new(values)), Ok)
+}
+
+fn new_list(mut values: Vec<Int>) -> *const List {
+    let owner = cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)));
+    ListOwner::into_raw(owner)
 }
 
 /// Consumes a list owner, caching at most two headers whose identities can no
 /// longer be observed. Elements are destroyed before caching, using the same
 /// BigInt cleanup and bounded buffer reuse as ordinary List destruction.
-/// `Rc::get_mut` excludes Weak observers as well as other strong owners.
-fn recycle_list_header(mut owner: Rc<List>) {
-    let Some(list) = Rc::get_mut(&mut owner) else {
+/// `ListOwner::get_mut` excludes Weak observers as well as other strong owners.
+fn recycle_list_header(mut owner: ListOwner) {
+    let Some(list) = ListOwner::get_mut(&mut owner) else {
         return;
     };
     list.release_range_hint();
@@ -668,7 +709,7 @@ pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
 
 /// Raise encoding and descriptor errors after releasing the stdout lock.
 fn output_text(value: &str) {
-    if let Err(error) = sys::write_stdout(value, true) {
+    if let Err(error) = objects::stdio::write_line(value, || sys::error_text(value)) {
         error.raise();
     }
 }
@@ -764,8 +805,13 @@ fn parse_integer_literal(literal: &str) -> Option<BigInt> {
 pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
     // SAFETY: both handles are borrowed by the ABI call.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
+    finish(integer_binary(&a, &b, op).map(Int::into_raw), 1)
+}
+
+/// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
+fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     if matches!(op, 8 | 9) {
-        return finish(integer_shift(&a, &b, op == 8).map(Int::into_raw), 1);
+        return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
@@ -777,7 +823,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
-                    return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
+                    return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -792,7 +838,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             _ => fail("SystemError", "invalid integer operation"),
         };
         if let Some(value) = result.and_then(Int::small) {
-            return value.into_raw();
+            return Ok(value);
         }
     }
     let (a, b) = (a.big(), b.big());
@@ -805,7 +851,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
+                return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -819,7 +865,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         }
         _ => fail("SystemError", "invalid integer operation"),
     };
-    Int::new(result).into_raw()
+    Ok(Int::new(result))
 }
 
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
@@ -885,12 +931,7 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
 pub unsafe extern "C" fn imre_int_compare(a: usize, b: usize) -> i32 {
     // SAFETY: the ABI caller keeps both handles alive.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
-    let order = if let (Some(a), Some(b)) = (a.as_small(), b.as_small()) {
-        a.cmp(&b)
-    } else {
-        a.big().cmp(&b.big())
-    };
-    match order {
+    match a.cmp(&b) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -1007,7 +1048,7 @@ pub unsafe extern "C" fn imre_str_release(value: *const Str) {
 pub unsafe extern "C" fn imre_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
     let text = unsafe { &*value };
-    if let Err(error) = sys::write_stdout_with(text, true, || {
+    if let Err(error) = objects::stdio::write_line(text, || {
         // SAFETY: the caller roots this same string until the write returns.
         Ok(unsafe { StrOwner::acquire_word(value as usize) })
     }) {
@@ -1168,8 +1209,8 @@ pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_retain(value: *const List) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<List> reference.
-        unsafe { Rc::increment_strong_count(value) };
+        // SAFETY: the caller owns a live list reference.
+        unsafe { ListOwner::increment_strong_count(value) };
     }
 }
 
@@ -1178,8 +1219,8 @@ pub unsafe extern "C" fn imre_list_retain(value: *const List) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_release(value: *const List) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<List> reference.
-        recycle_list_header(unsafe { Rc::from_raw(value) });
+        // SAFETY: the caller transfers one live list reference.
+        recycle_list_header(unsafe { ListOwner::from_raw(value) });
     }
 }
 
@@ -1901,26 +1942,26 @@ mod tests {
 
     #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {
-        let big = Rc::new(BigInt::from(1_u128 << 100));
-        let weak = Rc::downgrade(&big);
-        let big_word = Rc::as_ptr(&big) as usize;
+        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&big);
+        let big_word = Shared::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
         let values = vec![Int::small(9).unwrap()];
-        let list = Rc::new(List::new(values));
+        let list = ListOwner::new(List::new(values));
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
             assert_eq!(
-                imre_list_append_pair(Rc::as_ptr(&list), big_word, negative),
+                imre_list_append_pair(ListOwner::as_ptr(&list), big_word, negative),
                 1
             );
-            assert_eq!(Rc::strong_count(&big), 2);
+            assert_eq!(Shared::strong_count(&big), 2);
             let borrowed = list.0.with(|values| values[1].0);
             assert_eq!(
-                imre_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed),
+                imre_list_append_pair(ListOwner::as_ptr(&list), borrowed, borrowed),
                 1
             );
-            assert_eq!(Rc::strong_count(&big), 4);
+            assert_eq!(Shared::strong_count(&big), 4);
             list.0.with(|values| {
                 assert_eq!(values.len(), 5);
                 assert_eq!(values[0].as_small(), Some(9));
@@ -1993,36 +2034,36 @@ mod tests {
 
     #[test]
     fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
-        let positive = Rc::new(BigInt::from(1) << 120_u32);
-        let negative = Rc::new(-positive.as_ref());
-        let positive_weak = Rc::downgrade(&positive);
-        let negative_weak = Rc::downgrade(&negative);
-        let list = Rc::new(List::new(vec![
-            Int(Rc::into_raw(positive.clone()) as usize),
-            Int(Rc::into_raw(negative.clone()) as usize),
+        let positive = Shared::new(BigInt::from(1) << 120_u32);
+        let negative = Shared::new(-positive.as_ref());
+        let positive_weak = Shared::downgrade(&positive);
+        let negative_weak = Shared::downgrade(&negative);
+        let list = ListOwner::new(List::new(vec![
+            Int(Shared::into_raw(positive.clone()) as usize),
+            Int(Shared::into_raw(negative.clone()) as usize),
             Int::small(7).unwrap(),
         ]));
         let alias = list.clone();
-        let start = Rc::as_ptr(&positive) as usize;
+        let start = Shared::as_ptr(&positive) as usize;
         // SAFETY: start is rooted both directly and by the list. The aliased
         // mutation occurs between reductions, after all storage borrows end.
         let result = unsafe {
-            let result = Int(imre_list_sum(Rc::as_ptr(&list), start));
+            let result = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
             assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
-            assert_eq!(Rc::strong_count(&positive), 2);
-            assert_eq!(Rc::strong_count(&negative), 2);
+            assert_eq!(Shared::strong_count(&positive), 2);
+            assert_eq!(Shared::strong_count(&negative), 2);
             assert_eq!(
-                imre_list_set_index(Rc::as_ptr(&alias), 0, Int::small(42).unwrap().0),
+                imre_list_set_index(ListOwner::as_ptr(&alias), 0, Int::small(42).unwrap().0),
                 1
             );
-            let changed = Int(imre_list_sum(Rc::as_ptr(&list), start));
+            let changed = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
             assert_eq!(changed.as_small(), Some(49));
             result
         };
         drop(alias);
         drop(list);
-        assert_eq!(Rc::strong_count(&positive), 1);
-        assert_eq!(Rc::strong_count(&negative), 1);
+        assert_eq!(Shared::strong_count(&positive), 1);
+        assert_eq!(Shared::strong_count(&negative), 1);
         let expected = positive.as_ref() + 7;
         drop(positive);
         drop(negative);
@@ -2050,9 +2091,9 @@ mod tests {
                 let reused = imre_list_new();
                 assert_eq!(reused, original);
                 assert_eq!(Int(imre_list_len(reused)).as_small(), Some(0));
-                let owner = Rc::from_raw(reused);
-                let weak = Rc::downgrade(&owner);
-                imre_list_release(Rc::into_raw(owner));
+                let owner = ListOwner::from_raw(reused);
+                let weak = ListOwner::downgrade(&owner);
+                imre_list_release(ListOwner::into_raw(owner));
                 assert!(weak.upgrade().is_none());
                 let next = imre_list_new();
                 assert_ne!(next, weak.as_ptr());
@@ -2066,9 +2107,9 @@ mod tests {
     #[test]
     fn list_header_reuse_releases_elements_and_keeps_buffers_separate() {
         std::thread::spawn(|| {
-            let big = Rc::new(BigInt::from(1_u8) << 200_u32);
-            let weak = Rc::downgrade(&big);
-            let integer = Int(Rc::into_raw(big) as usize);
+            let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+            let weak = Shared::downgrade(&big);
+            let integer = Int(Shared::into_raw(big) as usize);
             let list = new_list(vec![integer.clone(), integer]);
             // SAFETY: the sequence retains the list, then releases its last
             // owner through WordKind. Reuse must retain neither BigInt owner.
@@ -2124,7 +2165,7 @@ mod tests {
                 let pointers = || {
                     borrowed
                         .each_ref()
-                        .map(|owner| owner.as_ref().map(Rc::as_ptr))
+                        .map(|owner| owner.as_ref().map(ListOwner::as_ptr))
                 };
                 assert_eq!(pointers(), [Some(lists[2]), Some(lists[1])]);
                 let fresh = imre_list_new();
@@ -2147,9 +2188,9 @@ mod tests {
         struct Teardown(Arc<AtomicBool>);
         impl Drop for Teardown {
             fn drop(&mut self) {
-                let big = Rc::new(BigInt::from(1_u8) << 200_u32);
-                let weak = Rc::downgrade(&big);
-                let list = new_list(vec![Int(Rc::into_raw(big) as usize)]);
+                let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+                let weak = Shared::downgrade(&big);
+                let list = new_list(vec![Int(Shared::into_raw(big) as usize)]);
                 // SAFETY: this sole owner must be released even after cache TLS
                 // destruction, including the contained BigInt allocation.
                 unsafe { imre_list_release(list) };
@@ -2178,7 +2219,7 @@ mod tests {
         let mut values = Vec::with_capacity(64);
         values.extend((0..64).map(|value| Int::small(value).unwrap()));
         let allocation = values.as_ptr();
-        let list = Rc::new(List::new(values));
+        let list = ListOwner::new(List::new(values));
         let alias = list.clone();
         drop(list);
         assert_eq!(take_list_buffer(48).capacity(), 0);
@@ -2236,10 +2277,10 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let bigint = Rc::new(BigInt::from(1_u128 << 100));
-        let weak = Rc::downgrade(&bigint);
+        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&bigint);
         let mut values = Vec::with_capacity(8);
-        values.push(Int(Rc::into_raw(bigint) as usize));
+        values.push(Int(Shared::into_raw(bigint) as usize));
         recycle_list_buffer(&mut values);
         assert_eq!(values.len(), 1);
         assert_eq!(weak.strong_count(), 1);
@@ -2280,14 +2321,14 @@ mod tests {
     #[test]
     fn list_drop_preserves_bigint_owners_at_vector_boundaries() {
         for position in [0, 1, 7, 8, 15, 16, 32] {
-            let bigint = Rc::new(BigInt::from(1_u128 << 100));
-            let weak = Rc::downgrade(&bigint);
+            let bigint = Shared::new(BigInt::from(1_u128 << 100));
+            let weak = Shared::downgrade(&bigint);
             let mut values = (0..33)
                 .map(|value| Int::small(value - 16).unwrap())
                 .collect::<Vec<_>>();
-            values[position] = Int(Rc::into_raw(bigint) as usize);
-            let list = Rc::new(List::new(values));
-            let alias = Rc::clone(&list);
+            values[position] = Int(Shared::into_raw(bigint) as usize);
+            let list = ListOwner::new(List::new(values));
+            let alias = list.clone();
             drop(list);
             assert_eq!(weak.strong_count(), 1);
             drop(alias);
@@ -2527,16 +2568,16 @@ mod tests {
                 objects::imre_object_release(error);
             }
         }
-        let owner = Rc::new(BigInt::from(1) << 130_u32);
-        let value = Int(Rc::into_raw(owner.clone()) as usize);
+        let owner = Shared::new(BigInt::from(1) << 130_u32);
+        let value = Int(Shared::into_raw(owner.clone()) as usize);
         let zero = Int::small(0).unwrap();
         // SAFETY: zero shifting returns an independent owner of the live input.
         let copy = Int(unsafe { imre_int_binary(value.0, zero.0, 8) });
-        assert_eq!(Rc::strong_count(&owner), 3);
+        assert_eq!(Shared::strong_count(&owner), 3);
         drop(value);
         assert_eq!(copy.big().as_ref(), owner.as_ref());
         drop(copy);
-        assert_eq!(Rc::strong_count(&owner), 1);
+        assert_eq!(Shared::strong_count(&owner), 1);
         assert_eq!(imre_error_pending(), 0);
     }
 
@@ -2615,7 +2656,7 @@ mod tests {
             imre_list_release(first);
             reserve(third);
             assert_eq!((&*third).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
-            drop(Rc::from_raw(second));
+            drop(ListOwner::from_raw(second));
             imre_list_release(third);
         }
         assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), 0);
@@ -2674,9 +2715,9 @@ mod tests {
 
     #[test]
     fn decoded_indices_acquire_before_replacing_the_only_stored_owner() {
-        let big = Rc::new(BigInt::from(1_u128 << 100));
-        let weak = Rc::downgrade(&big);
-        let word = Rc::as_ptr(&big) as usize;
+        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&big);
+        let word = Shared::as_ptr(&big) as usize;
         let list = imre_list_new();
         // SAFETY: the list roots the integer after its original owner is dropped.
         // Decoded zero is a native index; every acquired result is released.
@@ -2704,17 +2745,17 @@ mod tests {
 
     #[test]
     fn borrowed_indices_and_list_copy_preserve_bigint_owners() {
-        let source = Rc::new(BigInt::from(1_u128 << 100));
-        let displaced = Rc::new(BigInt::from(1_u128 << 120));
-        let source_weak = Rc::downgrade(&source);
-        let displaced_weak = Rc::downgrade(&displaced);
+        let source = Shared::new(BigInt::from(1_u128 << 100));
+        let displaced = Shared::new(BigInt::from(1_u128 << 120));
+        let source_weak = Shared::downgrade(&source);
+        let displaced_weak = Shared::downgrade(&displaced);
         let list = imre_list_new();
         // SAFETY: the list roots both integers after their original owners are
         // dropped. Borrowed words are consumed before any list mutation; owned
         // results and the list reference are each released exactly once.
         unsafe {
-            imre_list_append(list, Rc::as_ptr(&source) as usize);
-            imre_list_append(list, Rc::as_ptr(&displaced) as usize);
+            imre_list_append(list, Shared::as_ptr(&source) as usize);
+            imre_list_append(list, Shared::as_ptr(&displaced) as usize);
             drop(source);
             drop(displaced);
             assert_eq!(imre_list_copy_index(list, 2, 0), 0);
@@ -2753,15 +2794,15 @@ mod tests {
 
     #[test]
     fn proven_list_reads_borrow_boundary_values_without_acquiring_owners() {
-        let big = Rc::new(BigInt::from(1_u128 << 100));
-        let weak = Rc::downgrade(&big);
+        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&big);
         let list = imre_list_new();
         // SAFETY: the empty view is never dereferenced. All later reads are
         // in bounds and finish before the list or any element is released.
         unsafe {
             assert!(imre_list_data_readonly(list).is_aligned());
             imre_list_append(list, Int::small(MIN_SMALL).unwrap().0);
-            imre_list_append(list, Rc::as_ptr(&big) as usize);
+            imre_list_append(list, Shared::as_ptr(&big) as usize);
             imre_list_append(list, Int::small(MAX_SMALL).unwrap().0);
             drop(big);
             assert_eq!(

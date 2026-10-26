@@ -2,6 +2,9 @@
 set -euo pipefail
 export LANG=C.UTF-8 LC_ALL=C.UTF-8 LC_CTYPE=C.UTF-8
 unset PYTHONUTF8 PYTHONIOENCODING
+if [[ -f benchmarks/cpython_stdlib/full/sys/codec_cp424.py ]]; then
+  python3 -B benchmarks/cpython_stdlib/full/sys/codec_cp424.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-codec-cp424.json"
+fi
 sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
 python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
 if [[ -f benchmarks/cpython_stdlib/full/sys/codec_device.py ]]; then
@@ -19,6 +22,10 @@ fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stdin_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stdin_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdin-encoding.json"
   cmp benchmarks/cpython_stdlib/full/sys/stdin-encoding-linux.json "$RUNNER_TEMP/sys-stdin-encoding.json"
+fi
+if [[ -f benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py ]]; then
+  python3 -B benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-filesystem-encoding.json"
+  cmp benchmarks/cpython_stdlib/full/sys/filesystem-encoding-linux.json "$RUNNER_TEMP/sys-filesystem-encoding.json"
 fi
 for opt in 0 3; do
   python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"

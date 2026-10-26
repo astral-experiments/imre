@@ -1,4 +1,6 @@
 //! Iterative operations on documents emitted in postorder by the deep JSON decoder.
+use smallvec::SmallVec;
+
 use super::{Error, Kind, Node, View, copy_entries, copy_text};
 
 /// Copy an immutable subtree without walking it recursively. Children precede
@@ -38,7 +40,7 @@ pub(super) fn copy(view: &View, root: usize, output: &mut Vec<Node>) -> Result<u
 
 /// Compare a child at a time; a wide array needs only one pending frame.
 pub(super) fn equal(left: &View, right: &View) -> Result<bool, Error> {
-    let mut stack = vec![(left, left.index, right, right.index, 0)];
+    let mut stack = SmallVec::from_buf([(left, left.index, right, right.index, 0)]);
     while let Some((a, i, b, j, mut next)) = stack.pop() {
         let (a, i) = a.try_resolved(i)?;
         let (b, j) = b.try_resolved(j)?;
@@ -89,7 +91,7 @@ pub(super) fn write_repr(
     out: &mut crate::objects::values::ReprWriter<'_>,
 ) -> Result<(), Error> {
     use std::fmt::Write as _;
-    let mut stack = vec![(view, view.index, 0)];
+    let mut stack = SmallVec::from_buf([(view, view.index, 0)]);
     while let Some((view, index, next)) = stack.pop() {
         let (view, index) = view.try_resolved(index)?;
         let node = &view.nodes[index];
@@ -146,7 +148,7 @@ pub(super) fn write_repr(
 /// TOML's recursive writer retains its own nesting limit. Check the selected
 /// subtree before passing a newly accepted deep JSON view to that writer.
 pub(super) fn check_toml_depth(view: &View) -> Result<(), Error> {
-    let mut stack = vec![(view, view.index, 0)];
+    let mut stack = SmallVec::from_buf([(view, view.index, 0)]);
     while let Some((view, index, depth)) = stack.pop() {
         let (view, index) = view.try_resolved(index)?;
         match &view.nodes[index] {

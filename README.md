@@ -19,6 +19,23 @@ $ ./hello
 Hello, world!
 ```
 
+You can also run the file or a command string directly. Both compile to native code.
+
+```console
+$ imre hello.py
+Hello, world!
+$ imre -I -B -c 'import sys; print(sys.implementation.name)'
+imre
+$ uv python find imre
+/path/to/bin/imre
+$ uv run --python imre hello.py
+Hello, world!
+```
+
+For discovery, put `imre` on `PATH`. Stock uv runs its Python probe under Imre
+to find the executable. For building and installing extension wheels, see the
+[uv build instructions](docs/extensions.md#build-with-uv).
+
 > [!WARNING]
 > This README includes human edits; all code changes, PR summaries, and additional
 > documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
@@ -47,7 +64,7 @@ diagnostic changes and `format` renders the Git patches between their outputs.
 
 Imre supports:
 
-- Statically resolved imports, including [native wheels built from setuptools projects](docs/extensions.md)
+- Statically resolved imports, including [native wheels built with setuptools or scikit-build-core](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations

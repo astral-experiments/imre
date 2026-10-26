@@ -120,6 +120,34 @@ impl Emitter<'_, '_> {
             TextOperation::Dedent => {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }
+            TextOperation::UrlSplit => {
+                let bytes = i32::from(args[0].value.ty == Type::Bytes);
+                let scheme_bytes = i32::from(args[1].value.ty == Type::Bytes);
+                let fragments =
+                    self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let result = self.record(returns);
+                self.checked_line(format!("call void @imre_url_split(ptr {source}, i32 {bytes}, ptr {}, i32 {scheme_bytes}, i32 {fragments}, ptr {})", args[1].value.operand, result.operand));
+                return result;
+            }
+            TextOperation::UrlProperty(property) => {
+                let bytes = i32::from(args[0].value.ty == Type::Bytes);
+                self.checked_instruction(format!(
+                    "call i64 @imre_url_property(ptr {source}, i32 {bytes}, i32 {})",
+                    property as u32
+                ))
+            }
+            TextOperation::UrlTranscode { encode } => {
+                let bytes = i32::from(encode);
+                let result = self.record(returns);
+                self.checked_line(format!("call void @imre_url_transcode(ptr {source}, i32 {bytes}, ptr {}, ptr {}, ptr {})", args[1].value.operand, args[2].value.operand, result.operand));
+                return result;
+            }
+            TextOperation::UrlGetUrl => {
+                let bytes = i32::from(returns == Type::Bytes);
+                self.checked_pointer(format!(
+                    "call ptr @imre_url_geturl(ptr {source}, i32 {bytes})"
+                ))
+            }
             TextOperation::Unquote => {
                 self.checked_pointer(format!("call ptr @imre_str_unquote(ptr {source})"))
             }

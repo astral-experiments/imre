@@ -22,6 +22,12 @@ fn integer(hash: usize) -> usize {
         .into_raw()
 }
 
+fn try_integer(hash: usize) -> Result<usize, Error> {
+    Int::try_from_i64(hash as isize as i64)
+        .map(Int::into_raw)
+        .map_err(|_| Error::allocation())
+}
+
 /// # Safety
 /// The caller roots one immutable native string.
 #[unsafe(no_mangle)]
@@ -129,14 +135,15 @@ pub unsafe extern "C" fn imre_projected_hash(record: *const usize) -> usize {
                 };
                 hash = (hash ^ key as u64).wrapping_mul(0x100000001b3);
             }
-            return integer((hash & i64::MAX as u64) as usize);
+            return crate::finish(try_integer((hash & i64::MAX as u64) as usize), 0);
         }
     }
     // SAFETY: preparation initializes the extra word before the successful read.
     crate::finish(
         unsafe {
-            prepare(record)
-                .map(|()| integer((*record.add(descriptor(record).length)).wrapping_sub(1)))
+            prepare(record).and_then(|()| {
+                try_integer((*record.add(descriptor(record).length)).wrapping_sub(1))
+            })
         },
         0,
     )

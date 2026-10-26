@@ -15,6 +15,8 @@ module before any fixture is reached.
 | Main `32d0289` plus [#588](https://github.com/astral-sh/imre/pull/588) at `5b8ed5b` | Line 23, `import logging.config`, in all four checks. This replay uses main's checked keyword diagnostics and adds only the exact tuple-list subscript diagnostic proved by lowering. |
 | Main [`0cf6abb`](https://github.com/astral-sh/imre/commit/0cf6abbf39e6bc6f24c8027716c03e5c4b4a8871), including [#626](https://github.com/astral-sh/imre/pull/626) | Line 26, `import codecs`, in all four checks. The compiler used the exact published source tree. The import still precedes every logging fixture. |
 
+The [record-field replay on 4fe0c598](startup-record-fields-linux.json) used a neutral directory containing the unchanged test blob. Both the module and unittest runner stop at line 27, `import configparser`, in ordinary compilation and line 32, `import pickle`, in reachable-only compilation at O0 and O3. No fixture starts.
+
 The [same compiler on `6e9fbae`](https://github.com/astral-sh/imre/actions/runs/40181543433)
 checked both source layouts. Each report records four exit codes, the
 diagnostics and the compiler digest. Both executed **0 of 272** tests.
@@ -27,6 +29,11 @@ diagnostics and the compiler digest. Both executed **0 of 272** tests.
 To repeat the first row, run `python3 benchmarks/cpython_stdlib/full/check_suite_startup.py --compiler /path/to/imre --cpython-git /path/to/cpython test.test_logging`.
 For the second, also pass `--support-file` for each pinned `.py` outside
 `Lib/test`, relative to `Lib`. Codec support is tracked in [#691](https://github.com/astral-sh/imre/pull/691).
+
+On the [native stream and codec source](https://github.com/astral-sh/imre/commit/c0a1a2ed0fc7dfc0410b2718dc8ca22837601754),
+both vendored entry points first report `configparser` at line 27. With
+reachable-only compilation, both first report `pickle` at line 32. The
+[four diagnostics](startup-codec-vendored-linux.json) executed zero tests.
 
 There is one starred tuple **display** in the pinned test:
 [`ConfigDictTest.test_config_queue_handler`, line 3990](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py#L3990).

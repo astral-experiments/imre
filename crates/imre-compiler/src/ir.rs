@@ -1,6 +1,23 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SysEncoding {
+    Default,
+    Filesystem,
+    FilesystemErrors,
+}
+
+impl SysEncoding {
+    pub(crate) fn method(self) -> &'static str {
+        match self {
+            Self::Default => "getdefaultencoding",
+            Self::Filesystem => "getfilesystemencoding",
+            Self::FilesystemErrors => "getfilesystemencodeerrors",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
@@ -20,6 +37,7 @@ pub(crate) enum Type {
     StrLiteral(usize),
     /// A nominal enum with an unboxed, nonzero canonical member tag.
     StrEnum(usize),
+    IntEnum(usize),
     /// An ordinary Enum with a closed set of string-valued members.
     Enum(usize),
     Bytes,
@@ -37,6 +55,8 @@ pub(crate) enum Type {
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
+    /// A concrete immutable set of strings.
+    FrozenStrings,
     Tuple(usize),
     VarTuple(usize),
     /// A functools key retains its comparator and, for a bound key, its object.
@@ -107,6 +127,7 @@ pub(crate) enum Type {
     LogRecord,
     LogFormatter,
     Logger,
+    LogManager,
     TimedFileHandler,
     ClockTime,
     Calendar(CalendarType),
@@ -130,6 +151,7 @@ pub(crate) enum Type {
     Socket,
     CodecWriterClass,
     CodecWriter,
+    TextOutput,
     Sha256,
     Poll,
     JsonDecoder,
@@ -276,6 +298,7 @@ impl std::fmt::Display for Type {
         }
         match self {
             Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
+            Self::IntEnum(id) => return write!(f, "integer-enum#{id}"),
             Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
             Self::Cursor(id) => return write!(f, "iterator#{id}"),
@@ -302,6 +325,7 @@ impl std::fmt::Display for Type {
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
+            Self::FrozenStrings => "frozenset[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
             Self::TupleBuffer => "private tuple buffer",
@@ -350,6 +374,7 @@ impl std::fmt::Display for Type {
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
+            Self::LogManager => "logging.Manager",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
             Self::Calendar(CalendarType::DateTime) => "datetime.datetime",
@@ -368,6 +393,7 @@ impl std::fmt::Display for Type {
             Self::Socket => "socket.socket",
             Self::CodecWriterClass => "type[codecs.StreamWriter]",
             Self::CodecWriter => "codecs.StreamWriter",
+            Self::TextOutput => "writable text stream",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -382,6 +408,7 @@ impl std::fmt::Display for Type {
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
+            | Self::IntEnum(_)
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Class(_)
@@ -432,11 +459,22 @@ pub(crate) struct Module {
     pub entry: Function,
 }
 
+/// Fields initialized by the sealed enum constructors in the bundled http module.
+#[derive(Clone)]
+pub(crate) struct HttpMember {
+    pub code: Option<u16>,
+    pub phrase: String,
+    pub description: String,
+}
+
 pub(crate) struct ClassMetadata {
     pub name: String,
     pub qualified_name: String,
     /// Canonical members of a string enum, in declaration order.
     pub enum_members: Vec<(String, String)>,
+    /// Plain Enum names its class and member; StrEnum displays the value.
+    pub plain_enum: bool,
+    pub http_members: Vec<HttpMember>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
     pub value_struct: bool,
@@ -458,6 +496,8 @@ pub(crate) struct ListBuild {
 
 pub(crate) struct ClassFieldMetadata {
     pub name: String,
+    /// A trusted bundled field containing the complete, unquoted record representation.
+    pub repr_text: bool,
     pub compare: bool,
     pub repr: bool,
 }
@@ -484,6 +524,18 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    pub(crate) fn changes_stdout(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |e| {
+                used |= matches!(
+                    e.kind,
+                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
+                );
+            });
+        }
+        used
+    }
     /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
@@ -806,6 +858,17 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    SysStdout,
+    SysHasStdout,
+    SysOriginalOutput {
+        stderr: bool,
+    },
+    SysStdoutSet,
+    SysStdoutDelete,
+    TextOptionalReceiver,
+    TextMetadata {
+        errors: bool,
+    },
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsLen,
@@ -844,6 +907,9 @@ pub(crate) enum Builtin {
     FunctionWrappedSet,
     FunctionWrappedGet,
     StrEnumValue,
+    IntEnumValue,
+    HttpEnumPhrase,
+    HttpEnumDescription,
     EnumLookup(usize),
     EnumString,
     NominalIdentity,
@@ -882,10 +948,12 @@ pub(crate) enum Builtin {
         version: bool,
     },
     SysImplementation,
+    SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
         errors: bool,
     },
+    SysEncoding(SysEncoding),
     SysVersionInfo {
         implementation: bool,
     },
@@ -1148,8 +1216,11 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    GeneratorFrameEnter(String),
+    GeneratorFrameLeave,
     SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
@@ -1372,6 +1443,8 @@ pub(crate) enum Builtin {
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
+    /// Record the source location of a raised Python exception.
+    ExceptionOrigin(u64),
     ExceptionCause,
     ActiveException,
     ExceptionSuppressContext,
@@ -1558,9 +1631,24 @@ pub(crate) enum TextOperation {
     Partition,
     Translate,
     Unquote,
+    UrlSplit,
+    UrlProperty(UrlProperty),
+    UrlGetUrl,
+    UrlTranscode {
+        encode: bool,
+    },
     Dedent,
     ShlexSplit,
     ShlexQuote,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum UrlProperty {
+    Username,
+    Password,
+    Hostname,
+    Port,
 }
 
 #[derive(Clone, Copy)]
@@ -1733,6 +1821,8 @@ pub(crate) enum FormatterOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LogRecordOperation {
     New,
+    AddExtra,
+    Dictionary,
     Put,
     Update,
     Read,
@@ -1761,6 +1851,12 @@ pub(crate) enum WriterOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    Handlers,
+    AddHandler,
+    RemoveHandler,
+    WriteStream,
+    FlushStream,
+    StreamFile,
     HandlerRename,
     LockNew,
     LockAcquire,
@@ -1774,6 +1870,7 @@ pub(crate) enum LogOperation {
     LockReset,
     HandlerLookup,
     PrintActiveException,
+    New,
     AddLevel,
     LevelName,
     LevelForName,
@@ -1784,12 +1881,16 @@ pub(crate) enum LogOperation {
     Names,
     Numbers,
     NamesCopy,
-    Configure,
-    ConfigureName,
     DictConfig,
     DictConfigTyped,
     FileConfig,
     Disabled,
+    SetDisabled,
+    NewManager,
+    Manager,
+    ManagerRoot,
+    ManagerDisable,
+    SetManagerDisable,
     Propagate,
     SetPropagate,
     HasHandlers,
@@ -2023,6 +2124,7 @@ pub(crate) enum InstanceType {
     SimpleNamespace,
     ModuleSpec,
     StrEnum,
+    IntEnum,
     List,
     Deque,
     Dict,
@@ -2038,7 +2140,7 @@ impl InstanceType {
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
             Self::ContextVar => matches!(ty, Type::ContextVar(_)),
             Self::ContextToken => matches!(ty, Type::ContextToken(_)),
-            Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
+            Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool | Type::IntEnum(_)),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
@@ -2049,6 +2151,7 @@ impl InstanceType {
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
+            Self::IntEnum => matches!(ty, Type::IntEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),

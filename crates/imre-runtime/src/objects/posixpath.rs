@@ -240,7 +240,7 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
         return Error::new(Kind::TypeError, "'NoneType' object is not iterable").returning(0);
     }
     let compute = |storage: &super::Storage| -> Result<usize> {
-        let values = &storage.sequence().values;
+        let values = &storage.sequence()?.values;
         let Some(&first) = values.first() else {
             return Err(Error::new(
                 Kind::ValueError,

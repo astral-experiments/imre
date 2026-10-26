@@ -83,18 +83,30 @@ class _Arg:
         self.key = _key(text, kind)
 
 
+def _call_text(args: list[_Arg], kwargs: dict[str, _Arg]) -> str:
+    parts: list[str] = []
+    for arg in args:
+        parts.append(arg.text)
+    for key in kwargs:
+        parts.append(key + "=" + kwargs[key].text)
+    return "call(" + ", ".join(parts) + ")"
+
+
 @dataclass(repr=False)
 class _Call:
     _args: list[_Arg]
     _kwargs: dict[str, _Arg]
+    _text: str = field(compare=False)
+
+    def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
+        self._args = args
+        self._kwargs = kwargs
+        self._text = _call_text(args, kwargs)
 
     def _format(self, name: str) -> str:
-        parts: list[str] = []
-        for arg in self._args:
-            parts.append(arg.text)
-        for key in self._kwargs:
-            parts.append(key + "=" + self._kwargs[key].text)
-        return name + "(" + ", ".join(parts) + ")"
+        if name == "call":
+            return self._text
+        return name + self._text[4:]
 
     @staticmethod
     def _represent(value: _Call | None) -> str:

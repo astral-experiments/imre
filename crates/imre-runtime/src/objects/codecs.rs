@@ -11,16 +11,49 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-static CP1251: LazyLock<Charmap> = LazyLock::new(|| Charmap::named("cp1251").unwrap());
-static CP1251_ENCODE: LazyLock<HashMap<char, u8>> = LazyLock::new(|| {
-    (0..=u8::MAX)
-        .filter_map(|b| CP1251.decode(b).map(|ch| (ch, b)))
-        .collect()
-});
+pub(crate) struct CodePage {
+    index: usize,
+    decode: Charmap,
+    encode: HashMap<char, u8>,
+}
+
+impl CodePage {
+    /// Reuse the pinned source decoding table in both directions.
+    fn new(index: usize, name: &str) -> Self {
+        let decode = Charmap::named(name).unwrap();
+        let encode = (0..=u8::MAX)
+            .filter_map(|byte| decode.decode(byte).map(|ch| (ch, byte)))
+            .collect();
+        Self {
+            index,
+            decode,
+            encode,
+        }
+    }
+}
+
+static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
+static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
+
+const CODEC_NAMES: [&str; 6] = [
+    "ascii",
+    "iso8859-1",
+    "utf-8",
+    "utf-8-sig",
+    "cp1251",
+    "cp424",
+];
 
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, ObjectOwner>> = RefCell::default();
-    static NAMES: [StrOwner; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"].map(|s| StrOwner::new(Str::new(s)));
+    static NAMES: [StrOwner; CODEC_NAMES.len()] = CODEC_NAMES.map(|name| {
+        // Python interns identifiers in encoding modules, such as ascii and cp1251.
+        if name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+            crate::sys::canonical(name)
+        } else {
+            StrOwner::new(Str::const_new(name))
+        }
+    });
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -117,7 +150,7 @@ pub unsafe extern "C" fn imre_codec_encode(
 }
 
 /// Return an owned byte buffer for a borrowed or freshly encoded result.
-fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
+pub(super) fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
     let owner = match bytes {
         Cow::Borrowed(bytes) => owned_input(bytes)?,
         Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?,
@@ -176,7 +209,7 @@ pub(crate) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
-    Cp1251,
+    CodePage(&'static CodePage),
 }
 
 impl Codec {
@@ -186,13 +219,17 @@ impl Codec {
             Self::Latin1 => 1,
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
-            Self::Cp1251 => 4,
+            Self::CodePage(page) => page.index,
         }
     }
 
     /// Return the retained canonical name shared with registry entries.
     pub(crate) fn name_owner(self) -> StrOwner {
         NAMES.with(|names| names[self.index()].clone())
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        CODEC_NAMES[self.index()]
     }
 
     pub(crate) fn lookup(value: &str) -> Result<Self> {
@@ -205,7 +242,8 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
-            "cp1251" | "1251" | "windows_1251" => Ok(Self::Cp1251),
+            "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
+            "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -261,9 +299,9 @@ impl Codec {
                 text.extend(data.iter().copied().map(char::from));
                 Ok(text)
             }
-            Self::Cp1251 => {
+            Self::CodePage(page) => {
                 for (index, &byte) in data.iter().enumerate() {
-                    if let Some(ch) = CP1251.decode(byte) {
+                    if let Some(ch) = page.decode.decode(byte) {
                         text.try_reserve(ch.len_utf8())
                             .map_err(|_| Error::allocation())?;
                         text.push(ch);
@@ -351,12 +389,12 @@ impl Codec {
             }
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
-            Self::Cp1251 => ("charmap", "character maps to <undefined>"),
+            Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
         };
         let encoded = |ch: char| match self {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
-            Self::Cp1251 => CP1251_ENCODE.get(&ch).copied(),
+            Self::CodePage(page) => page.encode.get(&ch).copied(),
             Self::Utf8 { .. } => unreachable!(),
         };
         let mut out = Vec::new();
@@ -369,45 +407,72 @@ impl Codec {
                 out.push(byte);
                 continue;
             }
-            match errors.unwrap_or("strict") {
-                "ignore" => (),
-                "replace" => {
-                    out.try_reserve(1).map_err(|_| Error::allocation())?;
-                    out.push(b'?');
-                }
-                "backslashreplace" | "xmlcharrefreplace" => {
-                    let replacement = if errors == Some("backslashreplace") {
-                        escaped(ch)
-                    } else {
-                        compact_str::format_compact!("&#{};", u32::from(ch))
-                    };
-                    out.try_reserve(replacement.len())
-                        .map_err(|_| Error::allocation())?;
-                    out.extend_from_slice(replacement.as_bytes());
-                }
+            let replacement = match errors.unwrap_or("strict") {
+                "ignore" => continue,
+                "replace" => Str::const_new("?"),
+                "backslashreplace" => escaped(ch),
+                "xmlcharrefreplace" => compact_str::format_compact!("&#{};", u32::from(ch)),
+                "namereplace" => unicode_names2::name(ch).map_or_else(
+                    || escaped(ch),
+                    |name| compact_str::format_compact!("\\N{{{name}}}"),
+                ),
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
                     while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
                         end = i;
                     }
-                    let at = if start == end {
-                        format!("character '{}' in position {start}", escaped(ch))
-                    } else {
-                        format!("characters in position {start}-{end}")
-                    };
-                    return Err(Error::unicode_encode(
+                    return Err(encoding_error(
                         codec,
-                        error_input()?,
-                        start..end + 1,
                         reason,
-                        format!("'{codec}' codec can't encode {at}: {reason}"),
+                        error_input()?,
+                        start,
+                        end,
+                        ch,
                     ));
                 }
                 name => return Err(unknown_handler(name)),
+            };
+            out.try_reserve(replacement.len())
+                .map_err(|_| Error::allocation())?;
+            for c in replacement.chars() {
+                let Some(byte) = encoded(c) else {
+                    return Err(encoding_error(
+                        codec,
+                        reason,
+                        error_input()?,
+                        start,
+                        start,
+                        ch,
+                    ));
+                };
+                out.push(byte);
             }
         }
         Ok(Cow::Owned(out))
     }
+}
+
+/// Report the source string and scalar positions that the codec could not represent.
+fn encoding_error(
+    codec: &str,
+    reason: &str,
+    source: StrOwner,
+    start: usize,
+    end: usize,
+    ch: char,
+) -> Error {
+    let at = if start == end {
+        format!("character '{}' in position {start}", escaped(ch))
+    } else {
+        format!("characters in position {start}-{end}")
+    };
+    Error::unicode_encode(
+        codec,
+        source,
+        start..end + 1,
+        reason,
+        format!("'{codec}' codec can't encode {at}: {reason}"),
+    )
 }
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.

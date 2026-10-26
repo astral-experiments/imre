@@ -43,6 +43,7 @@ enum Shape {
     Callable(Vec<Type>, Type),
     IndexCallable(Type),
     RecordConstructor(usize, Vec<Type>),
+    PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
     DispatchCallable(DispatchFunction),
@@ -53,6 +54,14 @@ enum Shape {
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// A partial's adapter keeps its original callable and, when representable, its public args tuple.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PartialFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub func_slot: usize,
 }
 
 /// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
@@ -94,6 +103,12 @@ pub(crate) enum TupleOrigin {
     StructSequence(&'static str, &'static [&'static str]),
     LibraryNamedTuple(&'static str, &'static [&'static str]),
 }
+
+const URL_FIELDS: &[&str] = &["scheme", "netloc", "path", "query", "fragment"];
+pub(crate) const SPLIT_RESULT: TupleOrigin =
+    TupleOrigin::LibraryNamedTuple("SplitResult", URL_FIELDS);
+pub(crate) const SPLIT_RESULT_BYTES: TupleOrigin =
+    TupleOrigin::LibraryNamedTuple("SplitResultBytes", URL_FIELDS);
 
 pub(crate) const CACHE_INFO: TupleOrigin =
     TupleOrigin::LibraryNamedTuple("CacheInfo", &["hits", "misses", "maxsize", "currsize"]);
@@ -229,13 +244,16 @@ impl Types {
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
+                        | Shape::PartialCallable(_)
                 )
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
-            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
-                id < classes
-            }
+            Type::Class(id)
+            | Type::NamedException(id)
+            | Type::IntEnum(id)
+            | Type::StrEnum(id)
+            | Type::Enum(id) => id < classes,
             Type::Coroutine(id) | Type::Task(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
             }
@@ -257,6 +275,7 @@ impl Types {
             | Type::Bytes
             | Type::ListInt
             | Type::StringIterable
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -288,6 +307,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime
@@ -303,6 +323,7 @@ impl Types {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -357,6 +378,7 @@ impl Types {
                 Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
                     vec![*callable]
                 }
+                Shape::PartialCallable(p) => vec![p.callable, p.frame],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
@@ -531,11 +553,13 @@ impl Types {
             Type::Int
                 | Type::Str
                 | Type::StrLiteral(_)
+                | Type::IntEnum(_)
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
                 | Type::Logger
                 | Type::Socket
+                | Type::LogManager
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -560,6 +584,7 @@ impl Types {
             | Type::PurePath(_)
             | Type::Logger
             | Type::Socket
+            | Type::LogManager
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) if self.is_callback_storage(ty) => false,
@@ -646,6 +671,9 @@ impl Types {
             [Type::Bool, Type::Int] | [Type::Int, Type::Bool] => {
                 Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::Int])))
             }
+            [Type::Bool, Type::LogRecord] | [Type::LogRecord, Type::Bool] => {
+                Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::LogRecord])))
+            }
             choices @ [_, _, ..]
                 if choices
                     .iter()
@@ -661,9 +689,30 @@ impl Types {
                     self.string_literal(strings)
                 }
             }
+            choices @ [_, _, ..]
+                if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
+                    && choices
+                        .iter()
+                        .all(|ty| matches!(ty, Type::Str | Type::Int | Type::IntEnum(_)))
+                    && choices
+                        .iter()
+                        .filter(|ty| matches!(ty, Type::IntEnum(_)))
+                        .count()
+                        == 1 =>
+            {
+                let mut ordered = choices.to_vec();
+                ordered.sort_by_key(|ty| match ty {
+                    Type::Str => 0,
+                    Type::Int => 1,
+                    _ => 2,
+                });
+                Type::Union(self.intern(Shape::Union(ordered)))
+            }
             [Type::Str, other] | [other, Type::Str]
-                if matches!(other, Type::Bytes | Type::Path | Type::Enum(_))
-                    || self.element(*other) == Some(Type::Str) =>
+                if matches!(
+                    other,
+                    Type::Bytes | Type::Path | Type::FrozenStrings | Type::Enum(_)
+                ) || self.element(*other) == Some(Type::Str) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
@@ -726,6 +775,18 @@ impl Types {
         }
     }
 
+    /// A string list can defer its rows; testing a boxed value or a union may read that list.
+    pub(crate) fn truth_may_materialize(&self, ty: Type) -> bool {
+        let ty = self.payload(ty).unwrap_or(ty);
+        ty == Type::ObjectValue
+            || (matches!(ty, Type::List(_)) && self.element(ty) == Some(Type::Str))
+            || self.members(ty).is_some_and(|members| {
+                members
+                    .iter()
+                    .any(|member| self.truth_may_materialize(*member))
+            })
+    }
+
     /// Fixed tuples and nominal objects have no user-defined truth protocol.
     /// Unknown means the value must be inspected, including nullable payloads.
     pub(crate) fn truthiness(&self, ty: Type) -> Option<bool> {
@@ -769,6 +830,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime
@@ -784,6 +846,7 @@ impl Types {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -1067,6 +1130,15 @@ impl Types {
         self.namedtuple_layout(TupleOrigin::StructSequence(name, names), fields)
     }
 
+    pub(crate) fn url_split_result(&self, bytes: bool) -> Type {
+        let (origin, field) = if bytes {
+            (SPLIT_RESULT_BYTES, Type::Bytes)
+        } else {
+            (SPLIT_RESULT, Type::Str)
+        };
+        self.namedtuple_layout(origin, vec![field; URL_FIELDS.len()])
+    }
+
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {
         let Type::Tuple(id) = ty else { return None };
         match self.0.borrow().shapes[id] {
@@ -1300,6 +1372,8 @@ impl Types {
                     *underlying
                 }
                 Shape::CachedCallable(cache) => cache.callable,
+                Shape::DispatchCallable(dispatcher) => dispatcher.callable,
+                Shape::PartialCallable(p) => p.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
             };
@@ -1346,6 +1420,18 @@ impl Types {
         }
     }
 
+    pub(crate) fn partial_callable(&self, layout: PartialFunction) -> Type {
+        Type::Callable(self.intern(Shape::PartialCallable(layout)))
+    }
+
+    pub(crate) fn partial_function(&self, ty: Type) -> Option<PartialFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::PartialCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_dispatch_registry(&self, ty: Type) -> bool {
         matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DispatchRegistry(_)))
     }
@@ -1360,6 +1446,7 @@ impl Types {
             }
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
+            Shape::PartialCallable(p) => self.signature(p.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -1437,6 +1524,14 @@ impl Types {
         match self.0.borrow().shapes[id] {
             Shape::Set(element) => Some(element),
             _ => unreachable!("set type identity has a set shape"),
+        }
+    }
+
+    /// Element type for membership and iteration, including immutable set views.
+    pub(crate) fn readable_set_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::StringKeys | Type::FrozenStrings => Some(Type::Str),
+            _ => self.set_element(ty),
         }
     }
 
@@ -1697,7 +1792,11 @@ impl TypeDescription<'_> {
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
-            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id)
+            | Type::NamedException(id)
+            | Type::IntEnum(id)
+            | Type::StrEnum(id)
+            | Type::Enum(id) => {
                 return self.write_str(&(self.class_name)(id));
             }
             _ => return write!(self, "{ty}"),
@@ -1740,6 +1839,7 @@ impl TypeDescription<'_> {
                 self.write_str("type[")?;
                 self.write_type(Type::Class(*class))?;
             }
+            Shape::PartialCallable(p) => return self.write_type(p.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

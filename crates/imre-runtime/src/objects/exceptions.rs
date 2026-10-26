@@ -19,6 +19,8 @@ use std::rc::Rc;
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
+use allocator_api2::boxed::Box;
+
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, fail, object};
 
@@ -334,12 +336,13 @@ pub(super) struct Exception {
     kind: Kind,
     payload: Payload,
     suppress_context: bool,
-    details: Option<Rc<ExceptionDetails>>,
+    details: Option<crate::Shared<ExceptionDetails>>,
 }
 
 #[derive(Clone, Default)]
 struct ExceptionDetails {
     cause: Option<crate::ObjectOwner>,
+    origins: Vec<(StrOwner, u64)>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
@@ -384,7 +387,7 @@ enum Payload {
     Positional(imports::Positional),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
-    Group(Box<[GroupMember]>),
+    Group(std::boxed::Box<[GroupMember]>),
 }
 
 /// Indirect so retaining several arguments does not grow every Object allocation.
@@ -444,10 +447,62 @@ impl GroupMember {
 }
 
 impl Exception {
-    fn attach_directory_frame(&mut self, mut details: Rc<ExceptionDetails>) {
+    /// Own every argument before invoking a formatter that can reinitialize the exception.
+    fn display_snapshot(&self) -> Result<Self> {
+        fn boxed<T>(value: T) -> Result<Box<T>> {
+            Box::try_new(value).map_err(|_| Error::allocation())
+        }
+
+        let payload = match &self.payload {
+            Payload::Arguments(arguments) => {
+                let mut args = smallvec::SmallVec::new();
+                args.try_reserve_exact(arguments.args.len())
+                    .map_err(|_| Error::allocation())?;
+                args.extend(arguments.args.iter().cloned());
+                let os_paths = arguments
+                    .os_paths
+                    .as_deref()
+                    .cloned()
+                    .map(boxed)
+                    .transpose()?;
+                Payload::Arguments(boxed(BuiltinArguments {
+                    message: arguments.message.clone(),
+                    args,
+                    os_paths,
+                })?)
+            }
+            Payload::Import(value) => Payload::Import(boxed((**value).clone())?),
+            Payload::Process(value) => Payload::Process(boxed((**value).clone())?),
+            Payload::Timeout(value) => Payload::Timeout(boxed((**value).clone())?),
+            Payload::Group(members) => {
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(members.len())
+                    .map_err(|_| Error::allocation())?;
+                copy.extend_from_slice(members);
+                Payload::Group(copy.into_boxed_slice())
+            }
+            Payload::Empty
+            | Payload::Message(_)
+            | Payload::Json(_)
+            | Payload::Tree(_)
+            | Payload::Key(_)
+            | Payload::Exit(_)
+            | Payload::ExitArguments(_)
+            | Payload::Positional(_) => self.payload.clone(),
+        };
+        Ok(Self {
+            kind: self.kind,
+            payload,
+            suppress_context: self.suppress_context,
+            details: self.details.clone(),
+        })
+    }
+
+    fn attach_directory_frame(&mut self, mut details: crate::Shared<ExceptionDetails>) {
         if let Some(previous) = self.details.as_deref() {
-            let fresh = Rc::get_mut(&mut details).unwrap();
+            let fresh = crate::Shared::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
+            fresh.origins.clone_from(&previous.origins);
             fresh.named = previous.named;
             fresh.layout.clone_from(&previous.layout);
             fresh.args.clone_from(&previous.args);
@@ -458,8 +513,23 @@ impl Exception {
         self.details = Some(details);
     }
 
+    fn try_details_mut(&mut self) -> Result<&mut ExceptionDetails> {
+        if self
+            .details
+            .as_mut()
+            .and_then(crate::Shared::get_mut)
+            .is_none()
+        {
+            let copy = self.details.as_deref().cloned().unwrap_or_default();
+            self.details = Some(crate::Shared::try_new(copy).map_err(|_| Error::allocation())?);
+        }
+        Ok(crate::Shared::get_mut(self.details.as_mut().unwrap()).unwrap())
+    }
+
     fn details_mut(&mut self) -> &mut ExceptionDetails {
-        Rc::make_mut(self.details.get_or_insert_with(Default::default))
+        self.try_details_mut().unwrap_or_else(|_| {
+            std::alloc::handle_alloc_error(std::alloc::Layout::new::<ExceptionDetails>())
+        })
     }
 
     fn cause(&self) -> Option<&crate::ObjectOwner> {
@@ -468,7 +538,7 @@ impl Exception {
 
     fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
-        Rc::into_inner(self.details.take()?)?.cause
+        crate::Shared::try_unwrap(self.details.take()?).ok()?.cause
     }
 
     /// KeyError uses repr for one key unless an earlier builtin in the MRO overrides str.
@@ -778,6 +848,15 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Preserve the native exception class and its formatted Python message.
+    pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
+        let kind = self.kind.name();
+        let error = self.into_object();
+        // SAFETY: the local owner keeps the exception payload alive throughout the read.
+        let message = unsafe { error.0.with(Storage::exception_message) };
+        (kind, message)
+    }
+
     /// Copytree aggregates only OS failures; language errors still escape intact.
     pub(super) fn into_os_message(self) -> Result<StrOwner> {
         if !self.kind.matches(Kind::OSError) {
@@ -904,7 +983,7 @@ pub unsafe extern "C" fn imre_prepare_directory_frame(
         // SAFETY: the template is a live immutable exception.
         unsafe { template.0.with(|storage| storage.exception().clone()) }
     });
-    error.details = Some(Rc::new(ExceptionDetails {
+    error.details = Some(crate::Shared::new(ExceptionDetails {
         directories: Some(Rc::new(DirectoryFrame {
             managers: Vec::with_capacity(count),
             outer: None,
@@ -1029,7 +1108,7 @@ fn exception_object(kind: Kind, payload: Payload, cause: Option<crate::ObjectOwn
         payload,
         suppress_context: cause.is_some(),
         details: cause.map(|cause| {
-            Rc::new(ExceptionDetails {
+            crate::Shared::new(ExceptionDetails {
                 cause: Some(cause),
                 ..Default::default()
             })
@@ -1656,7 +1735,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        4 | 5 => super::boxed_values::python_length(kind, word) != Some(0),
+        4 | 5 | 10 => super::boxed_values::python_length(kind, word)
+            .map_or_else(|error| error.returning(false), |length| length != Some(0)),
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
@@ -1928,10 +2008,12 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
     }
     use std::fmt::Write as _;
     // SAFETY: release the storage borrow before a nested display method can mutate the exception.
-    let snapshot = unsafe {
-        object(value)
-            .0
-            .with(|s| Storage::Exception(s.exception().clone()))
+    let snapshot = match unsafe { object(value).0.with(|s| s.exception().display_snapshot()) } {
+        Ok(exception) => Storage::Exception(exception),
+        Err(error) => {
+            error.raise();
+            return std::ptr::null();
+        }
     };
     let s = &snapshot;
     // SAFETY: the snapshot retains the arguments throughout reentrant formatting.
@@ -2098,6 +2180,34 @@ pub unsafe extern "C" fn imre_exception_message(value: *const Object) -> *const 
     unsafe { display(value, false) }
 }
 
+/// Record a Python raise site without changing the exception's message or identity.
+///
+/// # Safety
+/// Both inputs are live borrowed Imre values. The result owns an additional
+/// reference to the same exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_with_origin(
+    value: *const Object,
+    filename: *const Str,
+    line: u64,
+) -> *const Object {
+    // SAFETY: both input owners outlive this call. A stored filename owns its reference.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Exception(exception) = storage else {
+                fail("SystemError", "expected an exception object");
+            };
+            let origins = &mut exception.details_mut().origins;
+            if origins.try_reserve(1).is_ok() {
+                crate::imre_str_retain(filename);
+                origins.push((StrOwner::from_raw(filename), line));
+            }
+        });
+        imre_exception_retain(value);
+    }
+    value
+}
+
 /// Attaches an explicit cause before publishing a fresh exception and returns
 /// an additional owned reference to that same exception. Null represents `from None`.
 ///
@@ -2204,6 +2314,29 @@ pub extern "C" fn imre_exception_reraise() {
     }
 }
 
+/// An integer passed to SystemExit first has to fit the platform's C long.
+#[derive(Clone, Debug)]
+pub(crate) enum ExitStatus {
+    Code(i32),
+    Overflow,
+}
+
+impl ExitStatus {
+    pub(crate) fn from_i64(value: Option<i64>) -> Self {
+        value.map_or(Self::Overflow, |code| Self::Code(code as i32))
+    }
+
+    pub(crate) fn report(self) -> i32 {
+        match self {
+            Self::Code(code) => code,
+            Self::Overflow => {
+                eprintln!("OverflowError: Python int too large to convert to C long");
+                -1
+            }
+        }
+    }
+}
+
 /// Reports and consumes the pending error after generated-code cleanup. Returning
 /// the exit status lets the C entry point finish normally, including sanitizer
 /// teardown. A failed best-effort stdout flush preserves the original error.
@@ -2301,10 +2434,14 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
     let mut current = Some(exception.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
-        let (name, cause) = unsafe {
+        let (name, cause, origins) = unsafe {
             exception.0.with(|storage| {
                 let e = storage.exception();
-                (e.name().to_owned(), e.cause().cloned())
+                (
+                    e.name().to_owned(),
+                    e.cause().cloned(),
+                    e.details.as_deref().map(|details| details.origins.clone()),
+                )
             })
         };
         // SAFETY: the local owner outlives custom formatting and any resulting error.
@@ -2327,17 +2464,23 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
                     _ => None,
                 })
         };
-        chain.push((name, message, suggestion));
+        chain.push((name, message, suggestion, origins));
         current = cause;
     }
     drop(exception);
     let mut diagnostic = crate::sys::stderr_writer();
-    for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
+    for (index, (name, message, suggestion, origins)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
                 diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
+        }
+        if let Some(origins) = origins.filter(|frames| !frames.is_empty()) {
+            let _ = writeln!(diagnostic, "Traceback (most recent call last):");
+            for (filename, line) in origins.iter().rev() {
+                let _ = writeln!(diagnostic, "  File \"{filename}\", line {line}");
+            }
         }
         if let Some(hint) = suggestion {
             let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
@@ -2395,6 +2538,7 @@ mod tests {
     use crate::objects::{
         imre_seq_append, imre_seq_get_index, imre_seq_new, imre_seq_pop, imre_seq_set_index,
     };
+    use crate::shared::Shared;
     use crate::{
         Int, imre_int_binary, imre_int_parse, imre_list_append, imre_list_copy_index,
         imre_list_get_index, imre_list_new, imre_list_pop, imre_list_repeat,
@@ -2746,11 +2890,11 @@ mod tests {
 
     #[test]
     fn caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery() {
-        let big = Rc::new(BigInt::from(1_u8) << 120_u32);
-        let weak = Rc::downgrade(&big);
-        let integer = Int(Rc::into_raw(big) as usize);
+        let big = Shared::new(BigInt::from(1_u8) << 120_u32);
+        let weak = Shared::downgrade(&big);
+        let integer = Int(Shared::into_raw(big) as usize);
         // SAFETY: the constructor transfers one owned list reference.
-        let list = unsafe { Rc::from_raw(imre_list_new()) };
+        let list = unsafe { crate::ListOwner::from_raw(imre_list_new()) };
         let zero = Int::small(0).unwrap();
         // SAFETY: all integer/list inputs stay rooted, and each successful owned
         // result is adopted exactly once. Failure sentinels are never acquired.
@@ -2759,24 +2903,24 @@ mod tests {
             drop(take_error(Kind::ZeroDivisionError));
             assert_eq!(imre_int_parse(&Str::new("12__3")), 1);
             drop(take_error(Kind::ValueError));
-            imre_list_append(Rc::as_ptr(&list), integer.0);
+            imre_list_append(crate::ListOwner::as_ptr(&list), integer.0);
             drop(integer);
             assert_eq!(weak.strong_count(), 1);
-            imre_list_copy_index(Rc::as_ptr(&list), 1, 0);
+            imre_list_copy_index(crate::ListOwner::as_ptr(&list), 1, 0);
             drop(take_error(Kind::IndexError));
             assert_eq!(weak.strong_count(), 1);
-            assert_eq!(imre_list_get_index(Rc::as_ptr(&list), 7), 0);
+            assert_eq!(imre_list_get_index(crate::ListOwner::as_ptr(&list), 7), 0);
             drop(take_error(Kind::IndexError));
             let huge = Int::new(BigInt::from(1_u8) << 100_u32);
-            assert!(imre_list_repeat(Rc::as_ptr(&list), huge.0).is_null());
+            assert!(imre_list_repeat(crate::ListOwner::as_ptr(&list), huge.0).is_null());
             drop(take_error(Kind::OverflowError));
             let capacity = Int::new(BigInt::from(isize::MAX));
-            assert!(imre_list_repeat(Rc::as_ptr(&list), capacity.0).is_null());
+            assert!(imre_list_repeat(crate::ListOwner::as_ptr(&list), capacity.0).is_null());
             drop(take_error(Kind::MemoryError));
-            let popped = Int(imre_list_pop(Rc::as_ptr(&list)));
+            let popped = Int(imre_list_pop(crate::ListOwner::as_ptr(&list)));
             assert_eq!(popped.big().as_ref(), &(BigInt::from(1_u8) << 120_u32));
             drop(popped);
-            assert_eq!(imre_list_pop(Rc::as_ptr(&list)), 0);
+            assert_eq!(imre_list_pop(crate::ListOwner::as_ptr(&list)), 0);
             drop(take_error(Kind::IndexError));
         }
         assert!(weak.upgrade().is_none());

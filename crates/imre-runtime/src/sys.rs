@@ -4,10 +4,12 @@ use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
+pub(crate) use intern::canonical;
 use std::io::{self, Write};
 mod encoding;
 mod input;
 pub(super) use input::read_input_line;
+mod encoding_names;
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::settings(isolated, utf8);
@@ -59,6 +61,10 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
 /// same Latin-1 owners as other Python strings.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
+    StrOwner::into_raw(standard_field(descriptor, errors != 0))
+}
+
+pub(super) fn standard_field(descriptor: u32, errors: bool) -> StrOwner {
     thread_local! {
         static FIELDS: [(StrOwner, StrOwner); 3] = {
             let settings = encoding::settings(false, None);
@@ -71,7 +77,7 @@ pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const S
     }
     FIELDS.with(|fields| {
         let (name, handler) = &fields[descriptor as usize];
-        StrOwner::into_raw(if errors != 0 { handler } else { name }.clone())
+        if errors { handler } else { name }.clone()
     })
 }
 
@@ -90,7 +96,7 @@ pub extern "C" fn imre_sys_stdout_errors() -> *const Str {
 }
 
 /// Allocate exception input only when formatting produced borrowed text.
-fn error_text(text: &str) -> super::Result<StrOwner> {
+pub(super) fn error_text(text: &str) -> super::Result<StrOwner> {
     StrOwner::try_new(Str::new(text)).map_err(|_| crate::Error::allocation())
 }
 
@@ -171,12 +177,22 @@ pub(super) fn flush_stderr() -> io::Result<()> {
     Ok(())
 }
 
-/// Write the default display hook's repr followed by a newline to stdout.
-pub(super) fn write_display_line(text: &str) -> bool {
-    match write_stdout(text, true) {
-        Ok(()) => true,
-        Err(error) => error.returning(false),
+pub(super) fn flush_standard(stderr: bool) -> io::Result<()> {
+    if stderr {
+        flush_stderr()
+    } else {
+        flush_stdout()
     }
+}
+
+/// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.
+pub(super) fn write_escaped_stdout(text: &str) -> super::Result<()> {
+    let settings = encoding::settings(false, None);
+    let bytes = settings
+        .codec
+        .encode(text, Some("backslashreplace"), || error_text(text))?;
+    let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
+    out.raw.write_all(&bytes).map_err(errno_error)
 }
 
 /// Return the Python platform name of the target that built this runtime.

@@ -199,7 +199,7 @@ impl Formatter {
 
     fn get(&self, r: &Record, key: &str) -> Result<OwnedWord> {
         if let Some(v) = r.fields.get(key) {
-            return Ok(v.clone());
+            return Ok(v);
         }
         if let Some(defaults) = &self.defaults {
             // SAFETY: the formatter retains this string-key map; lookup acquires a field owner.
@@ -360,20 +360,21 @@ impl Formatter {
 
     fn format(&self, r: &mut Record) -> Result<String> {
         let message = r.message()?;
-        r.fields.insert("message".into(), message);
+        r.fields.insert("message".into(), message)?;
         if self.uses_time() {
             let time = self.time(r, self.date.as_deref().map(Str::as_str))?;
-            r.fields.insert("asctime".into(), string(&time));
+            r.fields.insert("asctime".into(), string(&time))?;
         }
         let mut text = self.render(r)?;
-        if r.fields.get("exc_info").is_some_and(record::truth)
-            && !r.fields.get("exc_text").is_some_and(record::truth)
+        if r.fields.get("exc_info").as_ref().is_some_and(record::truth)
+            && !r.fields.get("exc_text").as_ref().is_some_and(record::truth)
         {
-            let info = &r.fields["exc_info"];
+            let info = &r.fields.field("exc_info")?;
             if record::tuple_len(info) == Some(3)
                 && (0..3).all(|i| record::tuple_item(info, i).kind.raw() == 0)
             {
-                r.fields.insert("exc_text".into(), string("NoneType: None"));
+                r.fields
+                    .insert("exc_text".into(), string("NoneType: None"))?;
             } else {
                 return Err(Error::new(
                     Kind::NotImplementedError,
@@ -382,11 +383,11 @@ impl Formatter {
             }
         }
         for key in ["exc_text", "stack_info"] {
-            if let Some(v) = r.fields.get(key).filter(|v| record::truth(v)) {
+            if let Some(v) = r.fields.get(key).filter(record::truth) {
                 if !text.ends_with('\n') {
                     append(&mut text, "\n")?;
                 }
-                write_display(&mut text, v)?;
+                write_display(&mut text, &v)?;
             }
         }
         Ok(text)

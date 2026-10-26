@@ -36,6 +36,13 @@ impl Checker<'_> {
         if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
             return None;
         }
+        if self
+            .types
+            .members(ty)
+            .is_some_and(|members| members.len() != 2)
+        {
+            return None;
+        }
         let slot = self.hidden(ty);
         let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
             (
@@ -89,7 +96,12 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
-        if self.types.index_callable_signature(ty) == Some(value.ty) {
+        if self
+            .types
+            .partial_function(ty)
+            .is_some_and(|p| p.callable == value.ty)
+            || self.types.index_callable_signature(ty) == Some(value.ty)
+        {
             return Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -174,6 +186,41 @@ impl Checker<'_> {
         Expr { ty, kind }
     }
 
+    /// Keep the nominal tag through isinstance; convert only the selected integer member.
+    pub(super) fn int_enum_union_value(&mut self, value: Expr) -> Option<Expr> {
+        let members = self.types.members(value.ty)?;
+        let [Type::Int, member @ Type::IntEnum(_)] = *members.as_slice() else {
+            return None;
+        };
+        let slot = self.hidden(value.ty);
+        let project = |ty| Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
+        };
+        let test = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(
+                Builtin::IsInstance(vec![InstanceType::Exact(member)]),
+                vec![self.local(slot)],
+            ),
+        };
+        Some(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(Self::enum_integer(project(member))),
+                        Box::new(project(Type::Int)),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        })
+    }
+
     /// Compare numeric values without changing the stored member used by repr or identity.
     pub(super) fn numeric_union_comparison(&self, values: Vec<Expr>) -> Vec<Expr> {
         if !values.iter().any(|v| self.types.is_bool_or_int(v.ty))
@@ -217,6 +264,10 @@ impl Checker<'_> {
                 ]);
             }
             _ => {}
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) = self.resolve(expression)
+        {
+            return Ok(vec![Exact(self.types.url_split_result(bytes))]);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
@@ -274,6 +325,9 @@ impl Checker<'_> {
         if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
             return Ok(vec![InstanceType::IoBase(base)]);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::IntEnum)) {
+            return Ok(vec![InstanceType::IntEnum]);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
         }
@@ -326,6 +380,7 @@ impl Checker<'_> {
                 "list" => InstanceType::List,
                 "dict" => InstanceType::Dict,
                 "set" => InstanceType::Set,
+                "frozenset" => InstanceType::Exact(Type::FrozenStrings),
                 "tuple" => InstanceType::Tuple,
                 _ => {
                     return Err(error(

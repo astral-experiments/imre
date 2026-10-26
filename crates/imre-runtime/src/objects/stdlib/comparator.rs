@@ -1,7 +1,7 @@
 //! Stable sorting with a fallible native Python comparison.
 use super::{List, apply_order, object};
 use crate::Int;
-use crate::objects::exceptions::imre_error_pending;
+use crate::objects::exceptions::{Error, imre_error_pending};
 use crate::objects::words::WordKind;
 use num_traits::Signed;
 use smallvec::SmallVec;
@@ -176,25 +176,29 @@ pub unsafe extern "C" fn imre_sort_by_comparator(
     let mut words = Indices::new();
     // SAFETY: only borrowed words escape the storage borrow. The private list,
     // still rooted by the caller, continues to own every referenced object.
-    let copied: Result<(), smallvec::CollectionAllocErr> = unsafe {
+    let copied: Result<(), Error> = unsafe {
         if kind == 2 {
             (&*list.cast::<List>()).0.with(|values| {
-                words.try_reserve_exact(values.len())?;
+                words
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| Error::allocation())?;
                 words.extend(values.iter().map(|value| value.0));
                 Ok(())
             })
         } else {
             object(list.cast()).0.with(|storage| {
-                let values = storage.sequence();
+                let values = storage.sequence()?;
                 values.check_kind(kind);
-                words.try_reserve_exact(values.values.len())?;
+                words
+                    .try_reserve_exact(values.values.len())
+                    .map_err(|_| Error::allocation())?;
                 words.extend_from_slice(&values.values);
                 Ok(())
             })
         }
     };
-    if copied.is_err() {
-        crate::objects::exceptions::sequence_allocation_failed();
+    if let Err(error) = copied {
+        error.raise();
         return;
     }
     let n = words.len();

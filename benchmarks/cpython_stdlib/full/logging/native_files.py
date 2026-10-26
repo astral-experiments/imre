@@ -18,7 +18,6 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 FILE_FIXTURE = """import logging
 import os
 import unittest
-from typing import TextIO
 
 class NativeCase:
     fn: str
@@ -28,10 +27,10 @@ class NativeCase:
         self.fn = FILENAME
         self.checks = unittest.TestCase()
 
-    def assertIsNone(self, stream: TextIO | None) -> None:
+    def assertIsNone(self, stream) -> None:
         self.checks.assertTrue(stream is None)
 
-    def assertIsNotNone(self, stream: TextIO | None) -> None:
+    def assertIsNotNone(self, stream) -> None:
         self.checks.assertFalse(stream is None)
 
     def assertTrue(self, value: bool) -> None:

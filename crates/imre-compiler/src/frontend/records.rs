@@ -522,16 +522,19 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Expr {
-        let Some(payload @ Type::Class(_)) = self.types.payload(receiver.ty) else {
+        let Some(payload) = self.types.payload(receiver.ty) else {
             return receiver;
         };
-        if !matches!(&*attr.value, ast::Expr::Attribute(_))
-            || !self
-                .graph
-                .session
-                .narrowed_instance(self.module, &attr.value)
-        {
-            return receiver;
+        match payload {
+            // Handler.formatter is optional until explicit or basic configuration assigns it.
+            Type::LogFormatter => {}
+            Type::Class(_)
+                if matches!(&*attr.value, ast::Expr::Attribute(_))
+                    && self
+                        .graph
+                        .session
+                        .narrowed_instance(self.module, &attr.value) => {}
+            _ => return receiver,
         }
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
@@ -1342,13 +1345,13 @@ impl Checker<'_> {
         if self.classes.declarations.definitions[class]
             .enum_members
             .as_ref()
-            .is_some_and(|members| members.plain)
+            .is_some_and(|members| members.plain || members.http.is_some())
         {
             self.reject_builtin_keywords(call)?;
             let [value] = call.arguments.args.as_ref() else {
                 return Err(error(self.source, call, "Enum lookup requires one value"));
             };
-            let ty = Type::Enum(class);
+            let ty = self.classes.declarations.instance(class);
             let value = self.expr(value)?;
             if value.ty == ty {
                 return Ok(value);
@@ -1394,7 +1397,12 @@ impl Checker<'_> {
                     },
                 });
             }
-            let text = self.coerce(value, Type::Str, call)?;
+            let text = if matches!(ty, Type::IntEnum(_) | Type::StrEnum(_)) && value.ty == Type::Int
+            {
+                value
+            } else {
+                self.coerce(value, Type::Str, call)?
+            };
             return Ok(Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::EnumLookup(class), vec![text]),

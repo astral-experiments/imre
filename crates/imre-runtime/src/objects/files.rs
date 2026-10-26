@@ -27,6 +27,9 @@ pub(super) struct FileState {
     raw: bool,
     stream: Option<Stream>,
     pub(super) name: Option<StrOwner>,
+    // A closed text wrapper still owns its encoding; StringIO has no byte codec.
+    encoding: Option<StrOwner>,
+    errors: Option<StrOwner>,
     // Preserve access mode after close: binary wrong-direction errors take precedence.
     kind: FileKind,
 }
@@ -43,6 +46,7 @@ enum FileKind {
 }
 
 enum Stream {
+    Standard(bool),
     Read(Input),
     UnreadGzip { file: File, capacity: usize },
     Write(Output),
@@ -55,6 +59,7 @@ impl Stream {
     /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
+            Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
@@ -155,6 +160,8 @@ impl FileState {
                 fd: Some(fd),
                 raw: !text && capacity == 0,
                 name: None,
+                encoding: text.then(|| super::literal_string("UTF-8")),
+                errors: text.then(|| super::literal_string("strict")),
                 stream: Some(stream),
                 kind,
             })),
@@ -304,10 +311,48 @@ impl FileState {
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
+        self.write_with(text, || crate::sys::error_text(text))
+    }
+
+    pub(super) fn write_with(
+        &mut self,
+        text: &str,
+        input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<()> {
+        match self.stream {
+            Some(Stream::Standard(false)) => {
+                return crate::sys::write_stdout_with(text, false, input);
+            }
+            Some(Stream::Standard(true)) => return crate::sys::write_standard_stream(true, text),
+            _ => {}
+        }
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.write(text);
         }
         self.write_bytes(text.as_bytes())
+    }
+
+    pub(super) fn write_line(
+        &mut self,
+        text: &str,
+        input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<()> {
+        if let Some(Stream::Standard(false)) = self.stream {
+            return crate::sys::write_stdout_with(text, true, input);
+        }
+        self.write_with(text, input)?;
+        self.write("\n")
+    }
+
+    pub(super) fn has_encoding(&self) -> bool {
+        self.encoding.is_some()
+    }
+
+    pub(super) fn write_escaped_display(&mut self, text: &str) -> Result<()> {
+        match self.stream()? {
+            Stream::Standard(false) => crate::sys::write_escaped_stdout(text),
+            _ => self.write(text),
+        }
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
@@ -318,6 +363,9 @@ impl FileState {
             return Err(Error::new(Kind::ValueError, "flush of closed file"));
         }
         match self.stream()? {
+            Stream::Standard(stderr) => {
+                crate::sys::flush_standard(*stderr).map_err(crate::objects::errno_error)
+            }
             Stream::Read(_)
             | Stream::UnreadGzip { .. }
             | Stream::Member(_)
@@ -456,17 +504,51 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     build(kind, errno, &description)
 }
 
-/// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
-/// Returns an owned Object or null with a pending error.
+/// Open a text wrapper and retain its codec spelling, including after close.
 ///
 /// # Safety
-/// `path` must point into a live StrOwner. Mode 4 reads universal newlines without translating them.
-/// Like other fallible entries, pending state must be clear on entry.
+/// Root the path and any non-null encoding. The frontend checks the codec and mode;
+/// mode 4 reads universal newlines without translating them.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_text_open(path: *const Str, mode: u32) -> *const Object {
-    // SAFETY: the caller keeps this string owner live throughout the call.
-    let path = unsafe { StrOwner::acquire_word(path as usize) };
-    finish(open(&path, mode, false, false), std::ptr::null())
+pub unsafe extern "C" fn imre_text_open(
+    path: *const Str,
+    mode: u32,
+    encoding: *const Str,
+) -> *const Object {
+    // SAFETY: the caller retains both native strings through construction.
+    let (path, encoding) = unsafe { (StrOwner::acquire_word(path as usize), encoding.as_ref()) };
+    let state = open_state_with_encoding(
+        &path,
+        mode,
+        false,
+        false,
+        Some(encoding.map_or("UTF-8", |name| name)),
+    );
+    finish(
+        state.map(|file| crate::ObjectOwner::into_raw(file.into_object())),
+        std::ptr::null(),
+    )
+}
+
+/// Return the wrapper's retained encoding, or a null optional word for StringIO.
+///
+/// # Safety
+/// The compiler supplies a rooted text file, including after close.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_text_metadata(file: *const Object, errors: u32) -> *const Str {
+    // SAFETY: the rooted file owns its optional string throughout this read.
+    unsafe {
+        object(file).0.with(|s| {
+            let file = s.file();
+            (if errors != 0 {
+                &file.errors
+            } else {
+                &file.encoding
+            })
+            .clone()
+            .map_or(std::ptr::null(), StrOwner::into_raw)
+        })
+    }
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
@@ -494,6 +576,32 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
     finish(open(&path, 0, binary == 1, true), std::ptr::null())
 }
 
+/// The original Python wrapper shares the runtime's stdout/stderr buffer, even through an alias.
+pub(super) fn standard_stream(stderr: bool) -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(
+        FileState {
+            fd: Some(if stderr {
+                io::stderr().as_raw_fd()
+            } else {
+                io::stdout().as_raw_fd()
+            }),
+            stream: Some(Stream::Standard(stderr)),
+            raw: false,
+            encoding: Some(crate::sys::standard_field(
+                if stderr { 2 } else { 1 },
+                false,
+            )),
+            errors: Some(crate::sys::standard_field(if stderr { 2 } else { 1 }, true)),
+            kind: FileKind::Text,
+            name: Some(StrOwner::new(Str::new(if stderr {
+                "<stderr>"
+            } else {
+                "<stdout>"
+            }))),
+        },
+    )))))
+}
+
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
 pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
     let state = open_state(path, mode, binary, gzip)?;
@@ -503,6 +611,18 @@ pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Resu
 }
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let encoding = (!binary).then_some(if gzip { "utf-8" } else { "UTF-8" });
+    open_state_with_encoding(path, mode, binary, gzip, encoding)
+}
+
+/// The wrapper owns a spelling separate from the caller's encoding argument.
+fn open_state_with_encoding(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<&str>,
+) -> Result<FileState> {
     let (file, metadata) = open_file_with(path, mode, |error| {
         errno_with_filenames(
             error,
@@ -529,6 +649,8 @@ fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<Fi
         raw: false,
         stream: Some(stream),
         name: Some(path.clone()),
+        encoding: encoding.map(super::literal_string),
+        errors: encoding.map(|_| super::literal_string("strict")),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
             (true, 0) if gzip => FileKind::GzipBinaryRead,
@@ -767,9 +889,11 @@ pub unsafe extern "C" fn imre_text_write(value: *const Object, text: *const Str)
     let text = unsafe { &*text };
     // SAFETY: text is immutable, both handles are rooted, and no storage escapes.
     let result = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.file_mut().write(text))
+        object(value).0.with_mut(|storage| {
+            storage.file_mut().write_with(text, || {
+                Ok(StrOwner::acquire_word(text as *const Str as usize))
+            })
+        })
     };
     finish(
         result.map(|()| Int::from_usize(text.chars().count()).into_raw()),
@@ -787,9 +911,11 @@ pub unsafe extern "C" fn imre_text_write(value: *const Object, text: *const Str)
 pub unsafe extern "C" fn imre_text_write_discard(value: *const Object, text: *const Str) -> u32 {
     // SAFETY: file I/O cannot reenter; only the write result leaves storage access.
     let result = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.file_mut().write(&*text))
+        object(value).0.with_mut(|storage| {
+            storage
+                .file_mut()
+                .write_with(&*text, || Ok(StrOwner::acquire_word(text as usize)))
+        })
     };
     finish(result.map(|()| 1), 0)
 }
@@ -944,9 +1070,15 @@ mod tests {
                     .raw_os_error()
                     .unwrap()
             });
+            let name = crate::BytesOwner::new(name);
             // SAFETY: the bytes and descriptor stay rooted across unlinkat.
             unsafe {
-                super::super::os::imre_os_unlink(std::ptr::from_ref(&name).cast(), 1, fd.0, 0)
+                super::super::os::imre_os_unlink(
+                    crate::BytesOwner::as_ptr(&name).cast(),
+                    1,
+                    fd.0,
+                    0,
+                )
             };
             if let Some(errno) = expected_errno {
                 assert_eq!(imre_error_pending(), 1);
@@ -994,7 +1126,7 @@ mod tests {
     fn open(path: &str, mode: u32) -> crate::ObjectOwner {
         let path = StrOwner::new(Str::new(path));
         // SAFETY: the path owner stays live; this helper requires a successful open.
-        let result = unsafe { imre_text_open(StrOwner::as_ptr(&path), mode) };
+        let result = unsafe { imre_text_open(StrOwner::as_ptr(&path), mode, std::ptr::null()) };
         assert!(!result.is_null());
         // SAFETY: open transfers this one owned reference to the Rc.
         unsafe { crate::ObjectOwner::from_raw(result) }
@@ -1028,6 +1160,8 @@ mod tests {
                 stream: Some(Stream::Write(Output::new(file, 8192, false).ok().unwrap())),
                 kind: FileKind::Text,
                 name: None,
+                encoding: Some(crate::objects::literal_string("UTF-8")),
+                errors: Some(crate::objects::literal_string("strict")),
             },
         )))))
     }
@@ -1502,8 +1636,10 @@ mod tests {
             ("nul\0path".to_owned(), Kind::ValueError),
         ] {
             let path = StrOwner::new(Str::from(path));
-            // SAFETY: the path owner stays live throughout the failed call.
-            assert!(unsafe { imre_text_open(StrOwner::as_ptr(&path), 0) }.is_null());
+            assert!(
+                // SAFETY: the path is rooted; null selects the default encoding.
+                unsafe { imre_text_open(StrOwner::as_ptr(&path), 0, std::ptr::null()) }.is_null()
+            );
             take_error(kind);
         }
         os_error(io::ErrorKind::OutOfMemory.into()).raise();

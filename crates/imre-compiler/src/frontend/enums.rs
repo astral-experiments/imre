@@ -112,11 +112,111 @@ impl Checker<'_> {
         })
     }
 
+    /// A direct iterator can read the sealed enum without exposing a mutable mapping.
+    /// Enum iteration visits distinct values; __members__.values() also visits aliases.
+    pub(super) fn enum_iteration(&self, expression: &ast::Expr) -> Option<Iteration> {
+        let (class, aliases) = if let ast::Expr::Call(call) = expression {
+            let ast::Expr::Attribute(values) = &*call.func else {
+                return None;
+            };
+            let ast::Expr::Attribute(members) = &*values.value else {
+                return None;
+            };
+            if !call.arguments.is_empty()
+                || values.attr.as_str() != "values"
+                || members.attr.as_str() != "__members__"
+            {
+                return None;
+            }
+            (self.class_reference(&members.value)?, true)
+        } else {
+            (self.class_reference(expression)?, false)
+        };
+        let members = self.classes.declarations.definitions[class]
+            .enum_members
+            .as_ref()?;
+        let ty = self.classes.declarations.instance(class);
+        let member = |member| Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::StrEnumMember { class, member }, vec![]),
+        };
+        let values = if aliases {
+            members
+                .declared
+                .iter()
+                .map(|name| member(members.names[name]))
+                .collect()
+        } else {
+            (0..members.values.len()).map(member).collect()
+        };
+        Some(Iteration::Container {
+            iterable: Expr {
+                ty: self.types.list(ty),
+                kind: ExprKind::List(values),
+            },
+            items: false,
+            start: None,
+        })
+    }
+
+    /// Only this subscript sees the temporary mapping. Aliases retain their canonical tags.
+    pub(super) fn enum_name_lookup(
+        &mut self,
+        sub: &ast::ExprSubscript,
+    ) -> Result<Option<Expr>, String> {
+        let Some(class) = self.class_reference(&sub.value) else {
+            return Ok(None);
+        };
+        let Some(members) = &self.classes.declarations.definitions[class].enum_members else {
+            return Ok(None);
+        };
+        let ty = self.classes.declarations.instance(class);
+        if let ast::Expr::StringLiteral(name) = &*sub.slice
+            && let Some(member) = self.enum_member(class, name.value.to_str())
+        {
+            return Ok(Some(member));
+        }
+        let entries = members
+            .declared
+            .iter()
+            .map(|name| {
+                (
+                    unpacking::string(name),
+                    self.enum_member(class, name).unwrap(),
+                )
+            })
+            .collect();
+        let mapping = Expr {
+            ty: self.types.dict(Type::Str, ty),
+            kind: ExprKind::Dict {
+                key: Type::Str,
+                value: ty,
+                entries,
+            },
+        };
+        let key = self.expr_expected(&sub.slice, Type::Str)?;
+        Ok(Some(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::DictGet, vec![mapping, key]),
+        }))
+    }
+
     pub(super) fn qualified_member(&self, value: &ast::Expr) -> Option<Expr> {
         let ast::Expr::Attribute(attr) = value else {
             return None;
         };
         self.enum_member(self.class_reference(&attr.value)?, attr.attr.as_str())
+    }
+
+    pub(super) fn enum_integer(value: Expr) -> Expr {
+        if matches!(value.ty, Type::IntEnum(_)) {
+            Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::IntEnumValue, vec![value]),
+            }
+        } else {
+            value
+        }
     }
 
     pub(super) fn enum_text(value: Expr) -> Expr {
@@ -308,6 +408,22 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if matches!(
+            (left.ty, right.ty),
+            (Type::IntEnum(_), Type::Int) | (Type::Int, Type::IntEnum(_))
+        ) {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(left), Statement::Expr(right)],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(op == ast::CmpOp::IsNot),
+                    }),
+                    clear: vec![],
+                },
+            });
+        }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
             && [left.ty, right.ty].iter().all(|&ty| {
@@ -363,12 +479,38 @@ impl Checker<'_> {
                 expr
             });
         }
+        if let Some((union, members)) = types
+            .iter()
+            .find_map(|&ty| self.types.members(ty).map(|members| (ty, members)))
+            && members.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Bool | Type::LogRecord | Type::Str | Type::Bytes | Type::Path
+                )
+            })
+            && types.iter().all(|ty| *ty == union || members.contains(ty))
+        {
+            // A member's pointer and its tagged union word can differ. Put both
+            // operands in the same representation while preserving None and bool.
+            let target = if [left.ty, right.ty] == types {
+                union
+            } else {
+                self.types.optional(union)
+            };
+            return Ok(Self::identity_result(
+                vec![
+                    self.coerce(left, target, node)?,
+                    self.coerce(right, target, node)?,
+                ],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
                     value.kind,
                     ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
-                )
+                ) || self.is_partial_args(value)
             });
         // Namespace owners and their backing dictionaries are distinct rooted
         // objects. Optional storage preserves their pointer words and None tag.
@@ -443,7 +585,7 @@ impl Checker<'_> {
         }
         if !(types
             .iter()
-            .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
+            .all(|ty| matches!(ty, Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)))
             || types.iter().all(|ty| {
                 matches!(
                     ty,
@@ -462,11 +604,6 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
-            || (types[0] == types[1]
-                && self
-                    .types
-                    .members(types[0])
-                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
             || types.iter().all(|ty| {
                 matches!(
                     ty,
@@ -475,6 +612,7 @@ impl Checker<'_> {
                         | Type::Dict(_)
                         | Type::ChainMap(_)
                         | Type::Set(_)
+                        | Type::FrozenStrings
                         | Type::Deque(_)
                         | Type::Class(_)
                         | Type::ModuleSpec(_)
@@ -503,6 +641,7 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
+            || types == [Type::LogManager; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
@@ -521,7 +660,12 @@ impl Checker<'_> {
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]
             || types == [Type::CodecWriterClass; 2]
-            || types == [Type::CodecWriter; 2]
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::TextOutput | Type::CodecWriter | Type::TextIO | Type::StringIO
+                )
+            })
             || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
@@ -555,7 +699,9 @@ impl Checker<'_> {
     /// Guards can fail. Only unconditional cases count toward a finite match.
     pub(super) fn enum_exhaustive(&self, ty: Type, cases: &[ast::MatchCase]) -> bool {
         let payload = self.types.payload(ty);
-        let (Type::StrEnum(class) | Type::Enum(class)) = payload.unwrap_or(ty) else {
+        let (Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class)) =
+            payload.unwrap_or(ty)
+        else {
             return false;
         };
         let members = self.classes.declarations.definitions[class]

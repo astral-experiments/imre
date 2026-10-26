@@ -59,7 +59,7 @@ impl Emitter<'_, '_> {
                 } else if matches!(builtin, Builtin::SortDetach) {
                     Value {
                         ty: list.ty,
-                        operand: self.instruction(format!(
+                        operand: self.checked_instruction(format!(
                             "call ptr @imre_sort_detach(ptr {}, i32 {kind})",
                             list.operand
                         )),

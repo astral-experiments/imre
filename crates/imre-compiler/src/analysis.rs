@@ -163,6 +163,15 @@ impl Session {
                 bootstrap,
             )
             .map_err(|e| e.to_string())?;
+        // CPython's _simple_enum builds the public enum classes from private member
+        // factories. Check callers against typeshed's IntEnum/StrEnum declarations.
+        let http = vendored
+            .read_to_string("stdlib/http/__init__.pyi")
+            .map_err(|e| e.to_string())?;
+        system
+            .fs()
+            .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
@@ -721,7 +730,10 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
             Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_))
         )
     };
-    if is_partial(callee) {
+    // A branch can choose partials with different bound arguments but the same native ABI.
+    if is_partial(callee)
+        || matches!(callee, Type::Union(union) if union.elements(db).iter().copied().all(is_partial))
+    {
         return rule == "too-many-positional-arguments"
             || (rule == "missing-argument" && call.range() == range);
     }
@@ -973,7 +985,7 @@ impl<'a> Visitor<'a> for SuiteLimits<'_> {
 
 /// Ruff indexes the AST recursively as soon as the database parses a module.
 /// Bound the depth before that happens, including chains with no parentheses.
-fn check_source_complexity(source: &str) -> Result<(), &'static str> {
+pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     const LIMIT: usize = 96;
     if source.len() < LIMIT {
         return Ok(());
@@ -1086,7 +1098,7 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
 }
 
 /// Rejects ambiguous indentation while preserving whitespace inside string tokens.
-fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
+pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
     let mut offset = 0;
     for (line_number, line) in source.split_inclusive('\n').enumerate() {
         for (index, character) in line.char_indices() {

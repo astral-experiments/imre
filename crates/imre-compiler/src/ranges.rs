@@ -575,19 +575,27 @@ impl Analyzer {
                     flow = flow.join(self.block(orelse, next, record));
                 }
                 // A handler sees any completed prefix, not the normal exit.
-                // Finally may also run on return or an uncaught exception.
                 for handler in handlers {
                     flow = flow.join(self.block(&handler.body, unknown.clone(), record));
                 }
-                let final_flow = self.block(finalbody, unknown.clone(), record);
-                if !finalbody.is_empty() {
-                    if final_flow.next.is_none() {
-                        flow.next = None;
-                    }
-                    flow.breaks = merge(flow.breaks, final_flow.breaks);
-                    flow.continues = merge(flow.continues, final_flow.continues);
-                    flow.exhausts = merge(flow.exhausts, final_flow.exhausts);
+                // Leaving a generator frame preserves locals on every exit from the step.
+                if matches!(
+                    finalbody.as_slice(),
+                    [] | [Statement::Expr(Expr {
+                        kind: ExprKind::Builtin(Builtin::GeneratorFrameLeave, _) | ExprKind::None,
+                        ..
+                    })]
+                ) {
+                    return flow;
                 }
+                // Finally may also run on return or an uncaught exception.
+                let final_flow = self.block(finalbody, unknown.clone(), record);
+                if final_flow.next.is_none() {
+                    flow.next = None;
+                }
+                flow.breaks = merge(flow.breaks, final_flow.breaks);
+                flow.continues = merge(flow.continues, final_flow.continues);
+                flow.exhausts = merge(flow.exhausts, final_flow.exhausts);
                 for state in [
                     &mut flow.next,
                     &mut flow.breaks,
@@ -1650,9 +1658,16 @@ mod tests {
 
     #[test]
     fn suspended_pipeline_cleanup_preserves_nonnegative_list_cursors() {
-        for source in ["values", "reversed(values)"] {
+        for (source, condition) in [
+            ("values", "left == right"),
+            ("reversed(values)", "left == right"),
+            (
+                "values",
+                "left == right and sys._getframemodulename(0) == '__main__'",
+            ),
+        ] {
             let module = module(&format!(
-                "def same(values: list[int]) -> bool:\n    return all(left == right for left, right in zip({source}, {source}))\n"
+                "import sys\ndef same(values: list[int]) -> bool:\n    return all({condition} for left, right in zip({source}, {source}))\n"
             ));
             let facts = analyze(&module);
             let mut accesses = 0;
@@ -1664,7 +1679,8 @@ mod tests {
                         Some(IntRange {
                             min: 0,
                             max: MAX_LIST_LEN as i64 - 1,
-                        })
+                        }),
+                        "{source}, {condition}"
                     );
                 }
             }

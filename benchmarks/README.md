@@ -2,6 +2,8 @@
 
 The [Rust, CPython and Imre comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and chart.
 
+The opt-in [Flask TCP acceptance gate](flask/README.md) checks five real requests against recorded CPython responses.
+
 ## Packed value structs
 
 [Packed struct lists vs frozen dataclasses](results/2026-10-25-struct-points.md) measures

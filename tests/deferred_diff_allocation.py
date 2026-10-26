@@ -1,0 +1,55 @@
+"""Refuse real allocations after creating two ndiff aliases and two tee cursors."""
+import os
+from pathlib import Path
+import re
+import subprocess
+
+
+def check(args, directory):
+    fixtures = Path(__file__).resolve().parent / "fixtures/deferred_diff_allocation"
+    wrapper = directory / "deferred-diff-refuse.o"
+    subprocess.run([args.clang, "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
+    link = ["-C", f"link-arg={wrapper}"]
+    for name in ("malloc", "realloc", "calloc", "imre_print_str"):
+        link += ["-C", f"link-arg=-Wl,--wrap={name}"]
+    if args.lto_linker is not None:
+        link += ["--lto-linker", args.lto_linker.resolve()]
+    source = fixtures / "retry.py"
+    modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
+    cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
+    cases.append(("join-owner", "short", "A", "B"))
+    cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
+    cases.append(("slice-owner", "short", "A", "B"))
+    passed = 0
+    for level in args.opt_levels:
+        exe = directory / f"deferred-diff-O{level}"
+        subprocess.run([args.compiler.resolve(), "build", source, "--no-cache",
+                        "--runtime", args.runtime.resolve(), "--clang", args.clang,
+                        "--opt-level", level, "-o", exe, *link], check=True)
+        for argv in cases:
+            expected = subprocess.check_output([args.python, "-I", source, *argv])
+            env = os.environ | {"IMRE_DIFF_FAIL_N": "0"}
+            control = subprocess.run([exe, *argv], env=env, capture_output=True, check=True)
+            assert control.stdout == expected, (level, argv, control)
+            count = int(re.fullmatch(rb"observed (\d+)\n", control.stderr)[1])
+            assert count > 0, (level, argv, "no allocations observed")
+            # repr's output buffer is covered separately; target its first row allocation.
+            if argv[0] == "slice-owner":
+                indices = (count,)
+            elif argv[0] in ("repr", "frozen"):
+                indices = (1,)
+            elif argv[0] == "join-owner":
+                indices = (count,)
+            elif argv[0] in ("pack-project", "restore"):
+                indices = {1, count // 2, count}
+            else:
+                indices = range(1, count + 1)
+            retry = expected.replace(b"armed\n", b"armed\nrefused\nMemoryError()\n", 1)
+            for at in indices:
+                env["IMRE_DIFF_FAIL_N"] = str(at)
+                got = subprocess.run([exe, *argv], env=env, capture_output=True)
+                assert (got.returncode, got.stdout) == (0, retry), (level, argv, at, got)
+                assert re.fullmatch(fr"refused {at} \d+\nobserved {at}\n".encode(), got.stderr), got
+                passed += 1
+            passed += 1
+    return passed

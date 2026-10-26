@@ -28,8 +28,10 @@ test packages and child-program strings:
 | argparse | `test_argparse.py:2069` | Patch `builtins.open` and observe which parser calls use it. |
 | unittest | `test_unittest/test_discovery.py:878,911`, `test_unittest/testmock/testmock.py:263` | Patch the actual import function for discovery and patch open for mock. |
 
-A qualified native `_` lookup reads its current value. A from-import would
-snapshot it at import time; the compiler currently rejects that form. The
+A qualified native `_` lookup reads its current value. A from-import executes
+its lookup once at the import statement and retains the object. A missing
+from-import raises ImportError with the original message and the module and
+export names; a qualified read raises AttributeError. The
 other callable bindings above also remain unsupported. Mapping their names to
 the default native operations would bypass changes to the namespace.
 
@@ -63,3 +65,27 @@ In `test_logging.py:2306`, `test_encoding_cyrillic_unicode`
 obtains `codecs.getwriter('cp1251')`, sets its class encoding, and logs into a
 wrapped `io.BytesIO`. A stateless UTF-8 or Latin-1 codec cannot implement that
 writer. These consumer occurrences stay with their respective suite reports.
+
+
+The complete original `DisplayHookTest.test_original_displayhook` runs at both
+optimization levels with CPython's fixture, body and assertions. Its ten
+operations reach one persistent Imre process. Newly written native stdout
+bytes are forwarded to the original captured stream. The child itself owns
+`builtins._`, saves and deletes its `sys.stdout`, raises the missing-stream
+exception, and restores the native handle. This is host-driven native
+operation coverage.
+
+The separate [stdout binding control](stdout_binding.py) redirects both print
+and the display hook to a real disk file and a native `io.StringIO`. It checks
+Unicode text, the repr of bytes, a float, writes through an old alias, and the
+error raised by closing the replacement stream. Its output is compared to
+CPython at O0 and O3; it adds no upstream test ID.
+
+The [wrapper metadata control](stdout_metadata.py) reads `sys.stdout.encoding`
+after redirecting stdout to a disk file or to `StringIO`. It checks the saved
+wrapper and string identities, the spelling preserved by an explicit UTF-8 open,
+reads after close, and distinct errors for a missing binding and a binding set
+to `None`. Both native levels compare the process streams and the redirected
+file bytes with pinned CPython. The disk default here is the suite's C.UTF-8
+locale with UTF-8 mode off; the file implementation in this branch supports
+UTF-8. This control adds no occurrence or change of execution role.

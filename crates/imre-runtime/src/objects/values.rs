@@ -15,6 +15,8 @@ use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 
 const GENERATED_EQ: u32 = 1;
 const GENERATED_REPR: u32 = 2;
+const HAS_REPR_TEXT: u32 = 1 << 4;
+const REPR_TEXT_FIELD: u32 = 1 << 2;
 const TUPLE: u32 = 1;
 const MODULE_SPEC: u32 = 2;
 
@@ -343,7 +345,14 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         (None, Some(b)) => return Comparison::Done(b.equal_words(left)),
                         (None, None) => {}
                     }
-                    let (left, right) = (left.resolved(), right.resolved());
+                    let left = match left.resolved() {
+                        Ok(v) => v,
+                        Err(error) => return Comparison::Error(error),
+                    };
+                    let right = match right.resolved() {
+                        Ok(v) => v,
+                        Err(error) => return Comparison::Error(error),
+                    };
                     if left.kind != right.kind || left.values.len() != right.values.len() {
                         return Comparison::Done(false);
                     }
@@ -367,9 +376,10 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
                     Comparison::Done(left.equal_member(right))
                 }
-                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
-                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
-                ),
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => {
+                    super::boxed_values::try_equal((l.kind, l.word), (r.kind, r.word))
+                        .map_or_else(Comparison::Error, Comparison::Done)
+                }
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(
                         crate::ObjectOwner::as_ptr(left),
@@ -595,8 +605,8 @@ unsafe fn write_repr_with(
                                 Ok(None)
                             }
                         }
-                        Storage::Sequence(values) => {
-                            if let Some(rows) = values.rows() {
+                        Storage::Sequence(sequence) => {
+                            if let Some(rows) = sequence.rows() {
                                 output.write_char('[')?;
                                 for i in 0..rows.len() {
                                     if i != 0 {
@@ -617,7 +627,15 @@ unsafe fn write_repr_with(
                                 output.write_char(']')?;
                                 return Ok(None);
                             }
-                            let values = values.resolved();
+                            let values = sequence.resolved().map_err(|error| {
+                                error.raise();
+                                std::fmt::Error
+                            })?;
+                            if position == 0 && sequence.mock_call_list.get()
+                                && write_mock_history(output, &values.values, values.kind)?
+                            {
+                                return Ok(None);
+                            }
                             if position == 0 {
                                 output.write_char('[')?;
                             }
@@ -647,7 +665,7 @@ unsafe fn write_repr_with(
                                 }
                                 output.write_str("ChainMap(")?;
                             }
-                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            let mapping = maps.0.with(|s| s.sequence_storage().values.get(position).copied());
                             if let Some(mapping) = mapping {
                                 if position != 0 {
                                     output.write_str(", ")?;
@@ -894,6 +912,67 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
+/// Borrows the cached display field while the caller roots the initialized record.
+unsafe fn record_repr_text<'a>(
+    payload: *const usize,
+    layout: &super::records::RecordDescriptor,
+) -> Option<&'a str> {
+    let semantics = layout.class_semantics()?;
+    if semantics.flags & HAS_REPR_TEXT == 0 {
+        return None;
+    }
+    // SAFETY: the compiler emits one flag and kind for each physical word.
+    // Reading the string borrows the record's owner without consuming a reference.
+    unsafe {
+        for index in 0..layout.length {
+            if (*semantics.fields.add(index)).flags & REPR_TEXT_FIELD != 0 {
+                let kind = WordKind::new(*layout.kinds.add(index));
+                if kind.raw() != 3 {
+                    return None;
+                }
+                let word = kind.read_record_field(payload.add(index));
+                return (word as *const Str).as_ref().map(Str::as_str);
+            }
+        }
+    }
+    None
+}
+
+/// Writes a marked call history with its own 80-character wrapping.
+unsafe fn write_mock_history(
+    output: &mut ReprWriter<'_>,
+    words: &[usize],
+    kind: WordKind,
+) -> Result<bool, std::fmt::Error> {
+    if kind.raw() != 6 {
+        return Ok(false);
+    }
+    let calls = words.iter().map(|&word| {
+        let payload = word as *const usize;
+        if payload.is_null() {
+            return None;
+        }
+        // SAFETY: the sequence roots each record, and neither pass invokes Python.
+        unsafe { record_repr_text(payload, descriptor(payload)) }
+    });
+    let punctuation = 2usize.saturating_add(words.len().saturating_sub(1).saturating_mul(2));
+    let Some(width) = calls.clone().try_fold(punctuation, |width, call| {
+        Some(width.saturating_add(call?.chars().take(81usize.saturating_sub(width)).count()))
+    }) else {
+        return Ok(false);
+    };
+    let separator = if width > 80 { ",\n " } else { ", " };
+    output.write_char('[')?;
+    for (index, call) in calls.enumerate() {
+        if index != 0 {
+            output.write_str(separator)?;
+        }
+        output.write_str(call.expect("validated immutable call text"))?;
+    }
+    output.write_char(']')?;
+    Ok(true)
+}
+
 unsafe fn fields_repr(
     output: &mut ReprWriter<'_>,
     payload: *const usize,
@@ -908,6 +987,10 @@ unsafe fn fields_repr(
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
     // SAFETY: checked descriptors contain valid names, flags, and field arrays.
     unsafe {
+        if let Some(rendered) = record_repr_text(payload, layout) {
+            output.write_str(rendered)?;
+            return Ok(None);
+        }
         if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR == 0 {
             write!(
                 output,

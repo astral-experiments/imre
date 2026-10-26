@@ -9,7 +9,9 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
+use crate::ir::{
+    CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
+};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -180,6 +182,8 @@ pub(crate) enum Intrinsic {
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
+    TextOutputType,
+    HandlerFallback,
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
@@ -244,6 +248,7 @@ pub(crate) enum Intrinsic {
     TypeVar,
     Stderr,
     Stdout,
+    OriginalStdout,
     SysExecutable,
     SysFlags,
     SysDontWriteBytecode,
@@ -252,9 +257,10 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysVersionInfo,
     SysThreadInfo,
+    SysStdlibModuleNames,
     SysVersion,
     SysHexversion,
-    SysEncoding(&'static str),
+    SysEncoding(SysEncoding),
     SysIntern { query: bool },
     SysException,
     SysGetFrameModuleName,
@@ -284,6 +290,7 @@ pub(crate) enum Intrinsic {
     Argv,
     OrigArgv,
     Logger,
+    LogManager,
     LogRoot,
     LogEmit(Option<u8>),
     TimedFileHandler,
@@ -332,6 +339,8 @@ pub(crate) enum Intrinsic {
     RegexPattern,
     RegexMatch,
     StrEnum,
+    IntEnum,
+    SimpleEnum,
     EnumAuto,
     DefaultDict,
     ChainMap,
@@ -416,6 +425,8 @@ pub(crate) enum Intrinsic {
     PosixPath(PosixPathOperation),
     Fnmatch(FnmatchOperation),
     Unquote,
+    UrlSplit,
+    SplitResult { bytes: bool },
 }
 
 impl Intrinsic {
@@ -583,7 +594,7 @@ impl IntrinsicModule {
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
             (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
-            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "LogRecord" | "_logRecordFactory") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
             (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),
@@ -699,7 +710,8 @@ impl IntrinsicModule {
             (Self::Subprocess, "getstatusoutput") => Intrinsic::ShellOutput { status: true },
             (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
-            (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
+            (Self::Sys, "stdout") => Intrinsic::Stdout,
+            (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
@@ -708,8 +720,11 @@ impl IntrinsicModule {
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
-            (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
-            (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding(SysEncoding::Default),
+            (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding(SysEncoding::Filesystem),
+            (Self::Sys, "getfilesystemencodeerrors") => {
+                Intrinsic::SysEncoding(SysEncoding::FilesystemErrors)
+            }
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,
@@ -718,6 +733,7 @@ impl IntrinsicModule {
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
             (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
+            (Self::Sys, "stdlib_module_names") => Intrinsic::SysStdlibModuleNames,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
@@ -753,6 +769,7 @@ impl IntrinsicModule {
             (Self::Datetime, "timezone") => Intrinsic::Calendar(crate::ir::CalendarType::Zone),
             (Self::Datetime, "UTC") => Intrinsic::CalendarUtc,
             (Self::Logging, "Logger") => Intrinsic::Logger,
+            (Self::Logging, "Manager") => Intrinsic::LogManager,
             (Self::Logging, "root") => Intrinsic::LogRoot,
             (Self::Logging, "log") => Intrinsic::LogEmit(None),
             (Self::Logging, "debug") => Intrinsic::LogEmit(Some(10)),
@@ -852,6 +869,8 @@ impl IntrinsicModule {
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
+            (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
+            (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections | Self::CollectionsNative, "_count_elements") => {
                 Intrinsic::CountElements
@@ -955,6 +974,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
+            (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
+            (Self::UrllibParse, "SplitResultBytes") => Intrinsic::SplitResult { bytes: true },
             _ => return declarations::symbol(self, name),
         };
         Some(Binding::Intrinsic(symbol))
@@ -982,6 +1004,8 @@ pub(crate) struct SourceModule {
     pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
+    /// Mutable intrinsic exports read at the source from-import, keyed by statement.
+    pub(crate) snapshots: HashMap<usize, Intrinsic>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
@@ -1011,6 +1035,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
+    pub(crate) virtual_command: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -1051,7 +1076,7 @@ impl SourceGraph {
         let mut modules = self.modules.iter().enumerate();
         inputs.files.retain(|_| {
             let (id, module) = modules.next().expect("one input per module");
-            !module.bundled && !(id == self.entry && self.command_startup.is_some())
+            !module.bundled && !(id == self.entry && self.virtual_command)
         });
         let paths = inputs
             .files
@@ -1360,6 +1385,36 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        // The bundled _simple_enum factories are lowered to immutable member tables.
+        // Keep the actual category property bodies and every caller in ty's check.
+        if let Some((id, http)) = self
+            .modules
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.is_bundled("http"))
+        {
+            let ranges =
+                &mut skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[id];
+            for stmt in &http.parsed.syntax().body {
+                match stmt {
+                    ast::Stmt::ImportFrom(import) if import.module.as_deref() == Some("enum") => {
+                        ranges.push(import.range());
+                    }
+                    ast::Stmt::ClassDef(class) => {
+                        ranges.extend(class.body.iter().filter_map(|s| {
+                            if let ast::Stmt::FunctionDef(f) = s
+                                && f.name.as_str() == "__new__"
+                            {
+                                Some(f.range())
+                            } else {
+                                None
+                            }
+                        }))
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.python_optimization() > 0 {
             use ast::visitor::{Visitor, walk_stmt};
 
@@ -1393,6 +1448,7 @@ impl SourceGraph {
             .filter(move |(id, segment)| {
                 let module = &self.modules[*id];
                 *id != self.entry
+                    || !module.snapshots.is_empty()
                     || class_globals
                     || !module.entry_globals.is_empty()
                     || !module.overloads.is_empty()
@@ -1452,6 +1508,39 @@ impl SourceGraph {
             options.entry_profile.as_deref(),
         )?;
         graph.command_startup = Some((command.flags, command.executable.clone()));
+        graph.virtual_command = true;
+        Ok(graph)
+    }
+
+    /// A directly invoked file is __main__; its enclosing package is not imported.
+    pub(crate) fn script(
+        path: &Path,
+        flags: crate::CommandFlags,
+        executable: &str,
+        options: &crate::CompileOptions,
+        mut fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let filename = std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(path);
+        let entry = fs
+            .canonicalize(path)
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let source = fs
+            .read_to_string(&entry)
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let root = entry
+            .parent()
+            .ok_or("script has no parent directory")?
+            .to_path_buf();
+        let mut loader = Loader::new(root, &options.extension_paths, fs)?;
+        loader.skip_current_root = flags.safe_path;
+        let reachable = options.reachable_only || options.entry_profile.is_some();
+        loader.reachable_only = reachable;
+        let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
+        loader.scan(id)?;
+        let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
+        graph.command_startup = Some((flags, executable.to_owned()));
         Ok(graph)
     }
 
@@ -1793,6 +1882,7 @@ impl<'a> Loader<'a> {
             overloads: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
+            snapshots: HashMap::new(),
             executable: Vec::new(),
         });
         Ok(id)
@@ -1881,6 +1971,7 @@ impl<'a> Loader<'a> {
         }
         let mut graph = SourceGraph {
             command_startup: None,
+            virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             entry_profile: profile
@@ -2023,7 +2114,15 @@ impl<'a> Loader<'a> {
                         segment = index;
                     }
                     class_data_prefix = false;
-                    self.import(id, statement)
+                    if self.modules[id]
+                        .snapshots
+                        .keys()
+                        .any(|at| (segment..index).contains(at))
+                    {
+                        self.initialization.push((id, segment..index));
+                        segment = index;
+                    }
+                    self.import(id, index, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
                     if errno_import(statement).is_some() {
                         // The target decides which forward symbols exist. A failed from-import
@@ -2143,7 +2242,7 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    fn import(&mut self, id: ModuleId, statement: &ast::Stmt) -> Result<(), String> {
+    fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
         match statement {
             ast::Stmt::Import(import) => {
                 if import.is_lazy {
@@ -2201,6 +2300,8 @@ impl<'a> Loader<'a> {
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
+                            "_TextOutput" => Intrinsic::TextOutputType,
+                            "_fallback" => Intrinsic::HandlerFallback,
                             _ => {
                                 return Err(format!(
                                     "unknown private logging symbol: {}",
@@ -2251,12 +2352,26 @@ impl<'a> Loader<'a> {
                                 alias.name
                             )
                         })?;
-                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
-                            return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
-                        }
                         if binding == Binding::Intrinsic(Intrinsic::BuiltinsLen) {
                             return Err("from builtins import len needs an import-time snapshot; use a qualified lookup".into());
                         }
+                        let binding = if let Binding::Intrinsic(
+                            symbol @ (Intrinsic::BuiltinsLast | Intrinsic::Stdout),
+                        ) = binding
+                        {
+                            // Typeshed omits the interactive name; this import
+                            // performs the real lookup and may raise ImportError.
+                            if symbol == Intrinsic::BuiltinsLast {
+                                self.checked_builtin_imports.push((id, alias.range()));
+                            }
+                            self.modules[id].snapshots.insert(index, symbol);
+                            Binding::Value(DefinitionId {
+                                module: id,
+                                statement: index,
+                            })
+                        } else {
+                            binding
+                        };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
                         if module == IntrinsicModule::Collections
@@ -2447,6 +2562,10 @@ impl<'a> Loader<'a> {
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
+            "http" => Some((
+                "http/__init__.py",
+                include_str!("../stdlib/http/__init__.py"),
+            )),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
@@ -2564,7 +2683,7 @@ impl<'a> Loader<'a> {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension("imre.a");
+                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.extension_roots.contains(root);
                 if installed && self.fs.is_file(&archive) {
                     if !self.fs.is_file(&stub) {

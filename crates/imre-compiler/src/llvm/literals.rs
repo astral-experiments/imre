@@ -232,6 +232,11 @@ ready:
             "define internal void @imre_init_literals(){attributes} {{\nentry:"
         )
         .unwrap();
+        if self.uses_string_interning {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_sys_init_encoding_names()\n");
+        }
         for (bytes, id, ty, init, _) in literals.clone() {
             if lazy_constructor(ty).is_some() {
                 continue;
@@ -261,10 +266,15 @@ ready:
         if !self.enum_members.is_empty() {
             writeln!(
                 self.output.entry_buffer(),
-                "  call void @imre_str_enum_table(ptr @str_enum_members, i64 {})",
+                "  call void @imre_enum_display_table(ptr @str_enum_members, i64 {}, ptr @enum_display_styles)",
                 self.enum_members.len()
             )
             .unwrap();
+        }
+        if !self.http_members.is_empty() {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_http_enum_table(ptr @http_enum_members)\n");
         }
         self.output.entry_buffer().push_str("  ret void\n}\n");
         self.output.common().push('\n');
@@ -277,6 +287,11 @@ ready:
             self.output
                 .entry_buffer()
                 .push_str("  call void @imre_str_enum_table(ptr null, i64 0)\n");
+        }
+        if !self.http_members.is_empty() {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_http_enum_table(ptr null)\n");
         }
         for (_, id, ty, _, release) in literals {
             let repr = ty.llvm();

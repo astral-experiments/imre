@@ -206,7 +206,9 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            expression(left, functions, targets) || expression(right, functions, targets)
+            targets.types.truth_may_materialize(left.ty)
+                || expression(left, functions, targets)
+                || expression(right, functions, targets)
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
@@ -451,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn proven_sequence_pulls_remove_only_their_own_index_errors() {
+    fn proven_sequence_pulls_preserve_deferred_read_errors() {
         let source = crate::modules::SourceGraph::single(
             r#"
 def checked(values: list[str], index: int) -> str:
@@ -465,11 +467,14 @@ def backward(values: list[str]) -> bool:
 
 def conversion(values: list[str]) -> bool:
     return any(int(value) for value in values)
+
+def integers(values: list[int]) -> int:
+    return len(values)
 "#,
         )
         .unwrap();
         let module = crate::frontend::lower(&source).unwrap();
-        assert_eq!(analyze(&module).functions, [true, false, false, true]);
+        assert_eq!(analyze(&module).functions, [true, true, true, true, false]);
     }
 
     #[test]
@@ -627,13 +632,24 @@ def indirect(value: str) -> int:
     }
 
     #[test]
-    fn splitlines_allocation_errors_escape_user_functions() {
-        let source = "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n";
-        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
-        for call in ["call ptr @imre_str_splitlines(", "call ptr @fn_0("] {
-            let (_, following) = llvm.split_once(call).unwrap();
-            let (body, _) = following.split_once("\n}").unwrap();
-            assert!(body.contains("call i32 @imre_error_pending()"));
+    fn allocation_errors_escape_user_functions() {
+        let cases = [
+            (
+                "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n",
+                "call ptr @imre_str_splitlines(",
+            ),
+            (
+                "import sys\ndef names() -> frozenset[str]:\n    return sys.stdlib_module_names\ndef count() -> int:\n    return len(names())\n",
+                "call ptr @imre_sys_stdlib_module_names(",
+            ),
+        ];
+        for (source, allocation) in cases {
+            let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+            for call in [allocation, "call ptr @fn_0("] {
+                let (_, following) = llvm.split_once(call).unwrap();
+                let (body, _) = following.split_once("\n}").unwrap();
+                assert!(body.contains("call i32 @imre_error_pending()"), "{call}");
+            }
         }
     }
 

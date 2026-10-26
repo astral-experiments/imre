@@ -23,3 +23,13 @@ propagates to the caller. The default handler honors `logging.raiseExceptions`.
 Imre's diagnostic includes the exception and its explicit causes, the record's
 filename and line, and the message and arguments. Native frames have no
 traceback objects.
+
+`FileHandler` inherits `StreamHandler`. A logger can attach a file handler,
+apply its level and filters, and remove that same handler. Closing releases
+the current stream and unregisters the handler name. Replacing the stream
+does not close the previous one.
+
+`tests/fixtures/files/logging_file_delivery.py` also compares 25 observations
+with CPython at both levels: accepted and filtered record identities, UTF-8
+bytes, stream replacement, `fileno`, delayed close without creating a file,
+and close delegation through a CP1251 writer. It contributes zero test IDs.

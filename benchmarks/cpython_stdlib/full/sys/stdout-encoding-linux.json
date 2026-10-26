@@ -90,6 +90,24 @@
           "stderr": ""
         },
         {
+          "case": "metadata",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "8397f4f2f44fa2a3998983a325e399a48525",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "IBM424:replace",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "8397f4f2f44f9985979381838525e399a48525",
+          "stderr": ""
+        },
+        {
           "case": "writes and failures",
           "setting": null,
           "flags": [],
@@ -153,6 +171,60 @@
           "stderr": ""
         },
         {
+          "case": "writes and failures",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f8186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": "7d838881999481977d408396848583408381957da34085958396848540838881998183a38599407de0a785f97d408995409796a289a389969540f37a40838881998183a3859940948197a240a396404ca495848586899585846e25"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:replace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f8381866f404a6f6ff8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:backslashreplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f838186e0a785f9404ae0a4f2f08183e0e4f0f0f0f186f9f8f0f8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:namereplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f838186e0d5c0d3c1e3c9d540e2d4c1d3d340d3c5e3e3c5d940c540e6c9e3c840c1c3e4e3c5d0404ae0d5c0c5e4d9d640e2c9c7d5d0e0d5c0c3d9c1c2d0f8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "text surrounding a POSIX child writing raw bytes",
+          "setting": "utf-8",
+          "flags": [],
+          "source_sha256": "bf43b990c7047b4cc3931849de124241f11b78e879a2d0217506c8e30686095e",
+          "status": 0,
+          "stdout": "c2a200726177ffc2a20a",
+          "stderr": ""
+        },
+        {
+          "case": "text surrounding a POSIX child writing raw bytes",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "bf43b990c7047b4cc3931849de124241f11b78e879a2d0217506c8e30686095e",
+          "status": 0,
+          "stdout": "4a00726177ff4a25",
+          "stderr": ""
+        },
+        {
           "case": "legacy POSIX locale",
           "setting": null,
           "flags": [
@@ -205,16 +277,16 @@
           "setting": "cp424",
           "source": "print(chr(0xa2))",
           "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
-          "same_status_stdout_and_last_diagnostic_line": false,
+          "same_status_stdout_and_last_diagnostic_line": true,
           "cpython": {
             "status": 0,
             "stdout": "4a25",
             "last_stderr_line": ""
           },
           "imre": {
-            "status": 1,
-            "stdout": "",
-            "last_stderr_line": "LookupError: unknown encoding: cp424"
+            "status": 0,
+            "stdout": "4a25",
+            "last_stderr_line": ""
           }
         },
         {
@@ -367,6 +439,24 @@
           "stderr": ""
         },
         {
+          "case": "metadata",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "8397f4f2f44fa2a3998983a325e399a48525",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "IBM424:replace",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "8397f4f2f44f9985979381838525e399a48525",
+          "stderr": ""
+        },
+        {
           "case": "writes and failures",
           "setting": null,
           "flags": [],
@@ -430,6 +520,60 @@
           "stderr": ""
         },
         {
+          "case": "writes and failures",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f8186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": "7d838881999481977d408396848583408381957da34085958396848540838881998183a38599407de0a785f97d408995409796a289a389969540f37a40838881998183a3859940948197a240a396404ca495848586899585846e25"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:replace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f8381866f404a6f6ff8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:backslashreplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f838186e0a785f9404ae0a4f2f08183e0e4f0f0f0f186f9f8f0f8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "cp424:namereplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "8285869699854f838186e0d5c0d3c1e3c9d540e2d4c1d3d340d3c5e3e3c5d940c540e6c9e3c840c1c3e4e3c5d0404ae0d5c0c5e4d9d640e2c9c7d5d0e0d5c0c3d9c1c2d0f8258186a385994ff4f8f3f5f7f0f3f2f7f8f4f5f8f5f1f6f6f9f8f8f2f4f7f0f425c68193a28525f14bf525827d96927d25",
+          "stderr": ""
+        },
+        {
+          "case": "text surrounding a POSIX child writing raw bytes",
+          "setting": "utf-8",
+          "flags": [],
+          "source_sha256": "bf43b990c7047b4cc3931849de124241f11b78e879a2d0217506c8e30686095e",
+          "status": 0,
+          "stdout": "c2a200726177ffc2a20a",
+          "stderr": ""
+        },
+        {
+          "case": "text surrounding a POSIX child writing raw bytes",
+          "setting": "cp424",
+          "flags": [],
+          "source_sha256": "bf43b990c7047b4cc3931849de124241f11b78e879a2d0217506c8e30686095e",
+          "status": 0,
+          "stdout": "4a00726177ff4a25",
+          "stderr": ""
+        },
+        {
           "case": "legacy POSIX locale",
           "setting": null,
           "flags": [
@@ -482,16 +626,16 @@
           "setting": "cp424",
           "source": "print(chr(0xa2))",
           "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
-          "same_status_stdout_and_last_diagnostic_line": false,
+          "same_status_stdout_and_last_diagnostic_line": true,
           "cpython": {
             "status": 0,
             "stdout": "4a25",
             "last_stderr_line": ""
           },
           "imre": {
-            "status": 1,
-            "stdout": "",
-            "last_stderr_line": "LookupError: unknown encoding: cp424"
+            "status": 0,
+            "stdout": "4a25",
+            "last_stderr_line": ""
           }
         },
         {

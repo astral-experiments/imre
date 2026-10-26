@@ -177,6 +177,8 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
                 fd: None,
                 raw: false,
                 name: None,
+                encoding: None,
+                errors: None,
                 kind: FileKind::TextMemory,
                 stream: Some(Stream::TextMemory(memory)),
             }

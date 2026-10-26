@@ -2,7 +2,6 @@
 
 use crate::StrOwner;
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
@@ -11,7 +10,7 @@ use serde::{Deserialize, Deserializer};
 use super::{
     Action, Error, Kind, OptionSpec, Parser, Stop, Words, imre_path_new, owned_text, string_repr,
 };
-use crate::{Int, List, floats, parse_decimal_int};
+use crate::{Int, floats, parse_decimal_int};
 
 #[derive(Deserialize)]
 pub(super) struct IntegerRange(
@@ -261,7 +260,8 @@ impl OptionSpec {
                     Scalar::Int(n) => n,
                     _ => unreachable!(),
                 }));
-                Rc::into_raw(Rc::new(List::new(ints))) as usize
+                let list = crate::try_new_list(ints).map_err(|_| Error::allocation())?;
+                crate::ListOwner::into_raw(list) as usize
             }
             Bound::List(values) => {
                 let mut words = Words::new(match self.kind {

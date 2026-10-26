@@ -1,0 +1,59 @@
+{
+  "python": "3.14.5",
+  "app_sha256": "079e25a38fcc801f352c38d5cde24be4d7f22795ef897023b142ace0b2fae057",
+  "recorded_reference_sha256": "1ef78d8f47efcfebd5fc17170eea3276d45cea0b862922fb875df4f0e1352c77",
+  "loopback_tcp": {
+    "health": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 12,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "{\"ok\":true}\n",
+      "sha256": "e5f1eb4d806641698a35efe20e098efd20d7d57a9b90ee69079d5bb650920726"
+    },
+    "bigint": {
+      "status": 201,
+      "content_type": "application/json",
+      "length": 50,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "{\"count\":3,\"total\":39614081257132168796771975169}\n",
+      "sha256": "344a4e61e2c58190bc15d399c18e1681626cf98e2cde6aa7926be125be121ae8"
+    },
+    "missing": {
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "length": 207,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n",
+      "sha256": "e9639e3c4681ce85f852fbac48e2eeee5ba51296dbfec57c200d59b76237ab80"
+    },
+    "view_exception": {
+      "status": 500,
+      "content_type": "text/html; charset=utf-8",
+      "length": 265,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "<!doctype html>\n<html lang=en>\n<title>500 Internal Server Error</title>\n<h1>Internal Server Error</h1>\n<p>The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.</p>\n",
+      "sha256": "ae5163256b944013e27cbef0d2bcd33a6dacbb92463509f91d5f3df782142910"
+    },
+    "after_exception": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 12,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "{\"ok\":true}\n",
+      "sha256": "e5f1eb4d806641698a35efe20e098efd20d7d57a9b90ee69079d5bb650920726"
+    }
+  },
+  "view_exception": [
+    "KeyError",
+    [
+      "values"
+    ]
+  ],
+  "speedups": "_speedups.cpython-314-x86_64-linux-gnu.so"
+}

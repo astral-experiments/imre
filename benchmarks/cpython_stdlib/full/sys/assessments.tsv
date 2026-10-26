@@ -7,7 +7,6 @@ ActiveExceptionTests.test_sys_exception_with_exception_type	blocked	The complete
 DisplayHookTest.test_custom_displayhook	blocked	Assigning a Python callable to sys.displayhook must affect eval of code compiled in single mode.
 DisplayHookTest.test_gh130163	blocked	The hook must hold the active output stream while an object's __repr__ replaces sys.stdout and forces collection.
 DisplayHookTest.test_lost_displayhook	blocked	Deleting the displayhook must cause single-mode eval to raise RuntimeError; neither mutable sys hooks nor single-mode eval exist.
-DisplayHookTest.test_original_displayhook	blocked	The native default hook must write to a swappable stdout, update builtins._, ignore None, and report a deleted stdout.
 ExceptHookTest.test_excepthook	blocked	Calling the default hook with invalid exception data must route an unraisable diagnostic to a captured stderr.
 ExceptHookTest.test_excepthook_bytes_filename	blocked	Rendering a SyntaxError with a bytes filename needs structured exception args, line data and a replaceable stderr.
 ExceptHookTest.test_original_excepthook	blocked	Formatted frames, sys.exc_info unpacking, and the callable original hook must work in the captured-stderr fixture.
@@ -34,11 +33,10 @@ SysModuleTest.test_getallocatedblocks	blocked	The check uses live allocation cou
 SysModuleTest.test_getframe	blocked	A callable native frame must expose the test function's actual code object by identity and reject out-of-range depth and extra arguments.
 SysModuleTest.test_getframemodulename	blocked	Native source frames supply the current or calling module and return None beyond the stack. The original first comparison still needs unittest equality for str | None; its loop needs sys._getframe, f_globals and f_back identity.
 SysModuleTest.test_intern	blocked	The original parent can query one live native string table. The whole native body also needs its test.support/random imports, callable assertions and the original local str subclass S with its own __hash__.
-SysModuleTest.test_ioencoding	failed	The unchanged method's first native child cannot find CP424 on this branch. Its three original ASCII children match independently. The final child needs chr(0xdcbd) to produce a Python string containing a lone surrogate for surrogateescape.
+SysModuleTest.test_ioencoding	failed	The first four native children match CPython, including CP424 4a 25 and both strict ASCII errors. The fifth exits 1 without writing: chr(0xdcbd) raises ValueError before stdout can apply surrogateescape.
 SysModuleTest.test_is_finalizing	blocked	The runtime must transition during final destruction, after atexit; the original reads sys.is_finalizing both during execution and inside __del__.
 SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
-SysModuleTest.test_module_names	blocked	The runtime needs an immutable frozenset of its standard library module names and iterable native string elements.
 SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
 SysModuleTest.test_posix_locale_surrogateescape	blocked	The original LC_ALL=POSIX child stops at getattr(sys, name) before any stream read. The report keeps its argv, first failed host assertion and six stock control children.
 SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.

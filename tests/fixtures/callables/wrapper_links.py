@@ -14,6 +14,10 @@ def other(value: int) -> int:
     return value * 4
 
 
+def call(fn: Callable[[int], int]) -> int:
+    return fn(5)
+
+
 def empty(label: str) -> tuple[()]:
     print(label)
     return ()
@@ -40,10 +44,11 @@ def exercise() -> None:
     print(result is alias)
     print(alias.__wrapped__ is inner)
     print(f"{alias(5)} {alias.__wrapped__(5)}")
-    saved = alias.__wrapped__
+    saved: Callable[[int], int] = alias.__wrapped__
     update_wrapper(alias, other, (), ())
     print(f"{saved is inner} {alias.__wrapped__ is other}")
     print(f"{saved(5)} {alias.__wrapped__(5)}")
+    print(call(alias.__wrapped__))
     left = make()
     right = make()
     print(left is not right)

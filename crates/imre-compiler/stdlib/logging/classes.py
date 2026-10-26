@@ -3,13 +3,14 @@
 import logging
 import os.path
 import sys
-from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _Lock, _lookup_handler, _print_active_exception, _rename_handler
+from logging import Formatter, Logger, LogRecord, getLevelNamesMapping, getLogger
+from imre._logging import _Level, _Lock, _TextOutput, _fallback, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
 from logging import Logger as _AdapterLogger
 
 _default_formatter = Formatter()
+_config_lock = _Lock()
 
 
 def _handle_error(record: LogRecord) -> None:
@@ -163,6 +164,16 @@ class Handler:
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
 
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
+        if record is None:
+            return None
+        for item in self.filters:
+            if not item.filter(record):
+                return False
+        with self.lock:
+            self.emit(record)
+        return record
+
     def handleError(self, record: LogRecord) -> None:
         _handle_error(record)
 
@@ -176,6 +187,106 @@ class Handler:
 
 def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
+
+
+class StreamHandler(Handler):
+    stream: _TextOutput | None
+    terminator: str
+
+    def __init__(self, stream: _TextOutput | None = None) -> None:
+        super().__init__()
+        self.stream = sys.stderr if stream is None else stream
+        self.terminator = "\n"
+
+    def flush(self) -> None:
+        with self.lock:
+            stream = self.stream
+            if stream is not None:
+                stream.flush()
+
+    def emit(self, record: LogRecord | None) -> None:
+        if record is None:
+            raise AttributeError("'NoneType' object has no attribute 'getMessage'")
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if stream is None:
+                raise AttributeError("'NoneType' object has no attribute 'write'")
+            stream.write(message + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def setStream(self, stream: _TextOutput | None) -> _TextOutput | None:
+        if stream is self.stream:
+            return None
+        with self.lock:
+            self.flush()
+            old = self.stream
+            self.stream = stream
+        return old
+
+
+def _deliver(logger: Logger, level: int, message: str, path: str, lineno: int) -> None:
+    current: Logger | None = logger
+    record: LogRecord | None = None
+    found = False
+    while current is not None:
+        for handler in current.handlers:
+            found = True
+            if level >= handler.level:
+                if record is None:
+                    record = LogRecord(logger.name, level, path, lineno, message, (), None)
+                handler.handle(record)
+        if not current.propagate:
+            break
+        current = current.parent
+    _fallback(logger, level, message, found)
+
+
+def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force: bool,
+                  stream: _TextOutput | None, style: str, handlers: list[Handler] | None,
+                  level_name: str | None, default_format: bool, stream_supplied: bool) -> None:
+    with _config_lock:
+        root = getLogger("")
+        if force:
+            for old in root.handlers[:]:
+                root.removeHandler(old)
+                old.close()
+        if root.handlers:
+            return
+        chosen: list[Handler]
+        if handlers is None:
+            chosen = [StreamHandler(stream)]
+        else:
+            if stream_supplied:
+                raise ValueError("'stream' or 'filename' should not be specified together with 'handlers'")
+            chosen = handlers
+        if style != "%" and style != "{" and style != "$":
+            raise ValueError("Style must be one of: %,{,$")
+        if default_format:
+            if style == "%":
+                fmt = "%(levelname)s:%(name)s:%(message)s"
+            elif style == "{":
+                fmt = "{levelname}:{name}:{message}"
+            else:
+                fmt = "${levelname}:${name}:${message}"
+        formatter = Formatter(fmt, datefmt, style)
+        for handler in chosen:
+            if handler.formatter is None:
+                handler.setFormatter(formatter)
+            root.addHandler(handler)
+        if level_name is not None:
+            root.setLevel(level_name)
+        elif level is not None:
+            root.setLevel(level)
+
+
+def _auto_config() -> None:
+    if not getLogger("").handlers:
+        _basic_config(None, None, None, False, None, "%", None, None, True, False)
 
 
 def _logfile_name(filename: str | Path) -> str:
@@ -200,16 +311,12 @@ def _open_logfile(filename: str, mode: str, encoding: str) -> TextIO:
     raise NotImplementedError("FileHandler stream mode: " + mode)
 
 
-class FileHandler:
+class FileHandler(StreamHandler):
     baseFilename: str
     mode: str
     encoding: str
     errors: str | None
     delay: bool
-    stream: TextIO | None
-    terminator: str
-    formatter: Formatter | None
-    _closed: bool
 
     def __init__(self, filename: str | Path, mode: str = "a", encoding: str | None = None,
                  delay: bool = False, errors: str | None = None) -> None:
@@ -220,69 +327,36 @@ class FileHandler:
         self.encoding = codec
         self.errors = errors
         self.delay = delay
-        self.terminator = "\n"
-        self.formatter = None
-        self._closed = False
-        self.stream = None if delay else _open_logfile(path, mode, codec)
+        stream = None if delay else _open_logfile(path, mode, codec)
+        super().__init__(stream)
+        self.stream = stream
 
     def _open(self) -> TextIO:
         return _open_logfile(self.baseFilename, self.mode, self.encoding)
 
-    def format(self, record: LogRecord) -> str:
-        formatter = self.formatter
-        if formatter is None:
-            return _default_formatter.format(record)
-        return formatter.format(record)
-
-    def setFormatter(self, fmt: Formatter | None) -> None:
-        self.formatter = fmt
-
-    def flush(self) -> None:
-        stream = self.stream
-        if stream is not None:
-            stream.flush()
-
-    def emit(self, record: LogRecord) -> None:
-        stream = self.stream
-        if stream is None:
+    def emit(self, record: LogRecord | None) -> None:
+        if self.stream is None:
             if self.mode == "w" and self._closed:
                 return
-            stream = self._open()
-            self.stream = stream
-        try:
-            message = self.format(record)
-            stream = self.stream
-            if stream is None:
-                raise AttributeError("'NoneType' object has no attribute 'write'")
-            stream.write(message + self.terminator)
-            self.flush()
-        except RecursionError:
-            raise
-        except Exception:
-            self.handleError(record)
-
-    def handleError(self, record: LogRecord) -> None:
-        _handle_error(record)
-
-    def handle(self, record: LogRecord) -> LogRecord:
-        self.emit(record)
-        return record
+            self.stream = self._open()
+        StreamHandler.emit(self, record)
 
     def close(self) -> None:
-        try:
-            stream = self.stream
-            if stream is not None:
-                try:
-                    stream.flush()
-                finally:
-                    self.stream = None
-                    stream.close()
-        finally:
-            self._closed = True
+        with self.lock:
+            try:
+                stream = self.stream
+                if stream is not None:
+                    try:
+                        self.flush()
+                    finally:
+                        self.stream = None
+                        stream.close()
+            finally:
+                StreamHandler.close(self)
 
 
 class NullHandler(Handler):
-    def handle(self, record: LogRecord | None):
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
         pass
 
     def emit(self, record: LogRecord | None) -> None:

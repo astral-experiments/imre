@@ -217,7 +217,7 @@ fn copy_tree(
         if let Some(item) = frame.entries.next() {
             let name: OsString = item.file_name();
             if let Some(ignored) = &frame.ignored
-                && ignored.contains(&src.joined(Path::new(&name))?)
+                && ignored.contains(&src.joined(Path::new(&name))?)?
             {
                 continue;
             }

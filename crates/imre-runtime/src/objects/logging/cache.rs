@@ -42,9 +42,8 @@ pub unsafe extern "C" fn imre_log_disable(level: usize) {
 /// The exact logger is rooted; the caller receives an owner of its live cache.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_enabled_cache(logger: *const Object) -> *const Object {
-    // SAFETY: the caller roots the logger while its name acquires an owner.
-    let name = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| ObjectOwner::into_raw(logs.entries[name.as_str()].enabled.0.clone()))
+    // SAFETY: the caller roots the exact logger through the cache read.
+    ObjectOwner::into_raw(unsafe { state(logger) }.enabled.0.clone())
 }
 
 /// # Safety

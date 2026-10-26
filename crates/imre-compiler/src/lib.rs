@@ -3,6 +3,7 @@ mod borrows;
 mod callables;
 mod classes;
 mod contracts;
+mod dynamic;
 mod effects;
 use imre_regex as fixed_regex;
 mod frontend;
@@ -30,8 +31,17 @@ mod watch;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Python language version used by type checking and native wheel consumers.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = version::LANGUAGE;
+
+/// Python implementation identifier used in interpreter metadata and wheel tags.
+pub const IMPLEMENTATION_NAME: &str = "imre";
+
+/// File extension of installed native archives linked into an application.
+pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
+
 /// Startup choices made before a native Python command executes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
     /// Python's language optimization level; independent of LLVM optimization.
@@ -53,6 +63,8 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Flags and executable for a file launched through the Python command line.
+    pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
@@ -64,6 +76,18 @@ pub struct CompileOptions {
 }
 
 impl CompileOptions {
+    /// Return the launcher's flags and path for a Python command or a script.
+    pub fn python_startup(&self) -> Option<(CommandFlags, &str)> {
+        self.command
+            .as_ref()
+            .map(|command| (command.flags, command.executable.as_str()))
+            .or_else(|| {
+                self.script_startup
+                    .as_ref()
+                    .map(|(flags, executable)| (*flags, executable.as_str()))
+            })
+    }
+
     fn load_graph(
         &self,
         path: &Path,
@@ -72,6 +96,9 @@ impl CompileOptions {
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
             return modules::SourceGraph::command(command, self, filesystem);
+        }
+        if let Some((flags, executable)) = &self.script_startup {
+            return modules::SourceGraph::script(path, *flags, executable, self, filesystem);
         }
         modules::SourceGraph::load_with(
             path,
@@ -170,9 +197,32 @@ fn check_file_with(
     cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let mut graph = options.load_graph(path, module_root, filesystem)?;
-    let (module, _) = checked_lower_with(&mut graph, cache)?;
-    verify_after(&module, "lowering")
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, filesystem)?;
+        let (module, _) = checked_lower_with(&mut graph, cache)?;
+        verify_after(&module, "lowering")
+    })();
+    object_fallback(path, module_root, options, typed, |_| ())
+}
+
+/// Compile runtime import paths with native object operations when static lowering cannot resolve them.
+fn object_fallback<T>(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    typed: Result<T, String>,
+    boxed: impl FnOnce(Compilation) -> T,
+) -> Result<T, String> {
+    match typed {
+        Ok(value) => Ok(value),
+        Err(error) if options.entry_profile.is_none() => {
+            match dynamic::compile(path, module_root, options)? {
+                Some(compilation) => Ok(boxed(compilation)),
+                None => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -181,21 +231,24 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let mut graph = options.load_graph(path, module_root, Default::default())?;
-    let (mut module, _) = checked_lower(&mut graph)?;
-    specialize(&mut module)?;
-    let ranges = ranges::analyze(&module);
-    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-    Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        source_inputs,
-        input_paths,
-    })
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, Default::default())?;
+        let (mut module, _) = checked_lower(&mut graph)?;
+        specialize(&mut module)?;
+        let ranges = ranges::analyze(&module);
+        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        Ok(Compilation {
+            llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
+            extension_archives: graph
+                .modules
+                .iter()
+                .filter_map(|m| m.archive.clone())
+                .collect(),
+            source_inputs,
+            input_paths,
+        })
+    })();
+    object_fallback(path, module_root, options, typed, |c| c)
 }
 
 pub struct CodegenUnit {
@@ -300,34 +353,45 @@ fn compile_file_units_with(
     options: &CompileOptions,
     cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let mut graph = options.load_graph(path, module_root, Default::default())?;
-    let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
-    for original in specialize(&mut module)? {
-        owners.push(owners[original]);
-    }
-    let ranges = ranges::analyze(&module);
-    let names = graph
-        .modules
-        .iter()
-        .map(|m| m.name.clone())
-        .collect::<Vec<_>>();
-    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-    Ok(UnitCompilation {
-        units: llvm::emit_units(
-            &module,
-            &ranges,
-            options.address_sanitizer,
-            &owners,
-            &names,
-            graph.entry,
-        )?,
-        extension_archives: graph
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, Default::default())?;
+        let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
+        for original in specialize(&mut module)? {
+            owners.push(owners[original]);
+        }
+        let ranges = ranges::analyze(&module);
+        let names = graph
             .modules
             .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        input_paths,
-        source_inputs,
+            .map(|m| m.name.clone())
+            .collect::<Vec<_>>();
+        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        Ok(UnitCompilation {
+            units: llvm::emit_units(
+                &module,
+                &ranges,
+                options.address_sanitizer,
+                &owners,
+                &names,
+                graph.entry,
+            )?,
+            extension_archives: graph
+                .modules
+                .iter()
+                .filter_map(|m| m.archive.clone())
+                .collect(),
+            input_paths,
+            source_inputs,
+        })
+    })();
+    object_fallback(path, module_root, options, typed, |c| UnitCompilation {
+        units: vec![CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir: c.llvm_ir,
+        }],
+        input_paths: c.input_paths,
+        source_inputs: c.source_inputs,
+        extension_archives: c.extension_archives,
     })
 }
 
@@ -655,6 +719,26 @@ mod tests {
         super::check(source).unwrap();
         let missing = source.replace("return 'one'", "pass");
         assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
+    fn key_sort_checks_the_detached_list_before_using_it() {
+        let source = concat!(
+            "def key(word: str) -> int:\n",
+            "    print(word)\n",
+            "    return len(word)\n",
+            "values = ['bb', 'a']\n",
+            "values.sort(key=key)\n",
+        );
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        let (_, after_call) = llvm.split_once("call ptr @imre_sort_detach(").unwrap();
+        assert!(
+            after_call
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains("call i32 @imre_error_pending()")
+        );
     }
 
     #[test]

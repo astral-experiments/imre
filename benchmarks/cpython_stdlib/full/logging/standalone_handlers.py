@@ -1,0 +1,45 @@
+import io
+import logging
+
+
+def main() -> None:
+    root = logging.getLogger()
+    root_output = io.StringIO()
+    root.addHandler(logging.StreamHandler(root_output))
+    root.setLevel(logging.DEBUG)
+    left = logging.Logger("twins")
+    right = logging.Logger("twins")
+    managed = logging.getLogger("twins")
+    left_output = io.StringIO()
+    left_handler = logging.StreamHandler(left_output)
+    right_output = io.StringIO()
+    right_handler = logging.StreamHandler(right_output)
+    held = left.handlers
+    print(held is left.handlers)
+    print(held is right.handlers)
+    print(held is managed.handlers)
+    left.addHandler(left_handler)
+    left.addHandler(left_handler)
+    right.addHandler(right_handler)
+    print(len(held))
+    print(held[0] is left_handler)
+    print(left.hasHandlers())
+    print(right.hasHandlers())
+    print(managed.hasHandlers())
+    left.warning("left")
+    right.warning("right")
+    managed.warning("managed")
+    print(left_output.getvalue())
+    print(right_output.getvalue())
+    print(root_output.getvalue())
+    left.removeHandler(right_handler)
+    print(len(held))
+    left.removeHandler(left_handler)
+    print(held is left.handlers)
+    print(len(held))
+    print(left.hasHandlers())
+    print(right.hasHandlers())
+    print(len(managed.handlers))
+
+
+main()

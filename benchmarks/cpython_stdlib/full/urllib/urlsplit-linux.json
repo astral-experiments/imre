@@ -1,0 +1,161 @@
+{
+  "reference_methods": 77,
+  "reference_subtest_skips": [
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_port",
+      {
+        "port": "\u096c",
+        "parse": "urlsplit",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_port",
+      {
+        "port": "\u096c",
+        "parse": "urlparse",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_scheme",
+      {
+        "scheme": "\u096chttp",
+        "parse": "urlsplit",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_scheme",
+      {
+        "scheme": "\u096chttp",
+        "parse": "urlparse",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_roundtrips",
+      {
+        "url": "sch\u00e8me:path/to/file",
+        "parsed": [
+          "",
+          "",
+          "sch\u00e8me:path/to/file",
+          "",
+          "",
+          ""
+        ],
+        "split": [
+          "",
+          "",
+          "sch\u00e8me:path/to/file",
+          "",
+          ""
+        ],
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ]
+  ],
+  "modes": {
+    "normal-O0": {
+      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "host_methods_using_native_split": [
+        "test_urlsplit_scoped_IPv6",
+        "test_urlsplit_attributes",
+        "test_urlsplit_remove_unsafe_bytes",
+        "test_urlsplit_strip_url",
+        "test_invalid_bracketed_hosts",
+        "test_splitting_bracketed_hosts",
+        "test_urlsplit_normalization"
+      ],
+      "werkzeug_make_environ": 5
+    },
+    "normal-O3": {
+      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "host_methods_using_native_split": [
+        "test_urlsplit_scoped_IPv6",
+        "test_urlsplit_attributes",
+        "test_urlsplit_remove_unsafe_bytes",
+        "test_urlsplit_strip_url",
+        "test_invalid_bracketed_hosts",
+        "test_splitting_bracketed_hosts",
+        "test_urlsplit_normalization"
+      ],
+      "werkzeug_make_environ": 5
+    },
+    "reachable-O0": {
+      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "host_methods_using_native_split": [
+        "test_urlsplit_scoped_IPv6",
+        "test_urlsplit_attributes",
+        "test_urlsplit_remove_unsafe_bytes",
+        "test_urlsplit_strip_url",
+        "test_invalid_bracketed_hosts",
+        "test_splitting_bracketed_hosts",
+        "test_urlsplit_normalization"
+      ],
+      "werkzeug_make_environ": 5
+    },
+    "reachable-O3": {
+      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "host_methods_using_native_split": [
+        "test_urlsplit_scoped_IPv6",
+        "test_urlsplit_attributes",
+        "test_urlsplit_remove_unsafe_bytes",
+        "test_urlsplit_strip_url",
+        "test_invalid_bracketed_hosts",
+        "test_splitting_bracketed_hosts",
+        "test_urlsplit_normalization"
+      ],
+      "werkzeug_make_environ": 5
+    }
+  },
+  "wheels": {
+    "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+    "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+    "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+    "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+    "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+    "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+  },
+  "serving_sha256": "99c73d55f9f574c5f3be6f3b3c4e6152dc98e9d401d1ef7c95cc6a0e4a568b3f",
+  "werkzeug_environments": [
+    [
+      "/health",
+      "",
+      "original.test",
+      "/health"
+    ],
+    [
+      "/caf\u00c3\u00a9",
+      "q=%2F",
+      "original.test",
+      "/caf%C3%A9?q=%2F"
+    ],
+    [
+      "/first/second",
+      "x=y",
+      "original.test",
+      "//first/second?x=y"
+    ],
+    [
+      "/a/b",
+      "x=1",
+      "Example.com:8080",
+      "http://Example.com:8080/a%2Fb?x=1#f"
+    ],
+    [
+      "*",
+      "",
+      "original.test",
+      "*"
+    ]
+  ],
+  "distinct_split_calls": 184
+}

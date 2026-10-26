@@ -28,7 +28,38 @@ impl Checker<'_> {
     }
 
     pub(super) fn object_value_supported(&self, ty: Type) -> bool {
-        self.boxable_value(ty) || matches!(ty, Type::Class(class) if self.boxed_dataclass(class))
+        if self.boxable_value(ty) {
+            return true;
+        }
+        match ty {
+            Type::Float
+            | Type::ListInt
+            | Type::Path
+            | Type::PurePath(_)
+            | Type::Enum(_)
+            | Type::StrEnum(_) => true,
+            Type::List(_)
+            | Type::Set(_)
+            | Type::Dict(_)
+            | Type::Tuple(_)
+            | Type::Optional(_)
+            | Type::Union(_) => self
+                .types
+                .children(ty)
+                .into_iter()
+                .all(|child| self.object_value_supported(child)),
+            Type::Class(class) => {
+                let decl = &self.classes.declarations.definitions[class];
+                // A plain instance without protocol overrides keeps its concrete
+                // descriptor and identity when stored in a Python dictionary.
+                self.boxed_dataclass(class) || (decl.dataclass.is_none()
+                    && decl.bases.is_empty()
+                    && !self.classes.has_concrete_subclasses(class)
+                    && decl.node.body.iter().all(|stmt| !matches!(stmt,
+                        ast::Stmt::FunctionDef(f) if f.name.starts_with("__") && f.name.ends_with("__"))))
+            }
+            _ => false,
+        }
     }
 }
 
@@ -104,6 +135,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
+        | Type::LogManager
         | Type::TimedFileHandler
         | Type::ProcessSelectorClass
         | Type::ClockTime
@@ -112,6 +144,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Socket
         | Type::CodecWriterClass
         | Type::CodecWriter
+        | Type::TextOutput
         | Type::Sha256
         | Type::JsonDecoder
         | Type::CsvReader
@@ -242,6 +275,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
         Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime
@@ -252,6 +286,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::RegexPattern
@@ -274,10 +309,19 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
         .enumerate()
         .map(|(id, class)| ir::ClassMetadata {
             name: class.name.clone(),
+            plain_enum: class
+                .enum_members
+                .as_ref()
+                .is_some_and(|members| members.plain),
             enum_members: class
                 .enum_members
                 .as_ref()
                 .map(|members| members.values.clone())
+                .unwrap_or_default(),
+            http_members: class
+                .enum_members
+                .as_ref()
+                .map(|m| m.http_members.clone())
                 .unwrap_or_default(),
             qualified_name: format!(
                 "{}.{}",
@@ -315,6 +359,10 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                     name: field.name.clone(),
                     compare: field.compare,
                     repr: field.repr,
+                    repr_text: graph.modules[class.definition.module].bundled
+                        && graph.modules[class.definition.module].name == "unittest.mock"
+                        && class.name == "_Call"
+                        && field.name == "_text",
                 })
                 .collect(),
         })

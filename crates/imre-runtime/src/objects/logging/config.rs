@@ -2,38 +2,17 @@
 
 use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
-use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
+use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, object, state};
 use crate::StrOwner;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
-
-#[derive(Clone, Copy)]
-struct Control {
-    disabled: bool,
-    propagate: bool,
-}
-
-impl Default for Control {
-    fn default() -> Self {
-        Self {
-            disabled: false,
-            propagate: true,
-        }
-    }
-}
-
-thread_local! { static CONTROLS: RefCell<HashMap<String, Control>> = RefCell::default(); }
-
-fn control(name: &str) -> Control {
-    CONTROLS.with_borrow(|c| c.get(name).copied().unwrap_or_default())
-}
+use std::rc::Rc;
 
 /// The root can handle its own records even if root.propagate is false.
 /// Re-evaluate parents on each walk: creating a logger can reparent its children.
 fn reaches_root(logs: &super::Registry, mut current: &str) -> bool {
     while let Some(parent) = logs.parent_name(current) {
-        if !control(current).propagate {
+        if !logs.entries[current].logger.propagate.get() {
             return false;
         }
         current = parent;
@@ -55,28 +34,34 @@ pub unsafe extern "C" fn imre_log_is_enabled(logger: *const Object, level: usize
 /// The caller roots an exact native logger.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_disabled(logger: *const Object) -> bool {
-    // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).disabled
+    // SAFETY: the caller holds this logger for the read.
+    unsafe { state(logger) }.disabled.get()
+}
+
+/// Assigning disabled takes effect before consulting the existing level cache.
+///
+/// # Safety
+/// The caller holds the logger for this assignment.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_set_disabled(value: bool, logger: *const Object) {
+    // SAFETY: the caller holds this logger for the update.
+    unsafe { state(logger) }.disabled.set(value);
 }
 
 /// # Safety
 /// The caller roots an exact native logger.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
-    // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).propagate
+    // SAFETY: the caller holds this logger for the read.
+    unsafe { state(logger) }.propagate.get()
 }
 
-/// Change the same control that fileConfig, dictConfig and emission observe.
-///
 /// # Safety
 /// The caller roots the logger through the update.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Object) {
-    // SAFETY: the input retains the native logger for this operation.
-    let key = unsafe { name(logger) };
-    CONTROLS
-        .with_borrow_mut(|controls| controls.entry(key.to_string()).or_default().propagate = value);
+    // SAFETY: the caller holds this logger for the update.
+    unsafe { state(logger) }.propagate.set(value);
 }
 
 /// Check reachable installed handlers. The fallback handler is not attached
@@ -87,8 +72,29 @@ pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Obje
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     // SAFETY: the incoming logger stays live for the walk.
-    let key = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &key))
+    let logger = unsafe { state(logger) };
+    LOGGERS.with_borrow(|logs| {
+        let mut current = logger.as_ref();
+        loop {
+            // SAFETY: the current logger retains its concrete handler list throughout the borrow.
+            if unsafe {
+                current
+                    .handlers
+                    .borrow()
+                    .0
+                    .with(|s| !s.sequence_storage().values.is_empty())
+            } {
+                return true;
+            }
+            let Some(parent) = logs.parent(current) else {
+                return !current.standalone && logs.format.is_some();
+            };
+            if !current.propagate.get() {
+                return false;
+            }
+            current = &parent.logger;
+        }
+    })
 }
 
 /// A logger with propagation stopped before root has only the default last-resort handler.
@@ -100,10 +106,20 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     logger: *const Object,
     level: usize,
     message: *const Str,
+    found: bool,
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
-    let logger_name = unsafe { name(logger) };
-    if LOGGERS.with_borrow(|logs| reaches_root(logs, &logger_name)) {
+    let receiver = unsafe { state(logger) };
+    let (root, configured) = LOGGERS.with_borrow(|logs| {
+        (
+            !receiver.standalone && reaches_root(logs, &receiver.name),
+            logs.format.is_some(),
+        )
+    });
+    if found && !(root && configured) {
+        return;
+    }
+    if root {
         // SAFETY: all three original owners remain live.
         unsafe { super::imre_log_emit(logger, level, message) };
     } else {
@@ -207,15 +223,17 @@ fn level(value: &Value) -> Result<Int> {
 
 /// Look up the existing logger, preserving aliases. All configured level
 /// writes use the same setter as public Logger.setLevel.
-fn logger_level(name: &str, level: Option<Int>) {
+fn logger_level(name: &str, level: Option<Int>) -> Rc<super::Logger> {
     let key = Str::from(name);
     // SAFETY: the string is live through lookup and each result transfers an owner.
-    let logger =
+    let handle =
         unsafe { crate::ObjectOwner::from_raw(super::imre_log_get(&key as *const Str as usize)) };
+    // SAFETY: lookup returned an owned native logger handle.
+    let logger = unsafe { state(crate::ObjectOwner::as_ptr(&handle)) };
     if let Some(level) = level {
-        // SAFETY: both owners remain in this scope until after the level write.
-        unsafe { super::imre_log_set_level(crate::ObjectOwner::as_ptr(&logger), level.0) };
+        LOGGERS.with_borrow(|logs| logs.set_level(&logger, &level));
     }
+    logger
 }
 
 fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> Result<()> {
@@ -226,8 +244,9 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
         .filter(|v| !matches!(v, Value::Null))
         .map(level)
         .transpose()?;
-    logger_level(name, threshold);
+    let logger = logger_level(name, threshold);
     if !incremental {
+        super::delivery::remove_configured_handlers(&logger);
         for key in ["handlers", "filters"] {
             if get(&cfg, key).is_some_and(|v| v.truth()) {
                 return Err(unsupported(key));
@@ -241,18 +260,15 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
         }
     }
     if !root {
-        CONTROLS.with_borrow_mut(|controls| {
-            let entry = controls.entry(name.to_owned()).or_default();
-            entry.disabled = false;
-            if let Some(v) = get(&cfg, "propagate").filter(|v| !matches!(v, Value::Null)) {
-                entry.propagate = v.truth();
-            }
-        });
+        logger.disabled.set(false);
+        if let Some(v) = get(&cfg, "propagate").filter(|v| !matches!(v, Value::Null)) {
+            logger.propagate.set(v.truth());
+        }
     }
     Ok(())
 }
 
-fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool) {
+fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool) -> Result<()> {
     for name in old {
         if configured.contains(name) {
             continue;
@@ -261,12 +277,15 @@ fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool)
             .match_indices('.')
             .any(|(end, _)| configured.contains(&name[..end]))
         {
-            logger_level(name, Int::small(0));
-            CONTROLS.with_borrow_mut(|map| map.entry(name.clone()).or_default().propagate = true);
+            let logger = logger_level(name, Int::small(0));
+            let replacement = super::delivery::empty_handlers()?;
+            drop(logger.handlers.replace(replacement));
+            logger.propagate.set(true);
         } else {
-            CONTROLS.with_borrow_mut(|map| map.entry(name.clone()).or_default().disabled = disable);
+            logger_level(name, None).disabled.set(disable);
         }
     }
+    Ok(())
 }
 
 fn configure(cfg: Pairs) -> Result<()> {
@@ -327,7 +346,7 @@ fn configure(cfg: Pairs) -> Result<()> {
             &configured,
             &old,
             get(&cfg, "disable_existing_loggers").is_none_or(|v| v.truth()),
-        );
+        )?;
     }
     if let Some(root) = get(&cfg, "root")
         && root.truth()
@@ -589,12 +608,11 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             "list.remove(x): x not in list",
         ));
     }
-    if let Some(level) = section("logger_root")?.get("level") {
-        logger_level(
-            "root",
-            Some(levels::named_level(&Str::from(level.as_str()))?),
-        );
-    }
+    let threshold = section("logger_root")?
+        .get("level")
+        .map(|level| levels::named_level(&Str::from(level.as_str())))
+        .transpose()?;
+    super::delivery::remove_configured_handlers(&logger_level("root", threshold));
     if !option("logger_root", "handlers")?.is_empty() {
         return Err(unsupported("root handlers"));
     }
@@ -618,7 +636,8 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             .get("level")
             .map(|s| levels::named_level(&Str::from(s.as_str())))
             .transpose()?;
-        logger_level(name, threshold);
+        let logger = logger_level(name, threshold);
+        super::delivery::remove_configured_handlers(&logger);
         if !option(&section_name, "handlers")?.is_empty() {
             return Err(unsupported("named handlers"));
         }
@@ -634,19 +653,11 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             })
             .transpose()?
             .unwrap_or(true);
-        CONTROLS.with_borrow_mut(|m| {
-            m.insert(
-                name.to_owned(),
-                Control {
-                    disabled: false,
-                    propagate,
-                },
-            );
-        });
+        logger.disabled.set(false);
+        logger.propagate.set(propagate);
         configured.insert(name.to_owned());
     }
-    previous_loggers(&configured, &old, disable);
-    Ok(())
+    previous_loggers(&configured, &old, disable)
 }
 
 /// # Safety

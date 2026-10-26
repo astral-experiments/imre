@@ -25,16 +25,24 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The local replay of `303e9fb05462f91c53b4a7c7736876024e988cfe` includes logger hierarchy, handler registration,
-formatters, and ordinary, timed and [size-based rotation](rotation.md).
-Both levels have the same counts:
+The replay covers logger hierarchy, stream delivery, record fields, handler registration,
+formatters, and ordinary, timed and [size-based rotation](rotation.md). The counts agree at both levels.
+
+The [standalone logger comparison](standalone.md) measures the original handler-removal loop.
+
+The [manager cleanup comparison](manager-cleanups-linux.json) exercises both original enablement methods and their deferred restorations.
+CPython runs both test bodies, their assertions and the original unittest cleanup stack.
+Imre reads and writes the logger and manager state, including both deferred restorations.
+The [direct manager comparison](manager_values.py) covers shared identity, private manager roots and thresholds, and cache behavior.
+CPython also accepts assignment to `logger.manager`. Imre rejects that assignment at compile time.
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 16 |
+| Imre | Imre | Imre | CPython hooks and native child | 22 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| Blocked before execution | | | | 210 |
+| CPython | CPython | Imre | CPython hooks and native child | 3 |
+| Blocked before execution | | | | 201 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -43,9 +51,14 @@ rollover with an explicit time, record representation, formatter precision,
 an empty name filter, both buffering formatters, and [FileHandler](files.md)
 delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
+The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
+The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
+Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
+FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
-CPython output helper. The 39 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 42 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
+The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.

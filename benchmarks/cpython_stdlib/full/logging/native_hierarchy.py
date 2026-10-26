@@ -122,13 +122,18 @@ def main():
     tools = Toolchain(args.imre, args.runtime, args.clang, args.opt_level)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        sample = HERE / "hierarchy_values.py"
-        program = tools.build(sample.read_bytes(), work)
         def output(cmd):
             child = subprocess.run(cmd, capture_output=True, timeout=30, check=True)
             return child.stdout, child.stderr
-        if output([program]) != output([sys.executable, sample]):
-            raise AssertionError("logger sets, dictionary keys, or parent changes differ from CPython")
+        for filename, commands in (("hierarchy_values.py", [()]),
+                                   ("reconfigure_handlers.py", [("dict",), ("file", work / "logging.ini")])):
+            sample = HERE / filename
+            program = tools.build(sample.read_bytes(), work)
+            for arguments in commands:
+                expected = output([sys.executable, sample, *arguments])
+                actual = output([program, *arguments])
+                if actual != expected:
+                    raise AssertionError((filename, arguments, expected, actual))
         callbacks = hierarchy_cases(tools, work)
         observed, failures, skips = run_in_fixtures(suite, callbacks)
         if failures or skips or set(observed) != set(callbacks):

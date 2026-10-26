@@ -1,4 +1,4 @@
-from functools import lru_cache, partial
+from functools import lru_cache, partial, singledispatch
 from typing import Callable
 
 
@@ -42,6 +42,22 @@ def cached(n: int) -> int:
     return n + 1
 
 
+def dispatch() -> Callable[[int], int]:
+    def plus_one(n: int) -> int:
+        return n + 1
+
+    first = singledispatch(doubled)
+    second = singledispatch(doubled)
+    saved = partial(first)
+    separate = wrap(second)
+    print(saved is first)
+    print(saved(4))
+    first.register(int, plus_one)
+    print(saved(4))
+    print(separate(4))
+    return partial(saved)
+
+
 def exercise() -> None:
     add = method(10)
     print(add(4))
@@ -61,6 +77,8 @@ def exercise() -> None:
     print(cache(3))
     print(via_partial(4))
     print(cache.cache_info()[0])
+    retained = dispatch()
+    print(retained(7))
 
 
 exercise()

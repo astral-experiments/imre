@@ -117,7 +117,9 @@ impl Classes {
 
     pub(crate) fn instance(&self, id: usize) -> Type {
         if let Some(members) = &self.definitions[id].enum_members {
-            if members.plain {
+            if members.http == Some(enums::HttpEnum::Status) {
+                Type::IntEnum(id)
+            } else if members.plain {
                 Type::Enum(id)
             } else {
                 Type::StrEnum(id)
@@ -228,7 +230,8 @@ fn collect_class(
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
 ) -> Result<Class, String> {
-    let is_enum = node.arguments.as_ref().is_some_and(|arguments| {
+    let http = enums::HttpEnum::bundled(module, node);
+    let is_enum = http.is_some() || node.arguments.as_ref().is_some_and(|arguments| {
         matches!(arguments.args.as_ref(), [base] if matches!(graph.resolve(definition.module, base), Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))))
             && arguments.keywords.is_empty()
     });
@@ -259,15 +262,22 @@ fn collect_class(
             "class inheritance, metaclasses, and type parameters are unsupported",
         ));
     }
-    if is_enum && !node.decorator_list.is_empty() {
+    if is_enum && http.is_none() && !node.decorator_list.is_empty() {
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
     }
     let mut enum_members = is_enum.then(enums::Members::default);
     if let Some(members) = &mut enum_members {
-        members.plain = graph.resolve(definition.module, &node.arguments.as_ref().unwrap().args[0])
-            == Some(Binding::Intrinsic(Intrinsic::StandardEnum));
+        members.http = http;
+        members.plain = node.arguments.as_ref().is_some_and(|args| {
+            graph.resolve(definition.module, &args.args[0])
+                == Some(Binding::Intrinsic(Intrinsic::StandardEnum))
+        });
     }
-    let dataclass = dataclasses::options(graph, definition.module, node)?;
+    let dataclass = if http.is_some() {
+        None
+    } else {
+        dataclasses::options(graph, definition.module, node)?
+    };
     let value_struct = dataclass.is_some_and(|options| options.value_struct);
     if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
         || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())
@@ -427,6 +437,12 @@ fn collect_class(
                     class_bindings.insert(name.to_owned());
                 }
             }
+            // The immutable CPython constructors initialize the member table, including
+            // HTTPMethod's custom repr. Category properties keep their original bodies.
+            ast::Stmt::FunctionDef(method)
+                if http.is_some() && method.name.as_str() == "__new__"
+                    || http == Some(enums::HttpEnum::Method)
+                        && method.name.as_str() == "__repr__" => {}
             ast::Stmt::FunctionDef(method) => {
                 let abstract_method = matches!(method.decorator_list.as_slice(), [decorator]
                     if graph.resolve(definition.module, &decorator.expression) == Some(Binding::Intrinsic(Intrinsic::AbstractMethod)));
@@ -1228,7 +1244,11 @@ fn check_initializer(
                     &format!("field {name:?} is not declared in the class"),
                 ));
             }
-            if !initialized.insert(name) {
+            // A completed base initializer owns these fields. A subclass assignment
+            // replaces their values through the same field store as an ordinary method.
+            if !initialized.insert(name)
+                && !(called_super && inherited.iter().any(|field| field.name == name))
+            {
                 return Err(module.error(
                     target,
                     &format!("field {name:?} is initialized more than once"),

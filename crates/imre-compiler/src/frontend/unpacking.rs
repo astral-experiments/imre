@@ -310,6 +310,22 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
                     }));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                    if !matches!(
+                        self.types.payload(value.ty).unwrap_or(value.ty),
+                        Type::TextIO | Type::StringIO | Type::None
+                    ) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "sys.stdout requires None or a native text stream",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
@@ -415,15 +431,21 @@ impl Checker<'_> {
                         vec![value, receiver],
                     )));
                 }
-                if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
+                if receiver.ty == Type::LogManager && attribute.attr.as_str() == "disable" {
+                    return self.set_manager_disable(receiver, value, target);
+                }
+                if receiver.ty == Type::Logger
+                    && let Some(op) = match attribute.attr.as_str() {
+                        "disabled" => Some(ir::LogOperation::SetDisabled),
+                        "propagate" => Some(ir::LogOperation::SetPropagate),
+                        _ => None,
+                    }
+                {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
                     return Ok(Statement::Expr(Expr {
                         ty: Type::None,
-                        kind: ExprKind::Builtin(
-                            Builtin::Logging(ir::LogOperation::SetPropagate),
-                            vec![value, receiver],
-                        ),
+                        kind: ExprKind::Builtin(Builtin::Logging(op), vec![value, receiver]),
                     }));
                 }
                 if receiver.ty == Type::LogFormatter {

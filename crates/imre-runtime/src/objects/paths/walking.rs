@@ -56,7 +56,7 @@ impl Walker {
                     // mutation of the list occurs while reading its names.
                     unsafe {
                         dirs.0.with(|storage| {
-                            let names = storage.sequence();
+                            let names = storage.sequence_storage();
                             stack
                                 .try_reserve(names.values.len())
                                 .map_err(|_| Error::allocation())?;
