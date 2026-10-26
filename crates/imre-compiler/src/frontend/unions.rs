@@ -1,7 +1,7 @@
 //! Closed type tests refine local values without refining aliased heap storage.
 
 use super::*;
-use crate::ir::InstanceType;
+use crate::ir::{CalendarType, InstanceType};
 
 impl Checker<'_> {
     /// int() on a closed string/integer value preserves the integer or parses the
@@ -95,6 +95,22 @@ impl Checker<'_> {
         }
         if ty == value.ty {
             return value;
+        }
+        if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Calendar(CalendarType::Date)
+            && ty == Type::Calendar(CalendarType::DateTime)
+        {
+            let date = if self.types.payload(value.ty).is_some() {
+                Expr {
+                    ty: Type::Calendar(CalendarType::Date),
+                    kind: ExprKind::Unwrap(Box::new(value)),
+                }
+            } else {
+                value
+            };
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![date]),
+            };
         }
         if self
             .types
@@ -273,6 +289,18 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::Calendar(CalendarType::Date))) => {
+                return Ok(vec![
+                    Exact(Type::Calendar(CalendarType::Date)),
+                    Exact(Type::Calendar(CalendarType::DateTime)),
+                ]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
+                return Ok(vec![Exact(Type::Calendar(kind))]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => {
+                return Ok(vec![Exact(Type::ClockTime)]);
+            }
             Some(Binding::Intrinsic(Intrinsic::Context)) => {
                 return Ok(vec![InstanceType::Exact(Type::Context)]);
             }
@@ -566,6 +594,15 @@ impl Checker<'_> {
         }
         let mut unknown = false;
         for &class in classes {
+            if ty == Type::Calendar(CalendarType::Date)
+                && matches!(
+                    class,
+                    InstanceType::Exact(Type::Calendar(CalendarType::DateTime))
+                )
+            {
+                unknown = true;
+                continue;
+            }
             if let InstanceType::IoBase(base) = class {
                 match base.matches(ty) {
                     Some(true) => return Some(true),
@@ -769,6 +806,18 @@ impl Checker<'_> {
                     self.instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
+                if *truth
+                    && matches!(
+                        classes.as_slice(),
+                        [InstanceType::Exact(Type::Calendar(CalendarType::DateTime))]
+                    )
+                {
+                    for member in &mut members {
+                        if *member == Type::Calendar(CalendarType::Date) {
+                            *member = Type::Calendar(CalendarType::DateTime);
+                        }
+                    }
+                }
                 if *truth && !classes.is_empty() && classes.iter().all(|c| matches!(c, InstanceType::Exception(kind) if self.is_import_error(*kind))) {
                     for member in &mut members { if *member==Type::Exception { *member=Type::ImportException; } }
                 }

@@ -14,7 +14,7 @@ use super::super::{Int, Object, Storage, StorageCell, Str, Words, fail, files, o
 
 const DAY: i64 = 86_400;
 
-pub(in crate::objects) struct Clock([i64; 5]);
+pub(in crate::objects) struct Clock(pub(in crate::objects) [i64; 5]);
 
 #[derive(Clone, Copy)]
 enum Period {

@@ -178,6 +178,13 @@ impl Checker<'_> {
             "assertDictEqual"
         } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
             "assertMultiLineEqual"
+        } else if matches!(
+            ty,
+            Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
+        ) {
+            "_assertDateEqual"
+        } else if ty == Type::Calendar(ir::CalendarType::Delta) {
+            "_assertDeltaEqual"
         } else {
             "_baseAssertEqual"
         };

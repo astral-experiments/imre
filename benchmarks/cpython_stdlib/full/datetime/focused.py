@@ -61,7 +61,12 @@ def main():
         live = directory / "live.py"
         live.write_bytes(CLOCK)
         clock([sys.executable, live])
-        fixed = [HERE / "certificate_clock.py", HERE / "behavior.py"]
+        fixed = [
+            HERE / "certificate_clock.py",
+            HERE / "behavior.py",
+            HERE / "date_values.py",
+            HERE / "date_assertions.py",
+        ]
         reference = {src: run([sys.executable, src]) for src in fixed}
         for src, result in reference.items():
             assert result.returncode == 0 and result.stderr == b"", (src, result)

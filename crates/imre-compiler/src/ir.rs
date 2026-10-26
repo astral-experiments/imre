@@ -169,6 +169,7 @@ pub(crate) enum Type {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum CalendarType {
+    Date,
     DateTime,
     Delta,
     Zone,
@@ -176,7 +177,9 @@ pub(crate) enum CalendarType {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CalendarOp {
+    Date,
     DateTime,
+    Combine,
     Delta,
     Zone,
     Utc,
@@ -381,6 +384,7 @@ impl std::fmt::Display for Type {
             Self::LogManager => "logging.Manager",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
+            Self::Calendar(CalendarType::Date) => "datetime.date",
             Self::Calendar(CalendarType::DateTime) => "datetime.datetime",
             Self::Calendar(CalendarType::Delta) => "datetime.timedelta",
             Self::Calendar(CalendarType::Zone) => "datetime.timezone",
