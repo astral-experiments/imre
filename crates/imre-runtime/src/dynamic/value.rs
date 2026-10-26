@@ -174,6 +174,10 @@ impl Context {
             Value::Count { .. } => "count",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
+            Value::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Reader(_) => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+            },
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
@@ -465,7 +469,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    File(std::rc::Rc<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {

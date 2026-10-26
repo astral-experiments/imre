@@ -22,7 +22,7 @@ mod hmac;
 mod inspect;
 pub(super) mod itertools;
 mod time;
-pub(super) use files::ReadSource;
+pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
 mod logging;
@@ -590,7 +590,9 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
+            (2, &[])
+        }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -610,6 +612,7 @@ pub(super) fn call(
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.flush"
         | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),
