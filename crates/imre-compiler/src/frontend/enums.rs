@@ -641,6 +641,7 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
+            || types == [Type::LogManager; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]

@@ -431,6 +431,9 @@ impl Checker<'_> {
                         vec![value, receiver],
                     )));
                 }
+                if receiver.ty == Type::LogManager && attribute.attr.as_str() == "disable" {
+                    return self.set_manager_disable(receiver, value, target);
+                }
                 if receiver.ty == Type::Logger
                     && let Some(op) = match attribute.attr.as_str() {
                         "disabled" => Some(ir::LogOperation::SetDisabled),

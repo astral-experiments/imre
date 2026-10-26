@@ -176,6 +176,7 @@ enum Storage {
     Hunk(patchset::Hunk),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<logging::Logger>),
+    LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
