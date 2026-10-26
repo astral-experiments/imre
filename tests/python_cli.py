@@ -314,6 +314,7 @@ def report(text):
             "boxed_type_identity.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
+            "boxed_super.py",
             "boxed_item_assignment.py",
             "boxed_dict_subclasses.py",
         ):

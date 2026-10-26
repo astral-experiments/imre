@@ -2,19 +2,23 @@ use super::*;
 
 impl Context {
     fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        if matches!(self.heap.get(class), Value::Native(kind) if kind == "dict") {
-            return self.builtins.get(&format!("dict.{name}")).copied();
-        }
-        let Value::Class { scope, bases, .. } = self.heap.get(class) else {
-            return None;
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return self.own_class_attr(class, name);
         };
-        self.scope_data(*scope)
-            .names
-            .get(name)
-            .copied()
-            .or_else(|| bases.iter().find_map(|&base| self.class_attr(base, name)))
+        std::iter::once(&class)
+            .chain(ancestors)
+            .find_map(|&base| self.own_class_attr(base, name))
     }
 
+    pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        match self.heap.get(class) {
+            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if kind == "dict" => {
+                self.builtins.get(&format!("dict.{name}")).copied()
+            }
+            _ => None,
+        }
+    }
     /// Special methods are looked up on the type, even if the instance shadows them.
     fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
@@ -104,7 +108,10 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
-                Value::Native(name) => name == "object.__setattr__" || name.starts_with("dict."),
+                Value::Native(name) => {
+                    matches!(name.as_str(), "object.__setattr__" | "object.__init__")
+                        || name.starts_with("dict.")
+                }
                 _ => false,
             };
             if method {
@@ -152,12 +159,18 @@ impl Context {
             value => value,
         }
     }
-    fn subclass(&self, class: Id, target: Id) -> bool {
+    pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
         }
-        if let Value::Class { bases, .. } = self.heap.get(class) {
-            return bases.iter().any(|&b| self.subclass(b, target));
+        if let Value::Class { ancestors, .. } = self.heap.get(class) {
+            return ancestors.iter().any(|&b| self.equal_class(b, target));
+        }
+        if let (Value::Native(actual), Value::Native(parent)) =
+            (self.heap.get(class), self.heap.get(target))
+        {
+            return self.builtin_type_name(class) == Some("type")
+                && (parent == "object" || (actual == "bool" && parent == "int"));
         }
         false
     }
@@ -167,7 +180,9 @@ impl Context {
     }
     fn has_base(&self, class: Id, target: &str) -> bool {
         match self.heap.get(class) {
-            Value::Class { bases, .. } => bases.iter().any(|&b| self.has_base(b, target)),
+            Value::Class { ancestors, .. } => ancestors
+                .iter()
+                .any(|&b| matches!(self.heap.get(b), Value::Native(name) if name == target)),
             Value::Native(name) => name == target,
             _ => false,
         }
@@ -206,6 +221,7 @@ impl Context {
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Property(_) => "property",
+            Value::Super { .. } => "super",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
                 Value::Native(_) => "builtin_function_or_method",
@@ -359,6 +375,11 @@ impl Context {
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
+            Value::Super {
+                start,
+                receiver,
+                owner,
+            } => return self.super_attribute(start, receiver, owner, name),
             Value::Partial {
                 function,
                 args,
@@ -434,12 +455,14 @@ impl Context {
                 return Ok(self.token_missing);
             }
             Value::Native(class) if class == "dict" => {
-                if let Some(method) = self.class_attr(obj, name) {
+                if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
                 }
             }
-            Value::Native(class) if class == "object" && name == "__setattr__" => {
-                return Ok(self.builtin("object.__setattr__"));
+            Value::Native(class)
+                if class == "object" && matches!(name, "__setattr__" | "__init__") =>
+            {
+                return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Module {
                 name: module,
@@ -713,6 +736,7 @@ impl Context {
             Value::Function {
                 name,
                 scope,
+                class_cell,
                 code,
                 parameters,
                 defaults,
@@ -790,6 +814,13 @@ impl Context {
                         }
                     }
                 }
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.first_argument = pos.into_iter().next();
+                if sig["class_cell"] == true {
+                    frame.class_cell = class_cell;
+                }
                 let value = self.execute(code, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
@@ -839,18 +870,22 @@ impl Context {
         };
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
+        let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.class_cell = Some(cell);
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        let ancestors = self.linearized_bases(&bases)?;
         let class = self.alloc(Value::Class {
             name: name.clone(),
             scope,
-            bases,
+            ancestors,
         });
+        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
