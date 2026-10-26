@@ -10,13 +10,14 @@ fn check_option(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn quoted(input: &[u8], safe: &[u8]) -> Result<*const Str> {
+fn quoted(input: &[u8], safe: &[u8], plus: bool) -> Result<*const Str> {
     let mut allowed = [false; 128];
     for &byte in safe.iter().filter(|b| b.is_ascii()) {
         allowed[usize::from(byte)] = true;
     }
     let safe = |b: u8| {
-        b.is_ascii_alphanumeric()
+        (plus && b == b' ')
+            || b.is_ascii_alphanumeric()
             || b"_.-~".contains(&b)
             || (b.is_ascii() && allowed[usize::from(b)])
     };
@@ -30,7 +31,9 @@ fn quoted(input: &[u8], safe: &[u8]) -> Result<*const Str> {
         .map_err(|_| Error::allocation())?;
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for &b in input {
-        if safe(b) {
+        if plus && b == b' ' {
+            out.push('+');
+        } else if safe(b) {
             out.push(char::from(b));
         } else {
             out.push('%');
@@ -55,6 +58,36 @@ pub unsafe extern "C" fn imre_url_quote(
     encoding: *const Str,
     errors: *const Str,
 ) -> *const Str {
+    // SAFETY: the same rooted inputs are passed through with their original tags.
+    unsafe { quote(source, bytes, safe, safe_bytes, encoding, errors, false) }
+}
+
+/// Quote a form component, replacing each ASCII space with a plus.
+///
+/// # Safety
+/// The rooted source, safe set and optional codec arguments follow `imre_url_quote`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_url_quote_plus(
+    source: *const c_void,
+    bytes: i32,
+    safe: *const c_void,
+    safe_bytes: i32,
+    encoding: *const Str,
+    errors: *const Str,
+) -> *const Str {
+    // SAFETY: the same rooted inputs are passed through with their original tags.
+    unsafe { quote(source, bytes, safe, safe_bytes, encoding, errors, true) }
+}
+
+unsafe fn quote(
+    source: *const c_void,
+    bytes: i32,
+    safe: *const c_void,
+    safe_bytes: i32,
+    encoding: *const Str,
+    errors: *const Str,
+    plus: bool,
+) -> *const Str {
     let result = (|| {
         // SAFETY: the typed caller retains safe and provides its layout.
         let safe = unsafe { url_data(safe, safe_bytes != 0) };
@@ -68,7 +101,7 @@ pub unsafe extern "C" fn imre_url_quote(
                 }
             }
             // SAFETY: the byte flag selects byte storage.
-            return quoted(unsafe { url_data(source, true) }, safe);
+            return quoted(unsafe { url_data(source, true) }, safe, plus);
         }
         // SAFETY: this branch selects a rooted scalar string.
         let text = unsafe { &*source.cast::<Str>() };
@@ -88,7 +121,7 @@ pub unsafe extern "C" fn imre_url_quote(
             // SAFETY: any UnicodeEncodeError owns a share of its source.
             Ok(unsafe { StrOwner::acquire_word(source as usize) })
         })?;
-        quoted(&data, safe)
+        quoted(&data, safe, plus && text.contains(' '))
     })();
     finish(result, std::ptr::null())
 }

@@ -20,7 +20,7 @@ unsafe extern "C" {
     fn imre_platform_errno_entries(length: *mut usize) -> *const Entry;
 }
 
-const DOC: &str = include_str!("../../native/errno-doc.txt");
+pub(crate) const DOC: &str = include_str!("../../native/errno-doc.txt");
 const LOADER: &str = "<class '_frozen_importlib.BuiltinImporter'>";
 const SPEC: &str = "ModuleSpec(name='errno', loader=<class '_frozen_importlib.BuiltinImporter'>, origin='built-in')";
 
@@ -55,13 +55,25 @@ fn into_object(storage: Storage) -> crate::ObjectOwner {
     crate::ObjectOwner::new(Object(StorageCell::new(storage)))
 }
 
-fn build() -> Option<crate::ObjectOwner> {
+/// The target's actual registration order decides the name retained for errno aliases.
+pub(crate) fn platform_entries() -> impl ExactSizeIterator<Item = (&'static str, i32)> {
     let mut length = 0;
     // SAFETY: this C table and its NUL-terminated symbol names have static lifetime.
     let entries = unsafe {
         let ptr = imre_platform_errno_entries(&mut length);
         std::slice::from_raw_parts(ptr, length)
     };
+    entries.iter().map(|entry| {
+        // SAFETY: the generated table stores NUL-terminated ASCII string literals.
+        let name = unsafe { CStr::from_ptr(entry.name) }
+            .to_str()
+            .expect("ASCII errno symbol");
+        (name, entry.code)
+    })
+}
+
+fn build() -> Option<crate::ObjectOwner> {
+    let entries = platform_entries();
     // SAFETY: these constructors return independent owners with the specified representations.
     let (errorcode, keys) = unsafe {
         (
@@ -98,17 +110,13 @@ fn build() -> Option<crate::ObjectOwner> {
             return None;
         }
     }
-    for entry in entries {
-        // SAFETY: generated C stores literal ASCII names in the target's actual registration order.
-        let name = unsafe { CStr::from_ptr(entry.name) }
-            .to_str()
-            .expect("ASCII errno symbol");
+    for (name, value) in entries {
         ordered.push(name);
         let text = StrOwner::new(Str::from(name));
         if !add_key(&text) {
             return None;
         }
-        let code = Int::small(i64::from(entry.code)).unwrap();
+        let code = Int::small(i64::from(value)).unwrap();
         // SAFETY: this is a dict[int,str], and both compiler-word representations are rooted.
         unsafe {
             imre_dict_set(
@@ -120,7 +128,7 @@ fn build() -> Option<crate::ObjectOwner> {
         if imre_error_pending() != 0 {
             return None;
         }
-        codes.insert(name, entry.code);
+        codes.insert(name, value);
     }
     let registry = Rc::new(Registry {
         ordered: RefCell::new(ordered),

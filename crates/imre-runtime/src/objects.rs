@@ -79,6 +79,7 @@ mod warnings;
 mod words;
 mod zipfile;
 
+pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::errno_error;
 
 use super::{

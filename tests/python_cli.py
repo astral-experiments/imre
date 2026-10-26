@@ -1,6 +1,7 @@
 """Compare the script and command-string entry points with Python's CLI."""
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -290,6 +291,16 @@ def report(text):
         contextvars = Path(__file__).with_name("fixtures") / "boxed_contextvars.py"
         plugin.write_bytes(contextvars.read_bytes())
         compare("-IB", "-c", imports + "arithmetic.current()")
+        errno_names = [name for name, value in vars(errno).items() if type(value) is int]
+        compare(
+            "-IB",
+            "-c",
+            "from sys import path\nimport errno\nfrom errno import errorcode\n"
+            f"print([getattr(errno, name) for name in {errno_names!r}])\n"
+            "print(list(errorcode.items()))\n"
+            "errorcode[errno.EADDRINUSE] = 'changed'\n"
+            "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
+        )
         checked = run(
             imre,
             "-IB",

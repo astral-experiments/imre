@@ -1,4 +1,6 @@
 //! Bind URL splitting, result methods, and quoting with normal argument evaluation.
+mod urlencode;
+
 use super::*;
 use crate::ir::{TextOperation, UrlProperty};
 use crate::types::{SPLIT_RESULT, SPLIT_RESULT_BYTES};
@@ -18,15 +20,17 @@ impl Checker<'_> {
     pub(super) fn url_quoting(
         &mut self,
         call: &ast::ExprCall,
-        quote: bool,
+        op: Intrinsic,
     ) -> Result<Expr, String> {
+        let quote = op != Intrinsic::Unquote;
         let none = Expr {
             ty: Type::None,
             kind: ExprKind::None,
         };
         let mut params = vec![slot("string", None)];
         if quote {
-            params.push(slot("safe", Some(unpacking::string("/"))));
+            let safe = if op == Intrinsic::Quote { "/" } else { "" };
+            params.push(slot("safe", Some(unpacking::string(safe))));
         }
         let (encoding, errors) = if quote {
             (none.clone(), none)
@@ -69,10 +73,10 @@ impl Checker<'_> {
                 ),
             });
         }
-        let operation = if quote {
-            TextOperation::UrlQuote
-        } else {
-            TextOperation::UrlUnquote
+        let operation = match op {
+            Intrinsic::Quote => TextOperation::UrlQuote,
+            Intrinsic::QuotePlus => TextOperation::UrlQuotePlus,
+            _ => TextOperation::UrlUnquote,
         };
         Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, args))
     }
@@ -109,6 +113,40 @@ impl Checker<'_> {
             self.types.url_split_result(bytes),
             args,
         ))
+    }
+
+    /// A SplitResult and a five-field tuple share the same native record layout.
+    pub(super) fn url_unsplit(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = self.arguments_with(
+            call,
+            &[slot("components", None)],
+            None,
+            |checker, _, node| checker.expr(node),
+        )?;
+        let ty = args.values[0].ty;
+        let fields = self.types.fields(ty).ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "urlunsplit requires five str or bytes fields",
+            )
+        })?;
+        let ty = if fields.len() == 5
+            && fields
+                .iter()
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_)))
+        {
+            Type::Str
+        } else if fields.len() == 5 && fields.iter().all(|ty| *ty == Type::Bytes) {
+            Type::Bytes
+        } else {
+            return Err(error(
+                self.source,
+                call,
+                "urlunsplit requires five str fields or five bytes fields",
+            ));
+        };
+        Ok(self.ordered_builtin(Builtin::Text(TextOperation::UrlGetUrl), ty, args))
     }
 
     pub(super) fn url_property(&self, receiver: &Expr, name: &str) -> Option<Expr> {

@@ -3,6 +3,7 @@
 use super::*;
 use crate::StrOwner;
 use crate::objects::exceptions::string_repr;
+use crate::objects::text::try_owned_string;
 use crate::objects::words::Words;
 
 impl Storage {
@@ -155,14 +156,15 @@ pub unsafe extern "C" fn imre_path_suffixes(path: *const Object) -> *const Objec
                 .values
                 .try_reserve(name.bytes().filter(|b| *b == b'.').count())
                 .map_err(|_| Error::allocation())?;
-            for part in name.split('.').skip(1) {
-                let mut suffix = Str::from(".");
-                suffix.push_str(part);
-                suffixes
-                    .values
-                    .push(StrOwner::into_raw(StrOwner::new(suffix)) as usize);
+            let mut dots = name.match_indices('.').map(|(start, _)| start).peekable();
+            while let Some(start) = dots.next() {
+                let end = dots.peek().copied().unwrap_or(name.len());
+                let suffix = try_owned_string(&name[start..end])?;
+                suffixes.values.push(StrOwner::into_raw(suffix) as usize);
             }
-            Ok(crate::ObjectOwner::into_raw(suffixes.into_object()))
+            crate::ObjectOwner::try_new(Object(StorageCell::new(suffixes.into_storage())))
+                .map(crate::ObjectOwner::into_raw)
+                .map_err(|_| Error::allocation())
         })
     };
     finish(result, std::ptr::null())
