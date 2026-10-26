@@ -10,6 +10,22 @@ use regex_syntax::hir::HirKind;
 const SPACE: &str =
     r"\x09-\x0d\x1c-\x20\x85\xa0\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}";
 
+/// The synthetic capture used to implement Python's terminal dollar before a final newline.
+pub const FINAL_NEWLINE_ANCHOR: &str = r"(?P<imre.eol>\n)?\z";
+
+/// Translate Python's ASCII character classes inside or outside a bracket expression.
+pub fn ascii_class(escape: char) -> Option<&'static str> {
+    Some(match escape {
+        'd' => "[0-9]",
+        'D' => "[^0-9]",
+        'w' => "[A-Za-z0-9_]",
+        'W' => "[^A-Za-z0-9_]",
+        's' => r"[\x09-\x0d\x20]",
+        'S' => r"[^\x09-\x0d\x20]",
+        _ => return None,
+    })
+}
+
 /// The engine expression and capture layout corresponding to a Python pattern.
 pub struct FixedPattern {
     pub source: String,
@@ -25,6 +41,15 @@ pub struct Capture {
 
 /// Translate the supported Python pattern grammar without changing search semantics.
 pub fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
+    translate_with_ascii(pattern, verbose, false)
+}
+
+/// Translate with the character classes selected by Python's ASCII flag.
+pub fn translate_with_ascii(
+    pattern: &str,
+    verbose: bool,
+    ascii: bool,
+) -> Result<FixedPattern, String> {
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
@@ -104,16 +129,16 @@ pub fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
             '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
-                output.push_str(r"(?P<imre.eol>\n)?\z");
+                output.push_str(FINAL_NEWLINE_ANCHOR);
                 can_repeat = false;
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
-                class(&mut input, &mut output)?;
+                class(&mut input, &mut output, ascii)?;
                 can_repeat = true;
             }
             '\\' => {
-                let kind = escaped(&mut input, &mut output, false)?;
+                let kind = escaped(&mut input, &mut output, false, ascii)?;
                 can_repeat = kind != Escape::Anchor;
             }
             '*' | '+' | '?' | '{' => {
@@ -360,9 +385,22 @@ enum Escape {
     Anchor,
 }
 
-fn escaped(input: &mut Input<'_>, output: &mut String, in_class: bool) -> Result<Escape, String> {
+fn escaped(
+    input: &mut Input<'_>,
+    output: &mut String,
+    in_class: bool,
+    ascii: bool,
+) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
+    if ascii && let Some(class) = ascii_class(c) {
+        output.push_str(class);
+        return Ok(Escape::Class);
+    }
     let value = match c {
+        'b' | 'B' if ascii && !in_class => {
+            output.push_str(if c == 'b' { r"(?-u:\b)" } else { r"(?-u:\B)" });
+            return Ok(Escape::Anchor);
+        }
         'w' | 'W' => {
             // Python uses Unicode letters, numbers and the literal underscore.
             // Rust's shorthand additionally includes marks, connector characters,
@@ -421,7 +459,7 @@ fn escaped(input: &mut Input<'_>, output: &mut String, in_class: bool) -> Result
     Ok(Escape::Scalar)
 }
 
-fn class(input: &mut Input<'_>, output: &mut String) -> Result<(), String> {
+fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), String> {
     output.push('[');
     if input.next_if_eq(&'^').is_some() {
         output.push('^');
@@ -452,7 +490,7 @@ fn class(input: &mut Input<'_>, output: &mut String) -> Result<(), String> {
             continue;
         }
         let scalar = if c == '\\' {
-            escaped(input, output, true)? == Escape::Scalar
+            escaped(input, output, true, ascii)? == Escape::Scalar
         } else {
             literal(output, c);
             true

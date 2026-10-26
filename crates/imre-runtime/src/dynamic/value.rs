@@ -395,7 +395,7 @@ pub(super) enum Value {
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
-        groups: Vec<Option<String>>,
+        groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
     },
     Context(std::rc::Rc<HashMap<Id, Id>>),
@@ -545,6 +545,8 @@ impl Value {
             Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexPattern(pattern) => visit.push(pattern.source),
+            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -561,9 +563,7 @@ impl Value {
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_)
-            | Self::RegexPattern(_)
-            | Self::RegexMatch { .. } => {}
+            | Self::TextFile(_) => {}
         }
     }
 }

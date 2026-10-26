@@ -212,9 +212,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
-        ("re", "A" | "U") => {
+        ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
+        ("re", "A" | "U" | "X") => {
             let module = ctx.module("re")?;
-            ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
+            let flag = match name {
+                "A" => "ASCII",
+                "U" => "UNICODE",
+                _ => "VERBOSE",
+            };
+            ctx.lookup_attr(module, flag)?
         }
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
@@ -518,6 +524,7 @@ pub(super) fn call(
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
         | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
@@ -825,6 +832,13 @@ pub(super) fn call(
             || name == "subprocess.run" =>
         {
             return files::call(ctx, name, args, kwargs);
+        }
+        "match.groups" => {
+            return regex::match_groups(
+                ctx,
+                argument(args, 0)?,
+                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
+            );
         }
         name if name.starts_with("pattern.") || name == "match.group" => {
             return regex::call(ctx, name, args);
