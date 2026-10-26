@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 69 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 33 modules with recorded suites, 92 complete test executions pass natively at both optimization levels; 12,789 of 12,936 upstream executions have a classification.
+**At a glance:** 69 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 34 modules with recorded suites, 93 complete test executions pass natively at both optimization levels; 12,866 of 13,013 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 395 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,535 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 395 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,542 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -47,7 +47,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 11 | 0 |
 | `json` | Yes | Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`. [Evidence](../benchmarks/cpython_stdlib/full/json/README.md) | [0 / 216](../benchmarks/cpython_stdlib/full/json/) | 38 | 45 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
-| `logging` | Yes | Format records, replace a `StreamHandler` stream, configure loggers and rotate files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 22 | 44 |
+| `logging` | Yes | Format records, replace a `StreamHandler` stream, configure loggers and rotate files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 22 | 46 |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 27 | 15 |
@@ -78,7 +78,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
 | `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 9 | 12 |
-| `urllib` | Yes | `urllib.parse.urlsplit` on string and bytes URLs, including named result fields, and `unquote` on strings. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | — | — | — |
+| `urllib` | Yes | `urllib.parse.urlsplit` on string and bytes URLs, including named result fields, and `unquote` on strings. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 77](../benchmarks/cpython_stdlib/full/urllib/) | 0 | 5 |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
 | `zlib` | Yes | `error` exception identity on compressed-input paths; this does not imply a general compression API. [Evidence](../tests/fixtures/files/stream_errors.py) | — | — | — |

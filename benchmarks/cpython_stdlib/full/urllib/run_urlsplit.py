@@ -6,11 +6,11 @@ import inspect
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 import urllib.parse
 
@@ -25,8 +25,41 @@ TARGETS = ("/health", "/caf%C3%A9?q=%2F", "//first/second?x=y",
 
 def run_method(cls, name):
     result = cls(name).run()
-    if not result.wasSuccessful() or result.testsRun != 1:
-        raise AssertionError((name, result.errors, result.failures))
+    if not result.wasSuccessful() or result.testsRun != 1 or result.skipped or result.expectedFailures:
+        raise AssertionError((name, result.errors, result.failures, result.skipped, result.expectedFailures))
+
+
+def write_evidence(output, case, reference, report, native_methods):
+    from suite_evidence import build_report, roles, write_reports
+    from suite_inventory import cases, load_suite
+
+    discovered = [(test.id(), "upstream") for test in cases(load_suite(reference["module"]))]
+    if len(discovered) != report["reference_methods"] or reference["subtest_skips"] != report["reference_subtest_skips"]:
+        raise ValueError("upstream discovery or skipped parameters differ from the checked reference")
+    pair = []
+    for level in (0, 3):
+        normal, reachable = (report["modes"][f"{mode}-O{level}"] for mode in ("normal", "reachable"))
+        if normal != reachable:
+            raise ValueError(f"ordinary and reachable observations differ at O{level}")
+        observations = {}
+        for name in normal["host_methods_using_native_split"]:
+            key = case(name).id(), 1
+            if name == normal["fully_native_isolated_method"]:
+                observations[key] = native_methods[f"normal-O{level}"]
+                continue
+            mixed = name == "test_urlsplit_strip_url"
+            observations[key] = {
+                "outcome": "pass",
+                "roles": roles(body="cpython", assertions="cpython", operation="mixed" if mixed else "imre", fixture="cpython"),
+                "evidence": {
+                    "operation": ("Native urlsplit and result fields with CPython urlunsplit." if mixed else
+                                  "Native urlsplit and its observed result or error."),
+                    "fixture": "CPython runs the original fixture, method and assertions with observed native results.",
+                    "method_sha256": hashlib.sha256(inspect.getsource(getattr(case, name)).encode()).hexdigest(),
+                },
+            }
+        pair.append(build_report(reference, level, discovered, observations))
+    write_reports(output, pair, reference)
 
 
 def werkzeug_environ(serving):
@@ -104,22 +137,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("compiler", "runtime", "wheelhouse", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--evidence", type=Path, help="write the paired per-method evidence for this run")
     args = parser.parse_args()
     assert sys.version_info[:3] == (3, 14, 5)
+    clang = shutil.which("clang")
+    if not clang:
+        parser.error("clang is required for the native method")
     from test import test_urlparse
     sys.path.insert(0, str(HERE.parents[1]))
-    from suite_inventory import verify_files, verify_interpreter_tests
+    from suite_inventory import load_suite, passing_subtest_skips, verify_files, verify_interpreter_tests
+    from suite_native import NativeDefaultMethod, Toolchain
     manifest = json.loads((HERE/"UPSTREAM.json").read_text())
     verify_files(HERE/"upstream", manifest["files"])
     verify_interpreter_tests(manifest)
     case = test_urlparse.UrlParseTestCase
-    full = unittest.defaultTestLoader.loadTestsFromModule(test_urlparse).run(unittest.TestResult())
-    assert full.wasSuccessful()
-    skips = [(sub.test_case.id(), {
-        name: (value.__name__ if callable(value) else value)
-        for name, value in sub.params.items()
-    }, reason) for sub, reason in full.skipped]
-    report = {"reference_methods": full.testsRun, "reference_subtest_skips": skips, "modes": {}}
+    full_count, skips, _ = passing_subtest_skips(load_suite(manifest["module"]))
+    report = {"reference_methods": full_count, "reference_subtest_skips": skips, "modes": {}}
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         sys.path.insert(0, str(HERE.parents[2]/"flask"))
@@ -145,17 +178,19 @@ def main():
         report["distinct_split_calls"] = len(queries)
         calls = directory / "calls.py"
         calls.write_text(native_input(queries))
-        method = directory / "native_case.py"
         name = "test_invalid_bracketed_hosts"
-        method.write_text("import unittest\nimport urllib.parse\n\nclass UrlParseTestCase(unittest.TestCase):\n"
-                          + inspect.getsource(getattr(case, name))
-                          + '\nif __name__ == "__main__":\n    unittest.main()\n')
+        source = "Lib/test/test_urlparse.py"
+        native_methods = {}
         for mode in ("normal", "reachable"):
             for opt in ("0", "3"):
+                tool = Toolchain(args.compiler, args.runtime, Path(clang), int(opt), mode == "reachable")
+                runner = NativeDefaultMethod(tool, directory, HERE / "upstream" / source, manifest["files"][source],
+                                             ("imre", "urlsplit raising ValueError for invalid bracketed hosts"))
+                observation = runner.run(case(name))
+                if observation["outcome"] != "pass":
+                    raise RuntimeError(observation)
+                native_methods[f"{mode}-O{opt}"] = observation
                 binary = directory / "runner"
-                build(args.compiler, args.runtime, method, binary, mode, opt)
-                run = subprocess.run([binary, "-v"], capture_output=True, text=True, check=True)
-                assert name in run.stderr and "Ran 1 test" in run.stderr and run.stderr.rstrip().endswith("OK")
                 build(args.compiler, args.runtime, calls, binary, mode, opt)
                 rows = subprocess.check_output([binary], text=True).splitlines()
                 results = dict(zip(queries, map(ast.literal_eval, rows), strict=True))
@@ -175,7 +210,12 @@ def main():
                     "werkzeug_make_environ": len(TARGETS),
                 }
     args.output.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"{full.testsRun} reference methods, {len(skips)} subtest skips, "
+    if args.evidence:
+        reference = json.loads((HERE / f"reference-urlparse-{sys.platform}.json").read_bytes())
+        if reference["cpython_commit"] != manifest["commit"] or reference["module"] != manifest["module"]:
+            raise ValueError("reference does not describe this pinned test module")
+        write_evidence(args.evidence, case, reference, report, native_methods)
+    print(f"{full_count} reference methods, {len(skips)} subtest skips, "
           f"{len(queries)} distinct native calls, {len(TARGETS)} Werkzeug environments per mode")
 
 

@@ -1810,6 +1810,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
+        Some(Binding::Intrinsic(Intrinsic::LogManager)) => return Ok(Type::LogManager),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => return Ok(Type::Calendar(kind)),
@@ -7524,6 +7525,9 @@ impl<'a> Checker<'a> {
                 if let Type::Patch(kind) = receiver.ty {
                     return self.patch_attribute(kind, receiver, attribute);
                 }
+                if receiver.ty == Type::LogManager {
+                    return self.log_manager_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -8596,6 +8600,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return self.log_record(call),
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
             Some(Binding::Intrinsic(Intrinsic::Logger)) => return self.new_logger(call),
+            Some(Binding::Intrinsic(Intrinsic::LogManager)) => return self.new_log_manager(call),
             Some(Binding::Intrinsic(
                 symbol @ (Intrinsic::AddLevelName
                 | Intrinsic::GetLevelName

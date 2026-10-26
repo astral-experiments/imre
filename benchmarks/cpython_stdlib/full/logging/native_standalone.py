@@ -35,7 +35,7 @@ SETUP = """
 """
 
 
-def handler_case(toolchain, work):
+def standalone_fixture(case):
     handle = method_bytes(SOURCE, "RecordingHandler", "handle").decode()
     recording = """
 class RecordingHandler(logging.NullHandler):
@@ -47,12 +47,16 @@ class RecordingHandler(logging.NullHandler):
 
 """ + handle
 
+    if (case.logger.name != "blah" or case.logger.parent is not None
+            or case.logger.level != 0 or case.logger.handlers != [case.recording]
+            or type(case.recording).__name__ != "RecordingHandler" or case.recording.records):
+        raise AssertionError("the original standalone logger fixture changed")
+    return base_fixture(case) + recording + "\n" + LOGGER + "\n" + testcase_fixture() + SETUP
+
+
+def handler_case(toolchain, work):
     def execute(case, method):
-        if (case.logger.name != "blah" or case.logger.parent is not None
-                or case.logger.level != 0 or case.logger.handlers != [case.recording]
-                or type(case.recording).__name__ != "RecordingHandler" or case.recording.records):
-            raise AssertionError("the original standalone logger fixture changed")
-        fixture = base_fixture(case) + recording + "\n" + LOGGER + "\n" + testcase_fixture() + SETUP
+        fixture = standalone_fixture(case)
         run = native_method(toolchain, work, SOURCE, "LoggerTest", CASE, fixture,
                             operation=("imre", "Find and remove the standalone logger's live handlers"))
         result = run(case, method)
@@ -81,7 +85,7 @@ def main():
         raise ValueError("loaded test_logging differs from the verified source")
     controls = {name: subprocess.run([sys.executable, "-I", "-B", HERE / name],
                                      capture_output=True, check=True)
-                for name in ("standalone_handlers.py", "instance_disabled.py")}
+                for name in ("standalone_handlers.py", "instance_disabled.py", "manager_values.py")}
     report = {"cpython_commit": manifest["commit"], "denominator": 272, "test_id": CASE, "levels": {}}
     for level in (0, 3):
         tools = Toolchain(args.imre, args.runtime, args.clang, level)
