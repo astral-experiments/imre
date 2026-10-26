@@ -528,6 +528,7 @@ impl Checker<'_> {
         match payload {
             // Handler.formatter is optional until explicit or basic configuration assigns it.
             Type::LogFormatter => {}
+            Type::Str if attr.attr.as_str() == "encode" => {}
             Type::Class(_)
                 if matches!(&*attr.value, ast::Expr::Attribute(_))
                     && self
@@ -927,80 +928,57 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        let owner = &self.classes.declarations.definitions[class];
-        if matches!(
-            owner.static_bindings.get(attribute.attr.as_str()),
-            Some(crate::classes::ClassValue::Runtime { .. })
-        ) {
-            self.class_reads.borrow_mut().insert(owner.definition);
-            if self.classes.has_concrete_subclasses(class)
-                && let Some(receiver) = receiver
-            {
-                return self.dispatch_record(
-                    class,
-                    receiver,
-                    attribute,
-                    |checker, layout, receiver| {
-                        checker.runtime_class_attribute(attribute, layout, Some(receiver))
-                    },
-                );
-            }
-            return self.runtime_class_attribute(attribute, class, receiver);
+        if self.classes.has_concrete_subclasses(class)
+            && let Some(receiver) = receiver
+        {
+            return self.dispatch_record(
+                class,
+                receiver,
+                attribute,
+                |checker, layout, receiver| {
+                    checker.concrete_attribute(attribute, layout, Some(receiver), expected)
+                },
+            );
         }
-        let literal = match owner.static_bindings.get(attribute.attr.as_str()) {
-            Some(crate::classes::ClassValue::String(value)) => Some(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(value.clone()),
-            }),
-            Some(crate::classes::ClassValue::Strings { owner, ordinal, .. }) => {
-                Some(self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
+        self.concrete_attribute(attribute, class, receiver, expected)
+    }
+
+    /// A subclass may supply its own plain data or a property for inherited data.
+    fn concrete_attribute(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+        class: usize,
+        receiver: Option<Expr>,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
+        use crate::classes::ClassValue;
+        let decl = &self.classes.declarations.definitions[class];
+        let value = match decl.static_bindings.get(attribute.attr.as_str()) {
+            Some(ClassValue::Runtime { owner, ordinal }) => {
+                self.class_reads.borrow_mut().insert(decl.definition);
+                let value = self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "class value is read before its declaration",
+                    )
+                })?;
+                return self.data_attribute(class, attribute, receiver, value);
+            }
+            Some(ClassValue::String(text)) => unpacking::string(text.clone()),
+            Some(ClassValue::Strings { owner, ordinal, .. }) => {
+                self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
                     error(
                         self.source,
                         attribute,
                         "class tuple is read before its declaration",
                     )
-                })?)
+                })?
             }
-            _ => None,
+            _ => return self.direct_class_attribute(attribute, class, receiver, expected),
         };
-        if let Some(literal) = literal {
-            self.class_reads.borrow_mut().insert(owner.definition);
-            return Ok(self.evaluated_receiver(receiver, literal));
-        }
-        if self.classes.has_concrete_subclasses(class)
-            && let Some(receiver) = receiver
-        {
-            return self.dispatch_record(class, receiver, attribute, |checker, class, receiver| {
-                checker.direct_class_attribute(attribute, class, Some(receiver), expected)
-            });
-        }
-        self.direct_class_attribute(attribute, class, receiver, expected)
-    }
-
-    fn runtime_class_attribute(
-        &mut self,
-        attribute: &ast::ExprAttribute,
-        class: usize,
-        receiver: Option<Expr>,
-    ) -> Result<Expr, String> {
-        let owner = &self.classes.declarations.definitions[class];
-        let Some(crate::classes::ClassValue::Runtime { owner, ordinal }) =
-            owner.static_bindings.get(attribute.attr.as_str())
-        else {
-            return Err(error(
-                self.source,
-                attribute,
-                "a class data override must retain its storage type",
-            ));
-        };
-        let value = self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
-            error(
-                self.source,
-                attribute,
-                "class value is read before its declaration",
-            )
-        })?;
-        self.data_attribute(class, attribute, receiver, value)
+        self.class_reads.borrow_mut().insert(decl.definition);
+        Ok(self.evaluated_receiver(receiver, value))
     }
 
     pub(super) fn direct_class_attribute(
@@ -1148,6 +1126,17 @@ impl Checker<'_> {
                 self.unittest_membership(call, attribute.attr.as_str(), class, receiver)?
         {
             return Ok(checked);
+        }
+        if matches!(attribute.attr.as_str(), "assertIs" | "assertIsNot")
+            && self.unittest_case(class)
+            && !self.classes.methods[class].contains_key(attribute.attr.as_str())
+            && let Some(receiver) = &receiver
+        {
+            return self.unittest_identity(
+                call,
+                receiver,
+                attribute.attr.as_str() == "assertIsNot",
+            );
         }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver

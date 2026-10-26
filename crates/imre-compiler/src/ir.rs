@@ -127,6 +127,7 @@ pub(crate) enum Type {
     LogRecord,
     LogFormatter,
     Logger,
+    LogManager,
     TimedFileHandler,
     ClockTime,
     Calendar(CalendarType),
@@ -251,6 +252,7 @@ pub(crate) enum TypingOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
+    GetFqdn,
     New,
     Bind,
     Listen,
@@ -376,6 +378,7 @@ impl std::fmt::Display for Type {
             Self::LogFormatter => "logging.Formatter",
             Self::LogRecord => "logging.LogRecord",
             Self::Logger => "logging.Logger",
+            Self::LogManager => "logging.Manager",
             Self::TimedFileHandler => "logging.handlers.TimedRotatingFileHandler",
             Self::ClockTime => "datetime.time",
             Self::Calendar(CalendarType::DateTime) => "datetime.datetime",
@@ -980,6 +983,7 @@ pub(crate) enum Builtin {
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
+    ClockParts(bool),
     TimeSleep,
     WarningFilter {
         category: u32,
@@ -1053,6 +1057,8 @@ pub(crate) enum Builtin {
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
+    /// object.__repr__ for a rooted source instance, bypassing its __repr__ override.
+    DefaultRecordRepr,
     Len,
     LengthResult,
     Abs,
@@ -1824,6 +1830,8 @@ pub(crate) enum LogRecordOperation {
     New,
     AddExtra,
     Dictionary,
+    HasAttr,
+    FieldView,
     Put,
     Update,
     Read,
@@ -1887,6 +1895,11 @@ pub(crate) enum LogOperation {
     FileConfig,
     Disabled,
     SetDisabled,
+    NewManager,
+    Manager,
+    ManagerRoot,
+    ManagerDisable,
+    SetManagerDisable,
     Propagate,
     SetPropagate,
     HasHandlers,

@@ -186,6 +186,8 @@ def run(args, level, root, fixture_root):
         ("test_result", "Test_TestResult", "test_startTestRun_stopTestRun", "unittest.TestResult.startTestRun and stopTestRun"),
         ("test_case", "Test_TestCase", "testAssertRaisesNoExceptionType", "unittest.TestCase.assertRaises"),
         ("test_case", "Test_TestCase", "testAssertRaisesCallable", "unittest.TestCase.assertRaises"),
+        ("test_case", "Test_TestCase", "testAssertIs", "unittest.TestCase.assertIs"),
+        ("test_case", "Test_TestCase", "testAssertIsNot", "unittest.TestCase.assertIsNot"),
         ("test_case", "Test_TestCase", "testAssertIsNone", "unittest.TestCase.assertIsNone and assertIsNotNone"),
         ("test_assertions", "Test_Assertions", "test_assertRaises", "unittest.TestCase.assertRaises"),
         *(("test_case", "Test_TestCase", method, "unittest.TestCase string equality and failure messages")

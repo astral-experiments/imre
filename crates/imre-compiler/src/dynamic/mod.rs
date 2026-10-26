@@ -259,13 +259,29 @@ pub(crate) fn compile(
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
-    let root = if let Some(r) = module_root {
-        cwd.join(r)
-    } else if command.is_some() {
-        cwd.clone()
+    let entry = cwd.join(path);
+    let entry_identity = command
+        .is_none()
+        .then(|| entry.canonicalize())
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let root = if let Some(root) = module_root {
+        cwd.join(root)
+    } else if entry_identity.is_some() {
+        entry.parent().unwrap_or(&cwd).to_owned()
     } else {
-        cwd.join(path).parent().unwrap_or(&cwd).to_owned()
+        cwd.clone()
     };
+    // POSIX starts a script's search path at its physical directory. Keep a
+    // usable UTF-8 alias when the physical name is outside our string domain.
+    let physical_root = match (cfg!(unix), &entry_identity, module_root) {
+        (true, Some(_), Some(_)) => root.canonicalize().ok(),
+        (true, Some(identity), None) => identity.parent().map(Path::to_owned),
+        _ => None,
+    };
+    let root = physical_root
+        .filter(|path| path.to_str().is_some())
+        .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
     if !safe_path {
@@ -279,15 +295,15 @@ pub(crate) fn compile(
         if command.is_some() {
             PathBuf::from("<string>")
         } else {
-            cwd.join(path)
+            entry
         },
         src.clone(),
     )];
     let mut inputs = SourceInputs::default();
-    if command.is_none() {
+    if let Some(identity) = entry_identity {
         inputs.files.push((
             path.to_owned(),
-            path.canonicalize().map_err(|e| e.to_string())?,
+            identity,
             blake3::hash(src.as_bytes()).to_hex().to_string(),
         ));
     }
@@ -342,6 +358,8 @@ pub(crate) fn compile(
             }
         }
     }
+    let paths = serde_json::to_value(initial)
+        .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let config = serde_json::json!({
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
@@ -349,7 +367,7 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":command.is_some(),"paths":initial,
+        "command":command.is_some(),"paths":paths,
     });
     let llvm_ir = emit::emit(&sources, &config.to_string())?;
     Ok(Some(Compilation {

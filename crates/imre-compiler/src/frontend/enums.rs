@@ -271,6 +271,59 @@ impl Checker<'_> {
             }
             _ => (self.expr(left)?, self.expr(right)?),
         };
+        self.identity_values(left, right, op, node)
+    }
+
+    pub(super) fn identity_is_none(value: Expr, op: ast::CmpOp) -> Expr {
+        let mut result = Expr {
+            ty: Type::Bool,
+            kind: match value.kind {
+                ExprKind::Builtin(
+                    Builtin::RegexCapture {
+                        operation: RegexCapture::Group,
+                        known,
+                    },
+                    args,
+                ) => ExprKind::Builtin(
+                    Builtin::RegexCapture {
+                        operation: RegexCapture::Absent,
+                        known,
+                    },
+                    args,
+                ),
+                _ if matches!(value.ty, Type::Document(_)) => {
+                    ExprKind::Builtin(Builtin::Document(ir::DocumentOp::IsNull), vec![value])
+                }
+                _ if value.ty == Type::ObjectValue => ExprKind::Builtin(
+                    Builtin::ExceptionFieldIdentity { reversed: false },
+                    vec![
+                        value,
+                        Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        },
+                    ],
+                ),
+                _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
+            },
+        };
+        if op == ast::CmpOp::IsNot {
+            result = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Not(Box::new(result)),
+            };
+        }
+        result
+    }
+
+    /// Compare the original typed operands, including their stable storage identities.
+    pub(super) fn identity_values(
+        &mut self,
+        left: Expr,
+        right: Expr,
+        op: ast::CmpOp,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
         if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
             return Ok(Self::identity_result(
                 vec![left, right],
@@ -385,16 +438,25 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
-        // Python's empty built-in tuple is a singleton. Each operand still
-        // executes exactly once, even when it raises before returning the tuple.
-        if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {
+        // Empty tuples share one identity. An exact int is never a bool singleton.
+        let identical = if [left.ty, right.ty] == [self.types.tuple(Vec::new()); 2] {
+            Some(true)
+        } else if matches!(
+            (left.ty, right.ty),
+            (Type::Bool, Type::Int) | (Type::Int, Type::Bool)
+        ) {
+            Some(false)
+        } else {
+            None
+        };
+        if let Some(identical) = identical {
             return Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Expr(left), Statement::Expr(right)],
                     value: Box::new(Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Bool(op == ast::CmpOp::Is),
+                        kind: ExprKind::Bool(identical == (op == ast::CmpOp::Is)),
                     }),
                     clear: Vec::new(),
                 },
@@ -641,6 +703,7 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
+            || types == [Type::LogManager; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]

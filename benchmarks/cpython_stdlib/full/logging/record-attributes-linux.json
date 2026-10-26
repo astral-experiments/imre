@@ -1,0 +1,230 @@
+{
+  "schema": "logging-record-attribute-comparison-v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source": "c43b7938b72762406acf9dad885155b738c5f086",
+  "tree": "92e6d23ccccdd3731a78f7c04c79b358adb604b2",
+  "canonical_stream": "2b5d7086da9c4f831c7fc5cda4e9ac0256c6e7ab",
+  "fixture": "tests/fixtures/files/logging_record_attributes.py",
+  "fixture_blob": "29052b6ba4726fae57655e9190609e9a0bcfc1b7",
+  "observations": [
+    "True",
+    "True",
+    "True",
+    "True",
+    "False",
+    "True",
+    "True",
+    "True",
+    "True",
+    "True",
+    "True",
+    "False",
+    "True",
+    "None",
+    "('arg',)",
+    "evaluated for present",
+    "one",
+    "evaluated for absent",
+    "evaluated for absent",
+    "None",
+    "True",
+    "dictionary default",
+    "True",
+    "True",
+    "True",
+    "False",
+    "'LogRecord' object has no attribute 'foo'",
+    "'LogRecord' object has no attribute 'foo'",
+    "2",
+    "[3, 4]",
+    "one",
+    "'one'",
+    "invalid name default",
+    "attribute name must be string, not 'int'",
+    "attribute name must be string, not 'NoneType'"
+  ],
+  "oracle": {
+    "status": 0,
+    "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+    "output_lines": 35,
+    "stderr": ""
+  },
+  "levels": {
+    "0": {
+      "status": 0,
+      "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+      "output_lines": 35,
+      "stderr": ""
+    },
+    "3": {
+      "status": 0,
+      "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+      "output_lines": 35,
+      "stderr": ""
+    }
+  },
+  "compiler_modes": {
+    "production": {
+      "tools": {
+        "imre": "fbb7686b4c3605c95d67f0a1234fc88d0affbd52e2a91b9420c13c692fea6c53",
+        "libimre_runtime.a": "0c22fb8531a23343ee3012de700212224b242763be7e0dbf5ee108e278d6dc68"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+          "output_lines": 35,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+          "output_lines": 35,
+          "stderr": ""
+        }
+      }
+    },
+    "verify-ir": {
+      "tools": {
+        "imre": "ff2e8cfccc79ef627929b90645cc0427148d290d8e2641f0bb92fc6604a2dda1",
+        "libimre_runtime.a": "0c22fb8531a23343ee3012de700212224b242763be7e0dbf5ee108e278d6dc68"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+          "output_lines": 35,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "aff3b66fb83ef4df9074b453a3405dfa809ca04e79250e4e4966df3c8e97e646",
+          "output_lines": 35,
+          "stderr": ""
+        }
+      }
+    }
+  },
+  "suite_parent": "7686f0ac5b38543e7e7b4a0c1724e7fc6278f24c",
+  "suite_denominator": 272,
+  "suite_sha256": "eea89535902577339bef548ccdd7f2a3f0ff0b72be3a53f6a1770010b27a7b91",
+  "upstream_test_blob": "c1dc06e02d965781df0498a444aa0a333bd28a85",
+  "changed_suite_occurrences": 0,
+  "stream_suite_sha256": "3ab788ebdc03caa76f9aeae55afabf662c8a81a2abae914eb38c76faeab5bb51",
+  "owner_allocation": {
+    "test": "crates/imre-runtime/tests/logging_record_allocation.rs::retained_default_and_refused_field_owner",
+    "result": "pass",
+    "observations": [
+      "A missing field returns the identical default without allocating.",
+      "Releasing the caller's original default leaves its allocation live until the returned owner drops.",
+      "Refusing the next real allocation for a present field returns null with MemoryError().",
+      "A subsequent successful lookup and the retained default keep distinct, readable values after record destruction."
+    ],
+    "test_blob": "3bac75a2262373e9962c421ad3712e73db4f58db",
+    "cpython": {
+      "oracle": "CPython 3.14.5 PyErr_NoMemory",
+      "repr": "MemoryError()",
+      "args": []
+    }
+  },
+  "compiled_field_allocation": {
+    "source": "c43b7938b72762406acf9dad885155b738c5f086",
+    "tools": {
+      "imre": "ff2e8cfccc79ef627929b90645cc0427148d290d8e2641f0bb92fc6604a2dda1",
+      "libimre_runtime.a": "0c22fb8531a23343ee3012de700212224b242763be7e0dbf5ee108e278d6dc68"
+    },
+    "python_fixture": "import logging\n\ndef check() -> None:\n    record = logging.makeLogRecord({\"field\": \"kept\"})\n    try:\n        print(getattr(record, \"field\", \"default\"))\n    except MemoryError as error:\n        print(repr(error))\n    print(getattr(record, \"field\", \"default\"))\n    print(getattr(record, \"absent\", \"fallback\"))\n\ncheck()\n",
+    "fault_shim": "#include <stddef.h>\n#include <stdlib.h>\n#include <unistd.h>\n\nvoid *__real_malloc(size_t);\nvoid *__real_imre_logrecord_field_view(const void *, const void *, const void *);\nstatic _Thread_local int armed;\nstatic _Thread_local unsigned calls;\n\nvoid *__wrap_malloc(size_t size) {\n    if (armed) {\n        armed = 0;\n        return NULL;\n    }\n    return __real_malloc(size);\n}\n\nvoid *__wrap_imre_logrecord_field_view(const void *rec, const void *key, const void *fallback) {\n    int reject = ++calls == 1 && getenv(\"IMRE_LOGGING_REFUSE_FIELD\") != NULL;\n    if (reject) armed = 1;\n    void *result = __real_imre_logrecord_field_view(rec, key, fallback);\n    if (reject && (armed || result != NULL)) _exit(91);\n    return result;\n}\n",
+    "control": {
+      "status": 0,
+      "stdout": "kept\nkept\nfallback\n",
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "baseline": {
+          "status": 0,
+          "stdout": "kept\nkept\nfallback\n",
+          "stderr": ""
+        },
+        "refused": {
+          "status": 0,
+          "stdout": "MemoryError()\nkept\nfallback\n",
+          "stderr": ""
+        },
+        "field_calls": [
+          [
+            "  %v43 = call ptr @imre_logrecord_field_view(ptr %v38, ptr %v39, ptr %v42)",
+            "  %v44 = call i32 @imre_error_pending()",
+            "  %v45 = icmp ne i32 %v44, 0",
+            "  br i1 %v45, label %b12, label %b13, !prof !0",
+            "b12:",
+            "  call void @object_release_if_present(ptr %v42)",
+            "  call void @str_release_if_present(ptr %v39)"
+          ],
+          [
+            "  %v74 = call ptr @imre_logrecord_field_view(ptr %v69, ptr %v70, ptr %v73)",
+            "  %v75 = call i32 @imre_error_pending()",
+            "  %v76 = icmp ne i32 %v75, 0",
+            "  br i1 %v76, label %b24, label %b25, !prof !0",
+            "b24:",
+            "  call void @object_release_if_present(ptr %v73)",
+            "  call void @str_release_if_present(ptr %v70)"
+          ],
+          [
+            "  %v87 = call ptr @imre_logrecord_field_view(ptr %v82, ptr %v83, ptr %v86)",
+            "  %v88 = call i32 @imre_error_pending()",
+            "  %v89 = icmp ne i32 %v88, 0",
+            "  br i1 %v89, label %b30, label %b31, !prof !0",
+            "b30:",
+            "  call void @object_release_if_present(ptr %v86)",
+            "  call void @str_release_if_present(ptr %v83)"
+          ]
+        ]
+      },
+      "3": {
+        "baseline": {
+          "status": 0,
+          "stdout": "kept\nkept\nfallback\n",
+          "stderr": ""
+        },
+        "refused": {
+          "status": 0,
+          "stdout": "MemoryError()\nkept\nfallback\n",
+          "stderr": ""
+        },
+        "field_calls": [
+          [
+            "  %v43 = call ptr @imre_logrecord_field_view(ptr %v38, ptr %v39, ptr %v42)",
+            "  %v44 = call i32 @imre_error_pending()",
+            "  %v45 = icmp ne i32 %v44, 0",
+            "  br i1 %v45, label %b12, label %b13, !prof !0",
+            "b12:",
+            "  call void @object_release_if_present(ptr %v42)",
+            "  call void @str_release_if_present(ptr %v39)"
+          ],
+          [
+            "  %v74 = call ptr @imre_logrecord_field_view(ptr %v69, ptr %v70, ptr %v73)",
+            "  %v75 = call i32 @imre_error_pending()",
+            "  %v76 = icmp ne i32 %v75, 0",
+            "  br i1 %v76, label %b24, label %b25, !prof !0",
+            "b24:",
+            "  call void @object_release_if_present(ptr %v73)",
+            "  call void @str_release_if_present(ptr %v70)"
+          ],
+          [
+            "  %v87 = call ptr @imre_logrecord_field_view(ptr %v82, ptr %v83, ptr %v86)",
+            "  %v88 = call i32 @imre_error_pending()",
+            "  %v89 = icmp ne i32 %v88, 0",
+            "  br i1 %v89, label %b30, label %b31, !prof !0",
+            "b30:",
+            "  call void @object_release_if_present(ptr %v86)",
+            "  call void @str_release_if_present(ptr %v83)"
+          ]
+        ]
+      }
+    }
+  },
+  "root_config_suite_sha256": "782b9ee00a8afad823fe7cef907be351b4d1e0d52715ebe1bb3509f2fc8c3c18",
+  "standalone_suite_sha256": "1012a444ad446c068cdd43481a3a2bf454d4391abffbb6469a19577dc2a52848"
+}

@@ -1,0 +1,146 @@
+{
+  "module": "test.test_urlparse",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 77,
+  "reference": {
+    "test.test_urlparse.DeprecationTest.test_splitattr_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splithost_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splitnport_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splitpasswd_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splitport_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splitquery_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splittag_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splittype_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splituser_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_splitvalue_deprecation": "pass",
+    "test.test_urlparse.DeprecationTest.test_to_bytes_deprecation": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_Quoter_repr": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC1808": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC2368": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC2396": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC2732": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC2732_invalid": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_RFC3986": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_all": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_anyscheme": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_attributes_bad_port": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_attributes_bad_scheme": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_attributes_without_netloc": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_clear_cache_for_code_coverage": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_default_scheme": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_http_roundtrips": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_invalid_bracketed_hosts": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_issue14072": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_mixed_types_rejected": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_noslash": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_fragments": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qs_encoding": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qs_separator": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_bytes": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_encoding": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_errors": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_false_value": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_max_num_fields": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_parse_qsl_separator": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_port_casting_failure_message": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_portseparator": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_qs": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_qsl": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_quote_errors": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_quote_from_bytes": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_result_pairs": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_roundtrips": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_roundtrips_normalization": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_splitting_bracketed_hosts": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_telurl_params": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_unparse_parse": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_unquote_to_bytes": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urldefrag": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlencode_quote_via": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlencode_sequences": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urljoins": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urljoins_relative_base": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urllib_parse_getattr_failure": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlsplit_attributes": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlsplit_normalization": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlsplit_remove_unsafe_bytes": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlsplit_scoped_IPv6": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_urlsplit_strip_url": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_usingsys": "pass",
+    "test.test_urlparse.UrlParseTestCase.test_withoutscheme": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitattr": "pass",
+    "test.test_urlparse.Utility_Tests.test_splithost": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitnport": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitpasswd": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitport": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitquery": "pass",
+    "test.test_urlparse.Utility_Tests.test_splittag": "pass",
+    "test.test_urlparse.Utility_Tests.test_splittype": "pass",
+    "test.test_urlparse.Utility_Tests.test_splituser": "pass",
+    "test.test_urlparse.Utility_Tests.test_splitvalue": "pass",
+    "test.test_urlparse.Utility_Tests.test_to_bytes": "pass",
+    "test.test_urlparse.Utility_Tests.test_unwrap": "pass"
+  },
+  "subtest_skips": [
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_port",
+      {
+        "port": "\u096c",
+        "parse": "urlsplit",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_port",
+      {
+        "port": "\u096c",
+        "parse": "urlparse",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_scheme",
+      {
+        "scheme": "\u096chttp",
+        "parse": "urlsplit",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_attributes_bad_scheme",
+      {
+        "scheme": "\u096chttp",
+        "parse": "urlparse",
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ],
+    [
+      "test.test_urlparse.UrlParseTestCase.test_roundtrips",
+      {
+        "url": "sch\u00e8me:path/to/file",
+        "parsed": [
+          "",
+          "",
+          "sch\u00e8me:path/to/file",
+          "",
+          "",
+          ""
+        ],
+        "split": [
+          "",
+          "",
+          "sch\u00e8me:path/to/file",
+          "",
+          ""
+        ],
+        "bytes": true
+      },
+      "non-ASCII bytes"
+    ]
+  ]
+}

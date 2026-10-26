@@ -184,6 +184,12 @@ class TestCase:
     def _bound_assertListEqual(self) -> _BoundListEqual:
         return _BoundListEqual(self)
 
+    def _bound_assertIs(self) -> _BoundIs:
+        return _BoundIs(self)
+
+    def _bound_assertIsNot(self) -> _BoundIsNot:
+        return _BoundIsNot(self)
+
     def _bound_assertRaises(self) -> _BoundRaises:
         return _BoundRaises(self)
 
@@ -375,8 +381,24 @@ class _BoundListEqual(_BoundAssertion):
     pass
 
 
+class _BoundIs(_BoundAssertion):
+    pass
+
+
+class _BoundIsNot(_BoundAssertion):
+    pass
+
+
 class _BoundRaises(_BoundAssertion):
     pass
+
+
+def _raise_identity_failure(case: TestCase, expr1: str, expr2: str | None, msg: str | None = None) -> None:
+    if expr2 is None:
+        standard = "unexpectedly identical: " + expr1
+    else:
+        standard = expr1 + " is not " + expr2
+    case.fail(case._formatMessage(msg, standard))
 
 
 def _raise_call_type_error(message: str) -> None:

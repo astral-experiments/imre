@@ -437,9 +437,30 @@ impl Checker<'_> {
             .iter()
             .position(|p| p.kind == ParameterKind::Variadic);
         let mut packed = Vec::new();
+        let mut forwarded = None;
         let mut extra = Vec::new();
         let mut positional = 0;
-        for arg in &call.arguments.args {
+        for (at, arg) in call.arguments.args.iter().enumerate() {
+            // A callee's *args has the same private, read-only storage as the
+            // caller's pack. Reuse it when all fixed arguments have been bound.
+            if let ast::Expr::Starred(star) = arg
+                && let Some(index) = pack
+                && index == positional
+                && packed.is_empty()
+                && at + 1 == call.arguments.args.len()
+                && star
+                    .value
+                    .as_name_expr()
+                    .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+            {
+                let value = self.expr_expected(&star.value, params[index].ty)?;
+                forwarded = Some(if let Some(scope) = scope.as_deref_mut() {
+                    scope.hold(self, value)
+                } else {
+                    value
+                });
+                continue;
+            }
             let mut bind = |checker: &mut Self,
                             input: Supplied<'_>,
                             scope: Option<&mut ArgumentScope>|
@@ -489,10 +510,10 @@ impl Checker<'_> {
         }
         if let Some(index) = pack {
             order[index + offset] = values.len();
-            values.push(Expr {
+            values.push(forwarded.unwrap_or_else(|| Expr {
                 ty: params[index].ty,
                 kind: ExprKind::List(packed),
-            });
+            }));
         }
         for keyword in &call.arguments.keywords {
             let name = keyword

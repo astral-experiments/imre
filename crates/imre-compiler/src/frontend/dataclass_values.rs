@@ -32,7 +32,8 @@ impl Checker<'_> {
             return true;
         }
         match ty {
-            Type::Float
+            Type::Exception
+            | Type::Float
             | Type::ListInt
             | Type::Path
             | Type::PurePath(_)
@@ -135,6 +136,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
+        | Type::LogManager
         | Type::TimedFileHandler
         | Type::ProcessSelectorClass
         | Type::ClockTime
@@ -274,6 +276,7 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
         Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime

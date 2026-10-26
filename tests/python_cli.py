@@ -132,6 +132,21 @@ def main():
         (package / "app.py").write_text(module)
         compare("-B", "-c", module)
         compare("-B", "pkg/app.py")
+        if os.name == "posix":
+            (package / "path0.py").write_text(
+                "import sys\nprint(sys.path[0])\nprint(__file__)\n" + module
+            )
+            (root / "linked-script.py").symlink_to("pkg/path0.py")
+            compare("-B", "linked-script.py")
+
+            byte_dir = root / os.fsdecode(b"dir-\xff")
+            byte_dir.mkdir()
+            (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
+            (root / "ascii-alias").symlink_to(byte_dir.name, target_is_directory=True)
+            result = run(imre, "-B", "ascii-alias/main.py")
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, os.fsencode(root.resolve() / "ascii-alias") + b"\n", b"",
+            ), result
         assert (
             run(imre, "-B", "pkg/app.py", extra={"PYTHONSAFEPATH": "1"}).returncode
             != 0
