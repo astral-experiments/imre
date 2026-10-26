@@ -459,8 +459,14 @@ pub(super) fn call(
             Ok(boolean(ctx.callable(args[0])))
         }
         "globals" => {
-            if !args.is_empty() || !kwargs.is_empty() {
-                return Err(type_error("globals() takes no arguments"));
+            if !kwargs.is_empty() {
+                return Err(type_error("globals() takes no keyword arguments"));
+            }
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "globals() takes no arguments ({} given)",
+                    args.len()
+                )));
             }
             Ok(ctx.module_globals(ctx.heap.current_scope()))
         }

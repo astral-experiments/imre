@@ -459,6 +459,9 @@ impl Context {
         let scope = self.scope(name, None);
         let name_id = self.text(name);
         self.bind(scope, "__name__", name_id);
+        if source.is_some() {
+            self.bind(scope, "__doc__", NONE);
+        }
         if !locations.is_empty() {
             let dirs = locations
                 .iter()
@@ -487,7 +490,6 @@ impl Context {
             _ => {}
         }
         if let Some((path, code)) = source {
-            self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
