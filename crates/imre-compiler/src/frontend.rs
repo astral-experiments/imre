@@ -17,6 +17,7 @@ mod ascii;
 mod assertion_syntax;
 mod assignments;
 mod asyncio;
+mod binascii;
 mod bytes;
 mod cache_paths;
 mod cached_properties;
@@ -5238,6 +5239,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
+            Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
+            Some(Binding::Intrinsic(Intrinsic::BinasciiIncomplete)) => Some(70),
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
@@ -8769,6 +8772,11 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
                 return self.dedent_call(call);
             }
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::BinasciiDecode | Intrinsic::BinasciiEncode),
+            )) => {
+                return self.binascii_base64(call, op == Intrinsic::BinasciiDecode);
+            }
             Some(Binding::Intrinsic(Intrinsic::UrlsafeB64encode)) => {
                 let args = self.arguments(
                     call,
@@ -8896,6 +8904,24 @@ impl<'a> Checker<'a> {
             return self.open(call, gzip);
         }
         if self.unshadowed_builtin(&call.func, "issubclass") {
+            let builtin_error = |expr: &ast::Expr| match self.collection_binding(expr) {
+                Some(Binding::Intrinsic(_)) => self.exception_category(expr),
+                None if let ast::Expr::Name(name) = expr
+                    && self.unshadowed_builtin(expr, name.id.as_str()) =>
+                {
+                    exception_kind(name.id.as_str())
+                }
+                _ => None,
+            };
+            if call.arguments.keywords.is_empty()
+                && let [child, parent] = call.arguments.args.as_slice()
+                && let (Some(child), Some(parent)) = (builtin_error(child), builtin_error(parent))
+            {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::ExceptionSubclass(child, parent), vec![]),
+                });
+            }
             if call.arguments.keywords.is_empty()
                 && let [child, parent] = call.arguments.args.as_slice()
                 && let (Some(child), Some(parent)) =
