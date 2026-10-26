@@ -85,6 +85,7 @@ enum Body<'a> {
     Statements(&'a [ast::Stmt]),
     Annotations(Vec<(&'a str, &'a ast::Expr)>),
     Expression(&'a ast::Expr),
+    Generator(&'a ast::Comprehension, &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
 
@@ -193,14 +194,19 @@ impl Output {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
                 }
+                f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::Statements(stmts) => f.statements(stmts),
+            Body::Statements(stmts) => {
+                f.declare_globals(stmts);
+                f.statements(stmts);
+            }
             Body::Annotations(entries) => f.annotations(&entries),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
             }
+            Body::Generator(generator, element) => f.generator_step(generator, element),
             Body::Expression(expr) => {
                 f.checkpoint(expr);
                 let value = f.expr(expr);

@@ -1,6 +1,6 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use super::Context;
@@ -155,13 +155,14 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
-            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
+            Value::Iterator { kind, .. } => kind,
+            Value::Generator { .. } => "generator",
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -249,6 +250,7 @@ pub(super) struct Scope {
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
+    pub globals: HashSet<String>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -377,6 +379,13 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    Generator {
+        code: Id,
+        scope: Id,
+        running: bool,
+        exhausted: bool,
+    },
+    Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
@@ -390,6 +399,7 @@ pub(super) enum Value {
         peeked: Option<Id>,
     },
     Iterator {
+        kind: &'static str,
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
@@ -474,8 +484,10 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
+            Self::Yielded(item) => visit.push(*item),
             Self::Range { .. } => {}
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);

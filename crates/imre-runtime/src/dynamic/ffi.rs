@@ -21,9 +21,18 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
+            "declare_global" => {
+                let name = self.str_value(b)?.to_owned();
+                let Value::Scope(scope) = self.heap.get_mut(a) else {
+                    unreachable!()
+                };
+                scope.globals.insert(name);
+                Ok(NONE)
+            }
             "delname" | "clearname" => {
                 let name = self.str_value(b)?.to_owned();
-                if !self.remove_binding(a, &name, b)? && op == "delname" {
+                let scope = self.binding_scope(a, &name);
+                if !self.remove_binding(scope, &name, b)? && op == "delname" {
                     return Err(Error::new(
                         "NameError",
                         format!("name '{name}' is not defined"),
@@ -166,6 +175,8 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
+            "generator" => self.generator(a, b),
+            "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self

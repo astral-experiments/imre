@@ -19,6 +19,17 @@ class WithNamespace:
     source_namespace = globals()
 
 
+def update_declared():
+    global first_bound, declared_value
+    first_bound += 1
+    declared_value = first_bound
+
+
+def delete_declared():
+    global declared_value
+    del declared_value
+
+
 def current():
     module = __import__(__name__)
     mapping = globals()
@@ -33,6 +44,10 @@ def current():
     print(first_bound, module.first_bound)
     module.first_bound = 11
     print(mapping['first_bound'], first_bound)
+    update_declared()
+    print(mapping['first_bound'], mapping['declared_value'], declared_value)
+    delete_declared()
+    print('declared_value' in mapping)
     values = mapping.values()
     mapping['fresh_value'] = 'added after making the view'
     print(fresh_value in values)
