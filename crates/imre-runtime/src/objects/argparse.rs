@@ -781,8 +781,11 @@ pub unsafe extern "C" fn imre_argparse_parse(
             let sequence = storage.sequence()?;
             sequence.check_kind(3);
             let words = sequence.values.iter().skip(usize::from(process_argv));
-            owners.try_reserve_exact(words.len()).map_err(|_| Error::allocation())?;
-            args.try_reserve_exact(words.len()).map_err(|_| Error::allocation())?;
+            owners
+                .try_reserve_exact(words.len())
+                .map_err(|_| Error::allocation())?;
+            args.try_reserve_exact(words.len())
+                .map_err(|_| Error::allocation())?;
             owners.extend(words.map(|&word| crate::StrOwner::acquire_word(word)));
             Ok(())
         })

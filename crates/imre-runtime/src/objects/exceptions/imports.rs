@@ -406,7 +406,10 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 std::ptr::null(),
             );
         }
-        let Some(len) = (match length(kind, word) { Ok(length) => length, Err(error) => return error.returning(std::ptr::null()), }) else {
+        let Some(len) = (match length(kind, word) {
+            Ok(length) => length,
+            Err(error) => return error.returning(std::ptr::null()),
+        }) else {
             return Error::new(
                 Kind::TypeError,
                 format!("'{}' object is not subscriptable", type_name(kind, word)),
@@ -442,9 +445,10 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 let s = StrOwner::new(Str::from(ch.to_string()));
                 view(WordKind::new(3), StrOwner::as_ptr(&s) as usize)
             }
-            4..=6 => {
-                finish(sequence_item(kind, word, i).map(|(k, w)| view(k, w)), std::ptr::null())
-            }
+            4..=6 => finish(
+                sequence_item(kind, word, i).map(|(k, w)| view(k, w)),
+                std::ptr::null(),
+            ),
             8 => view(
                 WordKind::new(2),
                 Int::from_usize((&*(word as *const Bytes))[i] as usize).into_raw(),

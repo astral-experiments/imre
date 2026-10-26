@@ -206,7 +206,12 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            expression(left, functions, targets) || expression(right, functions, targets)
+            let tested = targets.types.payload(left.ty).unwrap_or(left.ty);
+            tested == Type::ObjectValue
+                || (matches!(tested, Type::List(_))
+                    && targets.types.element(tested) == Some(Type::Str))
+                || expression(left, functions, targets)
+                || expression(right, functions, targets)
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)

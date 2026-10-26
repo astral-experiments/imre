@@ -288,7 +288,10 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
         // Preserve the header verbatim, including a surrounding sort's marker.
         crate::finish(
             saved.map(|saved| {
-                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                    Storage::Sequence(saved),
+                ))))
+                .cast()
             }),
             std::ptr::null(),
         )
@@ -439,7 +442,10 @@ unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize])
                         Err(error) => error.raise(),
                     }
                 } else {
-                    let values = match storage.sequence_mut() { Ok(words) => words, Err(error) => return error.raise() };
+                    let values = match storage.sequence_mut() {
+                        Ok(words) => words,
+                        Err(error) => return error.raise(),
+                    };
                     values.check_kind(element_kind);
                     permute(&mut values.values, order);
                 }
@@ -875,7 +881,12 @@ mod tests {
                 imre_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
                 list.0.with(|storage| {
                     assert_eq!(
-                        storage.sequence().ok().expect("fixture sequence").values.as_slice(),
+                        storage
+                            .sequence()
+                            .ok()
+                            .expect("fixture sequence")
+                            .values
+                            .as_slice(),
                         order.map(|i| StrOwner::as_ptr(&texts[i]) as usize),
                     );
                 });
@@ -919,7 +930,14 @@ mod tests {
             super::super::imre_seq_append(target, StrOwner::as_ptr(&original) as usize, 3);
             let saved =
                 crate::ObjectOwner::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
-            assert!(alias.0.with(|storage| storage.sequence().ok().expect("fixture sequence").values.is_empty()));
+            assert!(alias.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .is_empty()
+            }));
             assert_eq!(StrOwner::strong_count(&original), 2);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&addition) as usize, 3);
             imre_sort_restore(
@@ -929,7 +947,9 @@ mod tests {
                 0,
             );
             assert_eq!(
-                alias.0.with(|storage| storage.sequence().ok().expect("fixture sequence").values[0]),
+                alias
+                    .0
+                    .with(|storage| storage.sequence().ok().expect("fixture sequence").values[0]),
                 StrOwner::as_ptr(&original) as usize,
             );
             drop(saved);

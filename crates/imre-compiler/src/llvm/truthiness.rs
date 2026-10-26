@@ -94,7 +94,7 @@ impl Emitter<'_, '_> {
                     value.operand
                 )),
                 Type::ObjectValue => {
-                    let bit = self.instruction(format!(
+                    let bit = self.checked_instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
                     ));
@@ -125,6 +125,13 @@ impl Emitter<'_, '_> {
                     let length = self
                         .instruction(format!("call i64 @imre_patch_len(ptr {})", value.operand));
                     self.instruction(format!("icmp ne i64 {length}, 1"))
+                }
+                Type::List(_) if self.module.types.element(value.ty) == Some(Type::Str) => {
+                    let bit = self.checked_instruction(format!(
+                        "call i32 @imre_str_list_nonempty(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {bit}, 0"))
                 }
                 Type::List(_) => {
                     let length = self

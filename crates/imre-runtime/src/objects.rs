@@ -457,7 +457,10 @@ pub unsafe extern "C" fn imre_seq_set(value: *const Object, at: usize, word: usi
         return;
     }
     // SAFETY: the caller roots the checked replacement through acquisition.
-    let mut new = Some(match unsafe { replacement(value, word, kind) } { Ok(owner) => owner, Err(error) => return error.raise() });
+    let mut new = Some(match unsafe { replacement(value, word, kind) } {
+        Ok(owner) => owner,
+        Err(error) => return error.raise(),
+    });
     // SAFETY: ownership leaves mutable storage before any displaced value drops.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
@@ -583,9 +586,12 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
 pub unsafe extern "C" fn imre_seq_reverse(value: *const Object) {
     // SAFETY: resolving the native sequence and swapping slots cannot invoke Python.
     unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| finish(storage.sequence_mut().map(|words| words.values.reverse()), ()))
+        object(value).0.with_mut(|storage| {
+            finish(
+                storage.sequence_mut().map(|words| words.values.reverse()),
+                (),
+            )
+        })
     };
 }
 
@@ -624,8 +630,12 @@ pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     let length = unsafe {
         object(value).0.with(|storage| {
             let words = storage.sequence_storage();
-            if let Some(rows) = words.rows() { return Ok(rows.len()); }
-            words.plan().map_or_else(|| Ok(words.values.len()), deferred_diff::Deferred::len)
+            if let Some(rows) = words.rows() {
+                return Ok(rows.len());
+            }
+            words
+                .plan()
+                .map_or_else(|| Ok(words.values.len()), deferred_diff::Deferred::len)
         })
     };
     let length = match length {

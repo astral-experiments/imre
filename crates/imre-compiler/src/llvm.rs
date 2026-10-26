@@ -4161,7 +4161,11 @@ impl Emitter<'_, '_> {
                     "call i32 @{helper}({needle_ty} {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 );
-                let byte = if matches!(builtin, Builtin::StringListContains) { self.checked_instruction(call) } else { self.instruction(call) };
+                let byte = if matches!(builtin, Builtin::StringListContains) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {byte}, 0")),

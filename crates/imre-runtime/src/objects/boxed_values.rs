@@ -126,10 +126,12 @@ pub(super) fn length(kind: WordKind, word: usize) -> Result<Option<usize>, Error
         Ok(match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
             4 => Some((&*(word as *const crate::List)).0.with(Vec::len)),
-            5 => return object(word as *const Object).0.with(|s| match s {
-                Storage::Sequence(v) => v.resolved().map(|v| Some(v.values.len())),
-                _ => Ok(None),
-            }),
+            5 => {
+                return object(word as *const Object).0.with(|s| match s {
+                    Storage::Sequence(v) => v.resolved().map(|v| Some(v.values.len())),
+                    _ => Ok(None),
+                });
+            }
             6 => {
                 let layout = records::descriptor(word as *const usize);
                 layout.class_semantics().is_none().then_some(layout.length)
@@ -157,20 +159,26 @@ pub(super) fn python_length(kind: WordKind, word: usize) -> Result<Option<usize>
 
 /// # Safety
 /// The caller roots a sequence and has checked the element index against its length.
-pub(super) unsafe fn sequence_item(kind: WordKind, word: usize, i: usize) -> Result<(WordKind, usize), Error> {
+pub(super) unsafe fn sequence_item(
+    kind: WordKind,
+    word: usize,
+    i: usize,
+) -> Result<(WordKind, usize), Error> {
     // SAFETY: each concrete representation retains its element during the read.
     unsafe {
         Ok(match kind.raw() {
             4 => (&*(word as *const crate::List))
                 .0
                 .with(|v| (WordKind::new(2), v[i].0)),
-            5 => return object(word as *const Object).0.with(|s| {
-                let Storage::Sequence(v) = s else {
-                    unreachable!("admitted typed list")
-                };
-                let v = v.resolved()?;
-                Ok(concrete(v.kind, v.values[i]))
-            }),
+            5 => {
+                return object(word as *const Object).0.with(|s| {
+                    let Storage::Sequence(v) = s else {
+                        unreachable!("admitted typed list")
+                    };
+                    let v = v.resolved()?;
+                    Ok(concrete(v.kind, v.values[i]))
+                });
+            }
             6 => tuple_item(word, i),
             _ => unreachable!("list or tuple"),
         })
@@ -183,7 +191,10 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
     crate::finish(unsafe { try_equal(left, right) }, false)
 }
 
-pub(super) unsafe fn try_equal(left: (WordKind, usize), right: (WordKind, usize)) -> Result<bool, Error> {
+pub(super) unsafe fn try_equal(
+    left: (WordKind, usize),
+    right: (WordKind, usize),
+) -> Result<bool, Error> {
     let numeric = |(k, w): (WordKind, usize)| {
         if k.raw() == 1 {
             (WordKind::new(2), (w << 1) | 1)
@@ -204,12 +215,14 @@ pub(super) unsafe fn try_equal(left: (WordKind, usize), right: (WordKind, usize)
                 numeric(concrete(next.1.0, next.1.1)),
             )
         };
-        let sequence = |kind: WordKind, word| -> Result<_, Error> { Ok(match kind.raw() {
-            4 => 1,
-            5 if length(kind, word)?.is_some() => 1,
-            6 if length(kind, word)?.is_some() => 2,
-            _ => 0,
-        }) };
+        let sequence = |kind: WordKind, word| -> Result<_, Error> {
+            Ok(match kind.raw() {
+                4 => 1,
+                5 if length(kind, word)?.is_some() => 1,
+                6 if length(kind, word)?.is_some() => 2,
+                _ => 0,
+            })
+        };
         let (a, b) = ((ka, wa), (kb, wb));
         let left_sequence = sequence(ka, wa)?;
         if left_sequence != 0 && left_sequence == sequence(kb, wb)? {

@@ -170,7 +170,8 @@ impl Packed {
             .map_err(|_| Error::memory_error())?;
         let mut decoded = Vec::new();
         let mut row = Vec::new();
-        let mut string = StrOwner::try_new(Str::const_new("")).map_err(|_| Error::memory_error())?;
+        let mut string =
+            StrOwner::try_new(Str::const_new("")).map_err(|_| Error::memory_error())?;
         for block in &self.blocks {
             let mut data = block.bytes(&mut decoded)?;
             while let Some((&side, rest)) = data.split_first() {
@@ -187,7 +188,8 @@ impl Packed {
                     string = StrOwner::try_new(
                         Str::try_new(std::str::from_utf8(&row).expect("complete UTF-8 row"))
                             .map_err(|_| Error::memory_error())?,
-                    ).map_err(|_| Error::memory_error())?;
+                    )
+                    .map_err(|_| Error::memory_error())?;
                 }
                 if side & 1 != 0 {
                     left.values

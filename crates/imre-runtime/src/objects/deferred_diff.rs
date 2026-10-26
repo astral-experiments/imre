@@ -5,7 +5,10 @@
 use super::difflib::{Output, materialize_words};
 use super::exceptions::Error;
 use super::{Object, Str, Words, object};
-use crate::{ObjectOwner, StrOwner, shared::{Shared, Weak}};
+use crate::{
+    ObjectOwner, StrOwner,
+    shared::{Shared, Weak},
+};
 use std::cell::{OnceCell, Ref, RefCell};
 use std::rc::Rc;
 
@@ -208,9 +211,10 @@ fn filter(
             // SAFETY: retain the source string before adding it to the independent list.
             unsafe { values.kind.acquire(word) }.into_word()
         } else {
-            StrOwner::into_raw(StrOwner::try_new(
-                Str::try_new(selected).map_err(|_| Error::memory_error())?,
-            ).map_err(|_| Error::memory_error())?) as usize
+            StrOwner::into_raw(
+                StrOwner::try_new(Str::try_new(selected).map_err(|_| Error::memory_error())?)
+                    .map_err(|_| Error::memory_error())?,
+            ) as usize
         };
         result.values.push(element);
     }
@@ -279,7 +283,8 @@ pub unsafe extern "C" fn imre_ndiff_deferred(
             full: OnceCell::new(),
             signed: OnceCell::new(),
             projected: OnceCell::new(),
-        }).map_err(|_| Error::memory_error())?;
+        })
+        .map_err(|_| Error::memory_error())?;
         own_list(Words::deferred(Deferred(View::Full(source)))?)
     })();
     crate::finish(result, std::ptr::null())
@@ -382,10 +387,7 @@ pub unsafe extern "C" fn imre_str_list_filter(
             )
         })
     };
-    super::finish(
-        result.and_then(own_list),
-        std::ptr::null(),
-    )
+    super::finish(result.and_then(own_list), std::ptr::null())
 }
 
 /// Stable ordering by the suffix starting at a fixed nonnegative scalar index.
@@ -436,10 +438,7 @@ pub unsafe extern "C" fn imre_str_list_sorted_suffix(
             })
         })
     };
-    crate::finish(
-        result.and_then(own_list),
-        std::ptr::null(),
-    )
+    crate::finish(result.and_then(own_list), std::ptr::null())
 }
 
 /// # Safety

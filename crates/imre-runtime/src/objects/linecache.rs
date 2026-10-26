@@ -376,7 +376,14 @@ pub unsafe extern "C" fn imre_linecache_line_int(
     missing: *const Str,
 ) -> *const Str {
     // SAFETY: input owners survive lookup; a missing row acquires the caller's pooled empty string.
-    unsafe { crate::finish(line_at(super::object(lines), n).map(|row| StrOwner::into_raw(row.unwrap_or_else(|| StrOwner::acquire_word(missing as usize)))), std::ptr::null()) }
+    unsafe {
+        crate::finish(
+            line_at(super::object(lines), n).map(|row| {
+                StrOwner::into_raw(row.unwrap_or_else(|| StrOwner::acquire_word(missing as usize)))
+            }),
+            std::ptr::null(),
+        )
+    }
 }
 
 /// # Safety

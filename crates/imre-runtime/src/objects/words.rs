@@ -237,11 +237,14 @@ impl Words {
     /// An inline buffer can never have a saturated length. Reserve its unused
     /// header value for an owned plan, keeping the ordinary sequence layout.
     pub(super) fn deferred(plan: Deferred) -> Result<Self, super::Error> {
-        let owner = allocator_api2::boxed::Box::try_new(plan).map_err(|_| super::Error::memory_error())?;
+        let owner =
+            allocator_api2::boxed::Box::try_new(plan).map_err(|_| super::Error::memory_error())?;
         let mut words = Self::new(3);
         words.header = u32::MAX;
         words.kind = WordKind::DEFERRED;
-        words.values.push(allocator_api2::boxed::Box::into_raw(owner) as usize);
+        words
+            .values
+            .push(allocator_api2::boxed::Box::into_raw(owner) as usize);
         Ok(words)
     }
 
@@ -279,7 +282,9 @@ impl Words {
     }
 
     pub(super) fn resolved(&self) -> Result<&Self, super::exceptions::Error> {
-        if let Some(rows) = self.rows() { return Ok(rows.boxed()); }
+        if let Some(rows) = self.rows() {
+            return Ok(rows.boxed());
+        }
         self.plan().map_or(Ok(self), Deferred::ordered)
     }
 
@@ -559,11 +564,14 @@ mod tests {
             }
             assert_eq!(cached.read(), 7);
             assert_eq!(crate::ObjectOwner::strong_count(&child), 4);
-            assert!(
-                !sequence
-                    .0
-                    .with(|storage| storage.sequence().ok().expect("fixture sequence").values.spilled())
-            );
+            assert!(!sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             {
                 let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&sequence));
                 assert_eq!(
@@ -578,11 +586,14 @@ mod tests {
             imre_seq_append(crate::ObjectOwner::as_ptr(&alias), word, 5);
             assert_eq!(cached.read(), 8);
             assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
-            assert!(
-                sequence
-                    .0
-                    .with(|storage| storage.sequence().ok().expect("fixture sequence").values.spilled())
-            );
+            assert!(sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             assert_eq!(
                 Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
                 Some(4)
