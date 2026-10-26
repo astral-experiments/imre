@@ -212,7 +212,8 @@ or `--verbose-link` to see the Clang command. [Link options and environment vari
 
 CI runs automatically on pull requests. Add the `ci:macos` label to run the Apple Silicon tests
 on a PR and its subsequent pushes, or select **macOS → Run workflow** to run them on a branch.
-The `viarius-experiments` repository uses GitHub-hosted Linux, Windows and macOS runners.
+In `viarius-experiments/imre`, Linux x64 builds and tests use the 16-CPU Namespace
+Ubuntu 24.04 profile. Linux ARM64, Windows, and macOS use GitHub-hosted runners.
 Linux runs at most one native suite per available CPU, up to four at once.
 Packaging changes build the Linux archives and installer by default;
 runtime and code generation changes also run the full AddressSanitizer suites.
