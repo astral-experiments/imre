@@ -83,7 +83,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `urllib` | Yes | `urllib.parse.urlsplit` with named result fields, and `quote` and `unquote` with codec options for strings and bytes. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 3 | 5 |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |
-| `zlib` | Yes | `error` exception identity on compressed-input paths; this does not imply a general compression API. [Evidence](../tests/fixtures/files/stream_errors.py) | — | — | — |
+| `zlib` | Yes | `adler32` computes an unsigned checksum of bytes with an optional integer seed. Compressed-input failures preserve the `error` exception. [Evidence](../tests/fixtures/bytes/zlib_adler32.py) | — | — | — |
 
 ## Modules without an accepted import or a suite measurement
 

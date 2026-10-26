@@ -8846,6 +8846,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
                 return self.dedent_call(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::Adler32)) => return self.adler32(call),
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::BinasciiDecode | Intrinsic::BinasciiEncode),
             )) => {

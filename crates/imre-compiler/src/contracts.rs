@@ -107,6 +107,7 @@ impl Builtin {
                 ),
                 PreservesOwners,
             ),
+            Self::Adler32 => Contract::new(false, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
