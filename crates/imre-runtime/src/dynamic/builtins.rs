@@ -364,6 +364,32 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "object.__getattribute__" {
+        let Some((&object, values)) = args.split_first() else {
+            return Err(type_error(
+                "descriptor '__getattribute__' of 'object' object needs an argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __getattribute__() takes no keyword arguments",
+            ));
+        }
+        let [key] = values else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                values.len()
+            )));
+        };
+        let Value::Str(attr) = ctx.heap.get(*key) else {
+            return Err(type_error(format!(
+                "attribute name must be string, not '{}'",
+                ctx.type_name(*key)
+            )));
+        };
+        let attr = attr.clone();
+        return ctx.default_get_attr(object, &attr);
+    }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
