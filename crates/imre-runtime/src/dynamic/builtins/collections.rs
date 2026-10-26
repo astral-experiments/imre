@@ -162,17 +162,22 @@ pub(super) fn method(
                 kind,
             }))
         }
-        "dict.get" => {
+        "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
             if !hashable(ctx, args[0]) {
                 return Err(type_error("unhashable dictionary key"));
             }
-            let found = entries(ctx, receiver)?
+            if let Some(&(_, value)) = entries(ctx, receiver)?
                 .iter()
-                .find(|(key, _)| ctx.equal(*key, args[0]));
-            Ok(found
-                .map(|(_, v)| *v)
-                .unwrap_or_else(|| args.get(1).copied().unwrap_or(NONE)))
+                .find(|(key, _)| ctx.equal(*key, args[0]))
+            {
+                return Ok(value);
+            }
+            let default = args.get(1).copied().unwrap_or(NONE);
+            if name == "dict.setdefault" {
+                ctx.put_item(receiver, args[0], default)?;
+            }
+            Ok(default)
         }
         "dict.update" => {
             arity(name, args, 0, 1)?;

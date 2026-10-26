@@ -22,6 +22,7 @@ impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
+            ast::Expr::EllipsisLiteral(_) => "3".into(),
             ast::Expr::BooleanLiteral(v) => if v.value { "2" } else { "1" }.into(),
             ast::Expr::NumberLiteral(v) => match &v.value {
                 ast::Number::Int(n) => self.integer(n),

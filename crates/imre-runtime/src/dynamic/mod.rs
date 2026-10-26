@@ -157,6 +157,9 @@ impl Context {
                 break;
             }
         }
+        if name == "Ellipsis" {
+            return Ok(value::ELLIPSIS);
+        }
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }
