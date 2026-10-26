@@ -417,6 +417,17 @@ impl Context {
         match name {
             "io" => stdlib::io::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "sys" => {
+                for (name, original, stderr) in [
+                    ("stdout", "__stdout__", false),
+                    ("stderr", "__stderr__", true),
+                ] {
+                    let stream =
+                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    self.bind(scope, name, stream);
+                    self.bind(scope, original, stream);
+                }
+            }
             _ => {}
         }
         if let Some((path, code)) = source {
