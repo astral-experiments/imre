@@ -19,8 +19,54 @@ impl Context {
             _ => None,
         }
     }
-    pub(super) fn truth(&self, id: Id) -> bool {
-        match self.heap.get(id) {
+    pub(super) fn optional_truth(&mut self, value: Option<Id>, default: bool) -> Result<bool> {
+        value.map_or(Ok(default), |id| self.truth(id))
+    }
+
+    pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
+        let Some(hook) = self.bound_slot(id, "__len__")? else {
+            return Ok(None);
+        };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        let length = if let Ok(integer) = self.as_int(value) {
+            integer
+        } else if let Some(index) = self.bound_slot(value, "__index__")? {
+            let result = self.call(index, Vec::new(), Vec::new())?;
+            self.as_int(result).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__index__ returned non-int (type {})",
+                        self.type_name(result)
+                    ),
+                )
+            })?
+        } else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer",
+                    self.type_name(value)
+                ),
+            ));
+        };
+        let length = length
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "cannot fit 'int' into an index-sized integer",
+                )
+            })?;
+        if length < 0 {
+            return Err(Error::new("ValueError", "__len__() should return >= 0"));
+        }
+        Ok(Some(length as usize))
+    }
+
+    pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
+        Ok(match self.heap.get(id) {
             Value::None => false,
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
@@ -31,7 +77,7 @@ impl Context {
             | Value::Set(v)
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
-            Value::DictView { dict, .. } => self.truth(*dict),
+            Value::DictView { dict, .. } => return self.truth(*dict),
             Value::Context(bindings) => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
@@ -40,13 +86,54 @@ impl Context {
                     start > stop
                 }
             }
+            Value::Instance { .. } => {
+                if let Some(hook) = self.bound_slot(id, "__bool__")? {
+                    let value = self.call(hook, Vec::new(), Vec::new())?;
+                    let Value::Bool(result) = self.heap.get(value) else {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "__bool__ should return bool, returned {}",
+                                self.type_name(value)
+                            ),
+                        ));
+                    };
+                    *result
+                } else {
+                    self.instance_len(id)?.is_none_or(|len| len != 0)
+                }
+            }
             _ => true,
-        }
+        })
     }
     pub(super) fn equal(&self, a: Id, b: Id) -> bool {
+        // Hashable dictionary, set and cache keys cannot contain cyclic containers.
+        self.equal_inner(a, b, usize::MAX, &mut false)
+    }
+
+    /// Compare arbitrary boxed values and surface recursive context comparisons.
+    fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
+        let mut exhausted = false;
+        let result = self.equal_inner(a, b, usize::MAX, &mut exhausted);
+        if exhausted {
+            return Err(Error::new(
+                "RecursionError",
+                "maximum comparison depth exceeded",
+            ));
+        }
+        Ok(result)
+    }
+
+    /// Compare child values within the caller's remaining recursion budget.
+    fn equal_inner(&self, a: Id, b: Id, remaining: usize, exhausted: &mut bool) -> bool {
         if a == b {
             return true;
         }
+        if remaining == 0 {
+            *exhausted = true;
+            return false;
+        }
+        let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
         match (self.heap.get(a), self.heap.get(b)) {
             (Value::None, Value::None) => true,
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => self
@@ -58,20 +145,29 @@ impl Context {
             (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Native(a), Value::Native(b)) => a == b,
             (Value::List(x), Value::List(y)) => {
-                x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| self.equal(i, j))
+                x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
             (Value::List(_), _) | (_, Value::List(_)) => false,
             (Value::Dict(x), Value::Dict(y)) => {
                 x.len() == y.len()
                     && x.iter()
-                        .all(|&(k, v)| y.iter().any(|&(j, w)| self.equal(k, j) && self.equal(v, w)))
+                        .all(|&(k, v)| y.iter().any(|&(j, w)| equal(k, j) && equal(v, w)))
+            }
+            (Value::Context(x), Value::Context(y)) => {
+                std::rc::Rc::ptr_eq(x, y)
+                    || (x.len() == y.len()
+                        && x.iter().all(|(key, &v)| {
+                            y.get(key).is_some_and(|&w| {
+                                self.equal_inner(v, w, remaining.min(256) - 1, exhausted)
+                            })
+                        }))
             }
             (Value::Set(x), Value::Set(y)) => {
-                x.len() == y.len() && x.iter().all(|&k| y.iter().any(|&j| self.equal(k, j)))
+                x.len() == y.len() && x.iter().all(|&k| y.iter().any(|&j| equal(k, j)))
             }
             _ => match (self.sequence(a), self.sequence(b)) {
                 (Some(x), Some(y)) => {
-                    x.len() == y.len() && x.iter().zip(y).all(|(&i, j)| self.equal(i, j))
+                    x.len() == y.len() && x.iter().zip(y).all(|(&i, j)| equal(i, j))
                 }
                 _ => false,
             },
@@ -92,7 +188,7 @@ impl Context {
                 }
                 if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
                     for (&i, &j) in x.iter().zip(&y) {
-                        if !self.equal(i, j) {
+                        if !self.checked_equal(i, j)? {
                             return self.compare(i, j);
                         }
                     }
@@ -260,10 +356,12 @@ impl Context {
         {
             return Err(Error::new("TypeError", "unhashable key"));
         }
-        Ok(self
-            .items(container)?
-            .into_iter()
-            .any(|v| self.equal(v, item)))
+        for value in self.items(container)? {
+            if self.checked_equal(value, item)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
     pub(super) fn slice(&mut self, obj: Id, spec: Id) -> Result<Id> {
         let indices = self.items(spec)?;
@@ -326,8 +424,8 @@ impl Context {
             "%" if let Value::Str(text) = self.heap.get(a) => {
                 return builtins::percent(self, &text.clone(), b);
             }
-            "==" => return Ok(truth(self.equal(a, b))),
-            "!=" => return Ok(truth(!self.equal(a, b))),
+            "==" => return Ok(truth(self.checked_equal(a, b)?)),
+            "!=" => return Ok(truth(!self.checked_equal(a, b)?)),
             "is" => return Ok(truth(a == b)),
             "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),

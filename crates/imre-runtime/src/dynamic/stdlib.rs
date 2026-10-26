@@ -10,6 +10,7 @@ use crate::objects::interpreter_stdlib as system;
 
 mod contextvars;
 mod files;
+mod hashlib;
 mod json;
 mod operator;
 mod regex;
@@ -26,6 +27,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "site"
             | "struct"
             | "json"
+            | "hashlib"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -280,10 +282,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps")
+        | ("hashlib", "sha1")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
-        | ("functools", "lru_cache")
+        | ("functools", "lru_cache" | "partial")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -312,10 +315,52 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
+    if name == "functools.partial" {
+        let Some((&function, bound)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "type 'partial' takes at least one argument",
+            ));
+        };
+        if !ctx.callable(function) {
+            return Err(Error::new(
+                "TypeError",
+                "the first argument must be callable",
+            ));
+        }
+        let (function, mut args, keywords) = match ctx.heap.get(function).clone() {
+            Value::Partial {
+                function,
+                args,
+                keywords,
+            } => {
+                let Value::Dict(entries) = ctx.heap.get(keywords) else {
+                    unreachable!()
+                };
+                let keywords = ctx.dict(entries.clone());
+                (function, ctx.items(args)?, keywords)
+            }
+            _ => (function, Vec::new(), ctx.dict(Vec::new())),
+        };
+        args.extend(bound);
+        let args = ctx.alloc(Value::Tuple(args));
+        for (name, value) in kwargs {
+            let name = ctx.text(name);
+            ctx.put_item(keywords, name, *value)?;
+        }
+        return Ok(ctx.alloc(Value::Partial {
+            function,
+            args,
+            keywords,
+        }));
+    }
     let (max_args, keywords): (usize, &[&str]) = match name {
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.dumps" => (1, &["ensure_ascii"]),
+        "hashlib.sha1" => (1, &["data"]),
+        "hash.update" => (2, &[]),
+        "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
@@ -351,6 +396,10 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
+        "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
+            return hashlib::method(ctx, name, args);
+        }
         "platform.python_implementation" => ctx.text("Imre"),
         "platform.python_version" => ctx.text(full_version(ctx)?),
         "platform.python_version_tuple" => {
@@ -427,7 +476,7 @@ pub(super) fn call(
                     "custom installation variables are unsupported",
                 ));
             }
-            let expand = option(args, index + 2, kwargs, "expand")?.is_none_or(|id| ctx.truth(id));
+            let expand = ctx.optional_truth(option(args, index + 2, kwargs, "expand")?, true)?;
             let layout = layout(ctx)?;
             let get = |name| {
                 layout.path(&scheme, name, expand).ok_or_else(|| {
@@ -500,7 +549,7 @@ pub(super) fn call(
             ctx.alloc(Value::Tuple(items))
         }
         "json.dumps" => {
-            let ascii = kwargs.first().is_none_or(|&(_, id)| ctx.truth(id));
+            let ascii = ctx.optional_truth(kwargs.first().map(|(_, id)| *id), true)?;
             ctx.text(json::dumps(ctx, argument(args, 0)?, ascii)?)
         }
         "functools.lru_cache" => {

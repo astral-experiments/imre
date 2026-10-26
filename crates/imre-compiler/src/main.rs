@@ -28,7 +28,7 @@ enum Allocator {
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
-const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
        imre [-I] [-B] [-X utf8[=0|1]] -c CODE [PROGRAM_ARGUMENTS...]
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
@@ -39,6 +39,7 @@ const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--ex
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --reachable-only         Compile definitions reachable from program entry and module initialization
+  --runtime-imports        Allow native object dispatch when static lowering cannot compile an import graph
   --extension-path DIRECTORY  Search an installed Imre wheel directory (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status

@@ -450,6 +450,8 @@ pub(crate) enum Intrinsic {
     UrlEncode,
     UrlSplit,
     UrlUnsplit,
+    UrlJoin,
+    ParseQsl,
     EmailParseDate,
     EmailFormatDateTime,
     EmailFormatDate,
@@ -1028,6 +1030,8 @@ impl IntrinsicModule {
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
+            (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
+            (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
@@ -1070,6 +1074,12 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    /// Bundled contexts whose enter returns the receiver and whose exit closes it.
+    pub(crate) fn closes_context(&self, class: &str) -> bool {
+        (self.is_bundled("selectors") && class == "PollSelector")
+            || (self.is_bundled(TEMPFILE_SPOOL) && class == "SpooledTemporaryFile")
+    }
+
     pub(crate) fn is_bundled(&self, name: &str) -> bool {
         self.bundled && self.name == name
     }
@@ -1791,6 +1801,7 @@ fn resolve_binding(
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
+const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1816,6 +1827,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
+            IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
@@ -1829,6 +1841,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
                     (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
@@ -2576,6 +2589,13 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Tempfile)
+                && imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|a| a.name.as_str() == "SpooledTemporaryFile")
+                }))
+            .then_some((TEMPFILE_SPOOL, include_str!("../stdlib/tempfile/spool.py"))),
             (module == Some(IntrinsicModule::Inspect)
                 && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
             .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
@@ -2670,6 +2690,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == TEMPFILE_SPOOL {
+            return Err("the private tempfile implementation is not an importable module".into());
+        }
         if name == INSPECT_FUNCTIONS {
             return Err("the private inspect implementation is not an importable module".into());
         }

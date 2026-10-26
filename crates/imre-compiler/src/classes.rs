@@ -493,8 +493,7 @@ fn collect_class(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
-                let selector_context = module.is_bundled("selectors")
-                    && node.name.as_str() == "PollSelector"
+                let close_context = module.closes_context(node.name.as_str())
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(
@@ -503,7 +502,7 @@ fn collect_class(
                     )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
-                    && !selector_context
+                    && !close_context
                     && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(module.is_bundled("socketserver")

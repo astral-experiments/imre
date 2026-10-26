@@ -5007,11 +5007,14 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         let popen = matches!(manager.ty, Type::Popen(..));
-        let selector_close = if let Type::Class(class) = manager.ty {
+        let context_methods = if let Type::Class(class) = manager.ty {
             let owner = &self.classes.declarations.definitions[class];
-            (self.graph.modules[owner.definition.module].is_bundled("selectors")
-                && owner.name == "PollSelector")
-                .then(|| self.classes.methods[class]["close"].id)
+            self.graph.modules[owner.definition.module]
+                .closes_context(&owner.name)
+                .then(|| {
+                    let methods = &self.classes.methods[class];
+                    (methods["__enter__"].id, methods["close"].id)
+                })
         } else {
             None
         };
@@ -5022,7 +5025,7 @@ impl<'a> Checker<'a> {
             && !socket
             && server.is_none()
             && !popen
-            && selector_close.is_none()
+            && context_methods.is_none()
             && !matches!(
                 manager.ty,
                 Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
@@ -5058,14 +5061,20 @@ impl<'a> Checker<'a> {
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
         let mut statements = vec![Statement::Assign(captured, manager)];
-        if temporary.is_none()
+        if let Some((enter, _)) = context_methods {
+            self.calls.insert(enter);
+            let receiver = self.local(captured);
+            statements.push(Statement::Expr(Expr {
+                ty: receiver.ty,
+                kind: ExprKind::Call(enter, ir::CallArgs::positional(vec![receiver])),
+            }));
+        } else if temporary.is_none()
             && stored.is_none()
             && !archive
             && !token
             && !socket
             && server.is_none()
             && !popen
-            && selector_close.is_none()
         {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
@@ -5090,7 +5099,7 @@ impl<'a> Checker<'a> {
         let cleanup = if let Some(class) = server {
             self.tcpserver_context_exit(class, self.local(captured), &item.context_expr)?
         } else {
-            let kind = if let Some(id) = selector_close {
+            let kind = if let Some((_, id)) = context_methods {
                 self.calls.insert(id);
                 ExprKind::Call(id, ir::CallArgs::positional(vec![self.local(captured)]))
             } else {
@@ -8869,6 +8878,8 @@ impl<'a> Checker<'a> {
                 )?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
+            Some(Binding::Intrinsic(Intrinsic::UrlJoin)) => return self.url_join(call),
+            Some(Binding::Intrinsic(Intrinsic::ParseQsl)) => return self.parse_qsl(call),
             Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
             Some(Binding::Intrinsic(Intrinsic::UrlUnsplit)) => return self.url_unsplit(call),
             Some(Binding::Intrinsic(Intrinsic::UrlEncode)) => return self.url_encode(call),

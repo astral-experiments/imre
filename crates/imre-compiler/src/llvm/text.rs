@@ -138,6 +138,50 @@ impl Emitter<'_, '_> {
                 let errors = self.optional_object_pointer(&args[2].value);
                 self.checked_instruction(format!("call ptr @imre_url_unquote(ptr {source}, i32 {bytes}, ptr {encoding}, ptr {errors})"))
             }
+            TextOperation::UrlJoin => {
+                let base_bytes = i32::from(args[0].value.ty == Type::Bytes);
+                let url_bytes = i32::from(args[1].value.ty == Type::Bytes);
+                let fragments =
+                    self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let word = self.checked_instruction(format!("call i64 @imre_url_join(ptr {source}, i32 {base_bytes}, ptr {}, i32 {url_bytes}, i32 {fragments})", args[1].value.operand));
+                if base_bytes == url_bytes {
+                    self.instruction(format!("inttoptr i64 {word} to ptr"))
+                } else {
+                    word
+                }
+            }
+            TextOperation::ParseQsl => {
+                let query = self.optional_object_pointer(&args[0].value);
+                let bytes = i32::from(
+                    self.module
+                        .types
+                        .payload(args[0].value.ty)
+                        .unwrap_or(args[0].value.ty)
+                        == Type::Bytes,
+                );
+                let keep = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let strict = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let encoding = self.optional_object_pointer(&args[3].value);
+                let errors = self.optional_object_pointer(&args[4].value);
+                let max = if args[5].value.ty == Type::None {
+                    "0"
+                } else {
+                    &args[5].value.operand
+                };
+                let sep = &args[6].value;
+                let sep_ty = self.module.types.payload(sep.ty).unwrap_or(sep.ty);
+                let separator_bytes = i32::from(sep_ty == Type::Bytes);
+                let separator = if matches!(sep_ty, Type::Bytes | Type::Str | Type::StrLiteral(_)) {
+                    self.optional_object_pointer(sep)
+                } else {
+                    "null".into()
+                };
+                let pair = self.module.types.element(returns).unwrap();
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(pair)));
+                self.checked_instruction(format!("call ptr @imre_parse_qsl(ptr {query}, i32 {bytes}, i32 {keep}, i32 {strict}, ptr {encoding}, ptr {errors}, i64 {max}, ptr {separator}, i32 {separator_bytes}, ptr @{layout})"))
+            }
             TextOperation::UrlSplit => {
                 let bytes = i32::from(args[0].value.ty == Type::Bytes);
                 let scheme_bytes = i32::from(args[1].value.ty == Type::Bytes);
