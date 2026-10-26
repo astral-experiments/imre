@@ -45,13 +45,13 @@ for turn in range(4):
     try:
         for item in Path("missing").iterdir():
             print("unreachable missing")
-    except FileNotFoundError:
-        print("missing directory")
+    except FileNotFoundError as error:
+        print((error.errno, error.strerror, error.filename))
     try:
         for item in Path("input.txt").iterdir():
             print("unreachable file")
-    except NotADirectoryError:
-        print("not directory")
+    except NotADirectoryError as error:
+        print((error.errno, error.strerror, error.filename))
     try:
         for item in Path("bad\0path").iterdir():
             print("unreachable nul")
@@ -72,3 +72,21 @@ for turn in range(4):
     print(len(list(zip([], Path("bad\0path").glob("*")))))
 
 print(Path("sentinel.txt").read_text(encoding="utf-8"))
+
+for path in [Path("tree"), Path("dangling-link/child/grandchild")]:
+    try:
+        path.mkdir(parents=True)
+    except OSError as error:
+        print((error.errno, error.filename, repr(error.args)))
+try:
+    Path("missing").unlink()
+except FileNotFoundError as error:
+    print((error.errno, error.filename))
+try:
+    Path("tree").rmdir()
+except OSError as error:
+    print((error.errno, error.filename))
+try:
+    Path("missing").replace("./tree//destination")
+except FileNotFoundError as error:
+    print((error.errno, error.filename, error.filename2))
