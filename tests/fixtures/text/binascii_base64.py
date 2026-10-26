@@ -43,6 +43,14 @@ try:
 except TypeError as exc:
     print(str(exc))
 try:
+    b2a_base64([])
+except TypeError as exc:
+    print(str(exc))
+try:
+    a2b_base64({})
+except TypeError as exc:
+    print(str(exc))
+try:
     raise Incomplete("partial")
 except Error:
     print("caught wrong exception")

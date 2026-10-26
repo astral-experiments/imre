@@ -27,7 +27,8 @@ impl Checker<'_> {
                 sign_only: false,
             },
         ];
-        let args = self.arguments_with(call, &params, None, |c, _, arg| c.expr(arg))?;
+        let args =
+            self.arguments_with(call, &params, None, |c, _, arg| c.evaluated_argument(arg))?;
         let ty = args.values[args.order[0]].ty;
         let text = matches!(ty, Type::Str | Type::StrLiteral(_));
         if ty != Type::Bytes && !(decode && text) {
