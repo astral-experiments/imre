@@ -28,3 +28,9 @@ def current():
             cookie.rsplit(sep, limit)
         except (TypeError, ValueError, OverflowError) as error:
             print(str(error))
+    for args, kwargs in (((1, 2, 3), {}), ((), {"a": 1, "b": 2, "c": 3}),
+                         ((b".",), {"sep": b"."}), ((), {"unknown": 1})):
+        try:
+            cookie.rsplit(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
