@@ -576,13 +576,16 @@ impl Context {
                 }
                 Ok(value)
             }
-            Value::Instance { .. } => {
-                let Some(method) = self.bound_slot(callable, "__call__")? else {
-                    return Err(Error::new("TypeError", "object is not callable"));
-                };
-                self.call(method, args, kwargs)
+            _ => {
+                if let Some(method) = self.bound_slot(callable, "__call__")? {
+                    self.call(method, args, kwargs)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!("'{}' object is not callable", self.type_name(callable)),
+                    ))
+                }
             }
-            _ => Err(Error::new("TypeError", "object is not callable")),
         }
     }
     fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {

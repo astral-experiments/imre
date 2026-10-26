@@ -289,7 +289,7 @@ impl Checker<'_> {
     pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let (
             [
-                ast::Expr::StringLiteral(pattern),
+                pattern @ ast::Expr::StringLiteral(_),
                 ast::Expr::StringLiteral(replacement),
                 text,
             ],
@@ -305,29 +305,29 @@ impl Checker<'_> {
                 "re.sub expects a literal str pattern, a literal str replacement, and a str input",
             ));
         };
-        check_string(pattern, self.source)?;
+        let pattern = self.fixed_regex(pattern, false)?;
+        self.pattern_sub(pattern, replacement, text)
+    }
+
+    fn pattern_sub(
+        &mut self,
+        pattern: Expr,
+        replacement: &ast::ExprStringLiteral,
+        text: &ast::Expr,
+    ) -> Result<Expr, String> {
         check_string(replacement, self.source)?;
-        let fixed = crate::fixed_regex::translate(pattern.value.to_str(), false)
-            .map_err(|msg| error(self.source, pattern, &msg))?;
-        if fixed.may_match_empty {
-            return Err(error(
-                self.source,
-                pattern,
-                "re.sub requires a nonempty match",
-            ));
-        }
-        let template = crate::fixed_regex::replacement(replacement.value.to_str(), &fixed.groups)
+        let groups = self
+            .capture_layout(&pattern)
+            .filter(|layout| layout.nonempty_match)
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    replacement,
+                    "re.sub requires a known nonempty match",
+                )
+            })?;
+        let template = crate::fixed_regex::replacement(replacement.value.to_str(), &groups)
             .map_err(|msg| error(self.source, replacement, msg))?;
-        let pattern = Expr {
-            ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(
-                Builtin::RegexCompile {
-                    source: fixed.source,
-                    spelling: pattern.value.to_str().to_owned(),
-                },
-                vec![],
-            ),
-        };
         Ok(Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(
@@ -400,12 +400,15 @@ impl Checker<'_> {
                         ),
                     })
                 }
+                ("sub", [ast::Expr::StringLiteral(replacement), text]) => {
+                    self.pattern_sub(receiver, replacement, text)
+                }
                 ("search", [text]) => self.pattern_search(receiver, text, Builtin::RegexSearch),
                 ("match", [text]) => self.pattern_search(receiver, text, Builtin::RegexMatchStart),
                 _ => Err(error(
                     self.source,
                     call,
-                    "a regex pattern supports search(text), match(text), and finditer(text)",
+                    "a regex pattern supports search, match, finditer, and sub with a literal replacement",
                 )),
             };
         }
