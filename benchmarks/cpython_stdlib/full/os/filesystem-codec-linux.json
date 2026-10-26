@@ -1,0 +1,160 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_base": "3df6330a54b1d0a5f48ebe9ab589fad298a33a96",
+  "product_commit": "a4887bdd4d2c506a5f80fc4b4a6ca06132d796ad",
+  "compiler_sha256": "f7148180cc0febae39a0eff7ef6cb563bf4feafa18ca7ac1bda43c5a8f4f8576",
+  "runtime_sha256": "593d905d624c751df47b6c494bf1cfe0d0ea3729430c285e948337ff9d5a4741",
+  "werkzeug": "3.1.8",
+  "wheel_source": "werkzeug/datastructures/file_storage.py",
+  "wheel_source_sha256": "279ee9680406c419eadb28d8d327ec12e375c0f4640d72e4587df093fa50bd3b",
+  "wheels": {
+    "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+    "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+    "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+    "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+    "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+    "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+  },
+  "reference_sha256": "ce47e4676b0d95f83e5c64f05492224746deff8e4abf52308d3b182cdf9429e4",
+  "reference_all_256_byte_roundtrip_sha256": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+  "roles": {
+    "body_and_streams": "CPython original FileStorage class from the verified wheel",
+    "operation": "The original module imported fsdecode and fspath through native subprocess bindings. Each binding reconstructed the operand in Imre, executed the public OS call, and returned the measured value, identity, exception and descriptor call count.",
+    "fixture": "CPython creates the streams, a real byte-named file, and save destinations in a temporary directory."
+  },
+  "modes": {
+    "ordinary-O0": {
+      "original_wheel_cases": 35,
+      "matching_reference": 24,
+      "wheel_calls": 38,
+      "native_calls_executed": 34,
+      "calls_blocked_at_class_declaration": 4
+    },
+    "ordinary-O3": {
+      "original_wheel_cases": 35,
+      "matching_reference": 24,
+      "wheel_calls": 38,
+      "native_calls_executed": 34,
+      "calls_blocked_at_class_declaration": 4
+    },
+    "reachable-O0": {
+      "original_wheel_cases": 35,
+      "matching_reference": 24,
+      "wheel_calls": 38,
+      "native_calls_executed": 34,
+      "calls_blocked_at_class_declaration": 4
+    },
+    "reachable-O3": {
+      "original_wheel_cases": 35,
+      "matching_reference": 24,
+      "wheel_calls": 38,
+      "native_calls_executed": 34,
+      "calls_blocked_at_class_declaration": 4
+    }
+  },
+  "unchanged_flask": {
+    "cpython_responses": 5,
+    "native_responses": 0,
+    "first_diagnostic": "werkzeug/urls.py:54:25: starred elements in tuple displays require a function body"
+  },
+  "direct_native_controls": {
+    "bytes256": {
+      "source_sha256": "2bad310e791135feed3aaa1ba01b1c0c564ca545a2cb63f43a81813350dc380e",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "True\n",
+      "native_exit": 1,
+      "native_stdout": "",
+      "native_stderr": "NotImplementedError: native strings cannot represent surrogate-escaped input bytes\n"
+    },
+    "invalid-sequences": {
+      "source_sha256": "3ade95f30f4039cd4f9ce5118c9ac835a753cff34a2d43b35dd85b537260c23b",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "'bad\\udcff\\udc80.txt'\n",
+      "native_exit": 1,
+      "native_stdout": "",
+      "native_stderr": "NotImplementedError: native strings cannot represent surrogate-escaped input bytes\n"
+    },
+    "locale": {
+      "source_sha256": "acef78ba781b474b58362237e2ea0a71084042e760018fac539bcf2ccfd2c1aa",
+      "matched_in_all_four_modes": true,
+      "reference_stdout": "ascii\nascii\n'ascii' codec can't encode character '\\xe9' in position 3: ordinal not in range(128)\n",
+      "native_exit": 0,
+      "native_stdout": "ascii\nascii\n'ascii' codec can't encode character '\\xe9' in position 3: ordinal not in range(128)\n",
+      "native_stderr": ""
+    },
+    "path-subclass": {
+      "source_sha256": "6f3d9011879e5dfaf8a7be26504a871fbfd8078f7125b96ab4d6d01f4be85e0d",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "True\n1\n",
+      "compile_error": "the base must be a known fixed-layout class"
+    },
+    "public": {
+      "source_sha256": "e9b0db10a337e15c7ce25c287a1d40a3f0026b86274f9da2e123d204440445ec",
+      "matched_in_all_four_modes": true,
+      "reference_stdout": "expected Invalid.__fspath__() to return str or bytes, not int\npath refused\nexpected str, bytes or os.PathLike object, not int\n_fscodec.<locals>.fsencode() got multiple values for argument 'filename'\n",
+      "native_exit": 0,
+      "native_stdout": "expected Invalid.__fspath__() to return str or bytes, not int\npath refused\nexpected str, bytes or os.PathLike object, not int\n_fscodec.<locals>.fsencode() got multiple values for argument 'filename'\n",
+      "native_stderr": ""
+    },
+    "real-invalid": {
+      "source_sha256": "6cc3772dbab32c44e9f876b456885b665e190b1520ef295a7471120bcd6647d5",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "56575\nTrue\n",
+      "native_exit": 1,
+      "native_stdout": "",
+      "native_stderr": "NotImplementedError: native strings cannot represent surrogate-escaped input bytes\n"
+    },
+    "subclass": {
+      "source_sha256": "1d749209be2678e00f4be05472a387ba245430beb38c5616e4aa0b72e04f5adb",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "True\nTrue\n",
+      "compile_error": "the base must be a known fixed-layout class"
+    },
+    "truncated-utf8": {
+      "source_sha256": "83a1f21bf43a4760c543ce915531f72bbf2e643d95c2f5834863ec0a96075b57",
+      "matched_in_all_four_modes": false,
+      "reference_stdout": "'x\\udce2\\udc82'\n",
+      "native_exit": 1,
+      "native_stdout": "",
+      "native_stderr": "NotImplementedError: native strings cannot represent surrogate-escaped input bytes\n"
+    }
+  },
+  "rows": {
+    "explicit:str": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [99, 97, 102, 233, 46, 116, 120, 116], "bytes": "636166c3a92e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:str-subclass": {"matches_reference": false, "reference": {"filename": {"type": "MyStr", "codepoints": [99, 108, 97, 115, 115, 46, 116, 120, 116], "bytes": "636c6173732e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "observed": {"compiler_blocker": "the base must be a known fixed-layout class", "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": false}]},
+    "explicit:valid-utf8": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [129514, 46, 116, 120, 116], "bytes": "f09fa7aa2e747874"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:invalid-bytes": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [98, 97, 100, 56575, 56448, 46, 116, 120, 116], "bytes": "626164ff802e747874"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:incomplete-utf8": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [120, 56546, 56450], "bytes": "78e282"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:nul": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [120, 0, 121], "bytes": "780079"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:angle": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [60, 115, 116, 100, 105, 110, 62], "bytes": "3c737464696e3e"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:empty": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [], "bytes": ""}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:path-str": {"matches_reference": false, "reference": {"filename": {"type": "MyStr", "codepoints": [112, 97, 116, 104, 46, 116, 120, 116], "bytes": "706174682e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": 1, "wheel_calls": [["fsdecode", 48]]}, "observed": {"compiler_blocker": "the base must be a known fixed-layout class", "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": false}]},
+    "explicit:path-bytes": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [112, 56575], "bytes": "70ff"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": 1, "wheel_calls": [["fsdecode", 48]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": 1, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "explicit:pathlib": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [102, 243, 108, 100, 101, 114, 47, 97], "bytes": "66c3b36c6465722f61"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "explicit:invalid-result": {"matches_reference": true, "reference": {"error": ["TypeError", "expected PathValue.__fspath__() to return str or bytes, not int"], "path_calls": 1, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "explicit:raising-path": {"matches_reference": true, "reference": {"error": ["OSError", "path refused"], "path_calls": 1, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "explicit:wrong-type": {"matches_reference": true, "reference": {"error": ["TypeError", "expected str, bytes or os.PathLike object, not int"], "path_calls": null, "wheel_calls": [["fsdecode", 48]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]},
+    "stream-name:str": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [99, 97, 102, 233, 46, 116, 120, 116], "bytes": "636166c3a92e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:str-subclass": {"matches_reference": false, "reference": {"filename": {"type": "MyStr", "codepoints": [99, 108, 97, 115, 115, 46, 116, 120, 116], "bytes": "636c6173732e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "observed": {"compiler_blocker": "the base must be a known fixed-layout class", "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": false}]},
+    "stream-name:valid-utf8": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [129514, 46, 116, 120, 116], "bytes": "f09fa7aa2e747874"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:invalid-bytes": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [98, 97, 100, 56575, 56448, 46, 116, 120, 116], "bytes": "626164ff802e747874"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:incomplete-utf8": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [120, 56546, 56450], "bytes": "78e282"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:nul": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [120, 0, 121], "bytes": "780079"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:angle": {"matches_reference": true, "reference": {"filename": null, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:empty": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [], "bytes": ""}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:path-str": {"matches_reference": false, "reference": {"filename": {"type": "MyStr", "codepoints": [112, 97, 116, 104, 46, 116, 120, 116], "bytes": "706174682e747874"}, "input_identity": true, "body": "626f6479", "same_stream": true, "path_calls": 1, "wheel_calls": [["fsdecode", 43]]}, "observed": {"compiler_blocker": "the base must be a known fixed-layout class", "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": false}]},
+    "stream-name:path-bytes": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [112, 56575], "bytes": "70ff"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": 1, "wheel_calls": [["fsdecode", 43]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "path_calls": 1, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "stream-name:pathlib": {"matches_reference": true, "reference": {"filename": {"type": "str", "codepoints": [102, 243, 108, 100, 101, 114, 47, 97], "bytes": "66c3b36c6465722f61"}, "input_identity": false, "body": "626f6479", "same_stream": true, "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:invalid-result": {"matches_reference": true, "reference": {"error": ["TypeError", "expected PathValue.__fspath__() to return str or bytes, not int"], "path_calls": 1, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "stream-name:raising-path": {"matches_reference": true, "reference": {"error": ["OSError", "path refused"], "path_calls": 1, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "stream-name:wrong-type": {"matches_reference": true, "reference": {"error": ["TypeError", "expected str, bytes or os.PathLike object, not int"], "path_calls": null, "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "stream-name:absent": {"matches_reference": true, "reference": {"filename": null, "wheel_calls": []}, "calls": []},
+    "real-byte-filename": {"matches_reference": false, "reference": {"filename": {"type": "str", "codepoints": [97, 99, 116, 117, 97, 108, 45, 56575, 46, 98, 105, 110], "bytes": "61637475616c2dff2e62696e"}, "wheel_calls": [["fsdecode", 43]]}, "observed": {"error": ["NotImplementedError", "native strings cannot represent surrogate-escaped input bytes"], "wheel_calls": [["fsdecode", 43]]}, "calls": [{"operation": "fsdecode", "line": 43, "executed_in_imre": true}]},
+    "save:pathlib": {"matches_reference": true, "reference": {"body": "7061796c6f6164", "path_calls": null, "wheel_calls": [["fspath", 126]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}, {"operation": "fspath", "line": 126, "executed_in_imre": true}]},
+    "save:path-str": {"matches_reference": true, "reference": {"body": "7061796c6f6164", "path_calls": 1, "wheel_calls": [["fspath", 126]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}, {"operation": "fspath", "line": 126, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "save:path-bytes": {"matches_reference": true, "reference": {"error": ["AttributeError", "'bytes' object has no attribute 'write'"], "path_calls": 1, "wheel_calls": [["fspath", 126]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}, {"operation": "fspath", "line": 126, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "save:path-invalid": {"matches_reference": true, "reference": {"error": ["TypeError", "expected PathValue.__fspath__() to return str or bytes, not int"], "path_calls": 1, "wheel_calls": [["fspath", 126]]}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}, {"operation": "fspath", "line": 126, "executed_in_imre": true, "descriptor_calls": 1}]},
+    "save:stream": {"matches_reference": true, "reference": {"body": "7061796c6f6164", "path_calls": null, "wheel_calls": []}, "calls": [{"operation": "fsdecode", "line": 48, "executed_in_imre": true}]}
+  }
+}
