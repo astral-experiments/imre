@@ -1,17 +1,81 @@
-//! Bind urllib.parse.urlsplit and its named tuple result using normal argument evaluation.
+//! Bind URL splitting, result methods, and quoting with normal argument evaluation.
 use super::*;
 use crate::ir::{TextOperation, UrlProperty};
 use crate::types::{SPLIT_RESULT, SPLIT_RESULT_BYTES};
 
+fn slot(name: &str, default: Option<Expr>) -> Parameter {
+    Parameter {
+        name: name.into(),
+        ty: Type::None,
+        default,
+        kind: ParameterKind::PositionalOrKeyword,
+        sign_only: false,
+    }
+}
+
 impl Checker<'_> {
-    pub(super) fn url_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let slot = |name: &str, default| Parameter {
-            name: name.into(),
+    /// Bind concrete strings and bytes while preserving keyword evaluation order.
+    pub(super) fn url_quoting(
+        &mut self,
+        call: &ast::ExprCall,
+        quote: bool,
+    ) -> Result<Expr, String> {
+        let none = Expr {
             ty: Type::None,
-            default,
-            kind: ParameterKind::PositionalOrKeyword,
-            sign_only: false,
+            kind: ExprKind::None,
         };
+        let mut params = vec![slot("string", None)];
+        if quote {
+            params.push(slot("safe", Some(unpacking::string("/"))));
+        }
+        let (encoding, errors) = if quote {
+            (none.clone(), none)
+        } else {
+            (unpacking::string("utf-8"), unpacking::string("replace"))
+        };
+        params.extend([
+            slot("encoding", Some(encoding)),
+            slot("errors", Some(errors)),
+        ]);
+        let args =
+            self.arguments_with(call, &params, None, |checker, _, node| checker.expr(node))?;
+        for (i, &index) in args.order.iter().enumerate() {
+            let ty = args.values[index].ty;
+            let valid = if i == 0 || (quote && i == 1) {
+                matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
+            } else {
+                matches!(
+                    self.types.payload(ty).unwrap_or(ty),
+                    Type::Str | Type::StrLiteral(_) | Type::None
+                )
+            };
+            if !valid {
+                return Err(error(
+                    self.source,
+                    call,
+                    &format!("unsupported URL quoting type for {}", params[i].name),
+                ));
+            }
+        }
+        let source = &args.values[args.order[0]];
+        if !quote && call.arguments.len() == 1 && source.ty != Type::Bytes {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(
+                    Builtin::Text(TextOperation::Unquote),
+                    vec![source.clone()],
+                ),
+            });
+        }
+        let operation = if quote {
+            TextOperation::UrlQuote
+        } else {
+            TextOperation::UrlUnquote
+        };
+        Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, args))
+    }
+
+    pub(super) fn url_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [
             slot("url", None),
             slot("scheme", Some(unpacking::string(""))),

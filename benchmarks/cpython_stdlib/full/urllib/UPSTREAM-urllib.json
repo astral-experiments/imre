@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_urllib",
+  "regrtest_discovery": true,
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_urllib.py": "2dd739b77b8e4d1c8d021f22a00b170c9c7fcd6e"
+  }
+}
