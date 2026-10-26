@@ -1,6 +1,4 @@
-use num_bigint::BigInt;
-use num_traits::{Signed, Zero};
-use std::borrow::Cow;
+use num_traits::Signed;
 
 use ruff_python_literal::cformat::{CFormatPart, CFormatString};
 use ruff_python_literal::format::{
@@ -10,66 +8,6 @@ use ruff_python_literal::format::{
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, visit_line_fields as split_lines};
-
-fn integer(source: &str, mut base: u32) -> Result<crate::Int> {
-    let original = source;
-    let original_base = base;
-    let error = || {
-        Error::from(crate::integer_text::invalid_literal_in_base(
-            original,
-            original_base,
-        ))
-    };
-    let source = source.trim();
-    let source = if source.is_ascii() {
-        Cow::Borrowed(source)
-    } else {
-        Cow::Owned(
-            source
-                .chars()
-                .map(|ch| {
-                    crate::integer_text::decimal_digit(ch)
-                        .map_or(ch, |digit| char::from(b'0' + digit))
-                })
-                .collect(),
-        )
-    };
-    let source = source.as_ref();
-    let (negative, digits) = match source.as_bytes().first() {
-        Some(b'-') => (true, &source[1..]),
-        Some(b'+') => (false, &source[1..]),
-        _ => (false, source),
-    };
-    let radix_prefix = digits.as_bytes().get(..2).and_then(|v| match v {
-        b"0b" | b"0B" => Some(2),
-        b"0o" | b"0O" => Some(8),
-        b"0x" | b"0X" => Some(16),
-        _ => None,
-    });
-    let mut digits = digits;
-    let guessed = base == 0;
-    let prefixed = radix_prefix.is_some_and(|r| base == 0 || r == base);
-    if prefixed {
-        base = radix_prefix.unwrap();
-        digits = digits[2..].strip_prefix('_').unwrap_or(&digits[2..]);
-    } else if guessed {
-        base = 10;
-    }
-    if digits.is_empty()
-        || digits.starts_with('_')
-        || digits.ends_with('_')
-        || digits.contains("__")
-        || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
-    {
-        return Err(error());
-    }
-    let normalized = digits.replace('_', "");
-    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(error)?;
-    if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
-        return Err(error());
-    }
-    Ok(crate::Int::new(if negative { -value } else { value }))
-}
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -142,9 +80,9 @@ pub(super) fn construct(
             }
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
-                Some(Value::Str(s)) => integer(s, radix as u32)?,
+                Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
                 Some(Value::Bytes(b)) if b.is_ascii() => {
-                    integer(std::str::from_utf8(b).unwrap(), radix as u32)?
+                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
                 }
                 Some(Value::Bytes(_)) => {
                     return Err(Error::new("ValueError", "invalid byte literal for int()"));
@@ -169,6 +107,17 @@ pub(super) fn construct(
                     encoding,
                     errors,
                 )?
+            } else if let Some(value) = value
+                && let Some(method) = ctx.bound_slot(value, "__str__")?
+            {
+                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                if !matches!(ctx.heap.get(result), Value::Str(_)) {
+                    return Err(type_error(format!(
+                        "__str__ returned non-string (type {})",
+                        ctx.type_name(result)
+                    )));
+                }
+                return Ok(result);
             } else {
                 value.map(|id| ctx.display(id)).unwrap_or_default()
             };

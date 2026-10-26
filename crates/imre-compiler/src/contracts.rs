@@ -1257,6 +1257,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_str"
                 | "imre_decimal_int_text"
                 | "imre_int_parse"
+                | "imre_int_parse_hex"
                 | "imre_int_float"
                 | "imre_float_int"
                 | "imre_float_parse"

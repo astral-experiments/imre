@@ -10427,6 +10427,13 @@ impl<'a> Checker<'a> {
                 return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
             }
             "int"
+                if let [text, base] = args.as_slice()
+                    && text.ty == Type::Str
+                    && matches!(&base.kind, ExprKind::Int(n) if n == "16") =>
+            {
+                (Builtin::Int, Type::Int)
+            }
+            "int"
                 if args.len() == 1
                     && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
             {
