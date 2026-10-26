@@ -38,13 +38,13 @@ impl Checker<'_> {
                                 .fields
                                 .iter()
                                 .zip(&self.classes.fields[class])
-                                .all(|(field, &ty)| !field.repr || self.ascii_stored_type(ty))
+                                .all(|(field, &ty)| !field.repr || self.has_builtin_repr(ty))
                     }
                 }) =>
             {
                 self.record_repr(value, argument)?
             }
-            ty if self.ascii_stored_type(ty) => Expr {
+            ty if self.has_builtin_repr(ty) => Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             },
@@ -64,7 +64,7 @@ impl Checker<'_> {
 
     // Descriptor traversal of container contents never invokes Python methods.
     // Only admit shapes whose entire contents use built-in repr.
-    fn ascii_stored_type(&self, ty: Type) -> bool {
+    pub(super) fn has_builtin_repr(&self, ty: Type) -> bool {
         match ty {
             Type::None
             | Type::Bool
@@ -83,7 +83,7 @@ impl Checker<'_> {
                 self.types
                     .children(ty)
                     .into_iter()
-                    .all(|child| self.ascii_stored_type(child))
+                    .all(|child| self.has_builtin_repr(child))
             }
             _ => false,
         }

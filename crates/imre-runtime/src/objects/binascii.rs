@@ -149,3 +149,41 @@ pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const B
         std::ptr::null(),
     )
 }
+
+/// # Safety
+/// `data` and `alphabet` are rooted bytes owners. Translation preserves CPython's
+/// last assignment when the two source alphabet bytes are equal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_base64_translate(
+    data: *const Bytes,
+    alphabet: *const Bytes,
+    decode: bool,
+) -> *const Bytes {
+    // SAFETY: both inputs are exact, immutable bytes throughout the operation.
+    let (data, alphabet) = unsafe { (&*data, &*alphabet) };
+    let result = (|| {
+        let &[first, second] = alphabet.as_slice() else {
+            return Err(Error::new(
+                Kind::AssertionError,
+                super::bytes::repr(alphabet)?,
+            ));
+        };
+        let (from, to) = if decode {
+            ([first, second], *b"+/")
+        } else {
+            (*b"+/", [first, second])
+        };
+        let mut result = allocate(data.len())?;
+        result.extend(data.iter().map(|&c| {
+            if c == from[1] {
+                to[1]
+            } else if c == from[0] {
+                to[0]
+            } else {
+                c
+            }
+        }));
+        Ok(owned(result))
+    })();
+    finish(result, std::ptr::null())
+}

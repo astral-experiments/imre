@@ -1163,6 +1163,7 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    Base64Translate,
     BinasciiAsciiInput,
     BinasciiDecode,
     BinasciiEncode,

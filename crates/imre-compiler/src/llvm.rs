@@ -5625,6 +5625,11 @@ impl Emitter<'_, '_> {
             Builtin::DecodeAscii => {
                 self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
             }
+            Builtin::Base64Translate => self.call(
+                "imre_base64_translate",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::BinasciiAsciiInput => {
                 self.call("imre_binascii_ascii_input", Type::Bytes, &[&args[0].value])
             }
@@ -9127,6 +9132,7 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
+declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare ptr @imre_binascii_encode(ptr, i1)
