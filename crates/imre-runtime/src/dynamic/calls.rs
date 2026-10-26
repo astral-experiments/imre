@@ -707,11 +707,7 @@ impl Context {
                 _ => {}
             },
             Value::File(handle) if name == "closed" => {
-                return Ok(if handle.borrow().is_none() {
-                    TRUE
-                } else {
-                    FALSE
-                });
+                return Ok(if handle.closed() { TRUE } else { FALSE });
             }
             Value::Native(class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));

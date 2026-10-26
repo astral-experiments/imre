@@ -1,6 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::cell::RefCell;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -43,6 +42,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
         ImportError,
         ModuleNotFoundError,
         OSError,
+        UnsupportedOperation,
         ConnectionError,
         ConnectionRefusedError,
         ConnectionResetError,
@@ -68,7 +68,7 @@ pub(super) fn is_exception(name: &str) -> bool {
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
-    is_builtin_type(name)
+    (name != "UnsupportedOperation" && is_builtin_type(name))
         || matches!(
             name,
             "len"
@@ -238,12 +238,18 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "fileno"
                     | "readline"
                     | "readinto"
-                    | "seek"
-                    | "tell"
+                    | "write"
+                    | "flush"
                     | "close"
                     | "__enter__"
                     | "__exit__"
             ) =>
+        {
+            "file"
+        }
+        Value::File(file)
+            if matches!(attr, "seek" | "tell")
+                && matches!(file.as_ref(), super::stdlib::BinaryFile::Reader(_)) =>
         {
             "file"
         }
@@ -828,16 +834,8 @@ pub(super) fn call(
                 let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
-            if mode != "rb" {
-                return Err(Error::new(
-                    "ValueError",
-                    "unsupported mode for dynamic files",
-                ));
-            }
-            let (file, _) = crate::objects::open_file(path, 0)?;
-            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
-                io::BufReader::new(super::stdlib::ReadSource::File(file)),
-            ))))))
+            let file = super::stdlib::BinaryFile::open(path, mode)?;
+            Ok(ctx.alloc(Value::File(Rc::new(file))))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

@@ -20,7 +20,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 mod time;
-pub(super) use files::ReadSource;
+pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
 mod marshal;

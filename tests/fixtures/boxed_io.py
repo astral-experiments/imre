@@ -36,6 +36,34 @@ class ReadCount(RawIOBase):
 
 
 def exercise(path):
+    from io import UnsupportedOperation
+
+    target_path = path + ".output"
+    with open(target_path, "wb") as output:
+        alias = output
+        print(output.write(b"\x00\xff"), alias.closed)
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+        alias.flush()
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+    with open(target_path, "ab") as output:
+        print(output.write(bytearray(b"x")))
+    with open(target_path, "rb") as reader:
+        print(reader.read())
+    try:
+        open(target_path, "xb")
+    except FileExistsError:
+        print("exclusive create")
+    try:
+        alias.read()
+    except UnsupportedOperation as error:
+        print(alias.closed, isinstance(error, OSError), isinstance(error, ValueError))
+    try:
+        alias.write(b"x")
+    except ValueError:
+        print("closed writer")
+
     for invalid in ("./missing-binary-input/file", path + "/child", "."):
         try:
             open(invalid, "rb")
