@@ -303,16 +303,17 @@ impl Context {
             | Value::Set { .. }
             | Value::Range { .. }
             | Value::Iterator { .. }
-            | Value::Generator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
+            | Value::Generator { .. }
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "itertools.count",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -351,6 +352,7 @@ impl Context {
                             | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
+                            | "itertools.count"
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -447,6 +449,7 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | ("itertools.count", Value::Count { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -659,6 +662,7 @@ impl Context {
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
                 _ => {}
             },
+            Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function { scope, fields, .. } => {
                 if name == "__globals__" {
@@ -698,6 +702,11 @@ impl Context {
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == "itertools.count" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("count")),
+                "__module__" => return Ok(self.text("itertools")),
                 _ => {}
             },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
@@ -1440,6 +1449,26 @@ impl Context {
             } => {
                 let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();
+                if parameters == NONE {
+                    if let Some((key, _)) = kwargs.first() {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("{name}() got an unexpected keyword argument '{key}'"),
+                        ));
+                    }
+                    if !args.is_empty() {
+                        let verb = if args.len() == 1 { "was" } else { "were" };
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{name}() takes 0 positional arguments but {} {verb} given",
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let globals = self.module_globals(scope);
+                    return self.exec_source(code, globals, None);
+                }
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)

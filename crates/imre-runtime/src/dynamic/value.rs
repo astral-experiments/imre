@@ -10,15 +10,22 @@ pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
 /// Immutable executable and argument layout shared by functions from one Python definition.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct CodeObject {
-    pub entry: Code,
+    pub body: Body,
     pub parameters: Id,
     pub name: Id,
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
     pub coroutine: bool,
+    pub nested: Vec<(usize, Id)>,
+}
+
+#[derive(Clone)]
+pub(super) enum Body {
+    Native(Code),
+    Source(std::rc::Rc<super::source_code::Program>),
 }
 
 #[derive(Clone, Copy)]
@@ -34,9 +41,9 @@ pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
-    pub file: &'static str,
+    pub file: std::borrow::Cow<'static, str>,
     pub line: u32,
     pub span: Option<[u32; 3]>,
 }
@@ -149,6 +156,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "count",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -162,7 +170,6 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
-            Value::Generator { .. } => "generator",
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -170,6 +177,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
@@ -255,8 +263,16 @@ pub(super) struct Scope {
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
+    pub exec_globals: Option<ExecGlobals>,
+    pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ExecGlobals {
+    pub dict: Id,
+    pub builtins: Id,
 }
 
 #[derive(Clone)]
@@ -334,6 +350,12 @@ pub(super) enum Value {
         defaults: Id,
     },
     Code(CodeObject),
+    Generator {
+        code: Id,
+        scope: Id,
+        offset: Option<usize>,
+        running: bool,
+    },
     Class {
         name: String,
         scope: Id,
@@ -387,14 +409,12 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
-    Generator {
-        code: Id,
-        scope: Id,
-        running: bool,
-        exhausted: bool,
-    },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Count {
+        current: Id,
+        step: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -450,6 +470,7 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Zip {
                 inputs, pending, ..
             } => {
@@ -493,7 +514,6 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
             Self::Yielded(item) => visit.push(*item),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
@@ -512,6 +532,10 @@ impl Value {
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
+                visit.extend(scope.exec_locals);
+                if let Some(globals) = scope.exec_globals {
+                    visit.extend([globals.dict, globals.builtins]);
+                }
                 visit.extend(scope.names.values());
             }
             Self::ClassCell(class) => visit.extend(class),
@@ -533,7 +557,11 @@ impl Value {
                 visit.extend(class_cell);
                 fields.children(visit);
             }
-            Self::Code(code) => visit.extend([code.parameters, code.name, code.filename]),
+            Self::Code(code) => {
+                visit.extend([code.name, code.filename, code.parameters]);
+                visit.extend(code.nested.iter().map(|&(_, id)| id));
+            }
+            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
             Self::Class {
                 scope, ancestors, ..
             } => {
@@ -713,7 +741,7 @@ impl Heap {
     /// Materialize one frame per activation only when an exception unwinds it.
     pub fn trace_location(&mut self) -> Option<(Location, Id)> {
         let frame = self.frames.last()?;
-        let location = frame.location?;
+        let location = frame.location.clone()?;
         if let Some(object) = frame.object {
             return Some((location, object));
         }
@@ -731,7 +759,7 @@ impl Heap {
     }
 
     pub fn current_location(&self) -> Option<Location> {
-        self.frames.last()?.location
+        self.frames.last()?.location.clone()
     }
 
     pub fn statement(
@@ -742,7 +770,6 @@ impl Heap {
         caught: Id,
     ) {
         let frame = self.frames.last_mut().unwrap();
-        frame.location = Some(location);
         frame.active = if caught == NONE {
             frame.inherited
         } else {
@@ -753,6 +780,7 @@ impl Heap {
         {
             *lineno = location.line;
         }
+        frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
         if self.slots.len() < self.next_collection || !self.free.is_empty() {

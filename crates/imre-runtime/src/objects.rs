@@ -47,6 +47,7 @@ pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;
+pub(crate) use itertools::CountValue;
 mod join_buffer;
 mod joined_lines;
 mod json;
