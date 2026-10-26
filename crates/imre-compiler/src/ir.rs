@@ -1650,6 +1650,7 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    Normalize,
     Lower,
     Upper,
     Capitalize,

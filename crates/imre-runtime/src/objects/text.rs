@@ -3,6 +3,7 @@
 use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
+mod normalization;
 mod translate;
 mod urlquote;
 mod urlsplit;
