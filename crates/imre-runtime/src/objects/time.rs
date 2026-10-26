@@ -126,62 +126,93 @@ pub extern "C" fn imre_time_component(value: usize) -> usize {
     )
 }
 
-/// # Safety
-/// The argument is a rooted tuple with nine tagged integers in positional order. The original tuple supplies named timezone attributes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_mktime(record: *const usize, original: *const usize) -> f64 {
-    let result = (|| {
-        let mut parts = [0; 9];
-        for (i, part) in parts.iter_mut().enumerate() {
-            // SAFETY: all nine slots remain rooted while validating the integer arguments.
-            *part = c_component(unsafe { *record.add(i) })?;
-        }
-        let [
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
-            _weekday,
-            yearday,
-            isdst,
-        ] = parts;
-        // SAFETY: zero initializes every numeric field and any timezone pointer.
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        tm.tm_year = year
-            .checked_sub(1900)
-            .ok_or_else(|| Error::new(Kind::OverflowError, "year out of range"))?;
-        tm.tm_mon = month.wrapping_sub(1);
-        tm.tm_mday = day;
-        tm.tm_hour = hour;
-        tm.tm_min = minute;
-        tm.tm_sec = second;
-        tm.tm_yday = yearday.wrapping_sub(1);
-        tm.tm_isdst = isdst;
-        // The extended tuple may contain caller-supplied attributes. CPython
-        // validates them even though POSIX mktime determines the timezone itself.
-        let mut zone_bytes = Vec::new();
-        // SAFETY: original remains rooted with its own physical descriptor.
-        if unsafe { descriptor(original).has_time_zone() } {
-            // SAFETY: the descriptor marks the two hidden attributes.
-            unsafe {
-                let zone = *original.add(9);
-                if zone != 0 {
-                    if extra_kind(original, 9).base() != 3 {
-                        return Err(Error::new(
-                            Kind::TypeError,
-                            "bad argument type for built-in operation",
-                        ));
-                    }
-                    zone_bytes.extend_from_slice((&*(zone as *const crate::Str)).as_bytes());
-                    zone_bytes.push(0);
-                    tm.tm_zone = zone_bytes.as_mut_ptr().cast();
+/// Validate the visible fields and timezone name before converting the offset.
+unsafe fn mktime_fields(
+    record: *const usize,
+    original: *const usize,
+    zone_bytes: Option<&mut Vec<u8>>,
+) -> Result<libc::tm, Error> {
+    let mut parts = [0; 9];
+    for (i, part) in parts.iter_mut().enumerate() {
+        // SAFETY: all nine slots remain rooted while validating the integer arguments.
+        *part = c_component(unsafe { *record.add(i) })?;
+    }
+    let [
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        _weekday,
+        yearday,
+        isdst,
+    ] = parts;
+    // SAFETY: zero initializes every numeric field and any timezone pointer.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    tm.tm_year = year
+        .checked_sub(1900)
+        .ok_or_else(|| Error::new(Kind::OverflowError, "year out of range"))?;
+    tm.tm_mon = month.wrapping_sub(1);
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_yday = yearday.wrapping_sub(1);
+    tm.tm_isdst = isdst;
+    // The extended tuple may contain caller-supplied attributes. CPython
+    // validates them even though POSIX mktime determines the timezone itself.
+    // SAFETY: original remains rooted with its own physical descriptor.
+    if unsafe { descriptor(original).has_time_zone() } {
+        // SAFETY: the descriptor marks the two hidden attributes.
+        unsafe {
+            let zone = *original.add(9);
+            if zone != 0 {
+                if extra_kind(original, 9).base() != 3 {
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        "bad argument type for built-in operation",
+                    ));
                 }
-                let offset = *original.add(10);
+                if let Some(bytes) = zone_bytes {
+                    bytes.extend_from_slice((&*(zone as *const crate::Str)).as_bytes());
+                    bytes.push(0);
+                    tm.tm_zone = bytes.as_mut_ptr().cast();
+                }
+            }
+        }
+    }
+    Ok(tm)
+}
+
+/// Read an offset for Python index conversion after the preceding fields have passed validation.
+///
+/// # Safety
+/// Both tuples are rooted. The original is an extended struct_time.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mktime_offset(record: *const usize, original: *const usize) -> usize {
+    // SAFETY: the tuple layouts and ownership are supplied by the caller.
+    let result =
+        unsafe { mktime_fields(record, original, None).map(|_| imre_time_extra(original, false)) };
+    finish(result, 0)
+}
+
+/// Convert a rooted time tuple using an optional preconverted offset word.
+unsafe fn mktime(record: *const usize, original: *const usize, indexed: usize) -> f64 {
+    let result = (|| {
+        let mut zone_bytes = Vec::new();
+        // SAFETY: the caller roots both tuples and the zone buffer outlives the system call.
+        let mut tm = unsafe { mktime_fields(record, original, Some(&mut zone_bytes)) }?;
+        // SAFETY: the descriptor identifies the two additional words of a struct_time.
+        unsafe {
+            if descriptor(original).has_time_zone() {
+                let (offset, kind) = if indexed != 0 {
+                    (indexed, 2)
+                } else {
+                    (*original.add(10), extra_kind(original, 10).base())
+                };
                 if offset != 0 {
-                    let kind = extra_kind(original, 10);
-                    tm.tm_gmtoff = match kind.base() {
+                    tm.tm_gmtoff = match kind {
                         1 => (offset - 1) as libc::c_long,
                         2 => num_traits::ToPrimitive::to_i64(&*Int::borrow(offset).big())
                             .and_then(|n| libc::c_long::try_from(n).ok())
@@ -192,7 +223,7 @@ pub unsafe extern "C" fn imre_mktime(record: *const usize, original: *const usiz
                                 )
                             })?,
                         _ => {
-                            let name = match kind.base() {
+                            let name = match kind {
                                 3 => "str",
                                 7 => "float",
                                 8 => "bytes",
@@ -223,4 +254,24 @@ pub unsafe extern "C" fn imre_mktime(record: *const usize, original: *const usiz
         }
     })();
     finish(result, -1.0)
+}
+
+/// # Safety
+/// The rooted civil tuple has nine integers. The original tuple supplies its timezone attributes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mktime(record: *const usize, original: *const usize) -> f64 {
+    // SAFETY: both arguments satisfy the shared conversion's tuple contract.
+    unsafe { mktime(record, original, 0) }
+}
+
+/// # Safety
+/// Both tuples and the tagged integer produced by the Python index protocol are rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_mktime_indexed(
+    record: *const usize,
+    original: *const usize,
+    offset: usize,
+) -> f64 {
+    // SAFETY: all three arguments are rooted throughout conversion.
+    unsafe { mktime(record, original, offset) }
 }

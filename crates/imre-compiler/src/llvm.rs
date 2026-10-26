@@ -4726,10 +4726,20 @@ impl Emitter<'_, '_> {
                 };
                 self.call(name, Type::Str, &[&args[0].value, &args[1].value])
             }
+            Builtin::Mktime if args.len() == 3 => self.call(
+                "imre_mktime_indexed",
+                Type::Float,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::Mktime => self.call(
                 "imre_mktime",
                 Type::Float,
                 &[&args[0].value, &args.get(1).unwrap_or(&args[0]).value],
+            ),
+            Builtin::MktimeOffset => self.call(
+                "imre_mktime_offset",
+                returns,
+                &[&args[0].value, &args[1].value],
             ),
             Builtin::TimeSequenceLength => {
                 self.call("imre_time_sequence_length", Type::Int, &[&args[0].value])
@@ -8884,6 +8894,8 @@ declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare ptr @imre_clock_parts(double, i1, ptr)
 declare double @imre_mktime(ptr, ptr)
+declare double @imre_mktime_indexed(ptr, ptr, i64)
+declare i64 @imre_mktime_offset(ptr, ptr)
 declare i64 @imre_time_sequence_length(i64)
 declare i64 @imre_time_component(i64)
 declare void @imre_time_extras(ptr, i64, i64)

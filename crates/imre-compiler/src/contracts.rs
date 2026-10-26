@@ -262,7 +262,7 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
-            Self::Mktime | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
+            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }
@@ -992,6 +992,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "imre_mktime"
+                | "imre_mktime_indexed"
+                | "imre_mktime_offset"
                 | "imre_time_sequence_length"
                 | "imre_time_component"
                 | "int_floordiv"
