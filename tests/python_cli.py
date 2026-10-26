@@ -393,6 +393,7 @@ def report(text):
             "boxed_module_globals.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
+            "boxed_function_defaults.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",

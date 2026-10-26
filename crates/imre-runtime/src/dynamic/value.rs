@@ -346,6 +346,7 @@ pub(super) enum Value {
         scope: Id,
         class_cell: Option<Id>,
         defaults: Id,
+        kwdefaults: Id,
     },
     Code(CodeObject),
     Generator {
@@ -542,10 +543,11 @@ impl Value {
                 class_cell,
                 code,
                 defaults,
+                kwdefaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults]);
+                visit.extend([*scope, *code, *defaults, *kwdefaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
