@@ -1,5 +1,6 @@
 """Exercise quote boundaries, both lexer modes, and iterator evaluation order."""
 import shlex
+from collections import deque
 
 
 def observe(word: str) -> None:
@@ -35,6 +36,9 @@ def main() -> None:
     print(shlex.join(split_command=("two words", "'", "")))
     print(shlex.join(x for x in ["", "two words", "'"]))
     empty: list[str] = []
+    queue: deque[int] = deque()
+    assert shlex.quote(queue) == "''"
+    assert shlex.join([queue, queue]) == "'' ''"
     print(shlex.join(empty))
     print(shlex.join([]))
     print(shlex.quote(empty))

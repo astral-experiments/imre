@@ -161,6 +161,7 @@ impl Checker<'_> {
             Type::Tuple(_) => "tuple",
             Type::Dict(_) => "dict",
             Type::Set(_) => "set",
+            Type::Deque(_) => "deque",
             _ => {
                 return Err(error(
                     self.source,
