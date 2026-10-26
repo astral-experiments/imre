@@ -100,32 +100,44 @@ pub(super) fn construct(
         "str" => {
             let [value, encoding, errors] =
                 bind(name, args, kwargs, ["object", "encoding", "errors"])?;
-            let rendered = if encoding.is_some() || errors.is_some() {
-                decode(
-                    ctx,
-                    value.ok_or_else(|| type_error("decoding requires bytes"))?,
-                    encoding,
-                    errors,
-                )?
-            } else if let Some(value) = value
-                && matches!(ctx.heap.get(value), Value::Str(_))
-            {
+            for (name, argument) in [("encoding", encoding), ("errors", errors)] {
+                if let Some(argument) = argument
+                    && ctx.string_storage(argument).is_none()
+                {
+                    return Err(type_error(format!(
+                        "str() argument '{name}' must be str, not {}",
+                        ctx.type_name(argument)
+                    )));
+                }
+            }
+            let Some(value) = value else {
+                return Ok(ctx.text(""));
+            };
+            if encoding.is_some() || errors.is_some() {
+                let decoded = decode(ctx, value, encoding, errors)?;
+                return Ok(ctx.text(decoded));
+            }
+            if matches!(ctx.heap.get(value), Value::Str(_)) {
                 return Ok(value);
-            } else if let Some(value) = value
-                && let Some(method) = ctx.bound_slot(value, "__str__")?
-            {
+            }
+            let (name, method) = match ctx.bound_slot(value, "__str__")? {
+                Some(method) => ("__str__", Some(method)),
+                None if ctx.string_storage(value).is_none() => {
+                    ("__repr__", ctx.bound_slot(value, "__repr__")?)
+                }
+                None => ("__str__", None),
+            };
+            if let Some(method) = method {
                 let result = ctx.call(method, Vec::new(), Vec::new())?;
                 if ctx.string_storage(result).is_none() {
                     return Err(type_error(format!(
-                        "__str__ returned non-string (type {})",
+                        "{name} returned non-string (type {})",
                         ctx.type_name(result)
                     )));
                 }
                 return Ok(result);
-            } else {
-                value.map(|id| ctx.display(id)).unwrap_or_default()
-            };
-            Ok(ctx.text(rendered))
+            }
+            Ok(ctx.text(ctx.display(value)))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
