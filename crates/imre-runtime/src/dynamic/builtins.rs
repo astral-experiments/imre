@@ -45,6 +45,8 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "BlockingIOError"
             | "TimeoutError"
             | "FileNotFoundError"
+            | "IsADirectoryError"
+            | "NotADirectoryError"
             | "PermissionError"
             | "AssertionError"
             | "MemoryError"
@@ -136,6 +138,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "str"
         }
+        Value::Property(_) if attr == "setter" => "property",
         Value::Bytes(_) if attr == "decode" => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
@@ -168,6 +171,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "socket.socket"
+        }
+        Value::TextFile(_)
+            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+        {
+            "TextIOWrapper"
         }
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
@@ -387,6 +395,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -445,8 +454,7 @@ pub(super) fn call(
                 return ctx.python_iter(args[0]);
             }
             let iter = ctx.iterator(args[0])?;
-            while ctx.iterator_more(iter)? {
-                let item = ctx.iterator_next(iter)?;
+            while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? {
                     return Ok(TRUE);
                 }
@@ -525,18 +533,21 @@ pub(super) fn call(
             Ok(ctx.text(value))
         }
         "property" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::Property(args[0])))
+            let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
+            super::property::construct(ctx, fields)
         }
         "open" => {
             let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
+            if matches!(mode, "w" | "wt" | "tw") {
+                let file = crate::objects::TextFile::create(path)?;
+                return Ok(ctx.alloc(Value::TextFile(file)));
+            }
             if mode != "rb" {
                 return Err(Error::new(
                     "ValueError",
-                    "only binary read mode is supported for dynamic files",
+                    "unsupported mode for dynamic files",
                 ));
             }
             let file = File::open(path).map_err(|e| {

@@ -54,6 +54,14 @@ def current():
     assert next(cursor) == 2 and list(cursor) == []
     print(next(cursor, "done"))
 
+    pairs = (pair for pair in [("first", 1), ("bad",), ("later", 2)])
+    copied = {}
+    try:
+        copied.update(pairs)
+    except ValueError:
+        pass
+    assert copied == {"first": 1} and list(pairs) == [("later", 2)]
+
     class Owner:
         def classes(self, source):
             return (__class__ for item in source)

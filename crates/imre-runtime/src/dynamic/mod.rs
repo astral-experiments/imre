@@ -6,6 +6,7 @@ mod calls;
 mod ffi;
 mod iterators;
 mod operators;
+mod property;
 mod stdlib;
 mod super_object;
 mod value;
@@ -105,6 +106,15 @@ impl Context {
             )
         })
     }
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if self.iterator_more(id)? {
+            self.iterator_next(id).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         match self.heap.get(id).clone() {
             Value::List(items)
@@ -126,8 +136,8 @@ impl Context {
             | Value::RangeIterator { .. }
             | Value::PythonIterator { .. } => {
                 let mut items = Vec::new();
-                while self.iterator_more(id)? {
-                    items.push(self.iterator_next(id)?);
+                while let Some(item) = self.next_item(id)? {
+                    items.push(item);
                 }
                 Ok(items)
             }
@@ -222,6 +232,9 @@ impl Context {
         }
         if name == "Ellipsis" {
             return Ok(value::ELLIPSIS);
+        }
+        if name == "NotImplemented" {
+            return Ok(value::NOT_IMPLEMENTED);
         }
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));

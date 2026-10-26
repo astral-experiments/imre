@@ -93,6 +93,7 @@ def main():
             )
 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -308,6 +309,7 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
             "boxed_urlsplit.py",
@@ -318,6 +320,7 @@ def report(text):
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
+            "boxed_property_setter.py",
             "boxed_item_assignment.py",
             "boxed_dict_subclasses.py",
         ):
@@ -357,6 +360,10 @@ def report(text):
         )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.check()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_text_output.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('port.txt')")
+        if Path("/dev/full").exists():
+            compare("-IB", "-c", imports + "arithmetic.full_device()")
         checked = run(
             imre,
             "-IB",

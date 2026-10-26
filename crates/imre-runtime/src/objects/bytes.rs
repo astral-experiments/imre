@@ -472,6 +472,18 @@ pub unsafe extern "C" fn imre_bytes_list(value: *const List) -> *const Bytes {
     finish(result, std::ptr::null())
 }
 
+/// Copy two byte slices into one owned result after checking the total allocation.
+pub(crate) fn concat_bytes(left: &[u8], right: &[u8]) -> Result<Bytes> {
+    let length = left
+        .len()
+        .checked_add(right.len())
+        .ok_or_else(|| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
+    let mut result = allocate(length)?;
+    result.extend_from_slice(left);
+    result.extend_from_slice(right);
+    Ok(result)
+}
+
 /// # Safety
 /// Both immutable byte inputs remain rooted; the caller owns the result.
 #[unsafe(no_mangle)]
@@ -485,16 +497,8 @@ pub unsafe extern "C" fn imre_bytes_concat(
         // SAFETY: the nonempty operand, or either empty operand, remains rooted.
         return unsafe { retained(if left_bytes.is_empty() { right } else { left }) };
     }
-    let result = (|| {
-        let length = left_bytes
-            .len()
-            .checked_add(right_bytes.len())
-            .ok_or_else(|| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-        let mut result = allocate(length)?;
-        result.extend_from_slice(left_bytes);
-        result.extend_from_slice(right_bytes);
-        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
-    })();
+    let result = concat_bytes(left_bytes, right_bytes)
+        .map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)));
     finish(result, std::ptr::null())
 }
 

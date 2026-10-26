@@ -105,6 +105,53 @@ impl Imports {
     }
 }
 
+fn boxed_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "attrgetter"
+            | "lt"
+            | "le"
+            | "eq"
+            | "ne"
+            | "gt"
+            | "ge"
+            | "add"
+            | "sub"
+            | "mul"
+            | "matmul"
+            | "truediv"
+            | "floordiv"
+            | "mod"
+            | "lshift"
+            | "rshift"
+            | "and_"
+            | "xor"
+            | "or_"
+            | "iadd"
+            | "isub"
+            | "imul"
+            | "imatmul"
+            | "itruediv"
+            | "ifloordiv"
+            | "imod"
+            | "ipow"
+            | "ilshift"
+            | "irshift"
+            | "iand"
+            | "ixor"
+            | "ior"
+            | "neg"
+            | "pos"
+            | "invert"
+            | "contains"
+            | "getitem"
+            | "setitem"
+            | "delitem"
+            | "index"
+            | "length_hint"
+    )
+}
+
 impl<'a> Visitor<'a> for Imports {
     fn visit_stmt(&mut self, s: &'a Stmt) {
         match s {
@@ -133,11 +180,11 @@ impl<'a> Visitor<'a> for Imports {
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0
-                        && matches!(
-                            (name, suffix),
-                            ("sys", "path" | "version_info" | "implementation" | "exit")
-                                | ("operator", "attrgetter")
-                        )
+                        && ((name == "operator" && boxed_operator(suffix))
+                            || matches!(
+                                (name, suffix),
+                                ("sys", "path" | "version_info" | "implementation" | "exit")
+                            ))
                     {
                         self.runtime_imports = true;
                     }
@@ -169,7 +216,7 @@ impl<'a> Visitor<'a> for Imports {
             self.typed_machinery_receivers.insert(receiver.to_string());
         }
         if let Expr::Attribute(attr) = e
-            && attr.attr.as_str() == "attrgetter"
+            && boxed_operator(attr.attr.as_str())
             && let Expr::Name(module) = &*attr.value
             && self.operator_names.contains(module.id.as_str())
         {
@@ -251,7 +298,7 @@ pub(crate) fn compile(
             "platform",
             "site",
             "importlib",
-            "attrgetter",
+            "operator",
             "struct",
             "SystemExit",
         ]

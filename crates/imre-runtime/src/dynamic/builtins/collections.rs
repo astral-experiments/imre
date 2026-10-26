@@ -26,7 +26,12 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
     if let Some(input) = input
         && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
     {
-        for (index, pair) in ctx.items(input)?.into_iter().enumerate() {
+        // Unpacking a pair may mutate the input list or consume the same iterator.
+        let iter = ctx.iterator(input)?;
+        for index in 0.. {
+            let Some(pair) = ctx.next_item(iter)? else {
+                break;
+            };
             let pair = ctx.items(pair)?;
             let [key, value] = pair.as_slice() else {
                 return Err(Error::new(

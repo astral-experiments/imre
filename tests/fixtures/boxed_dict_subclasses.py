@@ -57,6 +57,24 @@ def current():
     filtered = Filtered(data)
     print(dict(filtered), {**filtered})
 
+    pending = []
+
+    class FirstPair(dict):
+        def __iter__(self):
+            pending[1] = ("replaced", 3)
+            pending.append(("appended", 2))
+            return dict.__iter__({"first": None, 1: None})
+
+    pending.extend([FirstPair(), ("original", 4)])
+    print(dict(pending))
+
+    pairs = dict.__iter__({("first", 1): None, ("bad",): None, ("later", 2): None})
+    copied = {}
+    try:
+        copied.update(pairs)
+    except ValueError:
+        print(copied, list(pairs))
+
     class FailsLater(Filtered):
         def keys(self):
             return ("visits", "absent")
