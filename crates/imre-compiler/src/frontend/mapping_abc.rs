@@ -17,6 +17,20 @@ fn type_error(result: Type, message: String, mut inputs: Vec<Expr>) -> Expr {
     }
 }
 
+pub(super) fn abstract_message(class: &str, methods: &HashSet<String>) -> String {
+    let mut names: Vec<_> = methods.iter().map(|name| format!("'{name}'")).collect();
+    names.sort();
+    let plural = if names.len() == 1 {
+        "method"
+    } else {
+        "methods"
+    };
+    format!(
+        "Can't instantiate abstract class {class} without an implementation for abstract {plural} {}",
+        names.join(", ")
+    )
+}
+
 impl Checker<'_> {
     /// These imported ABCs have a runtime class value that a function local can shadow.
     pub(super) fn mapping_class_import(&self, name: &str) -> bool {
@@ -35,25 +49,9 @@ impl Checker<'_> {
         &mut self,
         class: usize,
         call: &ast::ExprCall,
+        message: String,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        let declared = &self.classes.declarations.definitions[class];
-        let mut names = declared
-            .abstract_methods
-            .iter()
-            .map(|name| format!("'{name}'"))
-            .collect::<Vec<_>>();
-        names.sort();
-        let plural = if names.len() == 1 {
-            "method"
-        } else {
-            "methods"
-        };
-        let message = format!(
-            "Can't instantiate abstract class {} without an implementation for abstract {plural} {}",
-            declared.name,
-            names.join(", ")
-        );
         let mut inputs = Vec::new();
         for value in &call.arguments.args {
             inputs.push(self.expr(value)?);

@@ -1474,7 +1474,10 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
-            return self.abstract_class_call(class, call);
+            let declaration = &self.classes.declarations.definitions[class];
+            let message =
+                mapping_abc::abstract_message(&declaration.name, &declaration.abstract_methods);
+            return self.abstract_class_call(class, call, message);
         }
         if self.classes.declarations.definitions[class]
             .enum_members

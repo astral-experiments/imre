@@ -512,6 +512,36 @@ impl Checker<'_> {
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
                     return self.store_setup_field(receiver, value, attribute, field);
                 }
+                if let Type::Class(id) = receiver.ty
+                    && let class = &self.classes.declarations.definitions[id]
+                    && self.classes.declarations.has_empty_slots(id)
+                    && !self.classes.has_concrete_subclasses(id)
+                    && !class
+                        .fields
+                        .iter()
+                        .any(|f| f.name == attribute.attr.as_str())
+                    && !class.static_bindings.contains_key(attribute.attr.as_str())
+                    && !self.classes.methods[id].contains_key(attribute.attr.as_str())
+                {
+                    let message = format!(
+                        "'{}' object has no attribute '{}' and no __dict__ for setting new attributes",
+                        class.name, attribute.attr
+                    );
+                    return Ok(Statement::Scope {
+                        body: vec![
+                            Statement::Expr(value),
+                            Statement::Expr(receiver),
+                            Statement::Raise(Some(Expr {
+                                ty: Type::Exception,
+                                kind: ExprKind::Exception {
+                                    kind: exception_kind("AttributeError").unwrap(),
+                                    message: Some(Box::new(string(message))),
+                                },
+                            })),
+                        ],
+                        clear: vec![],
+                    });
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))

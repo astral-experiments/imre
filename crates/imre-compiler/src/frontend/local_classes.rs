@@ -11,6 +11,8 @@ pub(super) struct LocalClass {
     pub(super) name: String,
     pub(super) qualname: String,
     pub(super) attributes: Attributes,
+    pub(super) abstract_base: Option<usize>,
+    pub(super) abstract_methods: HashSet<String>,
 }
 
 /// Recover the lexical owner from source even when an inherited method is called on a subclass.
@@ -88,17 +90,24 @@ impl Checker<'_> {
                 "local class metadata requires one fixed base and no decorators, metaclass or type parameters",
             ));
         }
+        let mut abstract_base = None;
+        let mut abstract_methods = HashSet::new();
         let mut attributes =
             if let Some(base) = node.arguments.as_ref().and_then(|a| a.args.first()) {
                 if let Some(parent) = self.local_class(base)? {
+                    abstract_base = parent.abstract_base;
+                    abstract_methods.clone_from(&parent.abstract_methods);
                     parent.attributes.clone()
                 } else if let Some(id) = self.class_reference(base)
                     && let class = &self.classes.declarations.definitions[id]
                     && let module = &self.graph.modules[class.definition.module]
-                    && class.name == "TestCase"
-                    && module.bundled
-                    && module.name == "unittest"
+                    && ((class.name == "TestCase" && module.bundled && module.name == "unittest")
+                        || (class.abc && !class.abstract_methods.is_empty()))
                 {
+                    if !class.abstract_methods.is_empty() {
+                        abstract_base = Some(id);
+                        abstract_methods.clone_from(&class.abstract_methods);
+                    }
                     self.fixed_class_attributes(id)
                 } else {
                     return Err(error(
@@ -117,11 +126,13 @@ impl Checker<'_> {
                 ast::Stmt::FunctionDef(f)
                     if f.decorator_list.is_empty()
                         && f.type_params.is_none()
-                        && !f.name.starts_with("__")
+                        && (!f.name.starts_with("__")
+                            || matches!(f.name.as_str(), "__enter__" | "__exit__"))
                         && f.parameters
                             .iter_non_variadic_params()
                             .all(|p| p.default.is_none()) =>
                 {
+                    abstract_methods.remove(f.name.as_str());
                     attributes.insert(f.name.to_string(), Some(true));
                 }
                 ast::Stmt::Assign(a)
@@ -161,6 +172,8 @@ impl Checker<'_> {
             name: name.to_owned(),
             qualname,
             attributes,
+            abstract_base,
+            abstract_methods,
         });
         Ok(())
     }

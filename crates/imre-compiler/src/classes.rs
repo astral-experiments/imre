@@ -105,7 +105,26 @@ pub(crate) struct Field {
     pub(crate) compare: bool,
 }
 
+fn context_method(name: &str) -> bool {
+    matches!(name, "__enter__" | "__exit__")
+}
+
+fn empty_slots(name: &str, value: &ast::Expr) -> bool {
+    name == "__slots__" && matches!(value, ast::Expr::Tuple(t) if t.elts.is_empty())
+}
+
 impl Classes {
+    pub(crate) fn has_empty_slots(&self, child: usize) -> bool {
+        std::iter::once(&child)
+            .chain(&self.definitions[child].bases)
+            .all(|&id| {
+                self.definitions[id].node.body.iter().any(|statement| {
+                    let ast::Stmt::Assign(a) = statement else { return false };
+                    matches!(a.targets.as_slice(), [ast::Expr::Name(n)] if empty_slots(n.id.as_str(), &a.value))
+                })
+            })
+    }
+
     pub(crate) fn subclass(&self, graph: &SourceGraph, child: usize, parent: usize) -> bool {
         let bases = &self.definitions[child].bases;
         if child == parent || bases.contains(&parent) {
@@ -377,6 +396,10 @@ fn collect_class(
             && let Some(binding) = base.and_then(|(_, parent)| parent.static_bindings.get(name))
         {
             match (binding, statement) {
+                (_, ast::Stmt::Assign(a)) if empty_slots(name, &a.value) => {}
+                (_, ast::Stmt::FunctionDef(_)) if context_method(name) => {
+                    static_bindings.remove(name);
+                }
                 (ClassValue::Runtime { .. }, ast::Stmt::Assign(_)) => {}
                 (ClassValue::String(_), ast::Stmt::Assign(assign))
                     if matches!(&*assign.value, ast::Expr::StringLiteral(_)) => {}
@@ -532,7 +555,7 @@ fn collect_class(
                     )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
-                    && !matches!(name, "__enter__" | "__exit__")
+                    && !context_method(name)
                     && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
                 {
@@ -717,19 +740,21 @@ fn collect_class(
                         })
                     }) =>
             {
-                if !names.insert(name.id.to_string())
-                    || name.id.starts_with("__")
+                let member = name.id.as_str();
+                let protocol = context_method(member);
+                let slots = empty_slots(member, &assign.value);
+                if !names.insert(member.to_owned())
+                    || (member.starts_with("__") && !protocol && !slots)
                     || base.is_some_and(|(_, b)| {
-                        b.fields.iter().any(|f| f.name == name.id.as_str())
-                            || b.methods
-                                .iter()
-                                .any(|m| m.name.as_str() == name.id.as_str())
-                            || b.exception_aliases.contains_key(name.id.as_str())
+                        b.fields.iter().any(|f| f.name == member)
+                            || (!protocol && b.methods.iter().any(|m| m.name.as_str() == member))
+                            || b.exception_aliases.contains_key(member)
                     })
                 {
                     return Err(module.error(name, "duplicate or reserved static class binding"));
                 }
-                class_bindings.insert(name.id.to_string());
+                abstract_methods.remove(member);
+                class_bindings.insert(member.to_owned());
                 static_bindings.insert(name.id.to_string(), binding);
             }
             ast::Stmt::Assign(assign)

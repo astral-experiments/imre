@@ -8009,6 +8009,13 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(local) = self.local_class(&call.func)?
+            && let Some(base) = local.abstract_base
+            && !local.abstract_methods.is_empty()
+        {
+            let message = mapping_abc::abstract_message(&local.name, &local.abstract_methods);
+            return self.abstract_class_call(base, call, message);
+        }
         if let Some(value) = self.literal_attrgetter_call(call)? {
             return Ok(value);
         }
