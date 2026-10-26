@@ -506,7 +506,8 @@ pub(super) fn method(
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] = optional_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
+        let [sep, max] =
+            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = match max {
             None => usize::MAX,
             Some(id) => {

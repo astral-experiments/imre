@@ -12,7 +12,7 @@ pub(super) fn to_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
             ctx.type_name(receiver)
         ))
     })?;
-    let [length, order, signed] = optional_arguments(
+    let [length, order, signed] = bind_method_arguments(
         "to_bytes",
         args,
         kwargs,

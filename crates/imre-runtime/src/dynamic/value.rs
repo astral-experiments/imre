@@ -9,6 +9,17 @@ use crate::objects::exceptions::ExitStatus;
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
+/// Immutable executable and argument layout shared by functions from one Python definition.
+#[derive(Clone, Copy)]
+pub(super) struct CodeObject {
+    pub entry: Code,
+    pub parameters: Id,
+    pub name: Id,
+    pub filename: Id,
+    pub first_line: u32,
+    pub module_definition: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Hmac {
     pub inner: Id,
@@ -26,12 +37,15 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) struct Location {
     pub file: &'static str,
     pub line: u32,
+    pub span: Option<[u32; 3]>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
     pub frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
+    pub context: Option<Id>,
+    pub cause: Option<Id>,
     cached: Option<(usize, Id)>,
 }
 
@@ -68,6 +82,8 @@ impl Error {
                     .iter()
                     .map(|&(_, frame)| frame)
                     .chain(trace.instance)
+                    .chain(trace.context)
+                    .chain(trace.cause)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
     }
@@ -78,6 +94,21 @@ impl Error {
 }
 
 impl Context {
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        if let Some((mut loc, frame)) = self.heap.trace_location() {
+            if let Some(&[line, start, split, end]) = span {
+                loc.line = line;
+                loc.span = Some([start, split, end]);
+            }
+            let trace = error.tracing();
+            let active = self.heap.active_exception();
+            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
+                trace.context = Some(active);
+            }
+            trace.frames.push((loc, frame));
+        }
+    }
+
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
     pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
         let Value::Raised(error) = self.heap.get(exception) else {
@@ -95,6 +126,7 @@ impl Context {
                     frame,
                     next: head,
                     lineno: i64::from(at.line),
+                    span: at.span,
                 });
             }
             let Value::Raised(error) = self.heap.get_mut(exception) else {
@@ -120,6 +152,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
+            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -130,6 +163,7 @@ impl Context {
             Value::Dict(_) => "dict",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::Code(_) => "code",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
@@ -284,12 +318,12 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
-        code: Code,
+        code: Id,
         scope: Id,
         class_cell: Option<Id>,
-        parameters: Id,
         defaults: Id,
     },
+    Code(CodeObject),
     Class {
         name: String,
         scope: Id,
@@ -299,6 +333,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -307,9 +342,11 @@ pub(super) enum Value {
         frame: Id,
         next: Id,
         lineno: i64,
+        span: Option<[u32; 3]>,
     },
     PythonFrame {
         scope: Id,
+        code: Id,
         lineno: u32,
     },
     Method {
@@ -339,6 +376,7 @@ pub(super) enum Value {
     Iterator {
         sequence: Option<Id>,
         offset: usize,
+        reverse: bool,
     },
     IoMethod {
         owner: Id,
@@ -435,15 +473,16 @@ impl Value {
             Self::Function {
                 scope,
                 class_cell,
-                parameters,
+                code,
                 defaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *parameters, *defaults]);
+                visit.extend([*scope, *code, *defaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
+            Self::Code(code) => visit.extend([code.parameters, code.name, code.filename]),
             Self::Class {
                 scope, ancestors, ..
             } => {
@@ -454,6 +493,7 @@ impl Value {
                 class,
                 fields,
                 dictionary,
+                ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
@@ -481,7 +521,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
-            Self::PythonFrame { scope, .. } => visit.push(*scope),
+            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
@@ -525,6 +565,7 @@ pub(super) struct Heap {
 
 struct Frame {
     scope: Id,
+    code: Id,
     live: Vec<Id>,
     location: Option<Location>,
     object: Option<Id>,
@@ -533,9 +574,10 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(scope: Id, inherited: Id) -> Self {
+    fn new(scope: Id, code: Id, inherited: Id) -> Self {
         Self {
             scope,
+            code,
             live: Vec::new(),
             location: None,
             object: None,
@@ -556,7 +598,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
-            frames: vec![Frame::new(NONE, NONE)],
+            frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
         }
     }
@@ -584,8 +626,9 @@ impl Heap {
             .as_mut()
             .expect("live native handle")
     }
-    pub fn enter(&mut self, scope: Id) {
-        self.frames.push(Frame::new(scope, self.active_exception()));
+    pub fn enter(&mut self, scope: Id, code: Id) {
+        self.frames
+            .push(Frame::new(scope, code, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         self.frames.pop();
@@ -612,6 +655,7 @@ impl Heap {
         }
         let object = self.alloc(Value::PythonFrame {
             scope: frame.scope,
+            code: frame.code,
             lineno: location.line,
         });
         self.frames.last_mut().unwrap().object = Some(object);
@@ -620,6 +664,10 @@ impl Heap {
 
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    pub fn current_location(&self) -> Option<Location> {
+        self.frames.last()?.location
     }
 
     pub fn statement(
@@ -649,7 +697,7 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.extend([frame.scope, frame.active, frame.inherited]);
+            pending.extend([frame.scope, frame.code, frame.active, frame.inherited]);
             pending.extend(frame.object);
             pending.extend(&frame.live);
         }

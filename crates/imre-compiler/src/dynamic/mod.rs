@@ -97,7 +97,7 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct"
+                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct" | "traceback"
             )
         {
             self.runtime_imports = true;
@@ -304,6 +304,7 @@ pub(crate) fn compile(
             "importlib",
             "operator",
             "struct",
+            "traceback",
             "SystemExit",
         ]
         .iter()

@@ -183,6 +183,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "list.pop" {
+        return list_pop(ctx, args, kwargs);
+    }
     let slot = matches!(
         name,
         "dict.__init__" | "dict.__len__" | "dict.__iter__" | "dict.__setitem__"
@@ -350,4 +353,47 @@ pub(super) fn method(
         }
         _ => Err(type_error(format!("unsupported collection method {name}"))),
     }
+}
+
+fn list_pop(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error("unbound method list.pop() needs an argument"));
+    };
+    if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+        return Err(type_error(format!(
+            "descriptor 'pop' for 'list' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error("list.pop() takes no keyword arguments"));
+    }
+    let index = match args {
+        [] => -1,
+        [index] => ctx.index_integer(*index)?.to_i64().ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?,
+        _ => {
+            return Err(type_error(format!(
+                "pop expected at most 1 argument, got {}",
+                args.len()
+            )));
+        }
+    };
+    // __index__ can mutate the list. Its resulting length determines which item to remove.
+    let Value::List(items) = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    if items.is_empty() {
+        return Err(Error::new("IndexError", "pop from empty list"));
+    }
+    let len = items.len() as i64;
+    let index = if index < 0 { len + index } else { index };
+    if !(0..len).contains(&index) {
+        return Err(Error::new("IndexError", "pop index out of range"));
+    }
+    Ok(items.remove(index as usize))
 }

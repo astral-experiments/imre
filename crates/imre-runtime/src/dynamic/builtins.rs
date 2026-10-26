@@ -73,6 +73,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "reversed"
                 | "ord"
                 | "callable"
                 | "isinstance"
@@ -192,7 +193,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
+        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop") => "list",
         Value::Set { frozen: false, .. }
             if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
         {
@@ -235,7 +236,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch") => "pattern",
+        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+            "pattern"
+        }
         Value::RegexMatch { .. } if attr == "group" => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
@@ -282,8 +285,32 @@ fn positional(name: &str, kwargs: &[(String, Id)]) -> Result<()> {
     }
 }
 
-/// Bind a method with optional arguments using Python's Argument Clinic diagnostics.
-fn optional_arguments<const N: usize>(
+pub(super) fn bind<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    arity(name, args, 0, N)?;
+    let mut values = [None; N];
+    for (slot, &argument) in values.iter_mut().zip(args) {
+        *slot = Some(argument);
+    }
+    for (key, argument) in kwargs {
+        let index = names.iter().position(|arg| *arg == key).ok_or_else(|| {
+            type_error(format!("{name} got an unexpected keyword argument {key:?}"))
+        })?;
+        if values[index].replace(*argument).is_some() {
+            return Err(type_error(format!(
+                "{name} got multiple values for argument {key:?}"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+/// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+pub(super) fn bind_method_arguments<const N: usize>(
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -319,30 +346,6 @@ fn optional_arguments<const N: usize>(
             ))
         })?;
         values[index] = Some(*value);
-    }
-    Ok(values)
-}
-
-pub(super) fn bind<const N: usize>(
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-    names: [&str; N],
-) -> Result<[Option<Id>; N]> {
-    arity(name, args, 0, N)?;
-    let mut values = [None; N];
-    for (slot, &argument) in values.iter_mut().zip(args) {
-        *slot = Some(argument);
-    }
-    for (key, argument) in kwargs {
-        let index = names.iter().position(|arg| *arg == key).ok_or_else(|| {
-            type_error(format!("{name} got an unexpected keyword argument {key:?}"))
-        })?;
-        if values[index].replace(*argument).is_some() {
-            return Err(type_error(format!(
-                "{name} got multiple values for argument {key:?}"
-            )));
-        }
     }
     Ok(values)
 }
@@ -596,6 +599,27 @@ pub(super) fn call(
                 }
             };
             Ok(ctx.int(i64::from(code)))
+        }
+        "reversed" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let object = args[0];
+            if let Value::List(items) = ctx.heap.get(object) {
+                return Ok(ctx.alloc(Value::Iterator {
+                    sequence: Some(object),
+                    offset: items.len(),
+                    reverse: true,
+                }));
+            }
+            if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
+                && hook != NONE
+            {
+                return ctx.call(hook, Vec::new(), Vec::new());
+            }
+            Err(type_error(format!(
+                "'{}' object is not reversible",
+                ctx.type_name(object)
+            )))
         }
         "len" => {
             positional(name, kwargs)?;

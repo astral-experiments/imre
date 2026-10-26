@@ -131,6 +131,7 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__init__"
                             | "int.to_bytes"
+                            | "list.pop"
                     ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
@@ -277,6 +278,7 @@ impl Context {
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
+            | Value::Code(_)
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::StaticMethod { .. } => "staticmethod",
@@ -295,6 +297,7 @@ impl Context {
                         "NoneType"
                             | "ellipsis"
                             | "float"
+                            | "code"
                             | "function"
                             | "module"
                             | "method"
@@ -511,17 +514,42 @@ impl Context {
             return self.exact_type(obj);
         }
         match self.heap.get(obj).clone() {
-            Value::Raised(_) if name == "__traceback__" => return self.exception_traceback(obj),
+            Value::Raised(error)
+                if matches!(
+                    name,
+                    "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
+                ) =>
+            {
+                match name {
+                    "__traceback__" => return self.exception_traceback(obj),
+                    "__context__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                    }
+                    "__cause__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
+                    }
+                    "__suppress_context__" => {
+                        return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
+                            TRUE
+                        } else {
+                            FALSE
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Value::Traceback {
                 frame,
                 next,
                 lineno,
+                ..
             } => match name {
                 "tb_frame" => return Ok(frame),
                 "tb_next" => return Ok(next),
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
@@ -554,6 +582,13 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
+            Value::Code(code) => match name {
+                "co_name" => return Ok(code.name),
+                "co_filename" => return Ok(code.filename),
+                "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                _ => {}
+            },
+            Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function { scope, fields, .. } => {
                 if name == "__globals__" {
                     return Ok(self.module_globals(scope));
@@ -577,9 +612,16 @@ impl Context {
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
-            Value::Native(class) if class == "datetime.datetime" && name == "fromtimestamp" => {
-                return Ok(self.builtin("datetime.datetime.fromtimestamp"));
+            Value::Native(class)
+                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+            {
+                return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "datetime.time" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("time")),
+                "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
@@ -676,6 +718,9 @@ impl Context {
             }
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
+            }
+            Value::Native(class) if class == "list" && name == "pop" => {
+                return Ok(self.builtin("list.pop"));
             }
             Value::Native(class)
                 if class == "dict"
@@ -796,6 +841,9 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
@@ -840,6 +888,7 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
+            text_memory: None,
             fields: HashMap::new(),
         })
     }
@@ -945,19 +994,14 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, .. } => {
-                if [
-                    "Exception",
-                    "ValueError",
-                    "RuntimeError",
-                    "OSError",
-                    "TypeError",
-                ]
-                .iter()
-                .any(|kind| self.has_base(callable, kind))
-                {
-                    let message = args.first().map(|&x| self.display(x)).unwrap_or_default();
-                    return Ok(self.alloc(Value::Raised(Error::new(&name, message))));
+            Value::Class {
+                name, ancestors, ..
+            } => {
+                if ancestors.iter().any(|&base| {
+                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
+                }) {
+                    let error = self.exception(&name, &args);
+                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
@@ -982,6 +1026,7 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
+                        text_memory: None,
                     }));
                 }
                 let dictionary = self
@@ -1006,9 +1051,9 @@ impl Context {
                 scope,
                 class_cell,
                 code,
-                parameters,
                 defaults,
             } => {
+                let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
