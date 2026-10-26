@@ -20,7 +20,7 @@ impl Context {
         }
     }
     /// Special methods are looked up on the type, even if the instance shadows them.
-    fn slot(&self, object: Id, name: &str) -> Option<Id> {
+    pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
             return None;
         };
@@ -215,6 +215,9 @@ impl Context {
             | Value::Dict(_)
             | Value::Set(_)
             | Value::Range { .. }
+            | Value::RangeIterator { .. }
+            | Value::ListIterator { .. }
+            | Value::Generator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
@@ -238,6 +241,9 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "generator"
+                            | "list_iterator"
+                            | "range_iterator"
                             | "operator.attrgetter"
                     )
                 {

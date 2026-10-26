@@ -313,6 +313,8 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
+            "boxed_any_generator.py",
+            "boxed_global.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",

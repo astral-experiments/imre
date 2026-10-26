@@ -4,6 +4,7 @@
 mod builtins;
 mod calls;
 mod ffi;
+mod iterators;
 mod operators;
 mod stdlib;
 mod super_object;
@@ -120,6 +121,16 @@ impl Context {
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
+            Value::Generator { .. }
+            | Value::ListIterator { .. }
+            | Value::RangeIterator { .. }
+            | Value::PythonIterator { .. } => {
+                let mut items = Vec::new();
+                while self.iterator_more(id)? {
+                    items.push(self.iterator_next(id)?);
+                }
+                Ok(items)
+            }
             Value::Iterator { values, offset } => {
                 if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
                     *offset = values.len();
@@ -144,6 +155,10 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
+            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+                let iter = self.iterator(id)?;
+                self.items(iter)
+            }
             _ => Err(Error::new("TypeError", "object is not iterable")),
         }
     }
@@ -153,6 +168,7 @@ impl Context {
             class_cell: None,
             first_argument: None,
             names: HashMap::new(),
+            globals: Default::default(),
             parent,
             module: module.to_owned(),
         }))
@@ -163,7 +179,17 @@ impl Context {
         };
         s
     }
+    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).globals.contains(name) {
+            while let Some(parent) = self.scope_data(scope).parent {
+                scope = parent;
+            }
+        }
+        scope
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        let scope = self.binding_scope(scope, name);
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -176,6 +202,7 @@ impl Context {
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
+            scope = self.binding_scope(scope, name);
             let s = self.scope_data(scope);
             if let Some(id) = s.names.get(name) {
                 return Ok(*id);

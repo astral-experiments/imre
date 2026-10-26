@@ -1,6 +1,6 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use super::Context;
@@ -71,6 +71,9 @@ impl Context {
             Value::Dict(_) => "dict",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::Generator { .. } => "generator",
+            Value::ListIterator { .. } => "list_iterator",
+            Value::RangeIterator { .. } => "range_iterator",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
@@ -150,6 +153,7 @@ pub(super) struct Scope {
     pub class_cell: Option<Id>,
     pub first_argument: Option<String>,
     pub names: HashMap<String, Id>,
+    pub globals: HashSet<String>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -240,6 +244,27 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    Generator {
+        code: Code,
+        scope: Id,
+        buffered: Option<Id>,
+        running: bool,
+        exhausted: bool,
+    },
+    Yielded(Id),
+    RangeIterator {
+        next: i64,
+        step: i64,
+        remaining: usize,
+    },
+    PythonIterator {
+        source: Id,
+        buffered: Option<Id>,
+    },
+    ListIterator {
+        list: Option<Id>,
+        offset: usize,
+    },
     Iterator {
         values: Vec<Id>,
         offset: usize,
@@ -311,7 +336,19 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Range { .. } => {}
+            Self::Generator {
+                scope, buffered, ..
+            } => {
+                visit.push(*scope);
+                visit.extend(buffered);
+            }
+            Self::PythonIterator { source, buffered } => {
+                visit.push(*source);
+                visit.extend(buffered);
+            }
+            Self::Yielded(item) => visit.push(*item),
+            Self::ListIterator { list, .. } => visit.extend(list),
+            Self::Range { .. } | Self::RangeIterator { .. } => {}
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);

@@ -61,6 +61,9 @@ pub(super) fn is_builtin(name: &str) -> bool {
             name,
             "len"
                 | "callable"
+                | "iter"
+                | "next"
+                | "any"
                 | "isinstance"
                 | "getattr"
                 | "setattr"
@@ -432,6 +435,29 @@ pub(super) fn call(
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),
                 Err(e) if e.kind == "AttributeError" && args.len() == 3 => Ok(args[2]),
+                result => result,
+            }
+        }
+        "iter" | "any" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            if name == "iter" {
+                return ctx.python_iter(args[0]);
+            }
+            let iter = ctx.iterator(args[0])?;
+            while ctx.iterator_more(iter)? {
+                let item = ctx.iterator_next(iter)?;
+                if ctx.truth(item)? {
+                    return Ok(TRUE);
+                }
+            }
+            Ok(FALSE)
+        }
+        "next" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 2)?;
+            match ctx.iterator_next(args[0]) {
+                Err(e) if e.kind == "StopIteration" && args.len() == 2 => Ok(args[1]),
                 result => result,
             }
         }

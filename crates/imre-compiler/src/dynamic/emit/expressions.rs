@@ -120,6 +120,18 @@ impl Function<'_, '_> {
                 }
                 result
             }
+            ast::Expr::Generator(v) => {
+                let [generator] = v.generators.as_slice() else {
+                    return self.unsupported("generator expression with multiple for clauses");
+                };
+                if generator.is_async {
+                    return self.unsupported("async generator expression");
+                }
+                let iterable = self.expr(&generator.iter);
+                let iter = self.op("iter", &[&iterable]);
+                let step = self.define("<genexpr>", None, None, Body::Generator(generator, &v.elt));
+                self.op("generator", &[&step, &iter])
+            }
             ast::Expr::ListComp(v) => {
                 self.comprehension("list", &v.generators, Element::Value(&v.elt))
             }
@@ -249,6 +261,35 @@ impl Function<'_, '_> {
             out = self.op("+", &[&out, &value]);
         }
         out
+    }
+
+    /// Each resume uses the same lexical scope and advances the outer iterator before
+    /// evaluating filters or the yielded expression. None marks natural exhaustion.
+    pub(super) fn generator_step(&mut self, generator: &ast::Comprehension, element: &ast::Expr) {
+        let iter = self.lookup(".iterator");
+        let step = self.name("b");
+        let body = self.name("b");
+        let done = self.name("b");
+        self.jump(&step);
+        self.label(&step);
+        let more = self.op("more", &[&iter]);
+        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
+        self.branch(&cond, &body, &done);
+        self.label(&body);
+        self.checkpoint(element);
+        let item = self.op("next", &[&iter]);
+        self.assign(&generator.target, &item);
+        for filter in &generator.ifs {
+            let value = self.expr(filter);
+            let yes = self.truth(&value);
+            let keep = self.name("b");
+            self.branch(&yes, &keep, &step);
+            self.label(&keep);
+        }
+        let item = self.expr(element);
+        let yielded = self.op("yielded", &[&item]);
+        self.end(&format!("ret i64 {yielded}"));
+        self.label(&done);
     }
 
     fn comprehension(

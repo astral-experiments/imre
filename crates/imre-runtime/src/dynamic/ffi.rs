@@ -21,12 +21,26 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
-            "delname" => {
+            "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
-                let Value::Scope(s) = self.heap.get_mut(a) else {
+                let Value::Scope(scope) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                s.names.remove(&name);
+                scope.globals.insert(name);
+                Ok(NONE)
+            }
+            "delname" => {
+                let name = self.str_value(b)?.to_owned();
+                let target = self.binding_scope(a, &name);
+                let Value::Scope(s) = self.heap.get_mut(target) else {
+                    unreachable!()
+                };
+                if s.names.remove(&name).is_none() {
+                    return Err(Error::new(
+                        "NameError",
+                        format!("name {name:?} is not defined"),
+                    ));
+                }
                 if let Some(order) = &mut s.class_body {
                     order.retain(|member| member != &name);
                 }
@@ -152,27 +166,11 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => {
-                let values = self.items(a)?;
-                Ok(self.alloc(Value::Iterator { values, offset: 0 }))
-            }
-            "more" => {
-                let Value::Iterator { values, offset } = self.heap.get(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                Ok(flag(*offset < values.len()))
-            }
-            "next" => {
-                let Value::Iterator { values, offset } = self.heap.get_mut(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                let v = values
-                    .get(*offset)
-                    .copied()
-                    .ok_or_else(|| Error::new("StopIteration", ""))?;
-                *offset += 1;
-                Ok(v)
-            }
+            "generator" => self.generator(a, b),
+            "yielded" => Ok(self.alloc(Value::Yielded(a))),
+            "iter" => self.iterator(a),
+            "more" => Ok(flag(self.iterator_more(a)?)),
+            "next" => self.iterator_next(a),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))

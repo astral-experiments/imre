@@ -12,6 +12,33 @@ enum Place {
 }
 
 impl Function<'_, '_> {
+    /// A global declaration applies to the entire code block, even in an untaken branch.
+    pub(super) fn declare_globals(&mut self, suite: &[ast::Stmt]) {
+        #[derive(Default)]
+        struct Globals<'a>(std::collections::BTreeSet<&'a str>);
+
+        impl<'a> Visitor<'a> for Globals<'a> {
+            fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+                match statement {
+                    ast::Stmt::Global(global) => {
+                        self.0.extend(global.names.iter().map(|name| name.as_str()));
+                    }
+                    ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                    _ => visitor::walk_stmt(self, statement),
+                }
+            }
+
+            fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        }
+
+        let mut globals = Globals::default();
+        globals.visit_body(suite);
+        for name in globals.0 {
+            let name = self.text(name);
+            self.op("declare_global", &[&self.scope.clone(), &name]);
+        }
+    }
+
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
@@ -24,7 +51,17 @@ impl Function<'_, '_> {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
+                ast::Stmt::Delete(v) => {
+                    for target in &v.targets {
+                        if let ast::Expr::Name(name) = target {
+                            let name = self.text(name.id.as_str());
+                            self.op("delname", &[&self.scope.clone(), &name]);
+                        } else {
+                            self.unsupported("deleting an attribute or item");
+                        }
+                    }
+                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
@@ -562,6 +599,12 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     match body {
         Body::Statements(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Generator(generator, element) => {
+            for filter in &generator.ifs {
+                captures.visit_expr(filter);
+            }
+            captures.visit_expr(element);
+        }
         Body::Namespace(_) | Body::Unsupported(..) => {}
     }
     captures.0
