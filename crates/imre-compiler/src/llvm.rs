@@ -5161,6 +5161,16 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::SysEncoding(query) => {
+                use crate::ir::SysEncoding;
+                self.uses_string_interning = true;
+                let function = match query {
+                    SysEncoding::Default => "imre_sys_default_encoding",
+                    SysEncoding::Filesystem => "imre_sys_filesystem_encoding",
+                    SysEncoding::FilesystemErrors => "imre_sys_filesystem_errors",
+                };
+                self.call(function, returns, &[])
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
@@ -8976,6 +8986,10 @@ declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
+declare void @imre_sys_init_encoding_names()
+declare ptr @imre_sys_default_encoding()
+declare ptr @imre_sys_filesystem_encoding()
+declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)

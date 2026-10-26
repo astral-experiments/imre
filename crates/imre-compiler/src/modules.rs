@@ -9,7 +9,9 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, Session};
-use crate::ir::{CopyOperation, FnmatchOperation, PosixPathOperation, WrapperAttributes};
+use crate::ir::{
+    CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
+};
 use crate::watch::FileSystem;
 
 mod declarations;
@@ -255,7 +257,7 @@ pub(crate) enum Intrinsic {
     SysStdlibModuleNames,
     SysVersion,
     SysHexversion,
-    SysEncoding(&'static str),
+    SysEncoding(SysEncoding),
     SysIntern { query: bool },
     SysException,
     SysGetFrameModuleName,
@@ -709,8 +711,11 @@ impl IntrinsicModule {
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
-            (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding("getdefaultencoding"),
-            (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding("getfilesystemencoding"),
+            (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding(SysEncoding::Default),
+            (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding(SysEncoding::Filesystem),
+            (Self::Sys, "getfilesystemencodeerrors") => {
+                Intrinsic::SysEncoding(SysEncoding::FilesystemErrors)
+            }
             (Self::Sys, "intern") => Intrinsic::SysIntern { query: false },
             (Self::Sys, "_is_interned") => Intrinsic::SysIntern { query: true },
             (Self::Sys, "flags") => Intrinsic::SysFlags,

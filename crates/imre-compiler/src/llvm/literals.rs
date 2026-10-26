@@ -232,6 +232,11 @@ ready:
             "define internal void @imre_init_literals(){attributes} {{\nentry:"
         )
         .unwrap();
+        if self.uses_string_interning {
+            self.output
+                .entry_buffer()
+                .push_str("  call void @imre_sys_init_encoding_names()\n");
+        }
         for (bytes, id, ty, init, _) in literals.clone() {
             if lazy_constructor(ty).is_some() {
                 continue;
