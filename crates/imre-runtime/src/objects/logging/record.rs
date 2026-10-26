@@ -932,6 +932,86 @@ pub unsafe extern "C" fn imre_logrecord_dictionary(record: *const Object) -> *co
     finish(result.map(ObjectOwner::into_raw), std::ptr::null())
 }
 
+/// Attributes supplied by the pinned LogRecord class and its object base.
+fn class_attribute(name: &str) -> bool {
+    matches!(
+        name,
+        "getMessage"
+            | "__module__"
+            | "__firstlineno__"
+            | "__doc__"
+            | "__static_attributes__"
+            | "__dict__"
+            | "__weakref__"
+            | "__new__"
+            | "__repr__"
+            | "__hash__"
+            | "__str__"
+            | "__getattribute__"
+            | "__setattr__"
+            | "__delattr__"
+            | "__lt__"
+            | "__le__"
+            | "__eq__"
+            | "__ne__"
+            | "__gt__"
+            | "__ge__"
+            | "__init__"
+            | "__reduce_ex__"
+            | "__reduce__"
+            | "__getstate__"
+            | "__subclasshook__"
+            | "__init_subclass__"
+            | "__format__"
+            | "__sizeof__"
+            | "__dir__"
+            | "__class__"
+    )
+}
+
+/// Test attribute presence on a concrete LogRecord, including inherited descriptors.
+///
+/// # Safety
+/// The caller roots the record and exact string for the duration of the lookup.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_hasattr(record: *const Object, key: *const Str) -> bool {
+    // SAFETY: neither lookup calls user code or takes ownership of its inputs.
+    unsafe {
+        let key = &*key;
+        class_attribute(key.as_str()) || with_record(record, |r| r.fields.get_text(key).is_some())
+    }
+}
+
+/// Return a data attribute as a retained Python value, or the supplied default if absent.
+///
+/// # Safety
+/// The record, key and optional retained-value default are rooted. The result transfers an owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_field_view(
+    record: *const Object,
+    key: *const Str,
+    default: *const Object,
+) -> *const Object {
+    // SAFETY: both arguments remain rooted until the field has its own owner.
+    let (key, field) = unsafe {
+        let key = &*key;
+        (key, with_record(record, |r| r.fields.get_text(key)))
+    };
+    match field {
+        Some(value) => finish(
+            ObjectOwner::try_new(Object(StorageCell::new(Storage::ObjectValue(value))))
+                .map(ObjectOwner::into_raw)
+                .map_err(|_| Error::memory_error()),
+            std::ptr::null(),
+        ),
+        None if !default.is_null() => {
+            // SAFETY: default is a rooted view; transfer one new owner of the same value.
+            ObjectOwner::into_raw(unsafe { ObjectOwner::acquire_word(default as usize) })
+        }
+        None => finish(Err(Fields::missing(key.as_str())), std::ptr::null()),
+    }
+}
+
 /// Add Logger.makeRecord's fields without replacing existing or formatter-reserved names.
 ///
 /// # Safety

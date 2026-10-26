@@ -4356,6 +4356,17 @@ impl Emitter<'_, '_> {
                     Dictionary => {
                         self.call("imre_logrecord_dictionary", returns, &[&args[0].value])
                     }
+                    HasAttr => self.call(
+                        "imre_logrecord_hasattr",
+                        returns,
+                        &[&args[0].value, &args[1].value],
+                    ),
+                    FieldView => {
+                        let fallback = args.get(2).map_or("null", |arg| arg.value.operand.as_str());
+                        Value { ty: Type::ObjectValue, operand: self.checked_instruction(format!(
+                            "call ptr @imre_logrecord_field_view(ptr {}, ptr {}, ptr {fallback})",
+                            args[0].value.operand, args[1].value.operand)), small_integer: false }
+                    }
                     AddExtra => {
                         let mapping = self.word(&args[1].value);
                         self.checked_line(format!(
@@ -9595,6 +9606,8 @@ declare void @imre_formatter_set_default_msec(ptr,i64)
 declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
 declare ptr @imre_logrecord_dictionary(ptr)
+declare i1 @imre_logrecord_hasattr(ptr,ptr)
+declare ptr @imre_logrecord_field_view(ptr,ptr,ptr)
 declare void @imre_logrecord_extra(ptr, i64)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)
 declare void @imre_logrecord_put(ptr,ptr,i64,i32)

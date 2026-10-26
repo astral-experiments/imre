@@ -9813,6 +9813,12 @@ impl<'a> Checker<'a> {
         {
             return self.errno_builtin(name.id.as_str(), call, &args);
         }
+        if matches!(name.id.as_str(), "vars" | "hasattr" | "getattr")
+            && self.unshadowed_builtin(&call.func, name.id.as_str())
+            && let Some(value) = self.record_namespace_builtin(name.id.as_str(), &args, call)?
+        {
+            return Ok(value);
+        }
         if name.id == "vars"
             && let [receiver] = args.as_slice()
             && let Type::SimpleNamespace(id) = receiver.ty
