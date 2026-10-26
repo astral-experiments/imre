@@ -11,6 +11,7 @@ mod static_method;
 mod stdlib;
 mod super_object;
 mod value;
+mod zip;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -138,7 +139,7 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
+            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => return Ok(id),
             Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
             Value::Instance {
                 dictionary: Some(_),
@@ -150,7 +151,7 @@ impl Context {
                 let result = self.call(method, Vec::new(), Vec::new())?;
                 return if matches!(
                     self.heap.get(result),
-                    Value::Iterator { .. } | Value::AstWalk(_)
+                    Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. }
                 ) {
                     Ok(result)
                 } else {
@@ -198,6 +199,9 @@ impl Context {
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
+        if matches!(self.heap.get(id), Value::Zip { .. }) {
+            return self.zip_has_item(id);
+        }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
@@ -213,6 +217,9 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
+        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
+            return Ok(pending.take());
+        }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
@@ -224,7 +231,7 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+        if matches!(self.heap.get(id), Value::AstWalk(_) | Value::Zip { .. }) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);

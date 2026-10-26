@@ -115,6 +115,7 @@ impl Context {
             Value::Float(_) => "float",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Zip { .. } => "zip",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -332,6 +333,11 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     AstWalk(std::collections::VecDeque<Id>),
+    Zip {
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
+        pending: Option<Id>,
+    },
     Iterator {
         sequence: Option<Id>,
         offset: usize,
@@ -374,6 +380,12 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Zip {
+                inputs, pending, ..
+            } => {
+                visit.extend(inputs.iter());
+                visit.extend(pending);
+            }
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
