@@ -1,0 +1,95 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_modules": {
+    "test.test_str": {
+      "reference": "../str/reference-linux.json",
+      "denominator": 138,
+      "passed_reference": 132,
+      "skipped_reference": 6
+    },
+    "test.test_string": {
+      "reference": "../string/reference-linux.json",
+      "denominator": 54,
+      "passed_reference": 54,
+      "skipped_reference": 0
+    }
+  },
+  "original_bodies": "CPython unittest, fixtures and high-level Formatter; native _string initial results, pulls and exceptions. Empty call map means no native evidence.",
+  "requested_native_operations": {
+    "test.test_str.StringModuleTest.test_formatter_field_name_split": {
+      "split": 5
+    },
+    "test.test_str.StringModuleTest.test_formatter_parser": {
+      "parse": 6
+    },
+    "test.test_string.test_string.ModuleTest.test_auto_numbering": {
+      "parse": 22,
+      "split": 32
+    },
+    "test.test_string.test_string.ModuleTest.test_auto_numbering_lookup": {
+      "parse": 3,
+      "split": 4
+    },
+    "test.test_string.test_string.ModuleTest.test_auto_numbering_reenterability": {
+      "parse": 12,
+      "split": 16
+    },
+    "test.test_string.test_string.ModuleTest.test_basic_formatter": {
+      "parse": 7,
+      "split": 8
+    },
+    "test.test_string.test_string.ModuleTest.test_check_unused_args": {
+      "parse": 19,
+      "split": 24
+    },
+    "test.test_string.test_string.ModuleTest.test_conversion_specifiers": {
+      "parse": 13,
+      "split": 14
+    },
+    "test.test_string.test_string.ModuleTest.test_format_keyword_arguments": {
+      "parse": 9,
+      "split": 12
+    },
+    "test.test_string.test_string.ModuleTest.test_index_lookup": {
+      "parse": 5,
+      "split": 8
+    },
+    "test.test_string.test_string.ModuleTest.test_name_lookup": {
+      "parse": 4,
+      "split": 6
+    },
+    "test.test_string.test_string.ModuleTest.test_override_convert_field": {
+      "parse": 3,
+      "split": 4
+    },
+    "test.test_string.test_string.ModuleTest.test_override_format_field": {
+      "parse": 2,
+      "split": 2
+    },
+    "test.test_string.test_string.ModuleTest.test_override_get_value": {
+      "parse": 2,
+      "split": 2
+    },
+    "test.test_string.test_string.ModuleTest.test_override_parse": {
+      "split": 2
+    },
+    "test.test_string.test_string.ModuleTest.test_vformat_recursion_limit": {}
+  },
+  "fault_controls": [
+    "An incorrect first markup row fails StringModuleTest.test_formatter_parser.",
+    "An incorrect first field key fails StringModuleTest.test_formatter_field_name_split."
+  ],
+  "public_method_compiled_natively": "Unchanged string.Formatter.parse, checked against source blob eab5067c9b133ea1210efacd92eb5f69c2336236, with a fixture class and driver.",
+  "corpus": {
+    "distinct_inputs": 13969,
+    "extra_newline_controls": 2,
+    "cursor_output_lines": 285328,
+    "cursor_output_sha256": "9f43a9f955b0f5225400e46a01c875cf4372bb30f503c9c3caa5241e9d2d2a77",
+    "call_error_output_lines": 20,
+    "ownership_output_lines": 11
+  },
+  "whole_suite_startup": {
+    "test.test_str": "Before: Lib/test/test_str.py:8 import _string. After: Lib/test/test_str.py:9 import codecs. Both entry modes, ordinary and reachable. Zero tests executed.",
+    "test.test_string.test_string": "Still blocked on _imp in test/support/import_helper.py; zero tests executed."
+  }
+}

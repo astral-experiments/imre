@@ -1,0 +1,17 @@
+{
+  "github_run": 40228241550,
+  "event": "workflow_dispatch",
+  "head_ref": "codex/pathlib-971-ci-source",
+  "x86_job": 121274241666,
+  "artifact": 12612192739,
+  "zip_sha256": "54867b6adfbdb59efff285e9c8e38d6b1f61a18f03c6ebe05a87848c8370d951",
+  "tar_sha256": "f244435a918fb1282807d3a68bea85327646a1c652065b393f3399031b98b7ee",
+  "source": {
+    "commit": "d7fc14f2004fd6b3c494c4e46c9eae2b2354066b",
+    "tree": "7f44e9157fa54901dce67402e4c8aaa6a6078b81",
+    "files": {
+      "libimre_runtime.a": "b690262f13ec54fd2074cf528d753a8cf88c223865cac0716e39386e1d8a4dcd",
+      "imre": "42c229cbc6ab20f6a65c773d22b502e488651083c718ef3e253c2d6fa35913bb"
+    }
+  }
+}

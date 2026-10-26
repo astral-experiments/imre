@@ -1,0 +1,57 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "tests": {
+    "test.test_deque.TestBasic.test_delitem": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "operation": "All deque operations in this method call a live Imre deque",
+            "fixture": "Original CPython unittest hooks, assertions and seeded random input",
+            "opt_level": 0,
+            "native_calls": {
+              "construct": 1,
+              "delete": 502,
+              "length": 1501,
+              "get": 500,
+              "contains": 1000
+            },
+            "method_sha256": "81a089aacc8a2ef438f21581af3cf368333cdb08bf7746c351c1cf05789c26fd"
+          }
+        }
+      }
+    ],
+    "test.test_deque.TestBasic.test_getitem": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "operation": "All deque operations in this method call a live Imre deque",
+            "fixture": "Original CPython unittest hooks, assertions and seeded random input",
+            "opt_level": 0,
+            "native_calls": {
+              "construct": 3,
+              "popleft": 200,
+              "append": 101,
+              "get": 59984
+            },
+            "method_sha256": "1a8cd1ebc11ab9b9c88f83b1945a782b8c845fa3c50e1511f8025234bedc35b6"
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": []
+}

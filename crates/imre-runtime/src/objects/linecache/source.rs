@@ -2,10 +2,11 @@
 //! lines, then translate only TextIOWrapper's three physical line endings.
 use std::borrow::Cow;
 
-use super::super::{Error, Kind};
+use super::super::{
+    Error, Kind,
+    charmaps::{Charmap, NAMES},
+};
 
-const NAMES: &str = include_str!("codec_names.txt");
-const TABLES: &[u8] = include_bytes!("charmaps.bin");
 const BOM: &[u8] = b"\xef\xbb\xbf";
 
 fn cookie(line: &[u8]) -> Option<&str> {
@@ -162,15 +163,13 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
             ));
         }
         index => {
-            let base = index.parse::<usize>().unwrap() * 512;
+            let table = Charmap::at(index.parse().unwrap());
             let mut text = String::with_capacity(bytes.len());
             for b in bytes {
-                let k = base + usize::from(*b) * 2;
-                let scalar = u16::from_le_bytes([TABLES[k], TABLES[k + 1]]);
-                if scalar == 0xfffe {
+                let Some(ch) = table.decode(*b) else {
                     return Ok(None);
-                }
-                text.push(char::from_u32(u32::from(scalar)).unwrap());
+                };
+                text.push(ch);
             }
             Some(Cow::Owned(text))
         }

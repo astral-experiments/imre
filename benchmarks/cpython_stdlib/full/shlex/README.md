@@ -7,8 +7,11 @@ The [native operation runner](run.py) reruns the original fixture, methods and
 assertions. For every public `split`, `join` or `quote` call it compares the
 typed result or full exception to CPython, then returns the native answer to
 the upstream test. At both O0 and O3, five methods exercise 335 native calls
-(273 distinct requests). The other fourteen methods have reference evidence
-only. This [ledger](native-linux.json) claims no fully native methods.
+(273 distinct requests). Of those five methods, the runner also compiles and
+executes the unchanged bodies and assertions of `testSplitNone` and `testQuote`.
+CPython runs their original `ShlexTest.setUp`; these two [ledger entries](native-linux.json)
+therefore have native bodies with host fixtures. The other three use native
+operations under host tests, and fourteen methods have reference evidence only.
 
 The same command compares [24,082 additional observations](edge_cases.py)
 at each optimization level, including all words up to four characters over

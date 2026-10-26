@@ -37,10 +37,14 @@ def launch_controls(args, toolchain, folder):
     return controls
 
 
-def observer(module, toolchain, folder, method_sha256):
-    compiler = str(toolchain.imre.resolve())
+def native_command_env(toolchain):
     build_flags = ["--opt-level", str(toolchain.level), "--runtime", str(toolchain.runtime.resolve()),
                    "--clang", str(toolchain.clang.resolve()), "--no-cache"]
+    return {**os.environ, "IMRE_ENCODED_FLAGS": "\x1f".join(build_flags)}
+
+
+def observer(module, toolchain, folder, method_sha256):
+    compiler = str(toolchain.imre.resolve())
 
     def execute(case, original):
         subjects = {}
@@ -50,9 +54,7 @@ def observer(module, toolchain, folder, method_sha256):
             def capture(command, **kwargs):
                 if command[:5] != [exe, "-I", "-X", "utf8", "-c"]:
                     raise AssertionError(command)
-                env = dict(os.environ)
-                if subject == "imre":
-                    env["IMRE_ENCODED_FLAGS"] = "\x1f".join(build_flags)
+                env = native_command_env(toolchain) if subject == "imre" else None
                 result = subprocess.run(command, **kwargs, env=env, timeout=45)
                 calls.append((command, result))
                 return result

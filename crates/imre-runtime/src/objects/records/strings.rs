@@ -1,8 +1,8 @@
 //! Reuse the last owner of a long string field between decoded record arrays.
 
 use crate::Str;
+use crate::StrOwner;
 use std::cell::RefCell;
-use std::rc::Rc;
 
 const STEP: usize = 32;
 const CLASSES: usize = 8;
@@ -11,7 +11,7 @@ const IDLE_BYTES: usize = 64 * 1024;
 
 #[derive(Default)]
 struct Pool {
-    bins: [Vec<Rc<Str>>; CLASSES],
+    bins: [Vec<StrOwner>; CLASSES],
     capacity: usize,
 }
 
@@ -19,9 +19,9 @@ thread_local! {
     static POOL: RefCell<Pool> = RefCell::default();
 }
 
-pub(in crate::objects) fn copy(value: &str) -> Rc<Str> {
+pub(in crate::objects) fn copy(value: &str) -> StrOwner {
     if !(STEP + 1..=STEP * CLASSES).contains(&value.len()) {
-        return Rc::new(Str::new(value));
+        return StrOwner::new(Str::new(value));
     }
     let bin = (value.len() - 1) / STEP;
     let capacity = (bin + 1) * STEP;
@@ -34,14 +34,14 @@ pub(in crate::objects) fn copy(value: &str) -> Rc<Str> {
         })
         .ok()
         .flatten();
-    let mut owner = cached.unwrap_or_else(|| Rc::new(Str::with_capacity(capacity)));
-    Rc::get_mut(&mut owner)
+    let mut owner = cached.unwrap_or_else(|| StrOwner::new(Str::with_capacity(capacity)));
+    StrOwner::get_mut(&mut owner)
         .expect("cached string has no observers")
         .push_str(value);
     owner
 }
 
-pub(super) fn release(mut owner: Rc<Str>) {
+pub(super) fn release(mut owner: StrOwner) {
     let capacity = owner.capacity();
     if owner.len() <= STEP
         || !(STEP + 1..=STEP * CLASSES).contains(&capacity)
@@ -50,7 +50,7 @@ pub(super) fn release(mut owner: Rc<Str>) {
         return;
     }
     // A retained field or a Weak observer still identifies the old allocation.
-    let Some(value) = Rc::get_mut(&mut owner) else {
+    let Some(value) = StrOwner::get_mut(&mut owner) else {
         return;
     };
     value.clear();
@@ -75,8 +75,8 @@ mod tests {
         POOL.with(|pool| *pool.borrow_mut() = Pool::default());
         let text = "é\0".repeat(20);
         let owner = copy(&text);
-        let alias = Rc::clone(&owner);
-        let weak = Rc::downgrade(&owner);
+        let alias = StrOwner::clone(&owner);
+        let weak = StrOwner::downgrade(&owner);
         release(owner);
         assert_eq!(weak.upgrade().unwrap().as_str(), text);
         release(alias);
@@ -84,11 +84,11 @@ mod tests {
         POOL.with(|pool| assert_eq!(pool.borrow().capacity, 0));
 
         let owner = copy(&text);
-        let address = Rc::as_ptr(&owner);
+        let address = StrOwner::as_ptr(&owner);
         release(owner);
         let replacement = "🦀".repeat(15);
         let owner = copy(&replacement);
-        assert_eq!(Rc::as_ptr(&owner), address);
+        assert_eq!(StrOwner::as_ptr(&owner), address);
         assert_eq!(owner.as_str(), replacement);
         assert!(weak.upgrade().is_none());
     }

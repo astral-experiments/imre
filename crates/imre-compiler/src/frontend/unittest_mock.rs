@@ -27,7 +27,7 @@ impl Checker<'_> {
         self.bundled_mock_class(class, "Mock")
     }
 
-    fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
+    pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
         module.bundled && module.name == "unittest.mock" && record.name == name

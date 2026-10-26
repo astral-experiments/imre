@@ -80,3 +80,16 @@ def configs() -> None:
 
 calls()
 configs()
+
+for width in (30, 31):
+    mock = Mock()
+    history = mock.call_args_list
+    mock("😀" * 30)
+    mock("y" * width)
+    print(repr(history))
+    print(repr(list(history)))
+    print(repr(history[:]))
+    print(repr([history[0], history[1]]))
+    mock.reset_mock()
+    print(repr(history))
+    print(repr(mock.call_args_list))

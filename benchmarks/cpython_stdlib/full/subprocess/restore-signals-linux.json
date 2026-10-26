@@ -1,0 +1,117 @@
+{
+  "schema": "imre.subprocess.restore-signals/v1",
+  "platform": "linux",
+  "imre_revision": "b2043496e01f1bc45a1fe765ee470be03eaeeebb",
+  "tested_tree": "505366da5198251b9ef3cdb681fea928410c629a",
+  "hosted": {
+    "run": 40179436905,
+    "job": 121127114686,
+    "merge_commit": "1137a621063ca14bbb03c9b5a27eb99c0f13222b",
+    "artifact": 12594060850,
+    "archive_sha256": "e16695619b3eb2feb384c2de8a8f0bed162d87f4e5e2b2e2e15fd90612a968d1"
+  },
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "actor_sha256": "0b86af8dab8998555cef8754ab7abb233ec2206349430955d766e3262911a3f3",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_restore_signals": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "argv": [
+              "cat",
+              "/proc/self/status"
+            ],
+            "native_parent": 408566,
+            "children": [
+              {
+                "restore_signals": false,
+                "pid": 408569,
+                "ppid": 408566,
+                "sigign": "0x1001000",
+                "successful_parent_reaps": 1
+              },
+              {
+                "restore_signals": true,
+                "pid": 408582,
+                "ppid": 408566,
+                "sigign": "0x0",
+                "successful_parent_reaps": 1
+              }
+            ],
+            "changed_signals": [
+              "SIGPIPE",
+              "SIGXFSZ"
+            ]
+          }
+        ]
+      },
+      "toolchain": {
+        "imre": "7a94055a9491828ff4c2be202d342ddeeb5b818d0210191150d4aa9de69ee51f",
+        "runtime": "f924e68f8113d4a2700406a2cfad96df5a658d31570dcc8858862c1ad69f5251",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "actor_sha256": "feeca2d8ba00353c77c6d6137b8928b655b911cb827403fd979c0fc1ab48e992",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_restore_signals": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "argv": [
+              "cat",
+              "/proc/self/status"
+            ],
+            "native_parent": 413233,
+            "children": [
+              {
+                "restore_signals": false,
+                "pid": 413234,
+                "ppid": 413233,
+                "sigign": "0x1001000",
+                "successful_parent_reaps": 1
+              },
+              {
+                "restore_signals": true,
+                "pid": 413239,
+                "ppid": 413233,
+                "sigign": "0x0",
+                "successful_parent_reaps": 1
+              }
+            ],
+            "changed_signals": [
+              "SIGPIPE",
+              "SIGXFSZ"
+            ]
+          }
+        ]
+      },
+      "toolchain": {
+        "imre": "7a94055a9491828ff4c2be202d342ddeeb5b818d0210191150d4aa9de69ee51f",
+        "runtime": "f924e68f8113d4a2700406a2cfad96df5a658d31570dcc8858862c1ad69f5251",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    }
+  ]
+}

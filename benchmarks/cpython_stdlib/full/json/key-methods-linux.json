@@ -1,0 +1,349 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "method": "test.test_json.test_decode.TestDecode.test_keys_reuse",
+  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f",
+  "helper_sha256": "ccb296ea3f67c7e49b721a35662b051c41858680de40a42c13bc8e168234df93",
+  "sha256": {
+    "imre": "d43bc60e9b9e4afe6202a916688a9e8aac1c6aad4ddc7d6ca79d0f3cd4730bb3",
+    "runtime": "aa2efe9f857e07a583fcd7798f8a075f0d791d5899829fc3a848a5bd890f245c"
+  },
+  "fixture": "CPython supplies both original module, class and instance lifecycles",
+  "execution": {
+    "repr": "CPython body and assertions; native values transported as repr",
+    "native-owners": "CPython body and assertions; native key owners transported explicitly",
+    "native-body-attempts": "unchanged method and helper compiled together; individual outcomes below"
+  },
+  "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
+  "distinct-owner-negative-control": "passed",
+  "compile-only-components": {
+    "pass module loads": {
+      "source": "import json\nfrom typing import Any, Callable\nload: Callable[[str], list[dict[str, Any]]] = json.loads\nprint(repr(load('[]')))\n",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    "pass bound decoder decode": {
+      "source": "import json\nfrom typing import Any, Callable\ndecoder = json.JSONDecoder()\nload: Callable[[str], list[dict[str, Any]]] = decoder.decode\nprint(repr(load('[]')))\n",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    "sort decoded object": {
+      "source": "import json\nrows = json.loads('[{\"b_key\": 1, \"a_key\": 2}]')\nprint(sorted(rows[0]))\n",
+      "exit": 1,
+      "diagnostic": "<case>:3:7: Imre: sorted keys require int, bool, str, bytes, or fixed tuples of ordered scalar fields"
+    }
+  },
+  "levels": {
+    "0": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+          "fixture_sha256": "3041c9e6bad98ef1367756dacf90bb47e687b403c0b604ebe0b4897286cf7b09"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:9:26: Imre: sorted keys require int, bool, str, bytes, or fixed tuples of ordered scalar fields",
+          "fixture_sha256": "cd0630257b20b893f1cb114be7dc3edccc3548a1d945c084e24b81b2a45a2e38"
+        },
+        "typed-module-bindings": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:26:9: Imre: unknown class method",
+          "fixture_sha256": "14f403a2becbcc42f2b9b175fb0e6f0da764fa7a2e50a095d7666914e88cb696"
+        },
+        "typed-string-identity": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:38:26: Imre: expected bool, got dict[str, str]; annotations are enforced contracts",
+          "fixture_sha256": "c850e01ba61ce48d69cee4efd452483a2bafe0487d508baab7c2d58b8df359e1"
+        },
+        "typed-key-assertions": {
+          "outcome": "blocked",
+          "diagnostic": "error[invalid-method-override]: Invalid override of method `assertFalse`",
+          "fixture_sha256": "74ae0da525e62ce83e537ef9846d9900488205d4fec6d64f60b122798e4634ef"
+        },
+        "native-key-assertions": {
+          "passed": [
+            "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+            "test.test_json.test_decode.TestPyDecode.test_keys_reuse"
+          ],
+          "failed": [],
+          "skipped": [],
+          "observations": {
+            "test.test_json.test_decode.TestCDecode.test_keys_reuse": [
+              {
+                "roles": {
+                  "body": "imre",
+                  "assertions": "imre",
+                  "operation": "imre",
+                  "fixture": "mixed"
+                },
+                "evidence": {
+                  "operation": "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth",
+                  "fixture": "CPython module/class/instance hooks; native instance in child",
+                  "opt_level": 0,
+                  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f"
+                }
+              }
+            ],
+            "test.test_json.test_decode.TestPyDecode.test_keys_reuse": [
+              {
+                "roles": {
+                  "body": "imre",
+                  "assertions": "imre",
+                  "operation": "imre",
+                  "fixture": "mixed"
+                },
+                "evidence": {
+                  "operation": "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth",
+                  "fixture": "CPython module/class/instance hooks; native instance in child",
+                  "opt_level": 0,
+                  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f"
+                }
+              }
+            ]
+          },
+          "fixture_sha256": "84aac1dfc7170909015410f947d0da6190ce60d5e21edb890cc409980fa2c8e0"
+        }
+      },
+      "native-distinct-owner-control": {
+        "outcome": "pass",
+        "operation": "distinct native string owners and nonempty memo rejected; string lists compared by value"
+      }
+    },
+    "3": {
+      "repr": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "failed",
+          "reason": "'a_key' is not 'a_key'",
+          "repr_calls": [
+            {
+              "method": "loads",
+              "shape": "str",
+              "status": "OK"
+            }
+          ],
+          "native_operations": [],
+          "native_key_owners": []
+        }
+      },
+      "native-owners": {
+        "test.test_json.test_decode.TestCDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        },
+        "test.test_json.test_decode.TestPyDecode.test_keys_reuse": {
+          "outcome": "pass",
+          "reason": null,
+          "repr_calls": [],
+          "native_operations": [
+            "json.loads",
+            "json.decoder.JSONDecoder",
+            "JSONDecoder.decode",
+            "JSONDecoder.memo"
+          ],
+          "native_key_owners": [
+            [
+              0,
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0,
+              1
+            ]
+          ]
+        }
+      },
+      "native-body-attempts": {
+        "general": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:6:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
+          "fixture_sha256": "3041c9e6bad98ef1367756dacf90bb47e687b403c0b604ebe0b4897286cf7b09"
+        },
+        "unshadowed-module": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:9:26: Imre: sorted keys require int, bool, str, bytes, or fixed tuples of ordered scalar fields",
+          "fixture_sha256": "cd0630257b20b893f1cb114be7dc3edccc3548a1d945c084e24b81b2a45a2e38"
+        },
+        "typed-module-bindings": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:26:9: Imre: unknown class method",
+          "fixture_sha256": "14f403a2becbcc42f2b9b175fb0e6f0da764fa7a2e50a095d7666914e88cb696"
+        },
+        "typed-string-identity": {
+          "outcome": "blocked",
+          "diagnostic": "<case>/case.py:38:26: Imre: expected bool, got dict[str, str]; annotations are enforced contracts",
+          "fixture_sha256": "c850e01ba61ce48d69cee4efd452483a2bafe0487d508baab7c2d58b8df359e1"
+        },
+        "typed-key-assertions": {
+          "outcome": "blocked",
+          "diagnostic": "error[invalid-method-override]: Invalid override of method `assertFalse`",
+          "fixture_sha256": "74ae0da525e62ce83e537ef9846d9900488205d4fec6d64f60b122798e4634ef"
+        },
+        "native-key-assertions": {
+          "passed": [
+            "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+            "test.test_json.test_decode.TestPyDecode.test_keys_reuse"
+          ],
+          "failed": [],
+          "skipped": [],
+          "observations": {
+            "test.test_json.test_decode.TestCDecode.test_keys_reuse": [
+              {
+                "roles": {
+                  "body": "imre",
+                  "assertions": "imre",
+                  "operation": "imre",
+                  "fixture": "mixed"
+                },
+                "evidence": {
+                  "operation": "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth",
+                  "fixture": "CPython module/class/instance hooks; native instance in child",
+                  "opt_level": 3,
+                  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f"
+                }
+              }
+            ],
+            "test.test_json.test_decode.TestPyDecode.test_keys_reuse": [
+              {
+                "roles": {
+                  "body": "imre",
+                  "assertions": "imre",
+                  "operation": "imre",
+                  "fixture": "mixed"
+                },
+                "evidence": {
+                  "operation": "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth",
+                  "fixture": "CPython module/class/instance hooks; native instance in child",
+                  "opt_level": 3,
+                  "method_sha256": "1a1e5a4bffdfb1845de2a717074560fc1c330be8d1fb7c918c5d2a84edd2d22f"
+                }
+              }
+            ]
+          },
+          "fixture_sha256": "84aac1dfc7170909015410f947d0da6190ce60d5e21edb890cc409980fa2c8e0"
+        }
+      },
+      "native-distinct-owner-control": {
+        "outcome": "pass",
+        "operation": "distinct native string owners and nonempty memo rejected; string lists compared by value"
+      }
+    }
+  }
+}

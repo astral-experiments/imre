@@ -1,0 +1,120 @@
+{
+  "imre_revision": "f4e461af62b885ebf1b62614334a1a2329bb251d",
+  "tested_tree": "699ee364f8dc47709f29c2c3c2f28583b397567e",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_call_timeout": {
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "native_parent_sha256": "2c2839e18d76475a878c1e04b2da42d37c2bdc73f7392ba6a98b527c59431c5b",
+          "timed_out": {
+            "parent": 2716219,
+            "child": 2716220,
+            "child_exec": "1792937335.484606 execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"while True: pass\"], 0x7ffd9e81b028 /* 73 vars */) = 0",
+            "signals": [
+              "1792937335.586496 kill(2716220, SIGKILL) = 0"
+            ],
+            "reap": "1792937335.588364 wait4(2716220, [{WIFSIGNALED(s) && WTERMSIG(s) == SIGKILL}], WNOHANG, NULL) = 2716220",
+            "pending_waits": 10
+          },
+          "immediate_exit": {
+            "parent": 2716227,
+            "child": 2716228,
+            "child_exec": "1792937335.614306 execve(\"/bin/true\", [\"/bin/true\", \"-c\", \"while True: pass\"], 0x7ffc3a36c538 /* 73 vars */) = 0",
+            "signals": [],
+            "reap": "1792937335.619263 wait4(2716228, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 2716228",
+            "pending_waits": 2
+          },
+          "native_assertion_failure": "native exit 1: '' 'AssertionError: TimeoutExpired not raised by call\\n'"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": {
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "native_parent_sha256": "3ce045c55701d608468bbfa6df88f487fb8f2cd5fe2acc22024fef6c5ba3a937",
+          "timed_out": {
+            "parent": 2716669,
+            "child": 2716670,
+            "child_exec": "1792937340.501196 execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"while True: pass\"], 0x7ffca1736aa8 /* 73 vars */) = 0",
+            "signals": [
+              "1792937340.603343 kill(2716670, SIGKILL) = 0"
+            ],
+            "reap": "1792937340.605034 wait4(2716670, [{WIFSIGNALED(s) && WTERMSIG(s) == SIGKILL}], WNOHANG, NULL) = 2716670",
+            "pending_waits": 10
+          },
+          "immediate_exit": {
+            "parent": 2716675,
+            "child": 2716677,
+            "child_exec": "1792937340.629976 execve(\"/bin/true\", [\"/bin/true\", \"-c\", \"while True: pass\"], 0x7ffc718d1868 /* 73 vars */) = 0",
+            "signals": [],
+            "reap": "1792937340.635009 wait4(2716677, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 2716677",
+            "pending_waits": 2
+          },
+          "native_assertion_failure": "native exit 1: '' 'AssertionError: TimeoutExpired not raised by call\\n'"
+        }
+      },
+      "toolchain": {
+        "imre": "8e8dd4f2323c05683f936e8ddaeba4928276727d239ba87bb664a030bce6e494",
+        "runtime": "760ca4c905f17913fc80a16806a4f764df75b613e012294727083985a93a02a3",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_call_timeout": {
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "native_parent_sha256": "2e365acc7eb448c0bb8ac1e41cf87bb5b6f3fe24a83cd4c2472c3527293b9b95",
+          "timed_out": {
+            "parent": 2716423,
+            "child": 2716424,
+            "child_exec": "1792937338.388168 execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"while True: pass\"], 0x7ffd432db028 /* 73 vars */) = 0",
+            "signals": [
+              "1792937338.490465 kill(2716424, SIGKILL) = 0"
+            ],
+            "reap": "1792937338.492147 wait4(2716424, [{WIFSIGNALED(s) && WTERMSIG(s) == SIGKILL}], WNOHANG, NULL) = 2716424",
+            "pending_waits": 10
+          },
+          "immediate_exit": {
+            "parent": 2716480,
+            "child": 2716486,
+            "child_exec": "1792937338.521454 execve(\"/bin/true\", [\"/bin/true\", \"-c\", \"while True: pass\"], 0x7ffea7b26ea8 /* 73 vars */) = 0",
+            "signals": [],
+            "reap": "1792937338.526155 wait4(2716486, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 2716486",
+            "pending_waits": 2
+          },
+          "native_assertion_failure": "native exit 1: '' 'AssertionError: TimeoutExpired not raised by call\\n'"
+        },
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_call_timeout": {
+          "method_sha256": "27e33f202fd2ac697949d65a9b9c7515899cc3a2888f48fa6833da0c039a741b",
+          "native_parent_sha256": "0099530649b28068c2fd362a6427de82112b0892ab174877c6322d0d4d796d14",
+          "timed_out": {
+            "parent": 2716947,
+            "child": 2716953,
+            "child_exec": "1792937342.921211 execve(\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", [\"/home/dev-user/Documents/Codex/2026-10-23/could-relar-use-mlir/outputs/stdlib-priorities/cpython-oracle/official-build/python\", \"-c\", \"while True: pass\"], 0x7ffe7c224a98 /* 73 vars */) = 0",
+            "signals": [
+              "1792937343.023199 kill(2716953, SIGKILL) = 0"
+            ],
+            "reap": "1792937343.025183 wait4(2716953, [{WIFSIGNALED(s) && WTERMSIG(s) == SIGKILL}], WNOHANG, NULL) = 2716953",
+            "pending_waits": 10
+          },
+          "immediate_exit": {
+            "parent": 2716980,
+            "child": 2716984,
+            "child_exec": "1792937343.048237 execve(\"/bin/true\", [\"/bin/true\", \"-c\", \"while True: pass\"], 0x7ffca18eb1d8 /* 73 vars */) = 0",
+            "signals": [],
+            "reap": "1792937343.071228 wait4(2716984, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 2716984",
+            "pending_waits": 3
+          },
+          "native_assertion_failure": "native exit 1: '' 'AssertionError: TimeoutExpired not raised by call\\n'"
+        }
+      },
+      "toolchain": {
+        "imre": "8e8dd4f2323c05683f936e8ddaeba4928276727d239ba87bb664a030bce6e494",
+        "runtime": "760ca4c905f17913fc80a16806a4f764df75b613e012294727083985a93a02a3",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      }
+    }
+  ]
+}

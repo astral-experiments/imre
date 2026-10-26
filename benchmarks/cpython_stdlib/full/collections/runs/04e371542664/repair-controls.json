@@ -1,0 +1,48 @@
+{
+  "source": {
+    "compiler_revision": "04e37154266456ffb0980616c2462a3d69229ef5",
+    "tree": "e8e31daa476ee4b19b315e4130d1afa434c2d15c",
+    "parents": [
+      "d25e332361b6da63677dcfdf8bbb3ff9ac20c8a4",
+      "041050c0397e38e68a49546d303c46fad56b93a9"
+    ],
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "imre_sha256": "4387aaa7412ea2b21f8f2899cbb7102060363eee2e92e8409e94f6a47fd2106b",
+    "runtime_sha256": "1590edff996de9933ee95e549d97e8b49587b67989af10df839177590f8e24c9"
+  },
+  "controls": {
+    "tests/fixtures/iterator_pipelines/source_generator.py": {
+      "source_blob": "d87e78f5e2423f702b83185bb3599f864c3f0ed8",
+      "reference_sha256": "5a8b94c536d93babda1f0c43260f9122000b5c203b2b1d90cc6f7338b1fea7ec",
+      "reference_lines": 27,
+      "modes": {
+        "O0-whole": "5a8b94c536d93babda1f0c43260f9122000b5c203b2b1d90cc6f7338b1fea7ec",
+        "O0-reachable": "5a8b94c536d93babda1f0c43260f9122000b5c203b2b1d90cc6f7338b1fea7ec",
+        "O3-whole": "5a8b94c536d93babda1f0c43260f9122000b5c203b2b1d90cc6f7338b1fea7ec",
+        "O3-reachable": "5a8b94c536d93babda1f0c43260f9122000b5c203b2b1d90cc6f7338b1fea7ec"
+      }
+    },
+    "tests/fixtures/dataclasses/value_struct.py": {
+      "source_blob": "61aae8c91ee27b1fc860b905f9ca39587e63aa9d",
+      "reference_sha256": "f9a02b0ff51cdab41dc072311a2040bd1cbbf7172e4ae4206b4f27300044bf19",
+      "reference_lines": 39,
+      "modes": {
+        "O0-whole": "f9a02b0ff51cdab41dc072311a2040bd1cbbf7172e4ae4206b4f27300044bf19",
+        "O0-reachable": "f9a02b0ff51cdab41dc072311a2040bd1cbbf7172e4ae4206b4f27300044bf19",
+        "O3-whole": "f9a02b0ff51cdab41dc072311a2040bd1cbbf7172e4ae4206b4f27300044bf19",
+        "O3-reachable": "f9a02b0ff51cdab41dc072311a2040bd1cbbf7172e4ae4206b4f27300044bf19"
+      }
+    },
+    "tests/fixtures/iterables/named_generator_methods.py": {
+      "source_blob": "1c0a4321fd365516c594b74f9bb1fce96f1d0933",
+      "reference_sha256": "4c145371d2eba0a59bce8f5c047dff8da171ca94353aeb6b034f88c1359d56bc",
+      "reference_lines": 10,
+      "modes": {
+        "O0-whole": "4c145371d2eba0a59bce8f5c047dff8da171ca94353aeb6b034f88c1359d56bc",
+        "O0-reachable": "4c145371d2eba0a59bce8f5c047dff8da171ca94353aeb6b034f88c1359d56bc",
+        "O3-whole": "4c145371d2eba0a59bce8f5c047dff8da171ca94353aeb6b034f88c1359d56bc",
+        "O3-reachable": "4c145371d2eba0a59bce8f5c047dff8da171ca94353aeb6b034f88c1359d56bc"
+      }
+    }
+  }
+}

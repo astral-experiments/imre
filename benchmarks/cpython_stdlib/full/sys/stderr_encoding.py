@@ -33,6 +33,17 @@ sys.stderr.write("one")
 sys.stderr.write("two")
 sys.stderr.flush()
 """
+REPRESENTATION = """import sys
+from sys import stderr as err
+print(repr(err))
+print(str(sys.__stderr__))
+print("stream:", sys.stderr, err)
+"""
+SHADOWED_REPR = """import sys
+def render(repr: str) -> str:
+    return repr(sys.stderr)
+print(render("local"))
+"""
 
 
 def run(command, env):
@@ -82,6 +93,19 @@ def compare(toolchain, source):
             expect("stderr metadata and writes", METADATA, [direct], setting)
         repeated = binary(REPEATED, "signature")
         expect("one signature across writes and flushes", REPEATED, [repeated], "utf-8-sig")
+        representation = binary(REPRESENTATION, "representation")
+        for setting in (None, "LATIN-1", "US-ASCII:replace", "UTF_8_SIG"):
+            expect("repr, str and positional stderr", REPRESENTATION, [representation], setting)
+        shadow = root / "shadow.py"
+        shadow.write_text(SHADOWED_REPR)
+        stock = run([sys.executable, "-c", SHADOWED_REPR], base)
+        rejected = subprocess.run([toolchain.imre, "check", shadow], capture_output=True, timeout=30)
+        if (stock["status"] != 1 or b"TypeError: 'str' object is not callable" not in bytes.fromhex(stock["stderr"])
+                or rejected.returncode == 0 or b"shadow.py:3:12:" not in rejected.stderr):
+            raise AssertionError((stock, rejected))
+        rows.append({"case": "shadowed repr remains an ordinary invalid call", "stage": "compile",
+                     "source_sha256": hashlib.sha256(SHADOWED_REPR.encode()).hexdigest(),
+                     "diagnostic": rejected.stderr.decode().replace(str(root), "[case]").strip()})
         isolated = 'import os\n' + METADATA + '\nsetting = os.getenv("PYTHONIOENCODING")\nif setting is not None:\n    err.write(setting)\n'
         expect("isolated command preserves environment and ignores codec", isolated,
                [toolchain.imre, "-I", "-c", isolated], "not-a-codec", ["-I"])

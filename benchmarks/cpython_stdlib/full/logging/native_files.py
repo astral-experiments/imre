@@ -20,20 +20,25 @@ import os
 import unittest
 from typing import TextIO
 
-class NativeCase(unittest.TestCase):
+class NativeCase:
     fn: str
+    checks: unittest.TestCase
 
     def __init__(self) -> None:
-        super().__init__()
         self.fn = FILENAME
+        self.checks = unittest.TestCase()
 
-    def assertIsNone(self, value: TextIO | None) -> None:
-        if value is not None:
-            raise AssertionError("stream is open")
+    def assertIsNone(self, stream: TextIO | None) -> None:
+        self.checks.assertTrue(stream is None)
 
-    def assertIsNotNone(self, value: TextIO | None) -> None:
-        if value is None:
-            raise AssertionError("stream is missing")
+    def assertIsNotNone(self, stream: TextIO | None) -> None:
+        self.checks.assertFalse(stream is None)
+
+    def assertTrue(self, value: bool) -> None:
+        self.checks.assertTrue(value)
+
+    def assertFalse(self, value: bool) -> None:
+        self.checks.assertFalse(value)
 """
 
 
@@ -57,9 +62,13 @@ class NativeCase:
 def file_cases(toolchain, work):
     prefix = "test.test_logging.FileHandlerTest."
     def delay(case, method):
-        return native_method(toolchain, work, SOURCE,
+        result = native_method(toolchain, work, SOURCE,
                              "FileHandlerTest", case.id(), FILE_FIXTURE.replace("FILENAME", repr(case.fn)),
                              operation=("imre", "Native delayed file creation, record emission and close"))(case, method)
+        result["observation"]["evidence"]["fixture"] = (
+            "Original CPython FileHandlerTest hooks and filename; the native fixture checks optional "
+            "stream identity and passes the four predicates to native TestCase boolean assertions")
+        return result
     def write_mode(case, method):
         fixture = WRITE_FIXTURE.replace("FILENAME", repr(case.fn)).replace("MESSAGE_NUM", str(case.message_num))
         for owner, helper in (("BaseTest", "next_message"), ("BaseFileTest", "next_rec")):
@@ -91,11 +100,23 @@ def main():
         work = Path(tmp)
         sample = HERE / "file_values.py"
         binary = tools.build(sample.read_bytes(), work)
-        def observe(cmd, dest):
-            child = subprocess.run([*cmd, dest], capture_output=True, check=True, timeout=30)
-            return child.stdout, child.stderr, dest.read_bytes()
-        if observe([binary], work / "native.log") != observe([sys.executable, sample], work / "reference.log"):
-            raise AssertionError("native file lifecycle or bytes differ from CPython")
+        def observe(cmd, dest, report):
+            args = [*cmd, dest, *(["report"] if report else [])]
+            child = subprocess.run(args, capture_output=True, check=True, timeout=30)
+            if report:
+                expected = ["--- Logging error ---", "UnsupportedOperation: not writable",
+                            "Call stack:", "Message: 'π'", "Arguments: ()"]
+                lines = [line.removeprefix("io.") for line in child.stderr.decode().splitlines()]
+                if [line for line in lines if line in expected] != expected:
+                    raise AssertionError((cmd, child.stderr))
+            elif child.stderr:
+                raise AssertionError((cmd, child.stderr))
+            return child.stdout, dest.read_bytes()
+        for report in (False, True):
+            actual = observe([binary], work / f"native-{report}.log", report)
+            reference = observe([sys.executable, sample], work / f"reference-{report}.log", report)
+            if actual != reference:
+                raise AssertionError("native file lifecycle or bytes differ from CPython")
         callbacks = file_cases(tools, work)
         observed, errors, skips = run_in_fixtures(suite, callbacks)
         if errors or skips or set(observed) != set(callbacks):

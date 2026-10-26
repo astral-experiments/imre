@@ -1,11 +1,12 @@
 //! Stable owners for the Unicode and filesystem configuration of a native process.
-use super::{Codec, Rc, Str, canonical, encoding};
+use super::{Codec, canonical, encoding};
+use crate::{Str, StrOwner};
 use crate::objects::exceptions::{Error, Kind};
 
 struct Names {
-    unicode: Rc<Str>,
-    filesystem: Option<Rc<Str>>,
-    errors: Rc<Str>,
+    unicode: StrOwner,
+    filesystem: Option<StrOwner>,
+    errors: StrOwner,
 }
 
 thread_local! {
@@ -28,7 +29,7 @@ pub extern "C" fn imre_sys_init_encoding_names() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_default_encoding() -> *const Str {
-    NAMES.with(|names| Rc::into_raw(names.unicode.clone()))
+    NAMES.with(|names| StrOwner::into_raw(names.unicode.clone()))
 }
 
 /// Transfer a reference to the canonical codec name. A locale outside the native
@@ -36,7 +37,7 @@ pub extern "C" fn imre_sys_default_encoding() -> *const Str {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_filesystem_encoding() -> *const Str {
     NAMES.with(|names| match &names.filesystem {
-        Some(name) => Rc::into_raw(name.clone()),
+        Some(name) => StrOwner::into_raw(name.clone()),
         None => Error::new(
             Kind::LookupError,
             format!(
@@ -50,5 +51,5 @@ pub extern "C" fn imre_sys_filesystem_encoding() -> *const Str {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_filesystem_errors() -> *const Str {
-    NAMES.with(|names| Rc::into_raw(names.errors.clone()))
+    NAMES.with(|names| StrOwner::into_raw(names.errors.clone()))
 }

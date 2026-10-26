@@ -1,29 +1,43 @@
 //! Native text codecs shared by the registry and text files.
+pub(super) mod writer;
 
-use super::bytes::decode_error;
+use super::bytes::{ascii_decode_error, decode_error, owned_input};
+use super::charmaps::Charmap;
 use super::exceptions::Result;
-use super::{Bytes, Error, Kind, Object, Rc, Storage, StorageCell, Str, finish, object};
+use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
+use crate::{BytesOwner, ObjectOwner, StrOwner};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-const CODEC_NAMES: [&str; 4] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig"];
+static CP1251: LazyLock<Charmap> = LazyLock::new(|| Charmap::named("cp1251").unwrap());
+static CP1251_ENCODE: LazyLock<HashMap<char, u8>> = LazyLock::new(|| {
+    (0..=u8::MAX)
+        .filter_map(|b| CP1251.decode(b).map(|ch| (ch, b)))
+        .collect()
+});
+
+const CODEC_NAMES: [&str; 5] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251"];
 
 thread_local! {
-    static REGISTRY: RefCell<HashMap<String, Rc<Object>>> = RefCell::default();
-    static NAMES: [Rc<Str>; 4] = CODEC_NAMES.map(|name| {
-        // CodecInfo's ASCII identifier is interned; its hyphenated names are not.
-        if name == "ascii" {
+    static REGISTRY: RefCell<HashMap<String, ObjectOwner>> = RefCell::default();
+    static NAMES: [StrOwner; CODEC_NAMES.len()] = CODEC_NAMES.map(|name| {
+        // Python interns identifiers in encoding modules, such as ascii and cp1251.
+        if name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
             crate::sys::canonical(name)
         } else {
-            Rc::new(Str::const_new(name))
+            StrOwner::new(Str::const_new(name))
         }
     });
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
-fn normalize(name: &str) -> String {
+fn normalize(name: &str) -> Result<String> {
     let mut normalized = String::new();
+    normalized
+        .try_reserve_exact(name.len())
+        .map_err(|_| Error::allocation())?;
     let mut separated = false;
     for byte in name.bytes() {
         if byte.is_ascii_alphanumeric() || byte == b'.' {
@@ -36,7 +50,7 @@ fn normalize(name: &str) -> String {
             separated = true;
         }
     }
-    normalized
+    Ok(normalized)
 }
 
 /// # Safety
@@ -48,16 +62,26 @@ pub unsafe extern "C" fn imre_codec_lookup(name: *const Str) -> *const Object {
     if name.contains('\0') {
         return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
     }
-    let key = normalize(name);
+    let key = match normalize(name) {
+        Ok(key) => key,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
     REGISTRY.with_borrow_mut(|entries| {
         if let Some(entry) = entries.get(&key) {
-            return Rc::into_raw(entry.clone());
+            return ObjectOwner::into_raw(entry.clone());
         }
         match Codec::by_key(&key, name) {
             Ok(codec) => {
-                let info = Rc::new(Object(StorageCell::new(Storage::CodecInfo(codec))));
+                if entries.try_reserve(1).is_err() {
+                    return Error::allocation().returning(std::ptr::null());
+                }
+                let Ok(info) =
+                    ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecInfo(codec))))
+                else {
+                    return Error::memory_error().returning(std::ptr::null());
+                };
                 entries.insert(key, info.clone());
-                Rc::into_raw(info)
+                ObjectOwner::into_raw(info)
             }
             Err(e) => e.returning(std::ptr::null()),
         }
@@ -81,7 +105,7 @@ unsafe fn codec(info: *const Object) -> Codec {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
-    Rc::into_raw(unsafe { codec(info) }.name_owner())
+    StrOwner::into_raw(unsafe { codec(info) }.name_owner())
 }
 
 /// # Safety
@@ -93,11 +117,47 @@ pub unsafe extern "C" fn imre_codec_encode(
     errors: *const Str,
 ) -> *const Bytes {
     // SAFETY: the typed operands stay live until conversion is complete.
-    let result = unsafe { codec(info).encode(&*text, Some(&*errors)) };
-    finish(
-        result.map(|b| Rc::into_raw(Rc::new(b.into_owned()))),
-        std::ptr::null(),
-    )
+    let result = unsafe {
+        codec(info).encode(&*text, Some(&*errors), || {
+            Ok(StrOwner::acquire_word(text as usize))
+        })
+    };
+    finish(result.and_then(encoded_bytes), std::ptr::null())
+}
+
+/// Return an owned byte buffer for a borrowed or freshly encoded result.
+fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
+    let owner = match bytes {
+        Cow::Borrowed(bytes) => owned_input(bytes)?,
+        Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?,
+    };
+    Ok(BytesOwner::into_raw(owner))
+}
+
+/// Encode a string using the same codec implementation as registry entries and files.
+///
+/// # Safety
+/// All three operands are rooted strings for the duration of the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_encode_options(
+    text: *const Str,
+    encoding: *const Str,
+    errors: *const Str,
+) -> *const Bytes {
+    // SAFETY: the typed compiler passes three live, immutable strings.
+    let (encoding, errors) = unsafe { (&*encoding, &*errors) };
+    if encoding.contains('\0') || errors.contains('\0') {
+        return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
+    }
+    let result = Codec::lookup(encoding).and_then(|codec| {
+        // SAFETY: the caller roots the original string through conversion and error construction.
+        unsafe {
+            codec.encode(&*text, Some(errors), || {
+                Ok(StrOwner::acquire_word(text as usize))
+            })
+        }
+    });
+    finish(result.and_then(encoded_bytes), std::ptr::null())
 }
 
 /// # Safety
@@ -111,7 +171,11 @@ pub unsafe extern "C" fn imre_codec_decode(
     // SAFETY: the generated call retains all three operands.
     let result = unsafe { codec(info).decode(&*bytes, Some(&*errors)) };
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(s.into()))),
+        result.and_then(|s| {
+            StrOwner::try_new(s.into())
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }
@@ -121,6 +185,7 @@ pub(crate) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
+    Cp1251,
 }
 
 impl Codec {
@@ -130,11 +195,12 @@ impl Codec {
             Self::Latin1 => 1,
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
+            Self::Cp1251 => 4,
         }
     }
 
     /// Return the retained canonical name shared with registry entries.
-    pub(crate) fn name_owner(self) -> Rc<Str> {
+    pub(crate) fn name_owner(self) -> StrOwner {
         NAMES.with(|names| names[self.index()].clone())
     }
 
@@ -143,7 +209,7 @@ impl Codec {
     }
 
     pub(crate) fn lookup(value: &str) -> Result<Self> {
-        Self::by_key(&normalize(value), value)
+        Self::by_key(&normalize(value)?, value)
     }
 
     fn by_key(key: &str, value: &str) -> Result<Self> {
@@ -152,6 +218,7 @@ impl Codec {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
+            "cp1251" | "1251" | "windows_1251" => Ok(Self::Cp1251),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -159,29 +226,89 @@ impl Codec {
             "ascii" | "us" | "us_ascii" | "646" | "ansi_x3.4_1968" | "ansi_x3_4_1968"
             | "ansi_x3.4_1986" | "cp367" | "csascii" | "ibm367" | "iso646_us"
             | "iso_646.irv_1991" | "iso_ir_6" => Ok(Self::Ascii),
-            _ => Err(Error::new(
+            _ => Err(option_error(
                 Kind::LookupError,
-                format!("unknown encoding: {value}"),
+                "unknown encoding: ",
+                value,
+                "",
             )),
         }
     }
 
-    pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
+    /// Text streams accept the locale sentinel in addition to registry names.
+    pub(super) fn for_stream(encoding: Option<&str>) -> Result<Self> {
+        match encoding {
+            None | Some("locale") => Ok(Self::Utf8 { signature: false }),
+            Some(name) => Self::lookup(name),
+        }
+    }
+
+    /// Decode a complete text stream, applying universal newlines when requested.
+    pub(super) fn decode_stream(
+        self,
+        data: &[u8],
+        errors: Option<&str>,
+        universal: bool,
+    ) -> Result<String> {
+        let text = self.decode(data, errors)?;
+        Ok(if universal && text.contains('\r') {
+            universal_newlines(text)
+        } else {
+            text
+        })
+    }
+
+    pub(crate) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
+        let capacity = if matches!(self, Self::Latin1) {
+            data.len()
+                .checked_add(data.iter().filter(|byte| !byte.is_ascii()).count())
+                .ok_or_else(Error::allocation)?
+        } else {
+            data.len()
+        };
+        let mut text = String::new();
+        text.try_reserve_exact(capacity)
+            .map_err(|_| Error::allocation())?;
         match self {
-            Self::Latin1 => Ok(data.iter().copied().map(char::from).collect()),
+            Self::Latin1 => {
+                text.extend(data.iter().copied().map(char::from));
+                Ok(text)
+            }
+            Self::Cp1251 => {
+                for (index, &byte) in data.iter().enumerate() {
+                    if let Some(ch) = CP1251.decode(byte) {
+                        text.try_reserve(ch.len_utf8())
+                            .map_err(|_| Error::allocation())?;
+                        text.push(ch);
+                    } else {
+                        decoding_error(&mut text, errors, &[byte], || match owned_input(data) {
+                            Ok(bytes) => {
+                                let reason = "character maps to <undefined>";
+                                Error::unicode_decode(
+                                    "charmap",
+                                    bytes,
+                                    index..index + 1,
+                                    reason,
+                                    format!(
+                                        "'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"
+                                    ),
+                                )
+                            }
+                            Err(error) => error,
+                        })?;
+                    }
+                }
+                Ok(text)
+            }
             Self::Ascii => {
-                let mut text = String::with_capacity(data.len());
                 for (index, &byte) in data.iter().enumerate() {
                     if byte.is_ascii() {
+                        text.try_reserve(1).map_err(|_| Error::allocation())?;
                         text.push(char::from(byte));
                     } else {
-                        decoding_error(&mut text, errors, &[byte], || {
-                            Error::new(
-                                Kind::UnicodeDecodeError,
-                                format!(
-                                    "'ascii' codec can't decode byte 0x{byte:02x} in position {index}: ordinal not in range(128)"
-                                ),
-                            )
+                        decoding_error(&mut text, errors, &[byte], || match owned_input(data) {
+                            Ok(bytes) => ascii_decode_error(bytes, index),
+                            Err(error) => error,
                         })?;
                     }
                 }
@@ -194,15 +321,17 @@ impl Codec {
                     data
                 };
                 let mut remaining = data;
-                let mut text = String::with_capacity(data.len());
                 loop {
                     match std::str::from_utf8(remaining) {
                         Ok(valid) => {
+                            text.try_reserve(valid.len())
+                                .map_err(|_| Error::allocation())?;
                             text.push_str(valid);
                             return Ok(text);
                         }
                         Err(error) => {
                             let valid = error.valid_up_to();
+                            text.try_reserve(valid).map_err(|_| Error::allocation())?;
                             text.push_str(std::str::from_utf8(&remaining[..valid]).unwrap());
                             let end = error.error_len().map_or(remaining.len(), |len| valid + len);
                             decoding_error(&mut text, errors, &remaining[valid..end], || {
@@ -216,30 +345,62 @@ impl Codec {
         }
     }
 
-    pub(crate) fn encode<'a>(self, text: &'a str, errors: Option<&str>) -> Result<Cow<'a, [u8]>> {
-        let (codec, limit) = match self {
+    pub(crate) fn encode<'a>(
+        self,
+        text: &'a str,
+        errors: Option<&str>,
+        error_input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<Cow<'a, [u8]>> {
+        let (codec, reason) = match self {
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
-                return Ok(Cow::Owned([b"\xef\xbb\xbf", text.as_bytes()].concat()));
+                let mut out = Vec::new();
+                let len = text.len().checked_add(3).ok_or_else(Error::allocation)?;
+                out.try_reserve_exact(len)
+                    .map_err(|_| Error::allocation())?;
+                out.extend_from_slice(b"\xef\xbb\xbf");
+                out.extend_from_slice(text.as_bytes());
+                return Ok(Cow::Owned(out));
             }
-            Self::Ascii => ("ascii", 128),
-            Self::Latin1 => ("latin-1", 256),
+            Self::Ascii => ("ascii", "ordinal not in range(128)"),
+            Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
+            Self::Cp1251 => ("charmap", "character maps to <undefined>"),
         };
-        let mut out = Vec::with_capacity(text.len());
+        let encoded = |ch: char| match self {
+            Self::Ascii => ch.is_ascii().then_some(ch as u8),
+            Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
+            Self::Cp1251 => CP1251_ENCODE.get(&ch).copied(),
+            Self::Utf8 { .. } => unreachable!(),
+        };
+        let mut out = Vec::new();
+        out.try_reserve_exact(text.len())
+            .map_err(|_| Error::allocation())?;
         let mut chars = text.chars().enumerate().peekable();
         while let Some((start, ch)) = chars.next() {
-            if u32::from(ch) < limit {
-                out.push(ch as u8);
+            if let Some(byte) = encoded(ch) {
+                out.try_reserve(1).map_err(|_| Error::allocation())?;
+                out.push(byte);
                 continue;
             }
             match errors.unwrap_or("strict") {
                 "ignore" => (),
-                "replace" => out.push(b'?'),
-                "backslashreplace" => out.extend(escaped(ch).as_bytes()),
-                "xmlcharrefreplace" => out.extend(format!("&#{};", u32::from(ch)).as_bytes()),
+                "replace" => {
+                    out.try_reserve(1).map_err(|_| Error::allocation())?;
+                    out.push(b'?');
+                }
+                "backslashreplace" | "xmlcharrefreplace" => {
+                    let replacement = if errors == Some("backslashreplace") {
+                        escaped(ch)
+                    } else {
+                        compact_str::format_compact!("&#{};", u32::from(ch))
+                    };
+                    out.try_reserve(replacement.len())
+                        .map_err(|_| Error::allocation())?;
+                    out.extend_from_slice(replacement.as_bytes());
+                }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    while let Some((i, _)) = chars.next_if(|(_, c)| u32::from(*c) >= limit) {
+                    while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
                         end = i;
                     }
                     let at = if start == end {
@@ -247,9 +408,12 @@ impl Codec {
                     } else {
                         format!("characters in position {start}-{end}")
                     };
-                    return Err(Error::new(
-                        Kind::UnicodeEncodeError,
-                        format!("'{codec}' codec can't encode {at}: ordinal not in range({limit})"),
+                    return Err(Error::unicode_encode(
+                        codec,
+                        error_input()?,
+                        start..end + 1,
+                        reason,
+                        format!("'{codec}' codec can't encode {at}: {reason}"),
                     ));
                 }
                 name => return Err(unknown_handler(name)),
@@ -259,20 +423,54 @@ impl Codec {
     }
 }
 
-fn escaped(ch: char) -> String {
+/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
+fn universal_newlines(text: String) -> String {
+    let mut bytes = text.into_bytes();
+    let mut read = 0;
+    let mut written = 0;
+    while read < bytes.len() {
+        let byte = bytes[read];
+        read += 1;
+        bytes[written] = if byte == b'\r' {
+            read += usize::from(bytes.get(read) == Some(&b'\n'));
+            b'\n'
+        } else {
+            byte
+        };
+        written += 1;
+    }
+    bytes.truncate(written);
+    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
+}
+
+fn escaped(ch: char) -> Str {
     let code = u32::from(ch);
     match code {
-        0..=255 => format!("\\x{code:02x}"),
-        256..=65535 => format!("\\u{code:04x}"),
-        _ => format!("\\U{code:08x}"),
+        0..=255 => compact_str::format_compact!("\\x{code:02x}"),
+        256..=65535 => compact_str::format_compact!("\\u{code:04x}"),
+        _ => compact_str::format_compact!("\\U{code:08x}"),
     }
 }
 
+/// Format potentially long user-supplied codec and file options with a fallible reservation.
+pub(super) fn option_error(kind: Kind, prefix: &str, value: &str, suffix: &str) -> Error {
+    let capacity = prefix
+        .len()
+        .saturating_add(value.len())
+        .saturating_add(suffix.len());
+    let Ok(mut message) = Str::try_with_capacity(capacity) else {
+        return Error::allocation();
+    };
+    message.push_str(prefix);
+    message.push_str(value);
+    message.push_str(suffix);
+    Error::new(kind, message)
+}
+
 fn unknown_handler(name: &str) -> Error {
-    Error::new(
-        Kind::LookupError,
-        format!("unknown error handler name '{name}'"),
-    )
+    // CPython includes at most 400 UTF-8 bytes, ending before any partial character.
+    let name = &name[..name.floor_char_boundary(400)];
+    option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
 fn decoding_error(
@@ -283,9 +481,26 @@ fn decoding_error(
 ) -> Result<()> {
     match errors.unwrap_or("strict") {
         "strict" | "surrogatepass" => return Err(strict()),
-        "replace" => text.push('\u{fffd}'),
+        "surrogateescape" => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                "native strings cannot represent surrogate-escaped input bytes",
+            ));
+        }
+        "replace" => {
+            text.try_reserve(3).map_err(|_| Error::allocation())?;
+            text.push('\u{fffd}');
+        }
         "ignore" => (),
+        "namereplace" | "xmlcharrefreplace" => {
+            return Err(Error::new(
+                Kind::TypeError,
+                "don't know how to handle UnicodeDecodeError in error callback",
+            ));
+        }
         "backslashreplace" => {
+            let len = bytes.len().checked_mul(4).ok_or_else(Error::allocation)?;
+            text.try_reserve(len).map_err(|_| Error::allocation())?;
             for byte in bytes {
                 use std::fmt::Write;
                 write!(text, "\\x{byte:02x}").unwrap();
@@ -294,4 +509,57 @@ fn decoding_error(
         name => return Err(unknown_handler(name)),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_str_encode_retains_the_original_text_until_the_error_is_dropped() {
+        let text = StrOwner::new(Str::new("xé€"));
+        let name = Str::new("ascii");
+        let policy = Str::new("strict");
+        // SAFETY: all three arguments remain live until encoding returns.
+        let result = unsafe { imre_str_encode_options(StrOwner::as_ptr(&text), &name, &policy) };
+        assert!(result.is_null());
+        let error = super::super::exceptions::take_pending().unwrap();
+        assert_eq!(StrOwner::strong_count(&text), 2);
+        drop(error);
+        assert_eq!(StrOwner::strong_count(&text), 1);
+    }
+
+    #[test]
+    fn strict_registry_errors_retain_text_and_copy_bytes() {
+        let name = Str::new("ascii");
+        let policy = Str::new("strict");
+        let text = StrOwner::new(Str::new("xé€"));
+        let bytes = BytesOwner::new(vec![b'a', 0xff]);
+        // SAFETY: all ABI operands remain live until the returned owners are released.
+        unsafe {
+            let codec = ObjectOwner::from_raw(imre_codec_lookup(&name));
+            assert!(
+                imre_codec_encode(
+                    ObjectOwner::as_ptr(&codec),
+                    StrOwner::as_ptr(&text),
+                    &policy
+                )
+                .is_null()
+            );
+            let error = super::super::exceptions::take_pending().unwrap();
+            assert_eq!(StrOwner::strong_count(&text), 2);
+            drop(error);
+            assert_eq!(StrOwner::strong_count(&text), 1);
+            assert!(
+                imre_codec_decode(
+                    ObjectOwner::as_ptr(&codec),
+                    BytesOwner::as_ptr(&bytes),
+                    &policy
+                )
+                .is_null()
+            );
+            let _error = super::super::exceptions::take_pending().unwrap();
+            assert_eq!(BytesOwner::strong_count(&bytes), 1);
+        }
+    }
 }

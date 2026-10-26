@@ -1,0 +1,19 @@
+{
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de",
+  "tree": "419954b1e8f03c01169ef3868651a43de2517c0d",
+  "main": "de248d8137084688eaa8ca7d2d03fcf6eed6ea3f",
+  "previous_evidence_head": "d87c9cc211562a012b5b270e4bfb13a450ee1322",
+  "git_parents": [
+    "d87c9cc211562a012b5b270e4bfb13a450ee1322",
+    "de248d8137084688eaa8ca7d2d03fcf6eed6ea3f"
+  ],
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_sha256": "750fe493ef407793194244b51755c2b10b53bd567162fe09f29ea26edc2b5d39",
+  "runtime_sha256": "ecba30e3493d50b4f8e4c409f7e22435d032390c4b5c7abfb327d33e60c0cfeb",
+  "verification": "local",
+  "opt_levels": [
+    0,
+    3
+  ],
+  "report_sha256": "18b55c0e1192cabcd5a44b28ec6288a94207cb6dc955b30e0589607287e9d8ce"
+}

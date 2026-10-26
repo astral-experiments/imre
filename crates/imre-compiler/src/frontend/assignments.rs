@@ -521,6 +521,8 @@ impl Checker<'_> {
     /// or helper functions before their actual source evaluation point.
     pub(super) fn assignment_context(&self, target: &ast::Expr) -> Option<Type> {
         let helpers = Helpers::new(0);
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut probe = Checker::new(
             self.graph,
             self.module,
@@ -530,6 +532,8 @@ impl Checker<'_> {
             &helpers,
             self.globals,
         );
+        probe.omitted_assert_locals = omitted_locals;
+        probe.omitted_assert_free = omitted_free;
         probe.returns = self.returns;
         probe.class = self.class;
         probe.class_receiver = self.class_receiver.clone();
@@ -541,13 +545,33 @@ impl Checker<'_> {
         probe.comprehension_targets = self.comprehension_targets.clone();
         match target {
             ast::Expr::Attribute(attribute) => {
+                if let Some(class) = probe.class_reference(&attribute.value)
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
                 let receiver = probe.expr(&attribute.value).ok()?;
+                if let Type::Class(class) = receiver.ty
+                    && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
+                {
+                    return Some(ty);
+                }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    return Some(self.types.list(Type::Dict(id)));
+                }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     let setter = &self.classes.setters[class][attribute.attr.as_str()];
                     return match self.inference {
                         Some(inference) => inference.parameter(setter.id, 1),
                         None => Some(setter.params[1].ty),
                     };
+                }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return None; // its descriptor applies bool() to the original RHS.
                 }
                 probe
                     .writable_field_value(attribute, receiver)
@@ -569,7 +593,7 @@ impl Checker<'_> {
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
-                    .or_else(|| self.types.element(receiver.ty))
+                    .or_else(|| self.types.indexed_element(receiver.ty))
             }
             _ => None,
         }

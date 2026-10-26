@@ -4,9 +4,9 @@ import hashlib
 from pathlib import Path
 
 from exit_case import exit_observation
+import intern_case
 from ioencoding_case import observe as ioencoding_observation
 from locale_stream_cases import observe as locale_stream_observations
-import intern_case
 from suite_evidence import roles
 from suite_inventory import load_suite
 from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture

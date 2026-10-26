@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "207db8b07ca8c3b7f0f18be0c4c5f7451fb55e3f332764a6d96aa86b2b3915ea",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    }
+  ]
+}

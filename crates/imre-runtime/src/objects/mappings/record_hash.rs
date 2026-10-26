@@ -66,6 +66,7 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
             // SAFETY: every projected field is an initialized JSON/document object.
             let field = unsafe { object(*record.add(index) as *const Object) };
             if index != 0 {
+                text.try_reserve(1).map_err(|_| Error::allocation())?;
                 text.push('\n');
             }
             // SAFETY: the rooted immutable JSON view cannot mutate while rendering.
@@ -110,9 +111,27 @@ pub unsafe extern "C" fn imre_prepare_record_key(record: *const usize) {
 }
 
 /// # Safety
-/// The caller roots an exact frozen dataclass with a validated TOML hash projection.
+/// The caller roots an exact scalar struct or frozen dataclass with a validated TOML hash projection.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_projected_hash(record: *const usize) -> usize {
+    // SAFETY: a value struct owns only initialized scalar words and static metadata.
+    unsafe {
+        let layout = descriptor(record);
+        if layout.is_value_struct() {
+            let mut hash = 0xcbf29ce484222325_u64;
+            for i in 0..layout.length {
+                let kind = WordKind::new(*layout.kinds.add(i));
+                let word = kind.read_record_field(record.add(i));
+                let key = if kind.raw() == 7 {
+                    crate::objects::structs::float_key(word)
+                } else {
+                    word
+                };
+                hash = (hash ^ key as u64).wrapping_mul(0x100000001b3);
+            }
+            return integer((hash & i64::MAX as u64) as usize);
+        }
+    }
     // SAFETY: preparation initializes the extra word before the successful read.
     crate::finish(
         unsafe {

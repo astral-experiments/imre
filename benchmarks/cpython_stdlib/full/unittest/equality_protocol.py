@@ -46,6 +46,11 @@ def list_failure(case: unittest.TestCase, a: list[str], b: list[str]) -> None:
 
 
 case = unittest.TestCase()
+for value in (10 ** 79, 10 ** 80):
+    try:
+        case.assertEqual(value, value + 1)
+    except AssertionError as exc:
+        print(str(exc))
 failure_type(case)
 failure_type(CustomCase())
 custom = CustomCase()

@@ -35,7 +35,7 @@ the default native operations would bypass changes to the namespace.
 
 The two later codecs operations in this suite are `codecs.lookup(fs_encoding)`
 at line 975 and `codecs.charmap_build(encodings.iso8859_3.decoding_table)` at
-line 1650. The filesystem helper now calls native lookup; `charmap_build` remains unsupported.
+line 1650. The original filesystem method and helper both execute in Imre, including lookup; `charmap_build` remains unsupported.
 The [native codec fixture](codec_lookup.py) compares aliases and cache identity, canonical
 names, exact encoded/decoded results and consumed lengths, errors, and the five fixed
 UTF byte-order marks with pinned Python. The stateless registry supports ASCII, Latin-1,

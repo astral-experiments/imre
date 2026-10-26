@@ -45,17 +45,27 @@ impl Checker<'_> {
         let mut outer = calls::ArgumentScope::default();
         let receiver = receiver.map(|owner| outer.hold(self, owner));
         let args = call.arguments.args.as_slice();
-        if !call.arguments.keywords.is_empty() || !(1..=2).contains(&args.len()) {
-            let reason = if !call.arguments.keywords.is_empty() {
-                "dict.fromkeys() takes no keyword arguments".to_string()
-            } else if args.is_empty() {
-                "fromkeys expected at least 1 argument, got 0".to_string()
-            } else {
-                format!("fromkeys expected at most 2 arguments, got {}", args.len())
-            };
+        let error_type = shape.map_or(Type::None, |(key, value)| self.types.dict(key, value));
+        let ordered = receiver
+            .as_ref()
+            .is_some_and(|owner| self.types.is_ordered_dict(owner.ty));
+        let binding_error = if ordered {
+            ordered_fromkeys_binding_error(call)
+        } else if !call.arguments.keywords.is_empty() {
+            Some("dict.fromkeys() takes no keyword arguments".to_string())
+        } else if args.is_empty() {
+            Some("fromkeys expected at least 1 argument, got 0".to_string())
+        } else if args.len() > 2 {
+            Some(format!(
+                "fromkeys expected at most 2 arguments, got {}",
+                args.len()
+            ))
+        } else {
+            None
+        };
+        if let Some(reason) = binding_error {
             for arg in args {
-                let item = self.expr(arg)?;
-                outer.hold(self, item);
+                outer.discard(self, arg)?;
             }
             for kw in &call.arguments.keywords {
                 if kw.arg.is_none() {
@@ -65,12 +75,33 @@ impl Checker<'_> {
                         "dict.fromkeys keyword unpacking is unsupported",
                     ));
                 }
-                let item = self.expr(&kw.value)?;
-                outer.hold(self, item);
+                outer.discard(self, &kw.value)?;
             }
-            return Ok(outer.finish(fromkeys_error(reason)));
+            // Counter.fromkeys(iterable, v=None) accepts names and raises its
+            // own exception after the caller has evaluated all arguments.
+            let named = |name| call.arguments.find_keyword(name).is_some();
+            let binds_counter = match (args.len(), call.arguments.keywords.len()) {
+                (0, 1) => named("iterable"),
+                (0, 2) => named("iterable") && named("v"),
+                (1, 1) => named("v"),
+                _ => false,
+            };
+            if !ordered
+                && binds_counter
+                && let Some(owner) = receiver
+            {
+                let (key, value) = shape.unwrap_or((Type::Int, Type::None));
+                let target = self.fromkeys_target(Some(owner), key, value);
+                outer.hold(self, target);
+            }
+            return Ok(outer.finish(fromkeys_error(reason, error_type)));
         }
-        let source = &args[0];
+        let named = |name| call.arguments.find_keyword(name).map(|kw| &kw.value);
+        let source = args
+            .first()
+            .or_else(|| named("iterable"))
+            .expect("bound iterable");
+        let value_arg = args.get(1).or_else(|| named("value"));
         let hint = shape.map(|(key, _)| key);
         // A statically empty source may adopt any immutable key representation.
         let mut input = if matches!(source, ast::Expr::List(list) if list.elts.is_empty()) {
@@ -88,13 +119,19 @@ impl Checker<'_> {
         {
             *iterable = Self::string_value(iterable.clone());
         }
-        let value = match (args.get(1), shape) {
+        let value = match (value_arg, shape) {
             (Some(value), Some((_, ty))) => self.expr_expected(value, ty)?,
             (Some(value), None) => self.expr(value)?,
             (None, _) => Expr {
                 ty: Type::None,
                 kind: ExprKind::None,
             },
+        };
+        // When value= is supplied first, evaluate it before creating the iterable.
+        let value = if value_arg.is_some_and(|arg| arg.start() < source.start()) {
+            outer.hold(self, value)
+        } else {
+            value
         };
         if let Iteration::Container { iterable, .. } = &input
             && matches!(
@@ -111,7 +148,7 @@ impl Checker<'_> {
                     self.fromkeys_target(Some(owner), hint.unwrap_or(Type::Int), value_type);
                 outer.hold(self, target);
             }
-            return Ok(outer.finish(fromkeys_error(reason)));
+            return Ok(outer.finish(fromkeys_error(reason, error_type)));
         }
         let mut input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, Some(hint.unwrap_or(Type::Int)));
@@ -126,10 +163,10 @@ impl Checker<'_> {
         if let Some(key) = hint {
             self.expect(key, key_type, source)?;
         }
-        let ty = self.types.dict(key_type, value.ty);
+        let result = self.fromkeys_target(receiver, key_type, value.ty);
+        let ty = result.ty;
         let kept = self.hidden(value.ty);
         let target = self.hidden(ty);
-        let result = self.fromkeys_target(receiver, key_type, value.ty);
         // Evaluate the iterable expression and the value before asking for the
         // iterator. A generator expression acquires its own outer iterator earlier.
         input.evaluate.push(Statement::Assign(kept, value));
@@ -163,7 +200,11 @@ impl Checker<'_> {
         };
         match receiver {
             Some(owner) => Expr {
-                ty,
+                ty: if self.types.is_ordered_dict(owner.ty) {
+                    self.types.ordered_dict(key, value)
+                } else {
+                    ty
+                },
                 kind: ExprKind::Builtin(Builtin::DictFromKeysTarget, vec![owner, empty]),
             },
             None => empty,
@@ -171,9 +212,43 @@ impl Checker<'_> {
     }
 }
 
-fn fromkeys_error(message: String) -> Expr {
+fn ordered_fromkeys_binding_error(call: &ast::ExprCall) -> Option<String> {
+    let positional = call.arguments.args.len();
+    let count = positional + call.arguments.keywords.len();
+    if count > 2 {
+        let kind = if positional == 0 {
+            "keyword arguments"
+        } else {
+            "arguments"
+        };
+        return Some(format!("fromkeys() takes at most 2 {kind} ({count} given)"));
+    }
+    if positional == 0 && call.arguments.find_keyword("iterable").is_none() {
+        return Some("fromkeys() missing required argument 'iterable' (pos 1)".to_string());
+    }
+    for kw in &call.arguments.keywords {
+        match kw.arg.as_deref() {
+            Some("iterable") if positional > 0 => {
+                return Some(
+                    "argument for fromkeys() given by name ('iterable') and position (1)"
+                        .to_string(),
+                );
+            }
+            Some("iterable" | "value") => {}
+            Some(name) => {
+                return Some(format!(
+                    "fromkeys() got an unexpected keyword argument '{name}'"
+                ));
+            }
+            None => return Some("dict.fromkeys keyword unpacking is unsupported".to_string()),
+        }
+    }
+    None
+}
+
+fn fromkeys_error(message: String, ty: Type) -> Expr {
     Expr {
-        ty: Type::None,
+        ty,
         kind: ExprKind::Builtin(
             Builtin::RaiseException,
             vec![Expr {

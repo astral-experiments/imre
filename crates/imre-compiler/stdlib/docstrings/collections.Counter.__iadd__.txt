@@ -1,0 +1,7 @@
+Inplace add from another counter, keeping only positive counts.
+
+>>> c = Counter('abbb')
+>>> c += Counter('bcc')
+>>> c
+Counter({'b': 4, 'c': 2, 'a': 1})
+

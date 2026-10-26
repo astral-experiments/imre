@@ -28,6 +28,51 @@ impl Checker<'_> {
             });
         }
         let value = self.expr(expression)?;
+        self.test_truth(value, expression)
+    }
+
+    /// A nullable Mapping follows the same user-defined truth protocol on its
+    /// present arm. Capture it once before testing and unwrapping.
+    pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        if let Some(class) = self.mapping_class(value.ty) {
+            return self.mapping_truth(class, value, at);
+        }
+        if let Some(payload) = self.types.payload(value.ty)
+            && let Some(class) = self.mapping_class(payload)
+        {
+            let slot = self.hidden(value.ty);
+            let local = self.local(slot);
+            let absent = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+            };
+            let truth = self.mapping_truth(
+                class,
+                Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(local)),
+                },
+                at,
+            )?;
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, value)],
+                    clear: vec![slot],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Bool(false),
+                            }),
+                            Box::new(truth),
+                        ),
+                    }),
+                },
+            });
+        }
         Ok(self.truth_value(value))
     }
 
@@ -141,7 +186,11 @@ impl Checker<'_> {
             if known.is_none() {
                 right = self.coerce(right, ty, last)?;
             }
-            if self.bool_method(left.ty).is_some() {
+            if self.bool_method(left.ty).is_some()
+                || self
+                    .mapping_class(self.types.payload(left.ty).unwrap_or(left.ty))
+                    .is_some()
+            {
                 let slot = self.hidden(left.ty);
                 let captured = self.local(slot);
                 let stop = if self.types.payload(left.ty) == Some(ty) {
@@ -152,7 +201,7 @@ impl Checker<'_> {
                 } else {
                     self.coerce(captured.clone(), ty, first)?
                 };
-                let condition = self.truth_value(captured);
+                let condition = self.test_truth(captured, first)?;
                 let (yes, no) = if and { (right, stop) } else { (stop, right) };
                 right = Expr {
                     ty,

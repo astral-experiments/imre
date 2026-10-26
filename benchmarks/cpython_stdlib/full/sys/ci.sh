@@ -4,11 +4,19 @@ export LANG=C.UTF-8 LC_ALL=C.UTF-8 LC_CTYPE=C.UTF-8
 unset PYTHONUTF8 PYTHONIOENCODING
 sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
 python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+if [[ -f benchmarks/cpython_stdlib/full/sys/codec_device.py ]]; then
+  python3 -B benchmarks/cpython_stdlib/full/sys/codec_device.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-codec-device.json"
+  cmp benchmarks/cpython_stdlib/full/sys/codec-device-linux.json "$RUNNER_TEMP/sys-codec-device.json"
+fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stderr_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stderr_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stderr-encoding.json"
 fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stdout_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stdout_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdout-encoding.json"
+fi
+if [[ -f benchmarks/cpython_stdlib/full/sys/stdin_encoding.py ]]; then
+  python3 -B benchmarks/cpython_stdlib/full/sys/stdin_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdin-encoding.json"
+  cmp benchmarks/cpython_stdlib/full/sys/stdin-encoding-linux.json "$RUNNER_TEMP/sys-stdin-encoding.json"
 fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-filesystem-encoding.json"

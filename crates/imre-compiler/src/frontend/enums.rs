@@ -146,8 +146,130 @@ impl Checker<'_> {
         op: ast::CmpOp,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        let left = self.expr(left)?;
-        let right = self.expr(right)?;
+        if let Some(value) = self.context_missing_test(left, right, op == ast::CmpOp::IsNot)? {
+            return Ok(value);
+        }
+        let (left, right) = match (self.class_reference(left), self.class_reference(right)) {
+            (Some(class), None) | (None, Some(class)) => {
+                let class_first = self.class_reference(left).is_some();
+                let (literal, other) = if class_first {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                let other = self.expr(other)?;
+                let value = if let Some(base) = self.types.constructor_base(other.ty) {
+                    self.record_constructor_value(class, base, other.ty, literal)?
+                } else {
+                    self.expr(literal)?
+                };
+                if class_first {
+                    (value, other)
+                } else {
+                    (other, value)
+                }
+            }
+            _ => (self.expr(left)?, self.expr(right)?),
+        };
+        if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
+        let operands = [&left, &right];
+        let tuple = |e: &Expr| {
+            matches!(e.ty, Type::Tuple(_))
+                || matches!(
+                    e.kind,
+                    ExprKind::Builtin(
+                        Builtin::ExceptionArgs
+                            | Builtin::ImportErrorField(0)
+                            | Builtin::ExceptionTupleView,
+                        _
+                    )
+                )
+        };
+        if operands.iter().any(|e| e.ty == Type::ObjectValue)
+            && operands
+                .iter()
+                .all(|e| matches!(e.ty, Type::ObjectValue | Type::Tuple(_)))
+            && operands.iter().any(|e| tuple(e))
+        {
+            // One proven tuple rules out unsupported scalar identity, even when
+            // the other operand is an alias stored through a general object view.
+            let view = |e: Expr| {
+                if e.ty == Type::ObjectValue {
+                    e
+                } else {
+                    Expr {
+                        ty: Type::ObjectValue,
+                        kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![e]),
+                    }
+                }
+            };
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::ExceptionTupleIdentity,
+                    vec![view(left), view(right)],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
+        let identity = match (left.ty, right.ty) {
+            (Type::ObjectValue, Type::ListInt | Type::List(_)) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: false })
+            }
+            (Type::ListInt | Type::List(_), Type::ObjectValue) => {
+                Some(Builtin::ExceptionFieldIdentity { reversed: true })
+            }
+            (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: false,
+                })
+            }
+            (Type::Class(class), Type::ObjectValue) if self.boxed_dataclass(class) => {
+                Some(Builtin::ObjectRecordIdentity {
+                    class,
+                    reversed: true,
+                })
+            }
+            _ => None,
+        };
+        if let Some(identity) = identity {
+            let same = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(identity, vec![left, right]),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(same)),
+                }
+            } else {
+                same
+            });
+        }
+        if [left.ty, right.ty].iter().all(|t| {
+            matches!(
+                t,
+                Type::FunctionRef | Type::Callable(_) | Type::OverloadStub
+            )
+        }) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         // A comparison with a bool singleton only observes whether the other
         // operand is that same singleton; integer object identity is irrelevant.
         if let Some(union) = [left.ty, right.ty]
@@ -187,6 +309,60 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
+            && [left.ty, right.ty].iter().all(|&ty| {
+                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                self.types
+                    .signature(signature)
+                    .is_some_and(|(params, result)| {
+                        matches!(params.as_slice(), [arg] if self.types.is_len_argument(*arg))
+                            && result == Type::Int
+                    })
+            })
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
+        if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
+            return Err(error(
+                self.source,
+                node,
+                "imre.struct values have no observable identity; compare them with ==",
+            ));
+        }
+        if let Some(&ty) = types.iter().find(|t| matches!(t, Type::AnnotationValue(_)))
+            && types.iter().all(|t| {
+                matches!(
+                    t,
+                    Type::AnnotationValue(_)
+                        | Type::ForwardRef(_)
+                        | Type::BuiltinClass
+                        | Type::None
+                        | Type::Str
+                )
+            })
+        {
+            let expr = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::AnnotationIs,
+                    vec![
+                        self.box_annotation(left, ty),
+                        self.box_annotation(right, ty),
+                    ],
+                ),
+            };
+            return Ok(if op == ast::CmpOp::IsNot {
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(expr)),
+                }
+            } else {
+                expr
+            });
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
@@ -202,7 +378,8 @@ impl Checker<'_> {
             && types
                 .iter()
                 .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
-        if wrapper_attributes || namespace {
+        if wrapper_attributes || namespace || types.iter().all(|ty| matches!(ty, Type::CmpKey(..)))
+        {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,
@@ -221,10 +398,12 @@ impl Checker<'_> {
                 ),
             });
         }
-        if types
-            .iter()
-            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
-            && (types == [left.ty, right.ty] || types[0] == types[1])
+        if types.iter().any(|ty| {
+            matches!(
+                ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
+        }) && (types == [left.ty, right.ty] || types[0] == types[1])
         {
             if types[0] == types[1] {
                 return Ok(Self::identity_result(
@@ -291,24 +470,59 @@ impl Checker<'_> {
             || types.iter().all(|ty| {
                 matches!(
                     ty,
-                    Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) | Type::Class(_)
+                    Type::ListInt
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::ChainMap(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::Class(_)
+                        | Type::ModuleSpec(_)
                 )
             })
             || types == [Type::Str; 2]
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Context | Type::ContextVar(_) | Type::ContextToken(_)
+                )
+            })
+            || (types.contains(&Type::ContextMissing)
+                && types
+                    .iter()
+                    .all(|ty| matches!(ty, Type::ContextMissing | Type::ObjectValue)))
             || types == [Type::LogRecord; 2]
             || types.iter().all(|ty| matches!(ty, Type::Cursor(_)))
             || types == [Type::Path; 2]
             || (types.iter().all(|ty| matches!(ty, Type::Tuple(_)))
                 && types
                     .iter()
-                    .any(|ty| self.types.struct_sequence_fields(*ty).is_some()))
+                    .any(|ty| self.types.tuple_metadata(*ty).is_some()))
+            || types == [Type::SysImplementation; 2]
             || types == [Type::Logger; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
             || types == [Type::StringIO; 2]
+            || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]
             || types == [Type::ClockTime; 2]
+            || types.iter().all(|&t| {
+                matches!(t, Type::Calendar(_))
+                    || self
+                        .types
+                        .payload(t)
+                        .is_some_and(|p| matches!(p, Type::Calendar(_)))
+            })
             || types == [Type::PathInfo; 2]
             || types == [Type::CodecInfo; 2]
             || types == [Type::JsonDecoder; 2]
+            || types == [Type::Poll; 2]
+            || types == [Type::Socket; 2]
+            || types == [Type::ProcessSelectorClass; 2]
+            || types == [Type::CodecWriterClass; 2]
+            || types == [Type::CodecWriter; 2]
+            || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

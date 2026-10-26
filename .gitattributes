@@ -4,3 +4,4 @@ benchmarks/results/naming-data/*.hex linguist-generated=true
 
 # Preserve the pinned upstream Python sources byte for byte.
 examples/google_crc32c/upstream/** linguist-vendored=true whitespace=-blank-at-eol
+benchmarks/cpython_stdlib/full/socket/upstream/** linguist-vendored=true whitespace=-blank-at-eol

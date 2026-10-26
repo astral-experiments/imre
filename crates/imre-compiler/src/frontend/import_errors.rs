@@ -5,8 +5,8 @@ impl Checker<'_> {
     pub(super) fn exception_tuple_slot(&self, class: usize) -> bool {
         self.classes.declarations.definitions[class]
             .fields
-            .last()
-            .is_some_and(|field| field.name == crate::classes::EXCEPTION_ARGS_SLOT)
+            .iter()
+            .any(|field| field.name == crate::classes::EXCEPTION_ARGS_SLOT)
     }
 
     pub(super) fn is_import_error(&self, kind: u32) -> bool {
