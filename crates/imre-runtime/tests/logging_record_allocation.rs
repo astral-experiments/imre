@@ -109,7 +109,10 @@ fn retained_default_and_refused_field_owner() {
         imre_str_release(other);
         imre_str_release(word);
         assert!(!record.is_null() && !default.is_null());
-        assert!(imre_logrecord_hasattr(record, (&raw const qualname).cast()));
+        assert!(!imre_logrecord_hasattr(
+            record,
+            (&raw const qualname).cast()
+        ));
 
         // Missing data requires no wrapper or temporary AttributeError.
         REFUSE.set(true);
