@@ -131,7 +131,8 @@ impl Context {
                             | "object.__getattribute__"
                             | "object.__setattr__"
                             | "object.__init__"
-                    ) || name.starts_with("dict.")
+                    ) || name == "list.pop"
+                        || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -711,6 +712,9 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "list" && name == "pop" => {
+                return Ok(self.builtin("list.pop"));
+            }
             Value::Native(class)
                 if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
@@ -875,6 +879,7 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
+            text_memory: None,
             fields: HashMap::new(),
         })
     }
@@ -990,7 +995,9 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, .. } => {
+            Value::Class {
+                name, ancestors, ..
+            } => {
                 if self.classes.get("collections.abc.Callable") == Some(&callable) {
                     return Err(Error::new(
                         "TypeError",
@@ -1003,18 +1010,11 @@ impl Context {
                         "Can't instantiate typing.Generic directly",
                     ));
                 }
-                if [
-                    "Exception",
-                    "ValueError",
-                    "RuntimeError",
-                    "OSError",
-                    "TypeError",
-                ]
-                .iter()
-                .any(|kind| self.has_base(callable, kind))
-                {
-                    let message = args.first().map(|&x| self.display(x)).unwrap_or_default();
-                    return Ok(self.alloc(Value::Raised(Error::new(&name, message))));
+                if ancestors.iter().any(|&base| {
+                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
+                }) {
+                    let error = self.exception(&name, &args);
+                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
@@ -1039,6 +1039,7 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
+                        text_memory: None,
                     }));
                 }
                 let dictionary = self
