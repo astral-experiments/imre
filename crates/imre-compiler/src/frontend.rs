@@ -9952,7 +9952,8 @@ impl<'a> Checker<'a> {
                         | Type::Tuple(_)
                         | Type::VarTuple(_)
                         | Type::StringIterable
-                ) || (name.id == "print" && self.types.element(args[0].ty).is_some()))
+                ) || self.types.payload(args[0].ty) == Some(Type::Int)
+                    || (name.id == "print" && self.types.element(args[0].ty).is_some()))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
                 return Ok(if name.id == "str" {
