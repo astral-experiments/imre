@@ -6,10 +6,15 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_identity import audit_trace
+from native_identity import audit_trace, require_attached
 
 
 class TraceTests(unittest.TestCase):
+    def test_denied_attachment(self):
+        with patch("native_identity.Path.read_text", return_value="Name:\tserver\nTracerPid:\t0\n"):
+            with self.assertRaisesRegex(ValueError, "ptrace permissions"):
+                require_attached(41, Path("events"), "/usr/bin/strace")
+
     def audit(self, *events):
         with tempfile.TemporaryDirectory() as temp:
             binary = Path(temp) / "server"

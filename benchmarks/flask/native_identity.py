@@ -37,6 +37,23 @@ def traced_command(binary, trace):
             "trace=execve,execveat,clone,clone3,fork,vfork,mmap,mmap2", "-o", trace, "--", binary]
 
 
+def require_attached(pid, trace, tracer):
+    # A detached strace can leave the program running even when ptrace failed.
+    # Verify attachment before the program receives its first HTTP connection.
+    status = Path(f"/proc/{pid}/status").read_text().splitlines()
+    tracer_pid = int(next(line for line in status if line.startswith("TracerPid:")).split()[1])
+    if not tracer_pid or not Path(f"/proc/{tracer_pid}/exe").samefile(tracer):
+        raise ValueError("strace did not attach to the native server; check ptrace permissions")
+    limit = time.monotonic() + 2
+    while time.monotonic() < limit:
+        if trace.exists():
+            for line in trace.read_text(errors="replace").splitlines():
+                if (event := EXEC.match(line)) and int(event[1]) == pid:
+                    return tracer_pid
+        time.sleep(0.01)
+    raise ValueError("strace did not record the native executable launch before serving")
+
+
 def inspect_processes(pid, binary):
     todo, seen, sockets = [pid], set(), {}
     while todo:

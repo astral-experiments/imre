@@ -103,7 +103,9 @@ def exercise(command, work, expected, *, prove_binary=None):
             port = int(port)
             if prove_binary is not None:
                 row["outcome"] = "native_identity_error"
+                tracer_pid = native_identity.require_attached(process.pid, trace, command[0])
                 row["native_identity"] = native_identity.attest_socket(process.pid, prove_binary, port)
+                row["native_identity"]["tracer_pid"] = tracer_pid
             row["outcome"] = "request_error"
             for name, method, path, body in CASES:
                 row["responses"][name] = request(port, method, path, body)
@@ -220,14 +222,16 @@ def main():
                     mode = f"{'reachable' if reachable else 'normal'}-O{opt}"
                     work = root / mode
                     work.mkdir()
-                    report["modes"][mode] = native(compiler, runtime, site, work, expected, opt, reachable,
-                                                   prove=args.prove_native)
+                    row = native(compiler, runtime, site, work, expected, opt, reachable, prove=args.prove_native)
+                    report["modes"][mode] = row
+                    if args.prove_native:
+                        row["verified_native_responses"] = len(row["responses"]) if row["outcome"] == "pass" else 0
                     if args.prove_native and (trace := work / "syscalls").is_file():
                         directory = args.output.parent / (args.output.stem + "-traces")
                         directory.mkdir(parents=True, exist_ok=True)
                         copy = directory / (mode + ".strace")
                         shutil.copyfile(trace, copy)
-                        report["modes"][mode]["trace_file"] = str(copy.relative_to(args.output.parent))
+                        row["trace_file"] = str(copy.relative_to(args.output.parent))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     for name, row in report["modes"].items():
