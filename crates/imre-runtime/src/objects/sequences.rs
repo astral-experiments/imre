@@ -388,7 +388,11 @@ pub unsafe extern "C" fn imre_seq_slice(
         })
     };
     finish(
-        result.map(|values| crate::ObjectOwner::into_raw(values.into_object())),
+        result.and_then(|values| {
+            crate::ObjectOwner::try_new(Object(StorageCell::new(values.into_storage())))
+                .map(crate::ObjectOwner::into_raw)
+                .map_err(|_| Error::memory_error())
+        }),
         std::ptr::null(),
     )
 }

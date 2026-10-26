@@ -18,6 +18,7 @@ def check(args, directory):
     modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
+    cases.append(("slice-owner", "short", "A", "B"))
     passed = 0
     for level in args.opt_levels:
         exe = directory / f"deferred-diff-O{level}"
@@ -32,7 +33,9 @@ def check(args, directory):
             count = int(re.fullmatch(rb"observed (\d+)\n", control.stderr)[1])
             assert count > 0, (level, argv, "no allocations observed")
             # repr's output buffer is covered separately; target its first row allocation.
-            if argv[0] in ("repr", "frozen"):
+            if argv[0] == "slice-owner":
+                indices = (count,)
+            elif argv[0] in ("repr", "frozen"):
                 indices = (1,)
             elif argv[0] in ("pack-project", "restore"):
                 indices = {1, count // 2, count}

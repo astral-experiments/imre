@@ -53,6 +53,8 @@ def check(mode: str, shape: str) -> None:
                 number = len(alias)
             elif mode == "copy":
                 number = len(alias)
+            elif mode == "slice-owner":
+                alias = rows[1:]
             elif mode == "index":
                 value = rows[0]
             elif mode == "tee-first" or mode == "tee-boundary":
