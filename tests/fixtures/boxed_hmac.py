@@ -27,6 +27,13 @@ def check():
         long_key, b"Test Using Larger Than Block-Size Key - Hash Key First", lazy_sha1
     )
     print(long_mac.hexdigest(), calls)
+    sha256_mac = hmac.new(b"key", b"message", "sha256")
+    print(
+        sha256_mac.name,
+        sha256_mac.digest_size,
+        sha256_mac.block_size,
+        sha256_mac.hexdigest(),
+    )
     for _ in range(5000):
         _discard = [None]
     print(long_mac.hexdigest(), mac.hexdigest())
