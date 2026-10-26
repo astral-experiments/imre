@@ -101,4 +101,5 @@ if __name__ == "__main__":
         errors={},
         label="typed JSON",
         description=__doc__,
+        thinlto_build_timeout=120,
     )

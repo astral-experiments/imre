@@ -84,10 +84,10 @@ pub(super) fn binary(
     source: &str,
 ) -> Result<Expr, String> {
     use ast::Operator::{Add, Sub};
-    let (reverse, subtract) = match (a, b, node.op) {
-        (C::DateTime, C::Delta, Add) => (false, false),
-        (C::DateTime, C::Delta, Sub) => (false, true),
-        (C::Delta, C::DateTime, Add) => (true, false),
+    let (kind, reverse, subtract) = match (a, b, node.op) {
+        (date @ (C::Date | C::DateTime), C::Delta, Add) => (date, false, false),
+        (date @ (C::Date | C::DateTime), C::Delta, Sub) => (date, false, true),
+        (C::Delta, date @ (C::Date | C::DateTime), Add) => (date, true, false),
         _ => {
             return Err(error(
                 source,
@@ -98,7 +98,7 @@ pub(super) fn binary(
     };
     Ok(op(
         Op::Shift { reverse, subtract },
-        Type::Calendar(C::DateTime),
+        Type::Calendar(kind),
         vec![left, right],
     ))
 }
@@ -129,6 +129,15 @@ impl Checker<'_> {
         let int =
             |name: &str, optional: bool| par(name, Type::Int, optional.then(|| logging::number(0)));
         let (builtin, args) = match kind {
+            C::Date => {
+                let pars = ["year", "month", "day"].map(|name| int(name, false));
+                let args = self.arguments_with(call, &pars, None, |c, _, e| {
+                    let value = powers::integer(c.expr(e)?);
+                    c.expect(Type::Int, value.ty, e)?;
+                    Ok(value)
+                })?;
+                (Op::Date, args)
+            }
             C::Delta => {
                 let pars = [
                     "days",
@@ -265,6 +274,21 @@ impl Checker<'_> {
             args,
         ))
     }
+
+    pub(super) fn calendar_combine(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let tz = self.types.optional(Type::Calendar(C::Zone));
+        let pars = [
+            par("date", Type::Calendar(C::Date), None),
+            par("time", Type::ClockTime, None),
+            par("tzinfo", tz, Some(absent(tz))),
+        ];
+        let args = self.arguments(call, &pars, None)?;
+        Ok(self.ordered_builtin(
+            Builtin::Calendar(Op::Combine),
+            Type::Calendar(C::DateTime),
+            args,
+        ))
+    }
     pub(super) fn calendar_attribute(
         &mut self,
         kind: C,
@@ -277,6 +301,7 @@ impl Checker<'_> {
             return Ok(op(Op::TzInfo, ty, vec![recv]));
         }
         let names: &[&str] = match kind {
+            C::Date => &["year", "month", "day"],
             C::DateTime => &[
                 "year",
                 "month",
@@ -346,7 +371,7 @@ impl Checker<'_> {
             ));
         }
         let (operation, ty) = match (kind, name) {
-            (C::DateTime, "isoformat") => (Op::Text { iso: true }, Type::Str),
+            (C::Date | C::DateTime, "isoformat") => (Op::Text { iso: true }, Type::Str),
             (C::DateTime, "utcoffset") => {
                 (Op::Offset, self.types.optional(Type::Calendar(C::Delta)))
             }

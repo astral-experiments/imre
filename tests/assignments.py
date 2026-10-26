@@ -101,6 +101,7 @@ def main(
     errors: dict[str, tuple[str, str]] = ERRORS,
     label: str = "assignment expression",
     description: str | None = __doc__,
+    thinlto_build_timeout: int = 60,
 ) -> None:
     """Run a fixture suite using the shared output, filesystem, and failure oracle."""
     parser = argparse.ArgumentParser(description=description)
@@ -160,6 +161,7 @@ def main(
                         *flags,
                     ],
                     temporary,
+                    timeout=thinlto_build_timeout if args.lto_linker and not args.sanitize else 60,
                 )
                 assert built.returncode == 0 and not built.stderr, (
                     name,

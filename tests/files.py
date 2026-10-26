@@ -665,13 +665,15 @@ def run_with_failing_output(command, *, cwd, **options):
         return subprocess.run(command, cwd=cwd, **options)
 
 
-def run(command, cwd: Path, *, limit_descriptors: bool = False, runner=subprocess.run):
+def run(
+    command, cwd: Path, *, limit_descriptors: bool = False, runner=subprocess.run, timeout: int = 60
+):
     return runner(
         command,
         cwd=cwd,
         input=b"",
         capture_output=True,
-        timeout=60,
+        timeout=timeout,
         check=False,
         env=environment(),
         preexec_fn=descriptor_limit if limit_descriptors else None,

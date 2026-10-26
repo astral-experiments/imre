@@ -7,7 +7,13 @@ import tempfile
 
 SUITE = Path(__file__).resolve().parents[1] / 'benchmarks/cpython_stdlib/full/http'
 sys.path.insert(0, str(SUITE))
-from server_cases import public_contracts
+from server_cases import listener, public_contracts
+
+
+def check_listener(label, command):
+    lookup, legacy, persistent = public_contracts(command)
+    print(f'{label} passed hostname, HTTPStatus keys, HTTP/0.9 and both HTTP/1.1 responses on one socket '
+          f'(driver getfqdn {lookup:.2f}s, child startup {legacy:.2f}s and {persistent:.2f}s)', flush=True)
 
 
 def main():
@@ -18,15 +24,19 @@ def main():
     parser.add_argument('--opt-levels', nargs='+', default=['0', '3'])
     args = parser.parse_args()
     source = SUITE / 'server_contract.py'
+    try:
+        with listener([sys.executable, '-c', "import sys; sys.exit('early exit control')"]):
+            raise AssertionError('a failed child published a port')
+    except AssertionError as error:
+        assert 'status 1 before publishing' in str(error) and 'early exit control' in str(error), error
     if sys.version_info[:3] == (3, 14, 5):
-        public_contracts([sys.executable, '-B', source])
+        check_listener('CPython', [sys.executable, '-B', source])
     with tempfile.TemporaryDirectory() as tmp:
         binary = Path(tmp) / 'handler'
         for level in args.opt_levels:
             subprocess.run([args.compiler.resolve(), 'build', source, '--no-cache', '--runtime', args.runtime.resolve(),
                             '--clang', args.clang, '--opt-level', level, '-o', binary], check=True, timeout=180)
-            public_contracts([binary])
-            print(f'O{level}: delayed binding, HTTPStatus keys, HTTP/0.9 mapping and HTTP/1.1 subclass dispatch passed')
+            check_listener(f'Imre O{level}', [binary])
 
 
 if __name__ == '__main__':

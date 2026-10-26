@@ -8,7 +8,7 @@ Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 402 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,550 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 410 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,550 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -29,7 +29,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 0 | 4 |
 | `csv` | Yes | Read rows and apply supported CSV dialect options. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [18 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 7 |
 | `dataclasses` | Yes | Construct fixed-field dataclasses with defaults and factories. [Evidence](../tests/fixtures/dataclasses/record_factories.py) | — | — | — |
-| `datetime` | Yes | Construct and compare `datetime.time` for timed logging; construct fixed-offset datetimes and timezones, and add timedeltas. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 4 | 0 |
+| `datetime` | Yes | Construct and compare Gregorian dates, combine a date and time, and add timedeltas to dates or fixed-offset datetimes. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 12 | 0 |
 | `difflib` | Yes | `ndiff` on sequences of lines. [Evidence](../tests/fixtures/iterables/ndiff.py) | — | — | — |
 | `doctest` | Yes | `DocTestSuite` and execution of selected original docstring examples. [Evidence](../benchmarks/cpython_stdlib/full/doctest/README.md) | — | — | — |
 | `email` | Yes | Parse and format RFC mail dates with `email.utils.parsedate_to_datetime`, `format_datetime`, and `formatdate`. Selected message declarations also bind in unreachable code. [Evidence](../benchmarks/cpython_stdlib/full/email/README.md) | [0 / 1,793](../benchmarks/cpython_stdlib/full/email/) | 4 | 7 |

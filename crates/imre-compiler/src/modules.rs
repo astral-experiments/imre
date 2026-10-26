@@ -777,6 +777,7 @@ impl IntrinsicModule {
             (Self::Sys, "__displayhook__") => Intrinsic::SysDisplayHook,
             (Self::LoggingHandlers, "TimedRotatingFileHandler") => Intrinsic::TimedFileHandler,
             (Self::Datetime, "time") => Intrinsic::ClockTime,
+            (Self::Datetime, "date") => Intrinsic::Calendar(crate::ir::CalendarType::Date),
             (Self::Datetime, "datetime") => Intrinsic::Calendar(crate::ir::CalendarType::DateTime),
             (Self::Datetime, "timedelta") => Intrinsic::Calendar(crate::ir::CalendarType::Delta),
             (Self::Datetime, "timezone") => Intrinsic::Calendar(crate::ir::CalendarType::Zone),

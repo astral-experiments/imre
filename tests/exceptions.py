@@ -1360,14 +1360,14 @@ def exception_report(stderr: str) -> list[str]:
     ]
 
 
-def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         input="",
         text=True,
         capture_output=True,
         check=False,
-        timeout=60,
+        timeout=timeout,
         env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
     )
 
@@ -1447,7 +1447,8 @@ def main() -> None:
                         "--opt-level",
                         level,
                         *flags,
-                    ]
+                    ],
+                    timeout=120 if args.lto_linker and not args.sanitize else 60,
                 )
                 assert built.returncode == 0, (name, level, built.stderr)
                 actual = run([str(binary)])

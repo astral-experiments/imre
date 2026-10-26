@@ -824,6 +824,14 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(op, vec![value]),
             });
         }
+        if matches!(value.ty, Type::Calendar(_)) {
+            let name = if field.conversion == ast::ConversionFlag::Repr {
+                "repr"
+            } else {
+                "str"
+            };
+            return Ok(calendar::format_builtin(name, vec![value]));
+        }
         if field.conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
