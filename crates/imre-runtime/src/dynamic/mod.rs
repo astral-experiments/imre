@@ -10,6 +10,7 @@ mod function_fields;
 mod iterators;
 mod operators;
 mod property;
+mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
@@ -55,6 +56,7 @@ pub(crate) struct Context {
     contexts: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
+    source_builtins: Option<Id>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
@@ -65,11 +67,11 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    fn code_object(&self, id: Id) -> value::CodeObject {
+    fn code_object(&self, id: Id) -> &value::CodeObject {
         let Value::Code(code) = self.heap.get(id) else {
             unreachable!("function must retain its code object")
         };
-        *code
+        code
     }
 
     fn alloc(&mut self, value: Value) -> Id {
@@ -347,7 +349,13 @@ impl Context {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
-            Value::Generator { .. } => return self.next_generator_item(id),
+            Value::Generator { code, .. } => {
+                let code = *code;
+                return match self.code_object(code).body {
+                    value::Body::Native(_) => self.next_generator_item(id),
+                    value::Body::Source(_) => self.resume_source(id),
+                };
+            }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::File(_) | Value::TextFile(_) => {
                 let readline = self.lookup_attr(id, "readline")?;
@@ -485,6 +493,8 @@ impl Context {
             names: Default::default(),
             namespace: None,
             globals: Default::default(),
+            exec_globals: None,
+            exec_locals: None,
             parent,
             module: module.to_owned(),
         }))
@@ -507,12 +517,7 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(namespace) = scope.namespace {
-            return self
-                .dict_entries(namespace)?
-                .iter()
-                .find_map(|&(key, value)| {
-                    matches!(self.heap.get(key), Value::Str(key) if key == name).then_some(value)
-                });
+            return self.dict_named_item(namespace, name);
         }
         scope.names.get(name).copied()
     }
@@ -525,6 +530,9 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
+        if let Some(globals) = frame.exec_globals {
+            return globals.dict;
+        }
         if let Some(dict) = frame.namespace {
             return dict;
         }
@@ -542,11 +550,15 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(locals) = self.scope_data(scope).exec_locals {
+            return Ok(self.delete_item(locals, key).is_ok());
+        }
         if let Some(namespace) = self.scope_data(scope).namespace {
             if self.scope_name(scope, name).is_none() {
                 return Ok(false);
             }
-            self.delete_item(namespace, key)?;
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.delete_item(storage, key)?;
             return Ok(true);
         }
         let Value::Scope(data) = self.heap.get_mut(scope) else {
@@ -562,7 +574,8 @@ impl Context {
         let scope = self.binding_scope(scope, name);
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
-            self.put_item(namespace, key, value)
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.put_item(storage, key, value)
                 .expect("string key in module dictionary");
             return;
         }
@@ -579,7 +592,16 @@ impl Context {
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
             scope = self.binding_scope(scope, name);
+            if let Some(locals) = self.scope_data(scope).exec_locals {
+                match self.load_exec_name(locals, name) {
+                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                    value => return value,
+                }
+            }
             let s = self.scope_data(scope);
+            if let Some(globals) = s.exec_globals {
+                return self.source_global(globals, name);
+            }
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
             }
@@ -628,7 +650,10 @@ impl Context {
         value
     }
     fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
-        let entry = self.code_object(code).entry;
+        let entry = match &self.code_object(code).body {
+            value::Body::Native(entry) => *entry,
+            value::Body::Source(_) => return self.call_source(code, scope),
+        };
         self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
@@ -799,8 +824,9 @@ impl Context {
             let filename = self.text(path.to_string_lossy());
             let name_id = self.text("<module>");
             let code = self.alloc(Value::Code(value::CodeObject {
-                entry,
+                body: value::Body::Native(entry),
                 parameters: NONE,
+                nested: Vec::new(),
                 name: name_id,
                 filename,
                 first_line: 1,
