@@ -240,9 +240,6 @@ pub(super) fn call(
         BinaryFile::Writer(file) => {
             let mut file = file.borrow_mut();
             return match (name, &args[1..]) {
-                _ if !kwargs.is_empty() => {
-                    Err(Error::new("TypeError", "unexpected keyword argument"))
-                }
                 ("file.write", [value]) => {
                     let bytes = ctx.bytes_like(*value)?;
                     file.write_bytes(bytes)?;
