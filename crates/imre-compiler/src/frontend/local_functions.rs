@@ -81,9 +81,8 @@ fn reads_function_value(body: &[ast::Stmt], name: &str) -> bool {
     read.1
 }
 
-/// The parameter may have different layouts at different calls only if its body
-/// cannot observe the representation, including through a nested function.
-fn unread_parameter(def: &ast::StmtFunctionDef) -> bool {
+/// Admit independent call-site layouts when every read has a supported operation.
+fn callback_parameter(def: &ast::StmtFunctionDef) -> bool {
     let mut params = def.parameters.iter_non_variadic_params();
     let Some(param) = params.next() else {
         return false;
@@ -102,6 +101,11 @@ fn unread_parameter(def: &ast::StmtFunctionDef) -> bool {
     impl<'a> Visitor<'a> for Use<'_> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
             match expr {
+                ast::Expr::BinOp(b)
+                    if b.op == ast::Operator::Mod
+                        && matches!(&*b.left, ast::Expr::StringLiteral(s) if single_dispatch::text_conversion(s.value.to_str()))
+                        && matches!(&*b.right, ast::Expr::Tuple(t) if matches!(t.elts.as_slice(), [ast::Expr::Name(n)] if n.id == self.0)) =>
+                    {}
                 ast::Expr::Name(n)
                     if n.id == self.0
                         || matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec") =>
@@ -368,8 +372,8 @@ impl Checker<'_> {
             );
             return Ok(None);
         }
-        let unread = unread_parameter(definition);
-        if !unread
+        let boxed = callback_parameter(definition);
+        if !boxed
             && definition
                 .parameters
                 .iter_non_variadic_params()
@@ -411,8 +415,8 @@ impl Checker<'_> {
             None,
             &inference::Inference::default(),
         )?;
-        if unread {
-            signature.params[0].ty = self.types.unread_argument();
+        if boxed {
+            signature.params[0].ty = self.types.callback_argument();
         }
         let function = self.lift_local(
             if wraps.is_some() {

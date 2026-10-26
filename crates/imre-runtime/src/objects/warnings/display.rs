@@ -68,7 +68,7 @@ pub unsafe extern "C" fn imre_warning_write(file: *const Object, text: *const St
     unsafe {
         let text = (&*text).as_str();
         let result = if file.is_null() {
-            crate::sys::write_standard_stream(stdout == 0, text).map_err(super::super::errno_error)
+            crate::sys::write_standard_stream(stdout == 0, text)
         } else {
             object(file).0.with_mut(|s| s.file_mut().write(text))
         };

@@ -143,11 +143,12 @@ impl Emitter<'_, '_> {
                 | Type::Dict(_)
                 | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
+                | Type::FrozenStrings
                 | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
                         Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
-                        Type::Set(_) | Type::StringKeys => "set",
+                        Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "set",
                         Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };

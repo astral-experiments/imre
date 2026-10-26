@@ -32,13 +32,16 @@ enum Shape {
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     LenFrame(Vec<Type>),
-    /// Only the class-name prefix is visible. The concrete record owns the argument.
-    UnreadArgument,
+    /// The class name, owned positional tuple and its formatting capability travel together.
+    CallbackArgument(Type),
+    /// Its concrete record descriptor owns the argument and describes its real type.
+    CallbackPositional,
     VarTuple(Type),
     /// Display segments are fixed fields or repetitions of an item of known type.
     DisplayTuple(Vec<(Type, bool)>),
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
+    IndexCallable(Type),
     RecordConstructor(usize, Vec<Type>),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -198,7 +201,8 @@ impl Types {
                         | Shape::NamedTuple(..)
                         | Shape::PartialFrame(_)
                         | Shape::LenFrame(_)
-                        | Shape::UnreadArgument
+                        | Shape::CallbackArgument(_)
+                        | Shape::CallbackPositional
                         | Shape::DeferredCmpFrame(..)
                 )
             ),
@@ -221,6 +225,7 @@ impl Types {
                 Some(
                     Shape::Callable(..)
                         | Shape::RecordConstructor(..)
+                        | Shape::IndexCallable(_)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -252,6 +257,7 @@ impl Types {
             | Type::Bytes
             | Type::ListInt
             | Type::StringIterable
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -325,7 +331,8 @@ impl Types {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
                 Shape::LenFrame(prefix) => prefix.clone(),
-                Shape::UnreadArgument => vec![Type::Str],
+                Shape::CallbackArgument(positional) => vec![Type::Str, *positional, Type::Bool],
+                Shape::CallbackPositional => Vec::new(),
                 Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
                 Shape::VarTuple(ty)
                 | Shape::Cursor(ty)
@@ -348,7 +355,9 @@ impl Types {
                 | Shape::PartialFrame(fields)
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
-                Shape::DeclaredCache(callable, _) => vec![*callable],
+                Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                    vec![*callable]
+                }
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
@@ -554,7 +563,7 @@ impl Types {
             | Type::Socket
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
-            Type::Tuple(_) if self.is_unread_argument(ty) => false,
+            Type::Tuple(_) if self.is_callback_storage(ty) => false,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -592,9 +601,14 @@ impl Types {
                 .join(left, right)
                 .map(|value| self.directory_context(value));
         }
-        if left == right || self.payload(left) == Some(right) {
+        if left == right
+            || self.payload(left) == Some(right)
+            || self.index_callable_signature(right) == Some(left)
+        {
             Some(left)
-        } else if self.payload(right) == Some(left) {
+        } else if self.payload(right) == Some(left)
+            || self.index_callable_signature(left) == Some(right)
+        {
             Some(right)
         } else if left == Type::None {
             Some(self.optional(right))
@@ -649,8 +663,10 @@ impl Types {
                 }
             }
             [Type::Str, other] | [other, Type::Str]
-                if matches!(other, Type::Bytes | Type::Path | Type::Enum(_))
-                    || self.element(*other) == Some(Type::Str) =>
+                if matches!(
+                    other,
+                    Type::Bytes | Type::Path | Type::FrozenStrings | Type::Enum(_)
+                ) || self.element(*other) == Some(Type::Str) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
@@ -926,12 +942,23 @@ impl Types {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
     }
 
-    pub(crate) fn unread_argument(&self) -> Type {
-        Type::Tuple(self.intern(Shape::UnreadArgument))
+    /// A callback retains its actual argument in a singleton positional tuple.
+    pub(crate) fn callback_argument(&self) -> Type {
+        let positional = self.callback_positional();
+        Type::Tuple(self.intern(Shape::CallbackArgument(positional)))
     }
 
-    pub(crate) fn is_unread_argument(&self, ty: Type) -> bool {
-        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
+    pub(crate) fn is_callback_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::CallbackArgument(_)))
+    }
+
+    fn is_callback_storage(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::CallbackArgument(_) | Shape::CallbackPositional))
+    }
+
+    /// Its element has the concrete type recorded by the allocating call site.
+    pub(crate) fn callback_positional(&self) -> Type {
+        Type::Tuple(self.intern(Shape::CallbackPositional))
     }
 
     pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
@@ -1178,6 +1205,19 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    /// A subscription method accepts booleans in its first positional integer slot.
+    pub(crate) fn index_callable(&self, callable: Type) -> Type {
+        Type::Callable(self.intern(Shape::IndexCallable(callable)))
+    }
+
+    pub(crate) fn index_callable_signature(&self, ty: Type) -> Option<Type> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::IndexCallable(signature)) => Some(*signature),
+            _ => None,
+        }
+    }
+
     /// A class value can construct an instance but owns no instance or bound receiver.
     pub(crate) fn record_constructor(&self, base: usize, params: Vec<Type>) -> Type {
         Type::Callable(self.intern(Shape::RecordConstructor(base, params)))
@@ -1254,12 +1294,14 @@ impl Types {
     }
 
     /// The public positional ABI of a wrapper, including nested applied caches.
-    pub(crate) fn cache_signature(&self, ty: Type) -> Option<Type> {
+    pub(crate) fn wrapped_signature(&self, ty: Type) -> Option<Type> {
         let shapes = self.0.borrow();
         let mut current = ty;
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
-                Shape::DeclaredCache(underlying, _) => *underlying,
+                Shape::IndexCallable(underlying) | Shape::DeclaredCache(underlying, _) => {
+                    *underlying
+                }
                 Shape::CachedCallable(cache) => cache.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
@@ -1316,7 +1358,9 @@ impl Types {
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
-            Shape::DeclaredCache(callable, _) => self.signature(*callable),
+            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                self.signature(*callable)
+            }
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
             _ => unreachable!("callable type identity has a callable shape"),
@@ -1399,6 +1443,14 @@ impl Types {
         }
     }
 
+    /// Element type for membership and iteration, including immutable set views.
+    pub(crate) fn readable_set_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::StringKeys | Type::FrozenStrings => Some(Type::Str),
+            _ => self.set_element(ty),
+        }
+    }
+
     pub(crate) fn optional(&self, element: Type) -> Type {
         if matches!(element, Type::None | Type::Optional(_)) {
             element
@@ -1433,7 +1485,8 @@ impl Types {
         };
         match &self.0.borrow().shapes[id] {
             Shape::LenFrame(prefix) => Some(prefix.clone()),
-            Shape::UnreadArgument => Some(vec![Type::Str]),
+            Shape::CallbackArgument(positional) => Some(vec![Type::Str, *positional, Type::Bool]),
+            Shape::CallbackPositional => Some(Vec::new()),
             Shape::Tuple(fields)
             | Shape::NamedTuple(_, fields)
             | Shape::PartialFrame(fields)
@@ -1472,7 +1525,10 @@ impl Types {
             .enumerate()
             .filter_map(|(id, shape)| match shape {
                 Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
-                Shape::UnreadArgument => Some((Type::Tuple(id), vec![Type::Str])),
+                Shape::CallbackArgument(positional) => {
+                    Some((Type::Tuple(id), vec![Type::Str, *positional, Type::Bool]))
+                }
+                Shape::CallbackPositional => Some((Type::Tuple(id), Vec::new())),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
@@ -1522,7 +1578,7 @@ impl Types {
             }
             match ty {
                 // The opaque payload may own an observable resource through a container.
-                Type::Tuple(_) if self.is_unread_argument(ty) => return true,
+                Type::Tuple(_) if self.is_callback_storage(ty) => return true,
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
@@ -1675,9 +1731,12 @@ impl TypeDescription<'_> {
                     "len cache key"
                 });
             }
-            Shape::UnreadArgument => return self.write_str("object"),
+            Shape::CallbackArgument(_) => return self.write_str("object"),
+            Shape::CallbackPositional => return self.write_str("callback positional arguments"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
-            Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
+            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                return self.write_type(*callable);
+            }
             Shape::ContextValue(value) => {
                 self.write_str(if matches!(ty, Type::ContextVar(_)) {
                     "ContextVar["

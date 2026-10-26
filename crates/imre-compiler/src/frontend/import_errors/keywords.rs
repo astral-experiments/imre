@@ -6,7 +6,7 @@ use std::collections::HashSet;
 pub(super) struct Keywords<'a> {
     pub values: Vec<&'a ast::Expr>,
     pub fields: [Option<usize>; 3],
-    pub unexpected: Option<String>,
+    pub init_error: Option<String>,
     pub binding_error: Option<String>,
 }
 
@@ -19,7 +19,6 @@ pub(super) fn bind<'a>(
 ) -> Result<Keywords<'a>, String> {
     let mut result = Keywords::default();
     let mut seen = HashSet::new();
-    let mut non_string = false;
     let mut kwargs = call.arguments.keywords.iter().peekable();
     while let Some(kw) = kwargs.next() {
         let mut group = Vec::new();
@@ -91,7 +90,9 @@ pub(super) fn bind<'a>(
                 return Ok(result);
             }
             if !string {
-                non_string = true;
+                result
+                    .init_error
+                    .get_or_insert_with(|| "keywords must be strings".to_owned());
                 continue;
             }
             match key.as_str() {
@@ -99,13 +100,12 @@ pub(super) fn bind<'a>(
                 "path" => result.fields[1] = Some(index),
                 "name_from" => result.fields[2] = Some(index),
                 _ => {
-                    result.unexpected.get_or_insert(key);
+                    result.init_error.get_or_insert_with(|| {
+                        format!("ImportError() got an unexpected keyword argument '{key}'")
+                    });
                 }
             }
         }
-    }
-    if non_string {
-        result.binding_error = Some("keywords must be strings".to_owned());
     }
     Ok(result)
 }

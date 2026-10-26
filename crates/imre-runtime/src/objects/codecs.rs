@@ -96,8 +96,7 @@ unsafe fn codec(info: *const Object) -> Codec {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_name(info: *const Object) -> *const Str {
     // SAFETY: the codec info was returned by the registry.
-    let index = unsafe { codec(info) }.index();
-    NAMES.with(|names| StrOwner::into_raw(names[index].clone()))
+    StrOwner::into_raw(unsafe { codec(info) }.name_owner())
 }
 
 /// # Safety
@@ -173,7 +172,7 @@ pub unsafe extern "C" fn imre_codec_decode(
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Codec {
+pub(crate) enum Codec {
     Utf8 { signature: bool },
     Latin1,
     Ascii,
@@ -191,7 +190,12 @@ impl Codec {
         }
     }
 
-    pub(super) fn lookup(value: &str) -> Result<Self> {
+    /// Return the retained canonical name shared with registry entries.
+    pub(crate) fn name_owner(self) -> StrOwner {
+        NAMES.with(|names| names[self.index()].clone())
+    }
+
+    pub(crate) fn lookup(value: &str) -> Result<Self> {
         Self::by_key(&normalize(value)?, value)
     }
 
@@ -241,7 +245,7 @@ impl Codec {
         })
     }
 
-    pub(super) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
+    pub(crate) fn decode(self, data: &[u8], errors: Option<&str>) -> Result<String> {
         let capacity = if matches!(self, Self::Latin1) {
             data.len()
                 .checked_add(data.iter().filter(|byte| !byte.is_ascii()).count())
@@ -328,7 +332,7 @@ impl Codec {
         }
     }
 
-    pub(super) fn encode<'a>(
+    pub(crate) fn encode<'a>(
         self,
         text: &'a str,
         errors: Option<&str>,
@@ -464,6 +468,12 @@ fn decoding_error(
 ) -> Result<()> {
     match errors.unwrap_or("strict") {
         "strict" | "surrogatepass" => return Err(strict()),
+        "surrogateescape" => {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                "native strings cannot represent surrogate-escaped input bytes",
+            ));
+        }
         "replace" => {
             text.try_reserve(3).map_err(|_| Error::allocation())?;
             text.push('\u{fffd}');

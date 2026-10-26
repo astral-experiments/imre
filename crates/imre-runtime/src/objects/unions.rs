@@ -25,7 +25,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
     let kind = match value & 7 {
         0 => 3,                                      // str
         1 => 8,                                      // bytes
-        2 => 5,                                      // list[str]
+        2 => 5,                                      // list[str] or frozenset[str]
         3 => 5,                                      // exception
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
@@ -101,9 +101,10 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
         u32::from(match value & 7 {
             0 => !(*(word as *const Str)).is_empty(),
             1 => !(*(word as *const Bytes)).is_empty(),
-            2 => object(word as *const Object)
-                .0
-                .with(|s| crate::finish(s.sequence().map(|words| !words.values.is_empty()), false)),
+            2 => object(word as *const Object).0.with(|s| match s {
+                super::Storage::Set(set) => !set.is_empty(),
+                _ => crate::finish(s.sequence().map(|words| !words.values.is_empty()), false),
+            }),
             7 => !(*(word as *const BigInt)).is_zero(),
             _ => true,
         })

@@ -2262,6 +2262,10 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                     .ok()
                     .map(ExitText::Rendered)
             };
+            if message.is_none() {
+                // CPython discards an error raised while writing the exit diagnostic.
+                drop(take_pending());
+            }
             (1, Some(message))
         }
     });
@@ -2902,5 +2906,42 @@ mod tests {
         assert!(rendered.starts_with("'\\x00"));
         assert!(rendered.ends_with("\\x00'"));
         assert!(rendered.capacity() < 128 * 1024);
+    }
+
+    #[test]
+    fn unhandled_exit_discards_failed_exception_text() {
+        unsafe extern "C" fn failed_text(_: *const usize) -> *const Str {
+            Error::new(Kind::TypeError, "display failed").raise();
+            std::ptr::null()
+        }
+
+        assert_eq!(imre_error_pending(), 0);
+        let code = new_exception(Kind::ValueError, Payload::Empty);
+        // SAFETY: `code` is fresh and unescaped, and the failing formatter never
+        // reads the dummy record word.
+        unsafe {
+            code.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!()
+                };
+                exception.details_mut().layout = Some(Rc::new(NamedPayload {
+                    record: OwnedWord::from_owned(0, WordKind::new(0)),
+                    text: Some(failed_text),
+                    repr: None,
+                    dataclass_repr: false,
+                    takes_record_owner: false,
+                }));
+            });
+        }
+        // SAFETY: the local object owner roots the exception during acquisition.
+        let code_word =
+            unsafe { WordKind::new(5).acquire(crate::ObjectOwner::as_ptr(&code) as usize) };
+        replace_pending(Some(new_exception(
+            Kind::SystemExit,
+            Payload::Exit(Some(code_word)),
+        )));
+
+        assert_eq!(imre_error_unhandled(), 1);
+        assert_eq!(imre_error_pending(), 0);
     }
 }

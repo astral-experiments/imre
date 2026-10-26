@@ -69,6 +69,7 @@ impl Type {
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
+            | Self::FrozenStrings
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
@@ -163,6 +164,7 @@ impl Type {
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
+            | Self::FrozenStrings
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
@@ -856,6 +858,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -1928,7 +1931,15 @@ impl Emitter<'_, '_> {
                 u32::from(self.module.ignore_python_environment)
             ));
             self.line("call void @imre_record_error_init()");
-            self.line("call void @imre_stdio_init()");
+            if let Some(utf8) = self.module.command_utf8_mode {
+                self.line(format!(
+                    "call void @imre_stdio_command_init(i32 {}, i32 {})",
+                    u32::from(self.module.ignore_python_environment),
+                    u32::from(utf8)
+                ));
+            } else {
+                self.line("call void @imre_stdio_init()");
+            }
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_cache_paths {
@@ -3566,6 +3577,7 @@ impl Emitter<'_, '_> {
                 | Type::PurePath(_)
                 | Type::List(_)
                 | Type::Dict(_)
+                | Type::FrozenStrings
                 | Type::Set(_)
                 | Type::Deque(_)
                 | Type::SimpleNamespace(_) => {
@@ -4636,6 +4648,7 @@ impl Emitter<'_, '_> {
                     }
                 }
             }
+            Builtin::EmptyPartial => self.empty_partial(&args[0].value),
             Builtin::CallableContext => {
                 let address = self.instruction(format!(
                     "getelementptr %callable, ptr {}, i32 0, i32 1",
@@ -5041,6 +5054,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysStdlibModuleNames => {
+                self.call("imre_sys_stdlib_module_names", returns, &[])
+            }
             Builtin::SysImplementation => self.tuple(
                 returns,
                 &crate::version::implementation_values(&self.module.types),
@@ -5096,6 +5112,14 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_sys_setrecursionlimit", &[&args[0].value]);
                 none()
             }
+            Builtin::SysStreamText { descriptor, errors } => Value {
+                ty: Type::Str,
+                operand: self.instruction(format!(
+                    "call ptr @imre_sys_stream_text(i32 {descriptor}, i32 {})",
+                    u32::from(*errors)
+                )),
+                small_integer: false,
+            },
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
@@ -6111,7 +6135,7 @@ impl Emitter<'_, '_> {
                             Type::ListInt => "imre_list_len",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
                             Type::Deque(_) => "imre_deque_len",
-                            Type::Set(_) | Type::StringKeys => "imre_set_len",
+                            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
                             _ => unreachable!("len input was checked"),
                         },
                         Type::Int,
@@ -7200,6 +7224,7 @@ impl Emitter<'_, '_> {
                     | Type::ChainMap(_)
                     | Type::Set(_)
                     | Type::Deque(_)
+                    | Type::FrozenStrings
                     | Type::StringKeys
                     | Type::Iterator
                     | Type::Cursor(_)
@@ -7493,6 +7518,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -7601,6 +7627,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -8256,6 +8283,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ChainMap(_)
         | Type::Set(_)
         | Type::Deque(_)
+        | Type::FrozenStrings
         | Type::StringKeys
         | Type::Iterator
         | Type::Cursor(_)
@@ -8905,6 +8933,8 @@ declare void @imre_integer_digits_init(i32)
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
+declare void @imre_stdio_command_init(i32, i32)
+declare ptr @imre_sys_stream_text(i32, i32)
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
@@ -9225,6 +9255,7 @@ declare void @imre_sys_setrecursionlimit(i64)
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
+declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)

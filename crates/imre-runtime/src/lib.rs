@@ -404,6 +404,7 @@ struct Output<W = RawStdout> {
     text: text_output::PendingText,
     line_buffered: bool,
     captures: Vec<Vec<u8>>,
+    signature_emitted: bool,
 }
 
 struct BinaryOutput<W> {
@@ -479,11 +480,34 @@ static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
 /// Capture buffering from the startup descriptors before user code can replace them.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_stdio_init() {
+    prepare_stdio(false, None);
+}
+
+/// Ignore Python environment settings for an isolated command without changing os.environ.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_isolated_init() {
+    prepare_stdio(true, None);
+}
+
+/// Initialize streams with the effective flags of a native Python command.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
+    prepare_stdio(isolated != 0, Some(utf8 != 0));
+}
+
+fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
     initialize_io();
+    sys::initialize_encoding(isolated, utf8);
     LazyLock::force(&STDIO_SETTINGS);
 }
 
 impl<W: Write> Output<W> {
+    /// Line buffering inspects the input characters before the codec maps them to bytes.
+    fn write_encoded(&mut self, encoded: &[u8], original: &[u8]) -> io::Result<()> {
+        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', original).is_some();
+        self.text.write(&mut self.raw, encoded, flush_line)
+    }
+
     fn with_stream(stream: W, capacity: usize, line_buffered: bool) -> Self {
         // With zero capacity every write goes directly to the stream.
         let mut buffer = Vec::new();
@@ -497,6 +521,7 @@ impl<W: Write> Output<W> {
             text: text_output::PendingText::default(),
             line_buffered,
             captures: Vec::new(),
+            signature_emitted: false,
         }
     }
 }
@@ -516,8 +541,7 @@ impl<W: Write> Write for Output<W> {
             captured.extend_from_slice(bytes);
             return Ok(());
         }
-        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', bytes).is_some();
-        self.text.write(&mut self.raw, bytes, flush_line)
+        self.write_encoded(bytes, bytes)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -629,21 +653,6 @@ mod doctest;
 mod sys;
 mod text_output;
 
-/// Prints one value and a newline, returning with the writer lock released.
-/// Only primitive formatters run here; they cannot call user code.
-fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result<()> {
-    let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    write(&mut output)?;
-    output.write_all(b"\n")
-}
-
-/// Handles write failures only after releasing the writer lock.
-fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
-    if let Err(error) = write_output(write) {
-        objects::errno_error(error).raise();
-    }
-}
-
 /// Writes a UTF-8 line through the native standard-error handle.
 ///
 /// # Safety
@@ -657,9 +666,11 @@ pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     }
 }
 
-/// Writes already encoded text without the general formatting machinery.
-fn output_bytes(value: &[u8]) {
-    output(|writer| writer.write_all(value));
+/// Raise encoding and descriptor errors after releasing the stdout lock.
+fn output_text(value: &str) {
+    if let Err(error) = sys::write_stdout(value, true) {
+        error.raise();
+    }
 }
 
 /// The caller handles errors only after this function releases the writer lock.
@@ -894,20 +905,20 @@ pub unsafe extern "C" fn imre_print_int(value: usize) {
     let value = unsafe { Int::borrow(value) };
     if let Some(value) = value.as_small() {
         let mut digits = itoa::Buffer::new();
-        output_bytes(digits.format(value).as_bytes());
+        output_text(digits.format(value));
     } else {
-        output(|writer| write!(writer, "{}", value.big()));
+        output_text(&value.big().to_string());
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_bool(value: u32) {
-    output_bytes(if value == 0 { b"False" } else { b"True" });
+    output_text(if value == 0 { "False" } else { "True" });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_none() {
-    output_bytes(b"None");
+    output_text("None");
 }
 
 /// Formats an integer without changing its ownership or arbitrary precision.
@@ -995,7 +1006,13 @@ pub unsafe extern "C" fn imre_str_release(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    output_bytes(unsafe { &*value }.as_bytes());
+    let text = unsafe { &*value };
+    if let Err(error) = sys::write_stdout_with(text, true, || {
+        // SAFETY: the caller roots this same string until the write returns.
+        Ok(unsafe { StrOwner::acquire_word(value as usize) })
+    }) {
+        error.raise();
+    }
 }
 
 /// # Safety
@@ -1108,26 +1125,17 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_input() -> *const Str {
     // A preceding print must be visible before waiting for the next input line.
-    if flush_stdout().is_err() {
-        return Error::new(Kind::OSError, "could not write standard output")
-            .returning(std::ptr::null());
+    if let Err(error) = flush_stdout() {
+        return objects::errno_error(error).returning(std::ptr::null());
     }
-    let mut line = String::new();
-    match io::stdin().read_line(&mut line) {
-        Ok(0) => {
-            return Error::new(Kind::EOFError, "EOF when reading a line")
-                .returning(std::ptr::null());
-        }
-        Ok(_) => {}
-        Err(_) => {
-            return Error::new(Kind::OSError, "could not read standard input")
-                .returning(std::ptr::null());
-        }
-    }
-    if line.ends_with('\n') {
-        line.pop();
-    }
-    StrOwner::into_raw(StrOwner::new(Str::from(line)))
+    finish(
+        sys::read_input_line().and_then(|line| {
+            StrOwner::try_new(Str::from(line))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
+        std::ptr::null(),
+    )
 }
 
 #[unsafe(no_mangle)]

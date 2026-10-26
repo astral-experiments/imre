@@ -501,6 +501,7 @@ mod tests {
             class_fields: vec![vec![Type::Class(0)]],
             list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),

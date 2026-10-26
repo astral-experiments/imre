@@ -37,6 +37,8 @@ pub(crate) enum Type {
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
+    /// A concrete immutable set of strings.
+    FrozenStrings,
     Tuple(usize),
     VarTuple(usize),
     /// A functools key retains its comparator and, for a bound key, its object.
@@ -302,6 +304,7 @@ impl std::fmt::Display for Type {
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
+            Self::FrozenStrings => "frozenset[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
             Self::TupleBuffer => "private tuple buffer",
@@ -411,6 +414,8 @@ pub(crate) enum SourceFrame {
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
+    /// Effective UTF-8 mode of an interpreter-style command.
+    pub command_utf8_mode: Option<bool>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -880,6 +885,11 @@ pub(crate) enum Builtin {
         version: bool,
     },
     SysImplementation,
+    SysStdlibModuleNames,
+    SysStreamText {
+        descriptor: u8,
+        errors: bool,
+    },
     SysVersionInfo {
         implementation: bool,
     },
@@ -1190,6 +1200,8 @@ pub(crate) enum Builtin {
     /// Read the public maxsize (false) or typed (true) of a constructed cache.
     CacheParameter(bool),
     CallableContext,
+    /// A fresh partial with the same call interface, owning its original target.
+    EmptyPartial,
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.

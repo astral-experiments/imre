@@ -131,6 +131,8 @@ impl Node {
 #[derive(Clone)]
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
+    /// Nodes copied from a mutable document share a fallibly allocated owner.
+    Snapshot(crate::shared::Shared<Vec<Node>>),
     /// The iterative parser emits every subtree contiguously in postorder.
     Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
@@ -148,6 +150,7 @@ impl std::ops::Deref for Nodes {
             | Self::Deep(nodes)
             | Self::Root(nodes, _)
             | Self::DeepRoot(nodes, _) => nodes,
+            Self::Snapshot(nodes) => nodes,
             Self::Single(node) => std::slice::from_ref(node),
         }
     }

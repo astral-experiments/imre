@@ -89,6 +89,12 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if self.types.index_callable_signature(ty) == Some(value.ty) {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
         if matches!(value.ty, Type::AnnotationValue(_)) {
             let Type::Tuple(layout) = self.types.tuple(vec![ty]) else {
                 unreachable!()
@@ -320,6 +326,7 @@ impl Checker<'_> {
                 "list" => InstanceType::List,
                 "dict" => InstanceType::Dict,
                 "set" => InstanceType::Set,
+                "frozenset" => InstanceType::Exact(Type::FrozenStrings),
                 "tuple" => InstanceType::Tuple,
                 _ => {
                     return Err(error(

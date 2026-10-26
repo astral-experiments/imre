@@ -815,13 +815,8 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 Ok(help) => help,
                 Err(error) => return error.returning(std::ptr::null_mut()),
             };
-            if crate::write_output(|writer| {
-                writer.write_all(help.trim_end_matches('\n').as_bytes())
-            })
-            .is_err()
-            {
-                return Error::new(exceptions::Kind::OSError, "could not write standard output")
-                    .returning(std::ptr::null_mut());
+            if let Err(error) = crate::sys::write_stdout(help.trim_end_matches('\n'), true) {
+                return error.returning(std::ptr::null_mut());
             }
             return Error::exit_status(0).returning(std::ptr::null_mut());
         }
