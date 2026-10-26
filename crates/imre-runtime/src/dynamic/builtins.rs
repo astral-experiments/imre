@@ -136,7 +136,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "str"
         }
         Value::Property(_) if attr == "setter" => "property",
-        Value::Bytes(_) if matches!(attr, "decode" | "rstrip") => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),

@@ -495,18 +495,7 @@ impl Context {
             if let Some(number) = number {
                 return Ok(crate::objects::bytes_contains_int(data, &number)?);
             }
-            return match self.heap.get(item) {
-                Value::Bytes(needle) | Value::ByteArray(needle) => {
-                    Ok(crate::objects::bytes_contains(data, needle))
-                }
-                _ => Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "a bytes-like object is required, not '{}'",
-                        self.type_name(item)
-                    ),
-                )),
-            };
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
         if matches!(
             self.heap.get(container),

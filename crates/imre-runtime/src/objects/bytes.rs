@@ -295,6 +295,62 @@ pub(crate) fn bytes_contains_int(haystack: &[u8], needle: &Int) -> Result<bool> 
     Ok(memchr::memchr(byte, haystack).is_some())
 }
 
+/// A field covering the entire immutable input retains its original owner.
+pub(crate) fn rsplit_bytes(
+    data: &[u8],
+    separator: Option<&[u8]>,
+    limit: usize,
+) -> Result<Vec<Option<Bytes>>> {
+    let mut parts = Vec::new();
+    let mut push = |field: &[u8]| -> Result<()> {
+        parts.try_reserve(1).map_err(|_| Error::memory_error())?;
+        let owned = if field.len() == data.len() {
+            None
+        } else {
+            let mut bytes = allocate(field.len())?;
+            bytes.extend_from_slice(field);
+            Some(bytes)
+        };
+        parts.push(owned);
+        Ok(())
+    };
+    let mut end = data.len();
+    if let Some(sep) = separator {
+        if sep.is_empty() {
+            return Err(Error::new(Kind::ValueError, "empty separator"));
+        }
+        for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
+            push(&data[start + sep.len()..end])?;
+            end = start;
+        }
+        push(&data[..end])?;
+    } else {
+        let whitespace = |b: u8| matches!(b, b' ' | b'\t'..=b'\r');
+        let mut splits = 0;
+        loop {
+            while end > 0 && whitespace(data[end - 1]) {
+                end -= 1;
+            }
+            if end == 0 {
+                break;
+            }
+            if splits == limit {
+                push(&data[..end])?;
+                break;
+            }
+            let start = data[..end]
+                .iter()
+                .rposition(|&b| whitespace(b))
+                .map_or(0, |i| i + 1);
+            push(&data[start..end])?;
+            end = start;
+            splits += 1;
+        }
+    }
+    parts.reverse();
+    Ok(parts)
+}
+
 /// Tests for an immutable subsequence; the empty needle matches even empty bytes.
 ///
 /// # Safety

@@ -17,7 +17,7 @@ mod boxed_values;
 mod builtins;
 mod bytes;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rstrip_bytes,
+    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
 };
 mod cache_paths;
 mod calendar;
