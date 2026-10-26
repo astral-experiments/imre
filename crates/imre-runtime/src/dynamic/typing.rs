@@ -479,9 +479,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 explicit: false,
             })
         }
-        Value::Native(class)
-            if class == "typing.Callable" && name == "__mro_entries__" =>
-        {
+        Value::Native(class) if class == "typing.Callable" && name == "__mro_entries__" => {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
                 callable,
