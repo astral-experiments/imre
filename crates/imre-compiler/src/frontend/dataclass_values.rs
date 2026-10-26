@@ -82,7 +82,9 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
             }
             loader(types.module_spec_fields(id)[1], types)
         }
+        Type::SysImplementation => true,
         Type::Exception
+        | Type::CmpKey(..)
         | Type::NamedException(_)
         | Type::StringKeys
         | Type::ImportException
@@ -105,8 +107,11 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TimedFileHandler
         | Type::ProcessSelectorClass
         | Type::ClockTime
+        | Type::CodecInfo
         | Type::Poll
         | Type::Socket
+        | Type::CodecWriterClass
+        | Type::CodecWriter
         | Type::Sha256
         | Type::JsonDecoder
         | Type::CsvReader
@@ -242,8 +247,11 @@ fn contains_opaque(ty: Type, types: &Types) -> bool {
             | Type::ClockTime
             | Type::LogFormatter
             | Type::LogRecord
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::RegexPattern

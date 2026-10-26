@@ -67,15 +67,6 @@ pub unsafe extern "C" fn imre_annotation_ref(word: *const usize, name: *const St
     }
 }
 
-/// # Safety
-/// Both arguments borrow exact builtin class names from the compiler's closed domain.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_builtin_issubclass(first: *const Str, second: *const Str) -> u32 {
-    // SAFETY: builtin class operands retain their immutable native name storage.
-    let (first, second) = unsafe { ((&*first).as_str(), (&*second).as_str()) };
-    u32::from(first == second || second == "object" || (first == "bool" && second == "int"))
-}
-
 /// Read the exact field kind from the descriptor, including the native owner type.
 unsafe fn field(record: *const usize, index: usize) -> (WordKind, usize) {
     // SAFETY: the internal constructor emits five initialized fields in signature order.

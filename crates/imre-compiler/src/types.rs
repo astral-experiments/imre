@@ -1,7 +1,7 @@
 //! Interns concrete container types while keeping IR type identities small and exact.
 
 use std::cell::{Ref, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write};
 
 use crate::ir::Type;
@@ -22,6 +22,7 @@ enum Shape {
     Cursor(Type),
     List(Type),
     Dict(Type, Type),
+    OrderedDict(Type, Type),
     DefaultListDict(Type, Type),
     Counter(Type),
     Set(Type),
@@ -30,10 +31,15 @@ enum Shape {
     ModuleSpec(Vec<Type>),
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
+    LenFrame(Vec<Type>),
+    /// Only the class-name prefix is visible. The concrete record owns the argument.
+    UnreadArgument,
     VarTuple(Type),
     /// Display segments are fixed fields or repetitions of an item of known type.
     DisplayTuple(Vec<(Type, bool)>),
+    DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
+    RecordConstructor(usize, Vec<Type>),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
     DispatchCallable(DispatchFunction),
@@ -69,6 +75,7 @@ pub(crate) struct DispatchFunction {
     pub callable: Type,
     pub frame: Type,
     pub registry: Type,
+    pub metadata: Type,
 }
 
 /// A cache delegates annotation evaluation to the captured declaration.
@@ -115,6 +122,8 @@ struct Storage {
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
     plain_callbacks: HashSet<Type>,
+    constructor_targets: HashMap<usize, usize>,
+    constructor_slots: BTreeMap<usize, usize>,
     exceptions: Vec<NamedException>,
     ids: HashMap<Shape, usize>,
     hashable_records: HashSet<usize>,
@@ -173,6 +182,7 @@ impl Types {
                 storage.shapes.get(id),
                 Some(
                     Shape::Dict(..)
+                        | Shape::OrderedDict(..)
                         | Shape::DefaultListDict(..)
                         | Shape::Counter(_)
                         | Shape::DispatchRegistry(_)
@@ -183,8 +193,18 @@ impl Types {
             Type::Deque(id) => matches!(storage.shapes.get(id), Some(Shape::Deque(_))),
             Type::Tuple(id) => matches!(
                 storage.shapes.get(id),
-                Some(Shape::Tuple(_) | Shape::NamedTuple(..) | Shape::PartialFrame(_))
+                Some(
+                    Shape::Tuple(_)
+                        | Shape::NamedTuple(..)
+                        | Shape::PartialFrame(_)
+                        | Shape::LenFrame(_)
+                        | Shape::UnreadArgument
+                        | Shape::DeferredCmpFrame(..)
+                )
             ),
+            Type::CmpKey(id, bound) => {
+                matches!(storage.shapes.get(id), Some(Shape::PartialFrame(fields) | Shape::DeferredCmpFrame(_, fields)) if fields.len() == if bound { 2 } else { 1 })
+            }
             Type::ForwardRef(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Tuple(fields)) if fields.len() == 5)
             }
@@ -200,6 +220,7 @@ impl Types {
                 storage.shapes.get(id),
                 Some(
                     Shape::Callable(..)
+                        | Shape::RecordConstructor(..)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -247,6 +268,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::ActivePopen
             | Type::EventLoop
@@ -266,12 +288,16 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -282,6 +308,7 @@ impl Types {
             | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
+            | Type::Patch(_)
             | Type::None => true,
         };
         if valid {
@@ -297,6 +324,8 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
+                Shape::LenFrame(prefix) => prefix.clone(),
+                Shape::UnreadArgument => vec![Type::Str],
                 Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
                 Shape::VarTuple(ty)
                 | Shape::Cursor(ty)
@@ -310,11 +339,14 @@ impl Types {
                 | Shape::DirectoryContext(ty)
                 | Shape::ProcessArgs(ty)
                 | Shape::Optional(ty) => vec![*ty],
-                Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
+                Shape::Dict(key, value)
+                | Shape::OrderedDict(key, value)
+                | Shape::DefaultListDict(key, value) => vec![*key, *value],
                 Shape::Tuple(fields)
                 | Shape::ModuleSpec(fields)
                 | Shape::NamedTuple(_, fields)
                 | Shape::PartialFrame(fields)
+                | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
@@ -322,6 +354,11 @@ impl Types {
                 Shape::Callable(params, returns) => {
                     params.iter().copied().chain([*returns]).collect()
                 }
+                Shape::RecordConstructor(class, params) => params
+                    .iter()
+                    .copied()
+                    .chain([Type::Class(*class)])
+                    .collect(),
             };
             for child in children {
                 self.verify_type(child, classes)?;
@@ -497,6 +534,9 @@ impl Types {
     }
 
     pub(crate) fn immutable_key_field(&self, ty: Type) -> bool {
+        if self.is_len_argument(ty) {
+            return false;
+        }
         if let Some(payload) = self.payload(ty) {
             return self.immutable_key_field(payload);
         }
@@ -514,6 +554,7 @@ impl Types {
             | Type::Socket
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
+            Type::Tuple(_) if self.is_unread_argument(ty) => false,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -697,6 +738,7 @@ impl Types {
             | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -719,12 +761,16 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject
             | Type::PathInfo
+            | Type::CodecInfo
             | Type::Poll
             | Type::Socket
+            | Type::CodecWriterClass
+            | Type::CodecWriter
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -849,8 +895,43 @@ impl Types {
         }
     }
 
+    /// A live len argument owns its concrete value after its class and hash diagnostic.
+    pub(crate) fn len_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str, Type::Str, self.len_key()])))
+    }
+
+    /// The private immutable key starts with the class; its normalized value follows.
+    pub(crate) fn len_key(&self) -> Type {
+        Type::Tuple(self.intern(Shape::LenFrame(vec![Type::Str])))
+    }
+
+    pub(crate) fn is_len_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(&self.0.borrow().shapes[id], Shape::LenFrame(prefix) if prefix.len() == 3))
+    }
+
+    /// Return only Python sequence fields; private callable frames expose ABI prefixes.
+    pub(crate) fn len_tuple_fields(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Tuple(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(
+                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                fields,
+            ) => Some(fields.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn unread_argument(&self) -> Type {
+        Type::Tuple(self.intern(Shape::UnreadArgument))
+    }
+
+    pub(crate) fn is_unread_argument(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::UnreadArgument))
     }
 
     pub(crate) fn module_spec(&self, fields: Vec<Type>) -> Type {
@@ -1009,8 +1090,23 @@ impl Types {
         Type::Tuple(self.intern(Shape::PartialFrame(fields)))
     }
 
+    /// Retain a local comparator's definition until a comparison supplies operand types.
+    pub(crate) fn cmp_frame(&self, fields: Vec<Type>, source: Option<(usize, u32)>) -> Type {
+        match source {
+            Some(site) => Type::Tuple(self.intern(Shape::DeferredCmpFrame(site, fields))),
+            None => self.partial_frame(fields),
+        }
+    }
+
+    pub(crate) fn deferred_cmp_source(&self, layout: usize) -> Option<(usize, u32)> {
+        match self.0.borrow().shapes[layout] {
+            Shape::DeferredCmpFrame(site, _) => Some(site),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_partial_frame(&self, ty: Type) -> bool {
-        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_)))
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::PartialFrame(_) | Shape::DeferredCmpFrame(..)))
     }
 
     pub(crate) fn process_args(&self, command: Type) -> usize {
@@ -1082,6 +1178,62 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    /// A class value can construct an instance but owns no instance or bound receiver.
+    pub(crate) fn record_constructor(&self, base: usize, params: Vec<Type>) -> Type {
+        Type::Callable(self.intern(Shape::RecordConstructor(base, params)))
+    }
+
+    pub(crate) fn constructor_base(&self, ty: Type) -> Option<usize> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::RecordConstructor(base, _)) => Some(*base),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn register_constructor(&self, function: usize, class: usize) {
+        self.0
+            .borrow_mut()
+            .constructor_targets
+            .insert(function, class);
+    }
+
+    /// Every concrete Python class has one identity across all its type[T] views.
+    /// The compilation entry owns each singleton in an ordinary managed global.
+    pub(crate) fn reserve_constructor_globals(
+        &self,
+        globals: &mut Vec<Type>,
+        functions: &[crate::ir::Function],
+        entry: &crate::ir::Function,
+    ) {
+        let mut classes = BTreeMap::new();
+        for function in functions.iter().chain([entry]) {
+            crate::ir::walk_expressions(&function.body, &mut |expr| {
+                if let crate::ir::ExprKind::Callable {
+                    function,
+                    receiver: None,
+                } = &expr.kind
+                    && self.constructor_base(expr.ty).is_some()
+                {
+                    classes
+                        .entry(self.0.borrow().constructor_targets[function])
+                        .or_insert(expr.ty);
+                }
+            });
+        }
+        let mut storage = self.0.borrow_mut();
+        for (class, ty) in classes {
+            storage.constructor_slots.insert(class, globals.len());
+            globals.push(ty);
+        }
+    }
+
+    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<usize> {
+        self.constructor_base(ty)?;
+        let storage = self.0.borrow();
+        Some(storage.constructor_slots[&storage.constructor_targets[&function]])
+    }
+
     /// A module cache keeps its declaration's identity when bound to another name.
     pub(crate) fn declared_cache(&self, callable: Type, id: usize, policy: CachePolicy) -> Type {
         self.0.borrow_mut().cache_adapters.insert(id, policy);
@@ -1137,11 +1289,13 @@ impl Types {
     /// Only the dispatcher constructs this registry; source dictionaries cannot store callables.
     pub(crate) fn dispatch_callable(&self, callable: Type) -> Type {
         let registry = Type::Dict(self.intern(Shape::DispatchRegistry(callable)));
-        let frame = self.partial_frame(vec![callable, registry]);
+        let metadata = self.optional(self.tuple(vec![Type::Str, self.optional(Type::Str)]));
+        let frame = self.partial_frame(vec![callable, registry, metadata]);
         Type::Callable(self.intern(Shape::DispatchCallable(DispatchFunction {
             callable,
             frame,
             registry,
+            metadata,
         })))
     }
 
@@ -1161,6 +1315,7 @@ impl Types {
         let Type::Callable(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
             Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
@@ -1186,6 +1341,14 @@ impl Types {
 
     pub(crate) fn counter(&self, key: Type) -> Type {
         Type::Dict(self.intern(Shape::Counter(key)))
+    }
+
+    pub(crate) fn ordered_dict(&self, key: Type, value: Type) -> Type {
+        Type::Dict(self.intern(Shape::OrderedDict(key, value)))
+    }
+
+    pub(crate) fn is_ordered_dict(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::OrderedDict(..)))
     }
 
     pub(crate) fn is_counter(&self, ty: Type) -> bool {
@@ -1214,6 +1377,11 @@ impl Types {
             unreachable!("deque identity has a deque shape")
         };
         Some(element)
+    }
+
+    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
+        self.element(ty).or_else(|| self.deque_element(ty))
     }
 
     pub(crate) fn set(&self, element: Type) -> Type {
@@ -1264,9 +1432,12 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
-                Some(fields.clone())
-            }
+            Shape::LenFrame(prefix) => Some(prefix.clone()),
+            Shape::UnreadArgument => Some(vec![Type::Str]),
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(_, fields)
+            | Shape::PartialFrame(fields)
+            | Shape::DeferredCmpFrame(_, fields) => Some(fields.clone()),
             _ => unreachable!("tuple type identity has a tuple shape"),
         }
     }
@@ -1300,9 +1471,12 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
+                Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
+                Shape::UnreadArgument => Some((Type::Tuple(id), vec![Type::Str])),
                 Shape::Tuple(fields)
                 | Shape::NamedTuple(_, fields)
-                | Shape::PartialFrame(fields) => Some((Type::Tuple(id), fields.clone())),
+                | Shape::PartialFrame(fields)
+                | Shape::DeferredCmpFrame(_, fields) => Some((Type::Tuple(id), fields.clone())),
                 _ => None,
             })
             .collect()
@@ -1325,7 +1499,9 @@ impl Types {
         match self.0.borrow().shapes[id] {
             Shape::Counter(key) => Some((key, Type::Int)),
             Shape::DispatchRegistry(target) => Some((Type::Str, target)),
-            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
+            Shape::Dict(key, value)
+            | Shape::OrderedDict(key, value)
+            | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
     }
@@ -1345,6 +1521,8 @@ impl Types {
                 continue;
             }
             match ty {
+                // The opaque payload may own an observable resource through a container.
+                Type::Tuple(_) if self.is_unread_argument(ty) => return true,
                 Type::Cursor(_)
                 | Type::TextIO
                 | Type::StringIO
@@ -1378,7 +1556,7 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Type::ForwardRef(id) | Type::AnnotationValue(id) = ty {
+        if let Type::ForwardRef(id) | Type::AnnotationValue(id) | Type::CmpKey(id, _) = ty {
             return self.fields(Type::Tuple(id)).unwrap();
         }
         if let Type::ModuleSpec(id) = ty {
@@ -1490,6 +1668,14 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::LenFrame(prefix) => {
+                return self.write_str(if prefix.len() == 3 {
+                    "len argument"
+                } else {
+                    "len cache key"
+                });
+            }
+            Shape::UnreadArgument => return self.write_str("object"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
             Shape::ContextValue(value) => {
@@ -1502,6 +1688,10 @@ impl TypeDescription<'_> {
             }
             Shape::CachedCallable(c) => return self.write_type(c.callable),
             Shape::DispatchCallable(d) => return self.write_type(d.callable),
+            Shape::RecordConstructor(class, _) => {
+                self.write_str("type[")?;
+                self.write_type(Type::Class(*class))?;
+            }
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;
@@ -1540,7 +1730,10 @@ impl TypeDescription<'_> {
                 })?;
                 self.write_type(*element)?;
             }
-            Shape::Tuple(fields) | Shape::NamedTuple(_, fields) | Shape::PartialFrame(fields) => {
+            Shape::Tuple(fields)
+            | Shape::NamedTuple(_, fields)
+            | Shape::PartialFrame(fields)
+            | Shape::DeferredCmpFrame(_, fields) => {
                 self.write_str("tuple[")?;
                 self.write_types(fields, ", ")?;
             }
@@ -1556,13 +1749,14 @@ impl TypeDescription<'_> {
                 self.write_str("dict[str, ")?;
                 self.write_type(*target)?;
             }
-            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
-                self.write_str(if matches!(ty, Type::ChainMap(_)) {
-                    "ChainMap["
-                } else if matches!(shape, Shape::Dict(..)) {
-                    "dict["
-                } else {
-                    "defaultdict["
+            Shape::Dict(key, value)
+            | Shape::OrderedDict(key, value)
+            | Shape::DefaultListDict(key, value) => {
+                self.write_str(match shape {
+                    _ if matches!(ty, Type::ChainMap(_)) => "ChainMap[",
+                    Shape::Dict(..) => "dict[",
+                    Shape::OrderedDict(..) => "OrderedDict[",
+                    _ => "defaultdict[",
                 })?;
                 self.write_type(*key)?;
                 self.write_str(", ")?;

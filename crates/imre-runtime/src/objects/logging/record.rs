@@ -630,6 +630,13 @@ fn percent_value_in<'a>(
         .next()
         .ok_or_else(|| Error::new(Kind::ValueError, "incomplete format"))?;
     let value = &next_argument(args)?;
+    if value.kind == WordKind::new(2) && matches!(c, 'd' | 'i' | 'u' | 's' | 'r' | 'a') {
+        // SAFETY: the selected operand roots this exact integer.
+        let integer = unsafe { Int::borrow(value.word) };
+        if integer.as_small().is_none() {
+            crate::integer_text::check_decimal(&integer.big())?;
+        }
+    }
     let mut text = match c {
         's' | 'r' | 'a' => percent_text(value, c, precision)?,
         'd' | 'i' | 'u' | 'x' | 'X' | 'o' => {
@@ -1025,8 +1032,7 @@ pub unsafe extern "C" fn imre_str_percent_tuple(
 
 fn percent(fmt: &Str, value: OwnedWord) -> *const Str {
     finish(
-        format_arguments(fmt.as_str(), &value)
-            .map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
+        format_arguments(fmt.as_str(), &value).and_then(|s| crate::checked_owned_str(Str::from(s))),
         std::ptr::null(),
     )
 }

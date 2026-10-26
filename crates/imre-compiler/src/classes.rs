@@ -56,6 +56,8 @@ pub(crate) struct Class {
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     /// Field writes required of every override called during construction.
     pub(crate) init_hooks: init_hooks::Hooks,
+    /// A base initializer that passes self to Python needs the entire derived layout ready.
+    pub(crate) init_exposes_self: bool,
     pub(crate) method_kinds: Vec<MethodKind>,
     /// Declaring class for the corresponding method's imports and lexical super.
     pub(crate) method_origins: Vec<DefinitionId>,
@@ -479,17 +481,27 @@ fn collect_class(
                     && node.name.as_str() == "PollSelector"
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__fspath__")
+                    && !matches!(name, "__init__" | "__fspath__" | "__setitem__")
                     && !unary_protocol
                     && !selector_context
                     && !(mapping && matches!(name, "__getitem__" | "__contains__"))
                     && !(name == "__post_init__" && dataclass.is_some())
+                    && !(module.is_bundled("socketserver")
+                        && node.name.as_str() == "TCPServer"
+                        && matches!(name, "__enter__" | "__exit__"))
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                if name == "__setitem__"
+                    && (kind != MethodKind::Instance
+                        || method.parameters.len() != 3
+                        || method.parameters.posonlyargs.len() + method.parameters.args.len() != 3)
+                {
+                    return Err(module.error(method, "__setitem__ requires self, key and value"));
+                }
                 if kind == MethodKind::PropertySetter {
                     let mut accessors = methods
                         .iter()
@@ -814,12 +826,14 @@ fn collect_class(
             }
         }
     }
+    let base_exposes_self = base.is_some_and(|(_, parent)| parent.init_exposes_self);
+    let mut init_exposes_self = base_exposes_self;
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
-        check_initializer(
+        init_exposes_self |= check_initializer(
             module,
             &methods[initializer],
             InitializerFields {
@@ -830,6 +844,7 @@ fn collect_class(
                 } else {
                     inherited_fields
                 },
+                exposes_self: base_exposes_self,
             },
             exception_layout,
             &mut init_hooks,
@@ -841,6 +856,7 @@ fn collect_class(
         forwarder,
         name: node.name.as_str().to_owned(),
         init_hooks,
+        init_exposes_self,
         node: node.clone(),
         fields,
         toml_hash: hash.is_some(),
@@ -1000,12 +1016,13 @@ pub(crate) fn method_kind(
 
 struct InitializerFields<'a> {
     declared: &'a [Field],
+    exposes_self: bool,
     inherited: &'a [Field],
     bindings: &'a HashMap<String, ClassValue>,
 }
 
-/// Initializes each field once before `self` can be read or passed to another operation.
-/// This permits allocation before argument assignment without exposing a partial object.
+/// Checks that a constructor initializes the layout before user code can see it,
+/// and reports whether the initialized instance escapes to a callback.
 fn check_initializer(
     module: &SourceModule,
     initializer: &ast::StmtFunctionDef,
@@ -1013,9 +1030,10 @@ fn check_initializer(
     exception_layout: bool,
     hooks: &mut init_hooks::Hooks,
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let InitializerFields {
         declared: fields,
+        exposes_self: base_exposes_self,
         inherited,
         bindings,
     } = layout;
@@ -1038,7 +1056,24 @@ fn check_initializer(
         .collect();
     let mut called_super = false;
     let mut called_exception_base = false;
-    for statement in &initializer.body {
+    for (index, statement) in initializer.body.iter().enumerate() {
+        if index + 1 == initializer.body.len()
+            && (inherited.is_empty() || called_super)
+            && let ast::Stmt::Expr(s) = statement
+            && let ast::Expr::Call(call) = &*s.value
+            && matches!(&*call.func, ast::Expr::Name(_))
+            && matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id == receiver)
+        {
+            // Initialized also contains readable class attributes, which cannot
+            // stand in for a missing field when Python receives the instance.
+            if !declared.is_subset(&initialized) {
+                return Err(module.error(
+                    statement,
+                    "initialize all instance fields before passing self to a callback",
+                ));
+            }
+            return Ok(true);
+        }
         if exception_layout
             && let ast::Stmt::Expr(stmt) = statement
             && let ast::Expr::Call(call) = &*stmt.value
@@ -1109,6 +1144,14 @@ fn check_initializer(
                     return Err(
                         module.error(call, "base initializer fields may only be initialized once")
                     );
+                }
+                if base_exposes_self
+                    && fields
+                        .iter()
+                        .skip(inherited.len())
+                        .any(|f| !initialized.contains(f.name.as_str()))
+                {
+                    return Err(module.error(call, "initialize subclass fields before calling a base initializer that exposes self"));
                 }
                 for argument in call
                     .arguments
@@ -1210,7 +1253,7 @@ fn check_initializer(
             ),
         ));
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Chained and nested assignments must still initialize only declared fields.

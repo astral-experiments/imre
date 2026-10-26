@@ -335,6 +335,25 @@ impl Checker<'_> {
         for assignments in after_super.into_iter().rev() {
             stored.extend(assignments);
         }
+        let decl = &self.classes.declarations.definitions[class];
+        let id = self.classes.declarations.exceptions[&decl.definition];
+        let exception = self
+            .classes
+            .declarations
+            .exception_declarations
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        let inherits =
+            |name| exception_kind(name).is_some_and(|kind| exception.ancestors.contains(&kind));
+        // These builtin initializers validate or transform their positional arguments.
+        if inherits("UnicodeEncodeError") || (args.len() > 1 && inherits("OSError")) {
+            return Err(error(
+                self.source,
+                call,
+                "forwarding these arguments to a specialized builtin exception initializer is unsupported",
+            ));
+        }
         let tuple = Expr {
             ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
             kind: ExprKind::Tuple(args),
@@ -343,7 +362,6 @@ impl Checker<'_> {
             ty: Type::ObjectValue,
             kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
         };
-        let decl = &self.classes.declarations.definitions[class];
         let hidden = decl.exception_argument_slot();
         let mut fields = Vec::new();
         for (i, field) in decl.fields.iter().enumerate() {

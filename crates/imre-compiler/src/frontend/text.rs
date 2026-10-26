@@ -26,6 +26,28 @@ fn absent(ty: Type) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Convert a nullable string to text and evaluate its operand once.
+    pub(super) fn optional_text(&mut self, value: Expr) -> Expr {
+        let mut scope = calls::ArgumentScope::default();
+        let local = scope.hold(self, value);
+        let absent = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+        };
+        let present = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Unwrap(Box::new(local)),
+        };
+        scope.finish(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Conditional(
+                Box::new(absent),
+                Box::new(unpacking::string("None")),
+                Box::new(present),
+            ),
+        })
+    }
+
     pub(super) fn shlex_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let flag = |name, value| {
             parameter(
@@ -192,6 +214,18 @@ impl Checker<'_> {
                 // Preserve the existing bytes.decode().splitlines() path and
                 // direct-iteration fusion for the no-argument method.
                 match receiver.kind {
+                    _ if let Some(separator) = self.joined_lines.splits.get(&call.range()) => {
+                        ExprKind::Builtin(
+                            Builtin::JoinedSplitLines,
+                            vec![
+                                receiver,
+                                Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Str(separator.clone()),
+                                },
+                            ],
+                        )
+                    }
                     ExprKind::Builtin(Builtin::Decode, bytes) => {
                         ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
                     }

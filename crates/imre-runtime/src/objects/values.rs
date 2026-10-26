@@ -96,6 +96,7 @@ pub unsafe extern "C" fn imre_record_equal(left: *const usize, right: *const usi
 }
 
 pub(super) enum Comparison {
+    Error(Error),
     Done(bool),
     Child {
         left: usize,
@@ -256,6 +257,7 @@ pub(super) unsafe fn try_equal(left: usize, right: usize, kind: WordKind) -> Res
             }
         };
         match step {
+            Comparison::Error(error) => return Err(error),
             Comparison::Done(false) => return Ok(false),
             Comparison::Done(true) => match pending.pop() {
                 Some(next) => current = next,
@@ -385,14 +387,13 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                     Comparison::Done(super::calendar::equal(left, right))
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
-                (Storage::Document(left), Storage::Document(right)) => {
-                    let result = left.view().and_then(|left| Ok(left.equal(&right.view()?)));
-                    Comparison::Done(result.unwrap_or_else(|error| {
-                        error.raise();
-                        false
-                    }))
-                }
+                (Storage::Json(left), Storage::Json(right)) => left
+                    .equal(right)
+                    .map_or_else(Comparison::Error, Comparison::Done),
+                (Storage::Document(left), Storage::Document(right)) => left
+                    .view()
+                    .and_then(|left| left.equal(&right.view()?))
+                    .map_or_else(Comparison::Error, Comparison::Done),
                 (
                     left @ (Storage::Path { .. } | Storage::PurePath(_)),
                     right @ (Storage::Path { .. } | Storage::PurePath(_)),
@@ -552,6 +553,14 @@ unsafe fn write_repr_with(
                             write!(output, "<object object at {owner:p}>")?;
                             Ok(None)
                         }
+                        Storage::FunctoolsPlaceholder { class } => {
+                            output.write_str(if *class {
+                                "<class 'functools._PlaceholderType'>"
+                            } else {
+                                "Placeholder"
+                            })?;
+                            Ok(None)
+                        }
                         Storage::StrDescriptor(index) => {
                             write!(
                                 output,
@@ -667,12 +676,12 @@ unsafe fn write_repr_with(
                             format_entry(owner, set.repr_entry(output, position)?, &mut pending)
                         }
                         Storage::Json(value) => {
-                            value.write_repr(output)?;
+                            value.try_write_repr(output).map_err(|error| {error.raise(); std::fmt::Error})?;
                             Ok(None)
                         }
                         Storage::Document(value) => {
                             match value.view() {
-                                Ok(view) => view.write_repr(output)?,
+                                Ok(view) => view.try_write_repr(output).map_err(|error| {error.raise(); std::fmt::Error})?,
                                 Err(error) => { error.raise(); return Err(std::fmt::Error); }
                             }
                             Ok(None)
@@ -790,6 +799,23 @@ fn format_entry(
         pending.push(ReprTask::KeySeparator);
     }
     Ok(Some(ReprTask::Word(entry.key.0, entry.key.1)))
+}
+
+/// # Safety
+/// The caller roots the exact integer during formatting.
+pub(super) unsafe fn write_int_repr(output: &mut impl Write, word: usize) -> std::fmt::Result {
+    // SAFETY: the caller roots the integer for this borrow.
+    let value = unsafe { Int::borrow(word) };
+    if let Some(small) = value.as_small() {
+        write!(output, "{small}")
+    } else {
+        let value = value.big();
+        if let Err(error) = crate::integer_text::check_decimal(&value) {
+            error.raise();
+            return Err(std::fmt::Error);
+        }
+        write!(output, "{value}")
+    }
 }
 
 /// # Safety

@@ -8,11 +8,11 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 148,
+      "blocked": 146,
       "failed": 6,
-      "host-driven-native-operation": 89,
+      "host-driven-native-operation": 97,
       "host-operation": 6,
-      "mixed": 9,
+      "mixed": 3,
       "native-body-host-fixture": 54,
       "reference-skip": 41
     },
@@ -571,9 +571,9 @@
         },
         "evidence": {
           "opt_level": 0,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -1223,19 +1223,23 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 0,
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
+          "operation": "the native parent passes exactly one of the fixture's ten inheritable fds per fd-status child; each following native call emits RuntimeWarning before launching the fixture's zero-return command; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython body, assertions, OS fixture and assertWarns; the host forwards the actual native warning; the data children run fd_status.py on pinned CPython and the module's true command",
           "native_body_diagnostic": "POSIXProcessTestCase.test_pass_fds needs its upstream method decorator"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable",
@@ -1252,9 +1256,9 @@
         },
         "evidence": {
           "opt_level": 0,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -1276,9 +1280,9 @@
         },
         "evidence": {
           "opt_level": 0,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -1504,19 +1508,22 @@
         "opt_level": 0,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator"
+          "imre_revision": "b2043496e01f1bc45a1fe765ee470be03eaeeebb",
+          "tested_tree": "505366da5198251b9ef3cdb681fea928410c629a",
+          "source": "restore-signals-linux.json",
+          "native_body_diagnostic": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator",
+          "operation": "one compiled Imre parent launched and reaped both cat children; their /proc/self/status ignored masks differed exactly by SIGPIPE and SIGXFSZ",
+          "fixture": "unchanged CPython method, assertions and hooks; system cat read its own kernel status"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_run_abort",
@@ -4256,24 +4263,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdin_devnull",
@@ -4467,26 +4469,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:21:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the middle parent called subprocess with stdout=1; its CPython data child only wrote the bytes",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdout_fileobj",
@@ -4521,26 +4516,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdout_pipe",
@@ -7011,24 +6999,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull",
@@ -7217,26 +7200,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:21:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the middle parent called subprocess with stdout=1; its CPython data child only wrote the bytes",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:21:9: Imre: unknown class method",
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj",
@@ -7271,26 +7247,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 0,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:25:9: Imre: unknown class method",
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_pipe",
@@ -8673,11 +8642,11 @@
     "denominator": 353,
     "distinct_ids": 353,
     "counts": {
-      "blocked": 148,
+      "blocked": 146,
       "failed": 6,
-      "host-driven-native-operation": 89,
+      "host-driven-native-operation": 97,
       "host-operation": 6,
-      "mixed": 9,
+      "mixed": 3,
       "native-body-host-fixture": 54,
       "reference-skip": 41
     },
@@ -9236,9 +9205,9 @@
         },
         "evidence": {
           "opt_level": 3,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "three native launches inherit all 11 original fds, close them all, then keep the original set of eight; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -9888,19 +9857,23 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
-          "fixture": "cpython"
+          "body": "cpython",
+          "assertions": "cpython",
+          "fixture": "cpython",
+          "operation": "imre"
         },
-        "reason": "Unsupported: Popen options: pass_fds",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
+          "opt_level": 3,
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
+          "operation": "the native parent passes exactly one of the fixture's ten inheritable fds per fd-status child; each following native call emits RuntimeWarning before launching the fixture's zero-return command; the native parent reaps each child and keeps every original descriptor and flag",
+          "fixture": "original CPython body, assertions, OS fixture and assertWarns; the host forwards the actual native warning; the data children run fd_status.py on pinned CPython and the module's true command",
           "native_body_diagnostic": "POSIXProcessTestCase.test_pass_fds needs its upstream method decorator"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable",
@@ -9917,9 +9890,9 @@
         },
         "evidence": {
           "opt_level": 3,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "the native child inherits both original pipe fds; the original non-inheritable fd remains non-inheritable in the parent; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -9941,9 +9914,9 @@
         },
         "evidence": {
           "opt_level": 3,
-          "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
-          "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
-          "source": "fd-table-current-linux.json",
+          "imre_revision": "b6ba02b8ed80cc0d6409e9ef368ffe858b52048f",
+          "tested_tree": "87cc873a6d85a41d3405c92aa524c4098573acdd",
+          "source": "fd-table-landed-parent-linux.json",
           "operation": "three borrowed stdio fds survive exec both at 0/1/2 and at the original explicitly kept numbers; the native parent reaps each child and keeps every original descriptor and flag",
           "fixture": "original CPython test body, assertions and OS fixtures; the original fd_status.py child reports the actual inherited numbers",
           "native_body_diagnostic": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
@@ -10169,19 +10142,22 @@
         "opt_level": 3,
         "fixture_variant": "POSIXProcessTestCase",
         "reference": "pass",
-        "outcome": "blocked",
+        "outcome": "pass",
         "roles": {
-          "body": "unknown",
-          "assertions": "unknown",
-          "operation": "unknown",
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
           "fixture": "cpython"
         },
-        "reason": "Unsupported: subprocess.check_output",
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator"
+          "imre_revision": "b2043496e01f1bc45a1fe765ee470be03eaeeebb",
+          "tested_tree": "505366da5198251b9ef3cdb681fea928410c629a",
+          "source": "restore-signals-linux.json",
+          "native_body_diagnostic": "POSIXProcessTestCase.test_restore_signals needs its upstream method decorator",
+          "operation": "one compiled Imre parent launched and reaped both cat children; their /proc/self/status ignored masks differed exactly by SIGPIPE and SIGXFSZ",
+          "fixture": "unchanged CPython method, assertions and hooks; system cat read its own kernel status"
         },
-        "classification": "blocked"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.POSIXProcessTestCase.test_run_abort",
@@ -12921,24 +12897,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:24:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdin_devnull",
@@ -13132,26 +13103,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:21:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the middle parent called subprocess with stdout=1; its CPython data child only wrote the bytes",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:20:9: Imre: unknown class method",
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdout_fileobj",
@@ -13186,26 +13150,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and PollSelector binding; outer native syscalls {'poll': 2}",
+          "native_body_diagnostic": "<case>/case.py:24:9: Imre: unknown class method",
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCase.test_stdout_pipe",
@@ -15676,24 +15633,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:25:26: Imre: expected int, got bytes; annotations are enforced contracts",
+          "method_sha256": "c6561906867a69fdd0fa0db7f6155daf8985293a6adc9218b0158ba7e5ab8905"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdin_devnull",
@@ -15882,26 +15834,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:21:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the middle parent called subprocess with stdout=1; its CPython data child only wrote the bytes",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:21:9: Imre: unknown class method",
+          "method_sha256": "bd00b5c58eae10caa13bf33d93d3d1a82b6e4b1e7efee321c6662304b8ca86d1"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_fileobj",
@@ -15936,26 +15881,19 @@
         "roles": {
           "body": "cpython",
           "assertions": "cpython",
-          "operation": "mixed",
-          "fixture": "cpython"
+          "fixture": "cpython",
+          "operation": "imre"
         },
         "evidence": {
-          "imre_revision": "f5d008458b8ab221026f9ac92ba28fd028e96ece",
-          "native_body_diagnostic": "case.py:25:9: Imre: unknown class method",
-          "native_actor_calls": {
-            "Popen": 1,
-            "communicate": 1,
-            "returncode": 1,
-            "stderr.close": 1,
-            "stdout.close": 1,
-            "streams": 1
-          },
-          "operation": "Popen, communicate, returncode, stderr.close, stdout.close, streams",
-          "fixture": "original CPython module, class and instance hooks",
-          "opt_level": 3,
-          "host_operation": "child program exercises subprocess"
+          "imre_revision": "44030132616437faa91f9fd2edebda8ff806bd6f",
+          "tested_tree": "77c1fdb4074b0962333652dd08acb40a7f56bc16",
+          "source": "nested-chain-linux.json",
+          "operation": "outer and middle Imre parents each created and reaped the next process; the innermost data child also ran its original program natively",
+          "fixture": "unchanged host assertions, LIFO cleanups and SelectSelector binding; outer native syscalls {'pselect6': 2}",
+          "native_body_diagnostic": "<case>/case.py:25:9: Imre: unknown class method",
+          "method_sha256": "9d9f8df503e01b5975621c644aed97516ece1debd4a456d1dfdf688fa93e1301"
         },
-        "classification": "mixed"
+        "classification": "host-driven-native-operation"
       },
       {
         "id": "test.test_subprocess.ProcessTestCaseNoPoll.test_stdout_pipe",

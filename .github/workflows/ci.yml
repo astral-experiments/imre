@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -33,12 +35,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.unittest_source && format('unittest-{0}', inputs.unittest_source) || inputs.sys_source || github.ref }}
-  cancel-in-progress: true
+  # Main finishes its current run; GitHub keeps just one pending push.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ inputs.unittest_source && format('unittest-{0}', inputs.unittest_source) || inputs.sys_source || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   scope:
-    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
+    if: github.event_name != 'push' && !inputs.sys_source && !inputs.unittest_source
     runs-on: ubuntu-24.04
     outputs:
       release_artifacts: ${{ steps.scope.outputs.release_artifacts }}
@@ -177,7 +180,7 @@ jobs:
       - run: cargo test -p imre-runtime --lib --locked
 
   windows-compiler:
-    if: ${{ !inputs.sys_source && !inputs.unittest_source }}
+    needs: scope
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
@@ -186,14 +189,15 @@ jobs:
       - run: cargo test -p imre-compiler --lib --locked
 
   check:
-    needs: scope
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
     runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
-    env:
+    env: &wheel-env
       IMRE_REAL_WHEEL: .cpython-stdlib-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - &setup-python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14.5'
       - name: Install the pinned Rust toolchain
@@ -224,7 +228,8 @@ jobs:
         run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
       - name: Compare interrupted socket calls and fd reuse with CPython
         run: python3 tests/socket_eintr.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
-      - name: Get the pinned CPython unittest support and extension docstrings
+      - &cpython-reference
+        name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: python/cpython
@@ -247,6 +252,12 @@ jobs:
           dir=benchmarks/cpython_stdlib/full/socket
           python3 "$dir/run.py" --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18 --output "$RUNNER_TEMP/socket-evidence.json"
           cmp "$dir/evidence-linux.json" "$RUNNER_TEMP/socket-evidence.json"
+      - name: Compare synchronous TCPServer with original CPython socketserver tests
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: |
+          python3 benchmarks/cpython_stdlib/full/socketserver/run.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18 --output "$RUNNER_TEMP/socketserver-evidence.json"
+          cmp benchmarks/cpython_stdlib/full/socketserver/evidence-linux.json "$RUNNER_TEMP/socketserver-evidence.json"
       - name: Check native string line boundaries and Unicode predicates against CPython
         env:
           PYTHONPATH: .cpython-stdlib-reference/Lib
@@ -413,10 +424,11 @@ jobs:
           name: cpython-logging-evidence-linux
           path: ${{ runner.temp }}/logging-evidence-linux.json
           if-no-files-found: error
+      - &install-wheel-tools
+        name: Install the wheel test dependencies
+        run: python3 -m pip install "wheel==0.45.1" "packaging==25.0"
       - name: Build and install a Imre extension wheel
-        run: |
-          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
-          python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+        run: python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - uses: ./.github/actions/test-google-crc32c
         with:
           cc: clang-18
@@ -489,10 +501,11 @@ jobs:
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
-      - name: Compare Ruff’s ecosystem check with CPython on local Git repositories
+      - name: Compare Ruff’s ecosystem check and format commands with CPython
         run: |
           python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
-          target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
+          target/release/imre check --entry-profile examples/ruff_ecosystem/markdown-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
+          python3 tests/patchset.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
           python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
       - name: Compare fixed-offset datetime operations and original methods with CPython
         run: |
@@ -512,7 +525,7 @@ jobs:
           cmp benchmarks/cpython_stdlib/full/warnings/native-linux.json "$RUNNER_TEMP/test-warnings.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites socket_tcp errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites socket_tcp socketserver_tcp errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
           cat /tmp/imre-suites-ordinary/socket_tcp.log
       - name: Run original string core methods in native Imre
@@ -533,21 +546,24 @@ jobs:
         run: |
           python3 benchmarks/reference/luhn_checksum/build.py --artifact-dir /tmp/imre-luhn-reference --target-dir target/luhn-reference
           python3 benchmarks/luhn_validate.py --rust /tmp/imre-luhn-reference/luhn-reference --output /tmp/imre-luhn-reference/validation.json
-      - name: Build the runtime with AddressSanitizer
+      - &build-asan
+        name: Build the runtime with AddressSanitizer
         env:
           RUSTC_BOOTSTRAP: '1'
           RUSTFLAGS: -Zsanitizer=address -Cforce-frame-pointers=yes
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           cargo build -p imre-runtime --features corosensei/sanitizer --release --locked --target "$imre_target" --target-dir target/asan
-      - name: Check native ownership and wheels with AddressSanitizer
+      - &asan-smoke
+        name: Check native ownership and wheels with AddressSanitizer
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           python3 tests/extension_wheel.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize
           python3 tests/wheel_record.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           python3 tests/differential.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-      - name: Run the full AddressSanitizer suites
-        if: needs.scope.outputs.full_asan == 'true'
+      - &asan-suites
+        name: Run the full AddressSanitizer suites
+        if: github.event_name != 'workflow_dispatch' || inputs.full_asan
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o1 --suites imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
@@ -609,6 +625,34 @@ jobs:
           python3 benchmarks/reference/memory_report/build.py --artifact-dir /tmp/imre-memory-reference
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
+  pr-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - *setup-python
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  pr-asan:
+    needs: scope
+    if: github.event_name == 'pull_request' && needs.scope.outputs.full_asan == 'true'
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    env: *wheel-env
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - *setup-python
+      - *install-wheel-tools
+      - *cpython-reference
+      - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - run: cargo build -p imre-compiler --release --locked --features imre-compiler/verify-ir
+      - *build-asan
+      - *asan-smoke
+      - *asan-suites
+
   thinlto:
     needs: scope
     if: needs.scope.outputs.thinlto == 'true'
@@ -632,7 +676,11 @@ jobs:
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           imre_lld_dir="$(rustc --print sysroot)/lib/rustlib/$imre_target/bin"
-          python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$imre_lld_dir/rust-lld" --python python3
+          export IMRE_CI_LLD="$imre_lld_dir/gcc-ld/ld.lld"
+          export IMRE_CI_LTO_CACHE="$RUNNER_TEMP/imre-thinlto-cache"
+          mkdir -p "$IMRE_CI_LTO_CACHE"
+          ci_lld="$GITHUB_WORKSPACE/.github/scripts/ci-thinlto-ld.lld"
+          python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$ci_lld" --python python3
           if [[ "$FULL_THINLTO" != true ]]; then
             suites=(module_values)
           else
@@ -645,4 +693,4 @@ jobs:
             )
           fi
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
-            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$imre_lld_dir/gcc-ld/ld.lld" --opt-levels 3
+            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3

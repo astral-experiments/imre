@@ -19,12 +19,36 @@ from suite_native import Toolchain, native_method, run_in_fixtures
 SOURCE = HERE / "upstream/Lib/test/test_functools.py"
 MODULE = "test.test_functools"
 
-# The shared TestCase accepts integers. These methods compare homogeneous native
-# operands using ordinary equality and unittest's failure formatting.
+# These native fixtures compare the actual operands, using ordinary equality
+# and unittest's failure formatting. The method source is copied unchanged.
 EQUALITY = """    def assertEqual(self, first: OPERAND, second: OPERAND, msg: str | None = None) -> None:
         if first != second:
             raise AssertionError(unittest.TestCase()._formatMessage(msg, f"{first!r} != {second!r}"))
 """
+
+# The expectation is an exact str literal. TestCase dispatches a str pair to
+# assertMultiLineEqual; None takes the ordinary comparison and shortened reprs.
+STRING_EXPECTATION = """    def assertEqual(self, first: str | None, second: str, msg: str | None = None) -> None:
+        case = unittest.TestCase()
+        if first is None:
+            sides = unittest._short_reprs("None", repr(second))
+            case.fail(case._formatMessage(msg, sides[0] + " != " + sides[1]))
+        else:
+            case.assertMultiLineEqual(first, second, msg)
+"""
+
+
+def only_string_assertions(method):
+    """Every use of self is an assertEqual call with an exact string expectation."""
+    uses = {n for n in ast.walk(method) if isinstance(n, ast.Name) and n.id == "self"}
+    assertions = {
+        call.func.value for call in ast.walk(method) if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute) and call.func.attr == "assertEqual"
+        and isinstance(call.func.value, ast.Name) and call.func.value.id == "self"
+        and len(call.args) == 2 and not call.keywords
+        and isinstance(call.args[1], ast.Constant) and type(call.args[1].value) is str
+    }
+    return bool(uses) and assertions == uses
 
 
 def declared(nodes):
@@ -137,14 +161,19 @@ class Fixtures:
                 # Conditional global declarations are dedented to module scope.
                 declarations[source_node.lineno] = dedent(self.source(source_node))
         equality = ({"test_with_bound_and_unbound_methods": "str",
-                     "test_get_annotations": "dict[str, type]"}.get(method))
+                     "test_get_annotations": "dict[str, type]",
+                     "test_lru_cache_parameters": ""}.get(method))
+        if equality is None and only_string_assertions(node):
+            equality = "string expectation"
         fixture = "\n".join(sorted(imports)) + "\n\n"
         fixture += "\n".join(external + [declarations[k] for k in sorted(declarations)])
-        fixture += "\nclass NativeCase" + (":\n" if equality else "(unittest.TestCase):\n")
+        fixture += "\nclass NativeCase" + (":\n" if equality is not None else "(unittest.TestCase):\n")
         fixture += "".join(member_texts.values())
         fixture += "".join(helper_nodes[k] for k in sorted(helper_nodes))
-        if equality:
-            fixture += EQUALITY.replace("OPERAND", equality)
+        if equality == "string expectation":
+            fixture += STRING_EXPECTATION
+        elif equality is not None:
+            fixture += EQUALITY.replace(": OPERAND", f": {equality}" if equality else "")
         return owner.__name__, node, fixture
 
 

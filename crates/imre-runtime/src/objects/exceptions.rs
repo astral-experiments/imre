@@ -34,6 +34,13 @@ pub struct NamedDescriptor {
     base: u32,
 }
 
+impl NamedDescriptor {
+    fn mro(&self) -> &[u32] {
+        // SAFETY: the compiler emits count entries in C3 order in static storage.
+        unsafe { std::slice::from_raw_parts(self.kinds, self.count) }
+    }
+}
+
 /// Stable ABI identifiers for the supported builtin exception hierarchy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -97,6 +104,7 @@ pub(crate) enum Kind {
     InterruptedError = 50,
     TimeoutError = 51,
     // Warning exception identities use a separate block from module errors and filter categories.
+    UnidiffParseError = 52,
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
@@ -166,6 +174,7 @@ impl Kind {
             49 => Self::ConnectionResetError,
             50 => Self::InterruptedError,
             51 => Self::TimeoutError,
+            52 => Self::UnidiffParseError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
@@ -235,6 +244,7 @@ impl Kind {
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
             Self::DeprecationWarning => "DeprecationWarning",
+            Self::UnidiffParseError => "UnidiffParseError",
         }
     }
 
@@ -296,6 +306,7 @@ impl Kind {
                 Self::OSError
                     | Self::UnsupportedOperation
                     | Self::FileNotFoundError
+                    | Self::BlockingIOError
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
@@ -458,6 +469,28 @@ impl Exception {
     fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
         Rc::into_inner(self.details.take()?)?.cause
+    }
+
+    /// KeyError uses repr for one key unless an earlier builtin in the MRO overrides str.
+    fn quotes_single_key(&self) -> bool {
+        let Some(descriptor) = self.named() else {
+            return self.kind == Kind::KeyError;
+        };
+        for &kind in descriptor.mro() {
+            if kind == Kind::KeyError as u32 {
+                return true;
+            }
+            if [
+                Kind::OSError as u32,
+                Kind::ImportError as u32,
+                Kind::UnicodeEncodeError as u32,
+            ]
+            .contains(&kind)
+            {
+                return false;
+            }
+        }
+        false
     }
 
     fn named(&self) -> Option<&'static NamedDescriptor> {
@@ -707,6 +740,17 @@ impl Error {
         }
     }
 
+    /// Installs a constant diagnostic, preserving a catchable error if either owner cannot grow.
+    pub(crate) fn return_static_message<T>(kind: Kind, message: &'static str, sentinel: T) -> T {
+        let error = StrOwner::try_new(Str::const_new(message))
+            .and_then(|message| {
+                crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
+            })
+            .unwrap_or_else(|_| Self::memory_error().into_object());
+        replace_pending(Some(error));
+        sentinel
+    }
+
     /// Use Python's argument-free MemoryError when an operation exhausts memory.
     pub(crate) fn memory_error() -> Self {
         Self {
@@ -750,10 +794,21 @@ impl Error {
         self
     }
 
+    pub(crate) fn with_pending_cause(mut self) -> Self {
+        self.cause = take_pending();
+        self
+    }
+
     fn into_object(self) -> crate::ObjectOwner {
         match self.payload {
             Some(Payload::Empty) if self.kind == Kind::MemoryError && self.cause.is_none() => {
-                MEMORY_ERROR.with_borrow(crate::ObjectOwner::clone)
+                MEMORY_ERRORS.with(|errors| {
+                    let slot = errors[..MEMORY_ERROR_RESERVE]
+                        .iter()
+                        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
+                        .unwrap_or(&errors[MEMORY_ERROR_RESERVE]);
+                    slot.borrow().clone()
+                })
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
@@ -788,9 +843,13 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
     result.unwrap_or_else(|error| error.returning(sentinel))
 }
 
+// CPython reserves sixteen distinct errors and uses one last-resort instance
+// while all sixteen are still observable by callers.
+const MEMORY_ERROR_RESERVE: usize = 16;
+
 thread_local! {
-    static MEMORY_ERROR: RefCell<crate::ObjectOwner> =
-        RefCell::new(new_exception(Kind::MemoryError, Payload::Empty));
+    static MEMORY_ERRORS: [RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1] =
+        std::array::from_fn(|_| RefCell::new(new_exception(Kind::MemoryError, Payload::Empty)));
     static RECORD_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
@@ -810,7 +869,7 @@ thread_local! {
 /// Prepare allocation errors and exception state before generated code starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_record_error_init() {
-    MEMORY_ERROR.with(|_| ());
+    MEMORY_ERRORS.with(|_| ());
     RECORD_ALLOCATION_ERROR.with(|_| ());
     SEQUENCE_ALLOCATION_ERROR.with(|_| ());
     PENDING.with(|_| ());
@@ -918,14 +977,10 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
     }
     PENDING.with_borrow(|slot| {
         let Some(pending) = slot.as_ref() else { return };
-        if let Some(template) = [
-            &RECORD_ALLOCATION_ERROR,
-            &SEQUENCE_ALLOCATION_ERROR,
-            &MEMORY_ERROR,
-        ]
-        .into_iter()
-        .find(|template| template.with_borrow(|cached| crate::ObjectOwner::ptr_eq(cached, pending)))
-        {
+        let rotate = |template: &RefCell<crate::ObjectOwner>| {
+            if !crate::ObjectOwner::ptr_eq(&template.borrow(), pending) {
+                return false;
+            }
             // Move the spare into the cache. Existing aliases keep the exact pending
             // exception and its traceback, including an alias saved before a re-raise.
             // SAFETY: the cached allocation error has an immutable message payload.
@@ -938,7 +993,11 @@ pub unsafe extern "C" fn imre_error_attach_directory_frame(frame: *const Object)
                     .0
                     .with_mut(|storage| *storage = Storage::Exception(pristine))
             };
-            template.set(frame);
+            template.replace(frame.clone());
+            true
+        };
+        if !RECORD_ALLOCATION_ERROR.with(rotate) && !SEQUENCE_ALLOCATION_ERROR.with(rotate) {
+            MEMORY_ERRORS.with(|errors| errors.iter().any(rotate));
         }
         // SAFETY: attaching preallocated roots preserves the live exception identity.
         unsafe {
@@ -961,7 +1020,11 @@ fn exception_with_cause(
     payload: Payload,
     cause: Option<crate::ObjectOwner>,
 ) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(Exception {
+    crate::ObjectOwner::new(exception_object(kind, payload, cause))
+}
+
+fn exception_object(kind: Kind, payload: Payload, cause: Option<crate::ObjectOwner>) -> Object {
+    Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         payload,
         suppress_context: cause.is_some(),
@@ -971,7 +1034,7 @@ fn exception_with_cause(
                 ..Default::default()
             })
         }),
-    }))))
+    })))
 }
 
 pub(super) fn kind_of(error: &Object) -> Kind {
@@ -1316,7 +1379,8 @@ impl Storage {
         use std::fmt::Write as _;
         match &self.exception().payload {
             Payload::Import(err) => err.message(),
-            Payload::Positional(args) | Payload::ExitArguments(args) => args.message(),
+            Payload::Positional(args) => args.message(self.exception().quotes_single_key()),
+            Payload::ExitArguments(args) => args.message(false),
             Payload::Exit(Some(code)) => {
                 super::boxed_values::word_text(code.kind, code.word, false)
             }
@@ -1966,7 +2030,7 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
         object(value).0.with(|storage| {
             let e = storage.exception();
             if let Some(d) = e.named()
-                && std::slice::from_raw_parts(d.kinds, d.count).contains(&expected_kind)
+                && d.mro().contains(&expected_kind)
             {
                 return 1;
             }

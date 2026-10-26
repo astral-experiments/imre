@@ -58,9 +58,21 @@ total, membership, equality and all four ordering operations. The per-method
 and the host fixture role. The same cases are attributed by the full runner.
 
 `deque_methods.py` uses the shared runner to compile the four complete
-`test_big_queue_*` and `test_big_stack_*` methods. Their saved append/pop
-methods and integer assertions run in Imre; the original module, class, and
-instance fixture hooks run in CPython. The [O0](deque-methods-O0.json) and
-[O3](deque-methods-O3.json) reports record the hash of each unchanged method.
+`test_big_queue_*` and `test_big_stack_*` methods plus `test_setitem`. The
+deque operations and the integer or list assertions run in Imre; the original module, class, and
+instance fixture hooks run in CPython. The historical
+[O0](runs/pr605-7f3772b78ab4/deque-methods-O0.json) and
+[O3](runs/pr605-7f3772b78ab4/deque-methods-O3.json) reports record all five
+method hashes. Their directory identifies the original PR head; the reports
+do not identify the compiler revision.
 Pass `--imre`, `--runtime`, `--clang`, `--opt-level`, and `--result` to
-the pinned Python build. These four IDs are part of the 659 above.
+the pinned Python build.
+
+`deque_index_host.py` runs the unchanged randomized `test_getitem` and
+`test_delitem` with CPython fixtures, bodies, and assertions. Each deque lives
+in an Imre process; operations and their errors are returned over pipes.
+With random seed 1, the two tests make 60,288 and 3,504 native calls per
+level, respectively. The [O0](deque-index-host-O0.json) and
+[O3](deque-index-host-O3.json) reports count their operations. Run the same
+command-line options as above on Linux. `measure.py` also includes these two
+operations with their CPython roles. All seven IDs belong to the 659 above.

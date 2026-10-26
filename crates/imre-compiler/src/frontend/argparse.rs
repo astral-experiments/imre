@@ -792,6 +792,7 @@ fn namespace_class(
     classes.definitions.push(Class {
         forwarder: None,
         init_hooks: Default::default(),
+        init_exposes_self: false,
         exception_aliases: Default::default(),
         static_bindings: Default::default(),
         name: "Namespace".into(),

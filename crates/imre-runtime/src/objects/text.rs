@@ -26,6 +26,14 @@ pub unsafe extern "C" fn imre_ascii_escape(value: *const Str) -> *const Str {
         unsafe { StrOwner::increment_strong_count(value) };
         return value;
     }
+    finish(
+        ascii_escape(text).and_then(|ascii| crate::checked_owned_str(Str::from(ascii))),
+        std::ptr::null(),
+    )
+}
+
+/// Escape a representation for both builtin ASCII conversion and percent formatting.
+pub(super) fn ascii_escape(text: &str) -> Result<String> {
     let mut ascii = String::new();
     let size = text.chars().try_fold(0usize, |len, ch| {
         len.checked_add(match ch as u32 {
@@ -36,7 +44,7 @@ pub unsafe extern "C" fn imre_ascii_escape(value: *const Str) -> *const Str {
         })
     });
     if size.is_none_or(|size| ascii.try_reserve_exact(size).is_err()) {
-        return Error::allocation().returning(std::ptr::null());
+        return Err(Error::allocation());
     }
     for ch in text.chars() {
         let n = ch as u32;
@@ -47,7 +55,7 @@ pub unsafe extern "C" fn imre_ascii_escape(value: *const Str) -> *const Str {
             _ => write!(ascii, "\\U{n:08x}").unwrap(),
         }
     }
-    finish(crate::checked_owned_str(Str::from(ascii)), std::ptr::null())
+    Ok(ascii)
 }
 
 /// # Safety

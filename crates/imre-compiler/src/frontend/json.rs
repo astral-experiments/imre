@@ -195,6 +195,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module].error(
                     site,
                     "recursive calls through a JSON decoder are unsupported",
@@ -878,7 +879,7 @@ pub(super) fn schemas(
 }
 
 fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
-    if types.is_default_list_dict(ty) || types.is_counter(ty) {
+    if types.is_default_list_dict(ty) || types.is_counter(ty) || types.is_ordered_dict(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
     if let Some(inner) = types.payload(ty).or_else(|| types.element(ty)) {

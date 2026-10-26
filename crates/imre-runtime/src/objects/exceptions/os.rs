@@ -202,6 +202,21 @@ mod tests {
     };
 
     #[test]
+    fn blocked_writes_match_os_error_and_expose_the_accepted_count() {
+        let error = Error::blocked_write(libc::EAGAIN, 17);
+        assert!(error.kind.matches(Kind::OSError));
+        error.raise();
+        // SAFETY: take transfers the raised exception, which stays live through the field read.
+        unsafe {
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_os_error_field(crate::ObjectOwner::as_ptr(&error), 4),
+                crate::Int::small(17).unwrap().into_raw()
+            );
+        }
+    }
+
+    #[test]
     fn os_errors_quote_filenames_only_when_displayed() {
         let error = Error::from_errno(
             Kind::FileNotFoundError,

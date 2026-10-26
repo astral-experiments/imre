@@ -108,7 +108,8 @@ def main():
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
         flags = [] if args.write_bytecode else ["-B"]
-        run = subprocess.run([sys.executable, *flags, "-m", "test", "--single-process",
+        resources = ["-u", ",".join(manifest["resources"])] if manifest.get("resources") else []
+        run = subprocess.run([sys.executable, *flags, "-m", "test", "--single-process", *resources,
                               "--tempdir", work, "--randseed", "1", "--junit-xml", xml,
                               module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)

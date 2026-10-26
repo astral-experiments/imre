@@ -151,7 +151,11 @@ pub unsafe extern "C" fn imre_run_config(
                     0
                 };
                 let stderr = stream(stderr, stderr_kind)?;
-                let code = p.control.status().expect("communicate reaped the child");
+                let code = p
+                    .control
+                    .status()
+                    .expect("communicate reaped the child")
+                    .kernel();
                 if check && code != 0 {
                     raise_process(ProcessError {
                         positional_streams: false,

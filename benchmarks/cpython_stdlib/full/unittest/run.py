@@ -41,7 +41,7 @@ LOADER_BLOCKERS = {
     "test_getTestCaseNames__not_a_TestCase": "5:23: Imre: local class base requires supported native class metadata",
     "test_getTestCaseNames__testNamePatterns__attribute_access_regression":
         "6:13: Imre: local class body requires plain methods without defaults or inert class attributes",
-    "test_partial_functions": "6:9: Imre: local functions require annotated parameters and return types",
+    "test_partial_functions": "12:17: Imre: name is not a local value; globals and first-class functions are unsupported",
     "test_sortTestMethodsUsing__None": "10:9: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
     "test_sortTestMethodsUsing__getTestCaseNames": "5:9: Imre: local functions require annotated parameters and return types",
 }
@@ -256,7 +256,7 @@ def run(args, level, root, fixture_root):
         if row['id'].startswith(PREFIX + 'testmock.testpatch.PatchTest.'):
             method = row['id'].rsplit('.', 1)[-1]
             if method in patches:
-                if patch_cases.recorded_blocker(row, previous.get(row['id']), patches[method], fixture_root):
+                if patch_cases.recorded_blocker(row, previous.get((row['id'], row['occurrence'])), patches[method], fixture_root):
                     measured_blockers.add((row['id'], row['occurrence']))
                 if row['outcome'] == 'pass' and method not in patch_cases.REVIEWED:
                     raise ValueError(f"{row['id']}: review the original operation and assertions before publishing a new pass")

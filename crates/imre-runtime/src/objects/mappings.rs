@@ -5,6 +5,7 @@
 //! that the table can adjust when it removes vacant entries.
 
 use crate::StrOwner;
+use std::fmt::{self, Write};
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
@@ -151,7 +152,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                     5 => ObjectKey::borrow(word).hash(state),
                     6 => {
                         if index + 1 < layout.length {
-                            pending.try_reserve(1).map_err(|_| Error::allocation())?;
+                            pending.try_reserve(1).map_err(|_| Error::memory_error())?;
                             pending.push((value, index + 1));
                         }
                         current = (word as *const usize, 0);
@@ -688,6 +689,29 @@ impl<V: Copy> Tables<V> {
     fn len(&self) -> usize {
         table!(self, table => table.index.len())
     }
+    /// Compare live keys in insertion order, ignoring holes left by deletions.
+    fn same_key_order(&self, other: &Self) -> Result<bool, Error> {
+        fn same<K: TableKey, V>(a: &Table<K, V>, b: &Table<K, V>) -> Result<bool, Error> {
+            if a.index.len() != b.index.len() {
+                return Ok(false);
+            }
+            for (left, right) in a.entries.iter().flatten().zip(b.entries.iter().flatten()) {
+                if !left.key.try_eq(&right.key)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => same(a, b),
+            (Self::Enum(a), Self::Enum(b)) => same(a, b),
+            (Self::Str(a), Self::Str(b)) => same(a, b),
+            (Self::Object(a), Self::Object(b)) => same(a, b),
+            (Self::Bytes(a), Self::Bytes(b)) => same(a, b),
+            (Self::Tuple(a), Self::Tuple(b)) => same(a, b),
+            _ => Ok(false),
+        }
+    }
     #[cfg(test)]
     fn entry_count(&self) -> usize {
         table!(self, table => table.entries.len())
@@ -828,6 +852,8 @@ pub(super) struct Mapping {
     value_kind: WordKind,
     /// Only subscription consults this policy; membership and get inspect stored keys.
     missing: Missing,
+    /// An OrderedDict iterator detects key changes even if its size is restored.
+    order_version: Option<usize>,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -881,6 +907,7 @@ impl Mapping {
             copy.insert(key, value)?;
             position = next;
         }
+        copy.order_version = self.order_version.map(|_| 0);
         Ok(copy)
     }
 
@@ -1002,12 +1029,21 @@ impl Mapping {
     ) -> Result<Option<(OwnedWord, OwnedWord)>, Error> {
         let key_word = key.word;
         let old = self.tables.insert(key, value.word)?;
+        if old.is_none() {
+            self.keys_changed();
+        }
         let word = value.into_word();
         // SAFETY: the table or the displaced pair roots the key. The table owns
         // the new value, and each displaced word transfers its stored owner.
         unsafe {
             self.update_ascii_int(key_word, word);
             Ok(old.map(|(key, word)| (key, OwnedWord::from_owned(word, self.value_kind))))
+        }
+    }
+
+    fn keys_changed(&mut self) {
+        if let Some(version) = &mut self.order_version {
+            *version = version.wrapping_add(1);
         }
     }
 
@@ -1124,18 +1160,26 @@ impl Mapping {
         {
             return Comparison::Done(false);
         }
+        if position == 0 && self.order_version.is_some() && other.order_version.is_some() {
+            match self.tables.same_key_order(&other.tables) {
+                Ok(true) => {}
+                Ok(false) => return Comparison::Done(false),
+                Err(error) => return Comparison::Error(error),
+            }
+        }
         let Some((next, key, left)) = self.tables.next(position) else {
             return Comparison::Done(true);
         };
         // SAFETY: table kinds match and both tables retain their entries.
-        match unsafe { other.tables.lookup(key.word) } {
-            Some(right) => Comparison::Child {
+        match unsafe { other.tables.try_lookup(key.word) } {
+            Ok(Some(right)) => Comparison::Child {
                 left,
                 right,
                 kind: self.value_kind,
                 resume: Some(next),
             },
-            None => Comparison::Done(false),
+            Ok(None) => Comparison::Done(false),
+            Err(error) => Comparison::Error(error),
         }
     }
 
@@ -1144,50 +1188,19 @@ impl Mapping {
         &self,
         output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Result<Option<super::values::ReprEntry>, std::fmt::Error> {
-        use std::fmt::Write as _;
+    ) -> Result<Option<super::values::ReprEntry>, fmt::Error> {
         if self.missing == Missing::Zero {
-            output.write_str("Counter(")?;
-            if self.tables.len() != 0 {
-                let mut entries = Vec::new();
-                entries
-                    .try_reserve_exact(self.tables.len())
-                    .map_err(|_| std::fmt::Error)?;
-                self.tables.all(|key, count| {
-                    entries.push((key, count));
-                    true
-                });
-                // SAFETY: the immutable table roots both exact integer counts.
-                let descending = |a: &(usize, usize), b: &(usize, usize)| unsafe {
-                    super::stdlib::compare_int(b.1, a.1)
-                };
-                // Already ranked counters need no sort scratch. Otherwise stable sorting
-                // preserves first appearance for equal counts.
-                if !entries.is_sorted_by(|a, b| descending(a, b).is_le()) {
-                    super::stdlib::stable_sort(&mut entries, descending);
-                }
-                output.write_char('{')?;
-                for (index, (key, count)) in entries.into_iter().enumerate() {
-                    if index != 0 {
-                        output.write_str(", ")?;
-                    }
-                    // SAFETY: only immutable scalar keys and integer counts are supported.
-                    unsafe {
-                        super::values::try_write_repr(
-                            output,
-                            key,
-                            WordKind::new(self.tables.key_kind()),
-                        )?;
-                        output.write_str(": ")?;
-                        super::values::try_write_repr(output, count, self.value_kind)?;
-                    }
-                }
-                output.write_char('}')?;
-            }
-            output.write_char(')')?;
+            self.write_counter_repr(output)?;
             return Ok(None);
         }
         if position == 0 {
+            if self.order_version.is_some() {
+                output.write_str("OrderedDict(")?;
+                if self.tables.len() == 0 {
+                    output.write_char(')')?;
+                    return Ok(None);
+                }
+            }
             match self.missing {
                 Missing::List(_) => output.write_str("defaultdict(<class 'list'>, ")?,
                 Missing::NoFactory => output.write_str("defaultdict(None, ")?,
@@ -1197,7 +1210,9 @@ impl Mapping {
         }
         let Some((next, key, value)) = self.tables.next(position) else {
             output.write_char('}')?;
-            if matches!(self.missing, Missing::List(_) | Missing::NoFactory) {
+            if self.order_version.is_some()
+                || matches!(self.missing, Missing::List(_) | Missing::NoFactory)
+            {
                 output.write_char(')')?;
             }
             return Ok(None);
@@ -1212,11 +1227,50 @@ impl Mapping {
         }))
     }
 
+    fn write_counter_repr(&self, output: &mut impl Write) -> fmt::Result {
+        if self.tables.len() == 0 {
+            return output.write_str("Counter()");
+        }
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(self.tables.len())
+            .map_err(|_| fmt::Error)?;
+        self.tables.all(|key, count| {
+            entries.push((key, count, entries.len()));
+            true
+        });
+        // The ordinal preserves insertion order for ties without allocating sort scratch.
+        entries.sort_unstable_by(|a, b| {
+            // SAFETY: the immutable table roots both exact integer counts.
+            unsafe { crate::imre_int_compare(b.1, a.1) }
+                .cmp(&0)
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        output.write_str("Counter({")?;
+        for (index, (key, count, _)) in entries.into_iter().enumerate() {
+            if index != 0 {
+                output.write_str(", ")?;
+            }
+            // SAFETY: a Counter roots its exact integer or string keys and integer counts.
+            unsafe {
+                if self.tables.key_kind() == 2 {
+                    super::values::write_int_repr(output, key)?;
+                } else {
+                    super::exceptions::write_string_repr(&*(key as *const Str), output)?;
+                }
+                output.write_str(": ")?;
+                super::values::write_int_repr(output, count)?;
+            }
+        }
+        output.write_str("})")
+    }
+
     pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
             missing: Missing::Raise,
+            order_version: None,
             ascii_int: None,
         }
     }
@@ -1226,6 +1280,10 @@ impl Mapping {
     fn take_contents(&mut self) -> Self {
         let mut empty = Self::new(self.tables.key_kind(), self.value_kind.raw());
         empty.missing = self.missing;
+        empty.order_version = self.order_version;
+        if self.tables.len() != 0 {
+            empty.keys_changed();
+        }
         let cursors = table!(&mut self.tables, table => {
             std::mem::replace(&mut table.cursors, Cursors::Iterators(Vec::new()))
         });
@@ -1376,6 +1434,7 @@ impl Drop for Mapping {
 enum IterationError {
     DictionarySize,
     DictionaryKeys,
+    OrderedDictMutation,
     SetSize,
 }
 impl IterationError {
@@ -1383,6 +1442,7 @@ impl IterationError {
         match self {
             Self::DictionarySize => "dictionary changed size during iteration",
             Self::DictionaryKeys => "dictionary keys changed during iteration",
+            Self::OrderedDictMutation => "OrderedDict mutated during iteration",
             Self::SetSize => "Set changed size during iteration",
         }
     }
@@ -1395,7 +1455,8 @@ enum IteratorKind {
 }
 pub(super) struct MappingIterator {
     owner: crate::ObjectOwner,
-    expected_len: usize,
+    /// Size for a dict or set; key version for an OrderedDict.
+    expected: usize,
     position: Rc<Cell<usize>>,
     remaining: usize,
     kind: IteratorKind,
@@ -1413,8 +1474,16 @@ impl MappingIterator {
         // snapshot acquisition cannot reenter and no storage reference escapes.
         let result = unsafe {
             self.owner.0.with(|storage| {
-                let length = storage.iteration_len(self.kind);
-                if length != self.expected_len {
+                if self.kind != IteratorKind::Set
+                    && let Some(version) = storage.dictionary().order_version
+                {
+                    if self.remaining == 0 {
+                        return Ok(None);
+                    }
+                    if version != self.expected {
+                        return Err(IterationError::OrderedDictMutation);
+                    }
+                } else if storage.iteration_len(self.kind) != self.expected {
                     return Err(if self.kind == IteratorKind::Set {
                         IterationError::SetSize
                     } else {
@@ -1447,10 +1516,13 @@ impl MappingIterator {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
-                if error == IterationError::DictionaryKeys {
+                if matches!(
+                    error,
+                    IterationError::DictionaryKeys | IterationError::OrderedDictMutation
+                ) {
                     self.exhausted = true;
                 } else {
-                    self.expected_len = usize::MAX;
+                    self.expected = usize::MAX;
                 }
                 return Err(error);
             }
@@ -1792,8 +1864,13 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     owner: *const Object,
     fresh: *const Object,
 ) -> *const Object {
-    // SAFETY: only the missing-key policy is copied out of the receiver's borrow.
-    let policy = unsafe { object(owner).0.with(|s| s.dictionary().missing) };
+    // SAFETY: only the receiver's class and missing-key policy leave its borrow.
+    let (policy, ordered) = unsafe {
+        object(owner).0.with(|storage| {
+            let source = storage.dictionary();
+            (source.missing, source.order_version.is_some())
+        })
+    };
     let missing = match policy {
         Missing::Zero => {
             return Error::new(
@@ -1807,12 +1884,31 @@ pub unsafe extern "C" fn imre_dict_fromkeys_target(
     };
     // SAFETY: the target is still private; the result needs its own strong reference.
     unsafe {
-        object(fresh)
-            .0
-            .with_mut(|s| s.dictionary_mut().missing = missing);
+        object(fresh).0.with_mut(|storage| {
+            let target = storage.dictionary_mut();
+            target.missing = missing;
+            target.order_version = ordered.then_some(0);
+        });
         crate::ObjectOwner::increment_strong_count(fresh);
     }
     fresh
+}
+
+/// Give the constructor's freshly populated dictionary OrderedDict identity.
+///
+/// # Safety
+/// The argument is a rooted plain dictionary created for this constructor; no
+/// user code has observed it. The result has an independent strong reference.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_ordered_dict(value: *const Object) -> *const Object {
+    // SAFETY: the compiler creates this exact dictionary before the call.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.dictionary_mut().order_version = Some(0));
+        crate::ObjectOwner::increment_strong_count(value);
+    }
+    value
 }
 
 /// Copies the mapping in insertion order, preserving its subscription policy.
@@ -2314,6 +2410,7 @@ pub unsafe extern "C" fn imre_dict_setdefault(
             if inserted {
                 mapping.value_kind.acquire(word).into_word();
                 mapping.update_ascii_int(key, word);
+                mapping.keys_changed();
             }
             Ok(mapping.value_kind.acquire(word).into_word())
         })
@@ -2367,6 +2464,9 @@ unsafe fn take_entry(
                 .remove(key)?
                 .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
             mapping.update_ascii_int(key, 0);
+            if old.is_some() {
+                mapping.keys_changed();
+            }
             Ok((old, mapping.missing))
         })
     }
@@ -2470,14 +2570,19 @@ unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Objec
     // SAFETY: acquire an independent root before reading mutable cursor metadata.
     let owner = unsafe { crate::ObjectOwner::acquire_word(value as usize) };
     // SAFETY: the independent owner roots storage; only an owned cursor and size escape.
-    let (position, length) = unsafe {
-        owner
-            .0
-            .with_mut(|s| (s.iteration_position(kind), s.iteration_len(kind)))
+    let (position, length, expected) = unsafe {
+        owner.0.with_mut(|s| {
+            let length = s.iteration_len(kind);
+            let expected = match kind {
+                IteratorKind::Set => length,
+                _ => s.dictionary().order_version.unwrap_or(length),
+            };
+            (s.iteration_position(kind), length, expected)
+        })
     };
     let iterator = MappingIterator {
         owner,
-        expected_len: length,
+        expected,
         position,
         remaining: length,
         kind,
@@ -2822,6 +2927,43 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn counter_repr_propagates_writer_failures_and_preserves_ties() {
+        struct Budget(usize);
+        impl Write for Budget {
+            fn write_str(&mut self, text: &str) -> fmt::Result {
+                self.0 = self.0.checked_sub(text.len()).ok_or(fmt::Error)?;
+                Ok(())
+            }
+        }
+
+        // SAFETY: the counter owns its table; all keys and counts are immediate integers.
+        let counter = unsafe { crate::ObjectOwner::from_raw(imre_counter_new(2)) };
+        for (key, count) in [(2, 7), (-8, -4), (1, 7)] {
+            // SAFETY: the live counter owns exact immediate integer keys and counts.
+            unsafe {
+                imre_dict_set(
+                    crate::ObjectOwner::as_ptr(&counter),
+                    integer(key),
+                    integer(count),
+                )
+            };
+        }
+        // SAFETY: this shared borrow does not mutate the rooted counter.
+        unsafe {
+            counter.0.with(|storage| {
+                let mapping = storage.dictionary();
+                let expected = "Counter({2: 7, 1: 7, -8: -4})";
+                for budget in 0..expected.len() {
+                    assert!(mapping.write_counter_repr(&mut Budget(budget)).is_err());
+                }
+                let mut text = String::new();
+                mapping.write_counter_repr(&mut text).unwrap();
+                assert_eq!(text, expected);
+            })
+        };
     }
 
     #[test]

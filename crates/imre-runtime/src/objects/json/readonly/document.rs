@@ -170,7 +170,7 @@ impl Value {
 
     fn from_json_at(view: &View, index: usize, depth: usize) -> Result<Self, Error> {
         if index == view.index
-            && let Some(root) = view.snapshot_root()
+            && let Some(root) = view.snapshot_root()?
         {
             return Self::from_json_at(&root, root.index, depth);
         }
@@ -183,7 +183,10 @@ impl Value {
             ));
         }
         Ok(match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json_at(array.view(), array.view().index, depth)?,
+            Node::Deferred(array) => {
+                let child = array.try_view()?;
+                Self::from_json_at(child, child.index, depth)?
+            }
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -402,11 +405,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let mut repr = String::new();
                 doc(a)
                     .view()?
-                    .write_repr(&mut crate::objects::values::ReprWriter(&mut repr))
-                    .map_err(|_| Error::allocation())?;
-                StrOwner::into_raw(
-                    StrOwner::try_new(Str::from(repr)).map_err(|_| Error::allocation())?,
-                ) as usize
+                    .try_write_repr(&mut crate::objects::values::ReprWriter(&mut repr))?;
+                crate::checked_owned_str(Str::from(repr))? as usize
             }
             20 => usize::from(doc(a).truth()),
             21 => {
@@ -426,7 +426,9 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize
+                    StrOwner::into_raw(
+                        StrOwner::try_new(Str::from(text)).map_err(|_| Error::allocation())?,
+                    ) as usize
                 } else {
                     0
                 }

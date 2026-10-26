@@ -9,17 +9,80 @@ use std::cell::RefCell;
 mod active;
 mod communicate;
 mod control;
+mod poll;
 mod selector;
 
 pub(super) use active::cleanup;
 pub(in crate::objects) use active::retain_live_owner;
-use control::ChildControl;
+use control::{ChildControl, ReturnCode};
 use std::sync::Arc;
 
 type Pipes = [Option<crate::ObjectOwner>; 3];
 
+#[derive(Default)]
+pub(super) struct ChildPipes {
+    pub(super) ends: [Option<Stdio>; 3],
+    pub(super) closed_descriptor: bool,
+    pub(super) devnull: Option<fs::File>,
+}
+
+impl ChildPipes {
+    /// Open all pipe handles before allocating their Python stream buffers.
+    fn open(
+        modes: [u32; 3],
+        descriptors: [RawFd; 3],
+        pipe_capacity: Option<u32>,
+    ) -> Result<(Self, [Option<OwnedFd>; 3])> {
+        let mut child = Self::default();
+        let mut parents = [None, None, None];
+        if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
+            // Remember closed explicit descriptors before a new pipe can reuse their number.
+            child.closed_descriptor = descriptors.into_iter().any(|fd| {
+                // SAFETY: F_GETFD checks the integer without taking ownership.
+                fd >= 0 && unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
+            });
+        }
+        for (i, mode) in modes.into_iter().enumerate() {
+            if mode == 1 {
+                let (read, write) = super::pipe_size::open(pipe_capacity).map_err(errno_error)?;
+                let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
+                let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
+                parents[i] = Some(parent);
+                child.ends[i] = Some(Stdio::from(other));
+            } else if mode == 2 && child.devnull.is_none() {
+                child.devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")
+                        .map_err(errno_error)?,
+                );
+            }
+        }
+        Ok((child, parents))
+    }
+}
+
+/// Explicit descriptors and any handles already opened by Popen's constructor.
+pub(super) struct Redirects {
+    pub(super) fds: [RawFd; 3],
+    pub(super) oversized: bool,
+    pub(super) prepared: Option<ChildPipes>,
+}
+
+impl Default for Redirects {
+    fn default() -> Self {
+        Self {
+            fds: [-1; 3],
+            oversized: false,
+            prepared: None,
+        }
+    }
+}
+
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
+    poll_override: Option<poll::Override>,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
@@ -46,7 +109,7 @@ impl Popen {
         self.control.signal(signal)
     }
 
-    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<i32>> {
+    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<ReturnCode>> {
         self.control.wait(timeout)
     }
 }
@@ -132,11 +195,20 @@ struct PassFdsConfig {
     kind: u32,
 }
 
+/// Bit 21 appends the original pipesize word and its exact representation.
+#[repr(C)]
+struct SizedPipeConfig {
+    pass: PassFdsConfig,
+    size: usize,
+    kind: u32,
+}
+
 #[derive(Default)]
 struct LaunchExtras {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
+    pipe_size: Option<(usize, u32)>,
 }
 
 impl LaunchConfig {
@@ -153,6 +225,11 @@ impl LaunchConfig {
         // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
         if streams & (1 << 18) != 0 {
+            let pipe_size = (streams & (1 << 21) != 0).then(|| {
+                // SAFETY: bit 21 promises the complete sized pipe trailer.
+                let full = unsafe { &*config.cast::<SizedPipeConfig>() };
+                (full.size, full.kind)
+            });
             let keep = (streams & (1 << 19) != 0).then(|| {
                 // SAFETY: bit 19 promises the complete pass_fds trailer.
                 let full = unsafe { &*config.cast::<PassFdsConfig>() };
@@ -164,6 +241,7 @@ impl LaunchConfig {
                 redirects: config.redirect.words,
                 child: Some((config.group, config.mask, config.new_session)),
                 keep,
+                pipe_size,
             }
         } else if Self::has_redirects(streams) {
             LaunchExtras {
@@ -171,6 +249,7 @@ impl LaunchConfig {
                 redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
                 child: None,
                 keep: None,
+                pipe_size: None,
             }
         } else {
             LaunchExtras::default()
@@ -266,13 +345,17 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
-/// Popen acquires these handles before opening a parent stream with bufsize.
-fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+/// Check only on a validation failure: a successful launch creates its own handles.
+fn check_handles(
+    modes: &[u32],
+    fork_error_pipe: bool,
+    pipe_capacity: Option<u32>,
+) -> io::Result<()> {
     let mut pipes = [const { None }; 3];
     let mut devnull = None;
     for (pipe, mode) in pipes.iter_mut().zip(modes) {
         match mode {
-            1 => *pipe = Some(io::pipe()?),
+            1 => *pipe = Some(super::pipe_size::open(pipe_capacity)?),
             2 if devnull.is_none() => {
                 devnull = Some(
                     fs::OpenOptions::new()
@@ -284,7 +367,20 @@ fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
             _ => {}
         }
     }
+    if fork_error_pipe {
+        let (_read, write) = io::pipe()?;
+        // The fork child needs its error writer above the standard descriptors.
+        if write.as_raw_fd() < 3 {
+            let _above_stdio = write.try_clone()?;
+        }
+    }
     Ok(())
+}
+
+pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: Error) -> Error {
+    check_handles(modes, fork_error_pipe, None)
+        .err()
+        .map_or(error, errno_error)
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
@@ -304,6 +400,13 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    let pipe_capacity = match extras.pipe_size {
+        Some((word, kind)) => {
+            // SAFETY: the launch argument stays rooted until spawn returns.
+            unsafe { super::pipe_size::capacity(word, WordKind::new(kind)) }?
+        }
+        None => None,
+    };
     if !config.close_fds
         && let Some((word, kind)) = extras.keep
         // SAFETY: the launch trailer retains the original collection.
@@ -334,43 +437,50 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
                 object(extras.redirects[i] as *const Object)
                     .0
                     .with(|s| s.file().fileno())
-            }?,
+            }
+            .map_err(|error| {
+                check_handles(&modes[..i], false, pipe_capacity)
+                    .err()
+                    .map_or(error, errno_error)
+            })?,
             _ => -1,
         };
     }
+    let (prepared, parents) = ChildPipes::open(modes, descriptors, pipe_capacity)?;
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
         match c_int(&size) {
             Some(size) => size,
-            None => {
-                // Before reporting bufsize, preserve any error acquiring the pipe handles.
-                check_buffer_error_handles(modes).map_err(errno_error)?;
-                return Err(c_int_overflow());
-            }
+            None => return Err(c_int_overflow()),
         }
     } else {
         -1
     };
-    let child = |may_spawn| {
-        let Some((group, mask, new_session)) = extras.child else {
-            return Ok(ChildAttributes::default());
-        };
+    let child_args = extras.child.map(|(group, mask, new_session)| {
         let group = (group != 0).then(|| {
             // SAFETY: a non-null group is a rooted Python integer.
             unsafe { Int::borrow(group) }
         });
-        // SAFETY: the caller roots the requested mask and descriptor collection.
-        let mask = unsafe { Int::borrow(mask) };
-        let direct = may_spawn
-            && !new_session
-            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
-            && mask.big().sign() == num_bigint::Sign::Minus
-            && extras.keep.is_none_or(|(word, kind)| {
-                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
-                !unsafe { super::pass_fds::nonempty(word, kind) }
-            });
+        // SAFETY: the launch trailer roots the mask through argument conversion.
+        (group, unsafe { Int::borrow(mask) }, new_session)
+    });
+    let allow_spawn = child_args
+        .as_ref()
+        .is_none_or(|(group, mask, new_session)| {
+            !new_session
+                && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+                && mask.big().sign() == num_bigint::Sign::Minus
+        })
+        && extras.keep.is_none_or(|(word, kind)| {
+            // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+            !unsafe { super::pass_fds::nonempty(word, kind) }
+        });
+    let child = |direct| {
+        let Some((group, mask, new_session)) = child_args else {
+            return Ok(ChildAttributes::default());
+        };
         if direct {
             return Ok(ChildAttributes::default());
         }
@@ -397,24 +507,28 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             keep,
         })
     };
+    let text = streams & (1 << 16) != 0;
+    let mut pipes: Pipes = [None, None, None];
+    for (i, parent) in parents.into_iter().enumerate() {
+        if let Some(fd) = parent {
+            pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
+        }
+    }
+    let redirects = Redirects {
+        fds: descriptors,
+        oversized,
+        prepared: Some(prepared),
+    };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =
-        unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized, child) };
-    child.map(|mut child| {
-        let text = streams & (1 << 16) != 0;
-        let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
-        let pipes = [
-            child.stdin.take().map(|fd| pipe(fd.into(), false)),
-            child.stdout.take().map(|fd| pipe(fd.into(), true)),
-            child.stderr.take().map(|fd| pipe(fd.into(), true)),
-        ];
-        Popen {
-            pipes,
-            args,
-            control: Arc::new(ChildControl::new(child)),
-            communication: Default::default(),
-            finalized: false,
-        }
+        unsafe { launch_error::spawn(&args, config, streams, redirects, allow_spawn, child) }?;
+    Ok(Popen {
+        pipes,
+        args,
+        control: Arc::new(ChildControl::new(child)),
+        communication: Default::default(),
+        finalized: false,
+        poll_override: None,
     })
 }
 
@@ -486,7 +600,9 @@ pub unsafe extern "C" fn imre_call_config(
     let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.and_then(|mut p| {
         // SAFETY: the deadline kind was selected for this rooted word by the compiler.
         let timeout = unsafe { Deadline::from_word(kind, word) };
-        let waited = p.wait(timeout.as_ref());
+        let waited = p
+            .wait(timeout.as_ref())
+            .map(|code| code.map(ReturnCode::kernel));
         let killed = if matches!(waited, Ok(Some(_))) {
             Ok(())
         } else {
@@ -581,7 +697,20 @@ pub unsafe extern "C" fn imre_child_status(control: *const ChildControl, poll: b
     } else {
         Ok(control.status())
     };
-    finish(result.map(|s| s.map_or(0, exit_word)), 0)
+    finish(result.map(|s| s.map_or(0, ReturnCode::into_word)), 0)
+}
+
+/// # Safety
+/// The caller roots the Popen's control and the optional Python integer through the store.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_child_set_status(control: *const ChildControl, word: usize) {
+    let value = (word != 0).then(|| {
+        // SAFETY: a nonzero word is a rooted integer on the calling thread.
+        let value = unsafe { Int::borrow(word) };
+        ReturnCode::from_int(&value)
+    });
+    // SAFETY: the Popen continues to own this control while its mutex is held.
+    unsafe { (*control).set_status(value) };
 }
 
 /// # Safety
@@ -600,7 +729,7 @@ pub unsafe extern "C" fn imre_child_wait(
     unsafe {
         let timeout = Deadline::from_word(kind, word);
         match (*control).wait(timeout.as_ref()) {
-            Ok(Some(code)) => exit_word(code),
+            Ok(Some(code)) => code.into_word(),
             Ok(None) => {
                 let cmd = with_process(owner, |p| p.args.clone());
                 raise_timeout(TimeoutError {
@@ -618,23 +747,26 @@ pub unsafe extern "C" fn imre_child_wait(
 }
 
 /// # Safety
+/// The caller roots the integer until conversion; conversion can raise OverflowError.
+unsafe fn signal_number(signal: usize) -> Result<i32> {
+    // SAFETY: the caller supplied a rooted Python integer.
+    unsafe { Int::borrow(signal) }
+        .as_small()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C int",
+            )
+        })
+}
+
+/// # Safety
 /// The control stays rooted, and the signal integer belongs to the caller thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal: usize) {
     // SAFETY: no language state from the Popen owner is accessed while signaling.
-    let result = unsafe {
-        (*control).signal(|| {
-            Int::borrow(signal)
-                .as_small()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new(
-                        Kind::OverflowError,
-                        "Python int too large to convert to C int",
-                    )
-                })
-        })
-    };
+    let result = unsafe { (*control).signal(|| signal_number(signal)) };
     finish(result, ());
 }
 
@@ -642,8 +774,13 @@ pub unsafe extern "C" fn imre_child_signal(control: *const ChildControl, signal:
 /// Legacy entry point: the caller roots this Popen on its owner thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_status(handle: *const Object, poll: bool) -> usize {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_status(imre_popen_control(handle), poll) }
+    // SAFETY: clone the callable under the borrow, then invoke it after releasing the borrow.
+    unsafe {
+        if poll && let Some(callback) = with_process(handle, |p| p.poll_override.clone()) {
+            return callback.invoke();
+        }
+        imre_child_status(imre_popen_control(handle), poll)
+    }
 }
 
 /// # Safety
@@ -658,8 +795,12 @@ pub unsafe extern "C" fn imre_popen_wait(handle: *const Object, kind: u32, word:
 /// Legacy entry point: the handle and signal integer stay rooted on this thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_signal(handle: *const Object, signal: usize) {
-    // SAFETY: the handle stays rooted throughout the control call.
-    unsafe { imre_child_signal(imre_popen_control(handle), signal) }
+    // SAFETY: the handle and signal stay rooted across the optional user callback.
+    unsafe {
+        if !poll::imre_popen_signal_override(handle, signal) {
+            imre_child_signal(imre_popen_control(handle), signal);
+        }
+    }
 }
 
 /// # Safety

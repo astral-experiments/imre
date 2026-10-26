@@ -591,7 +591,7 @@ impl Encoder<'_> {
             Node::Float(value) => self.float(*value),
             Node::ConstantNan => self.float(f64::NAN),
             Node::Deferred(array) => {
-                let v = array.view();
+                let v = array.try_view()?;
                 self.document(v, v.index, depth)
             }
             Node::Array(children) => {

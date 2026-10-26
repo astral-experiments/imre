@@ -34,6 +34,35 @@ def check_pipe_exhaustion() -> None:
         else:
             raise AssertionError("expected pipe exhaustion")
     assert descriptors() == before
+    # Leave three slots: the second configured pipe fails regardless of launch API.
+    for _ in range(2):
+        held.append(open("sentinel.txt", "rb"))
+    empty: list[str] = []
+    closed = open("sentinel.txt", "rb")
+    closed.close()
+    before = descriptors()
+    for _ in range(3):
+        try:
+            subprocess.Popen(empty, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as error:
+            assert error.errno == EMFILE
+        else:
+            raise AssertionError("expected pipe exhaustion before argv lookup")
+        try:
+            subprocess.Popen(
+                [argv[1]], stdin=36893488147419103232, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        except OSError as error:
+            assert error.errno == EMFILE
+        else:
+            raise AssertionError("expected pipe exhaustion before descriptor conversion")
+        try:
+            subprocess.Popen([argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=closed)
+        except OSError as error:
+            assert error.errno == EMFILE
+        else:
+            raise AssertionError("expected pipe exhaustion before a later closed file")
+    assert descriptors() == before
     for file in held:
         file.close()
 

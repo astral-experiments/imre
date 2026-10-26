@@ -17,7 +17,7 @@ impl Checker<'_> {
                 "dictionary keyword entries require string keys",
             ));
         }
-        let mut value = shape.map(|(_, value)| value);
+        let expected = shape.map(|(_, value)| value);
         let mut scope = calls::ArgumentScope::default();
         let mut entries = Vec::with_capacity(call.arguments.keywords.len());
         for kw in &call.arguments.keywords {
@@ -28,14 +28,25 @@ impl Checker<'_> {
                     "dictionary keyword unpacking is unsupported",
                 )
             })?;
-            let item = match value {
+            let item = match expected {
                 Some(ty) => self.expr_expected(&kw.value, ty)?,
                 None => self.expr(&kw.value)?,
             };
-            value = Some(item.ty);
             entries.push((unpacking::string(name.as_str()), scope.hold(self, item)));
         }
-        let value = value.expect("at least one keyword or a contextual value type");
+        let value = expected.unwrap_or_else(|| {
+            let first = entries[0].1.ty;
+            if entries.iter().all(|(_, item)| item.ty == first) {
+                first
+            } else {
+                Type::ObjectValue
+            }
+        });
+        let entries = entries
+            .into_iter()
+            .zip(&*call.arguments.keywords)
+            .map(|((key, item), kw)| Ok((key, self.coerce(item, value, &kw.value)?)))
+            .collect::<Result<Vec<_>, String>>()?;
         Ok(scope.finish(Expr {
             ty: self.types.dict(Type::Str, value),
             kind: ExprKind::Dict {
@@ -44,6 +55,20 @@ impl Checker<'_> {
                 entries,
             },
         }))
+    }
+
+    /// Only the freshly constructed mapping receives OrderedDict identity.
+    pub(super) fn ordered_dict_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mapping = self.dict_constructor(call, shape)?;
+        let (key, value) = self.types.mapping(mapping.ty).expect("fresh dictionary");
+        Ok(Expr {
+            ty: self.types.ordered_dict(key, value),
+            kind: ExprKind::Builtin(Builtin::OrderedDict, vec![mapping]),
+        })
     }
 
     /// Copy stored entries into a fresh plain dictionary. A Counter's zero
@@ -502,6 +527,7 @@ impl Checker<'_> {
         receiver: Expr,
         source: &ast::Expr,
         node: &impl Ranged,
+        append: Builtin,
     ) -> Result<Expr, String> {
         let element = self.types.element(receiver.ty).unwrap();
         let destination = self.hidden(receiver.ty);
@@ -523,6 +549,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
         });
         let before = match &input {
+            _ if !matches!(append, Builtin::Append) => Vec::new(),
             Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
                 let mut eager = Vec::new();
                 if self.locals[list.value] == self.locals[destination] {
@@ -558,7 +585,7 @@ impl Checker<'_> {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
-                        Builtin::Append,
+                        append.clone(),
                         vec![
                             checker.local(destination),
                             checker.coerce(value, element, node)?,

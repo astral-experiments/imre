@@ -363,6 +363,19 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
                 let executable =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[10].value.operand));
+                // Bit 20 is set in the ABI word only when the caller disables
+                // restoration. The optional boolean is the final bound operand.
+                let signal_arg = streams & (1 << 20) != 0;
+                let stream_word = if signal_arg {
+                    self.instruction(format!(
+                        "select i1 {}, i32 {}, i32 {}",
+                        args[args.len() - 1].value.operand,
+                        streams & !(1 << 20),
+                        streams
+                    ))
+                } else {
+                    streams.to_string()
+                };
                 let kind = |index: usize| {
                     representation_kind(
                         self.module
@@ -381,7 +394,7 @@ impl Emitter<'_, '_> {
                     ("i32", kind(0).to_string()),
                     ("i32", kind(2).to_string()),
                     ("i32", kind(10).to_string()),
-                    ("i32", streams.to_string()),
+                    ("i32", stream_word),
                     ("i1", args[9].value.operand.clone()),
                     ("i1", args[11].value.operand.clone()),
                 ];
@@ -403,7 +416,12 @@ impl Emitter<'_, '_> {
                 }
                 if child_options {
                     let pass_fds = streams & (1 << 19) != 0;
-                    let start = args.len() - 3 - usize::from(pass_fds);
+                    let pipe_size = streams & (1 << 21) != 0;
+                    let start = args.len()
+                        - 3
+                        - usize::from(pass_fds)
+                        - usize::from(pipe_size)
+                        - usize::from(signal_arg);
                     fields.extend([
                         ("i64", args[start].value.operand.clone()),
                         ("i64", args[start + 1].value.operand.clone()),
@@ -413,6 +431,19 @@ impl Emitter<'_, '_> {
                         fields.extend([
                             ("i64", self.word(&args[start + 3].value)),
                             ("i32", kind(start + 3).to_string()),
+                        ]);
+                    } else if pipe_size {
+                        // SizedPipeConfig embeds the complete pass_fds layout.
+                        fields.extend([("i64", "0".into()), ("i32", "0".into())]);
+                    }
+                    if pipe_size {
+                        let value = &args[start + 3 + usize::from(pass_fds)].value;
+                        fields.extend([
+                            ("i64", self.word(value)),
+                            (
+                                "i32",
+                                representation_kind(value.ty, &self.module.types).to_string(),
+                            ),
                         ]);
                     }
                 }
@@ -495,16 +526,49 @@ impl Emitter<'_, '_> {
             ProcessOperation::PopenIdentity => {
                 self.call("imre_popen_identity", returns, &[&args[0].value])
             }
-            ProcessOperation::PopenStatus { poll } => {
+            ProcessOperation::PopenStatus { poll: true } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_popen_status(ptr {}, i1 true)",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenStatus { poll: false } => {
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
                     args[0].value.operand
                 ));
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_child_status(ptr {control}, i1 {})",
-                    u8::from(poll)
+                    "call i64 @imre_child_status(ptr {control}, i1 false)"
                 ));
                 self.unpack_word(word, returns)
+            }
+            ProcessOperation::PopenSetPoll { returns_none } => {
+                self.checked_line(format!(
+                    "call void @imre_popen_set_poll(ptr {}, ptr {}, i1 {})",
+                    args[1].value.operand,
+                    args[0].value.operand,
+                    u8::from(returns_none)
+                ));
+                none()
+            }
+            ProcessOperation::PopenDeletePoll => {
+                self.checked_line(format!(
+                    "call void @imre_popen_del_poll(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::PopenSetStatus => {
+                let control = self.instruction(format!(
+                    "call ptr @imre_popen_control(ptr {})",
+                    args[1].value.operand
+                ));
+                self.line(format!(
+                    "call void @imre_child_set_status(ptr {control}, i64 {})",
+                    args[0].value.operand
+                ));
+                none()
             }
             ProcessOperation::PopenCommunicate { text } => {
                 let layout = self
@@ -540,6 +604,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::PopenSignal => {
+                let overridden = self.checked_instruction(format!(
+                    "call i1 @imre_popen_signal_override(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                let (default, done) = (self.label(), self.label());
+                self.branch(&overridden, &done, &default);
+                self.start(&default);
                 let control = self.instruction(format!(
                     "call ptr @imre_popen_control(ptr {})",
                     args[0].value.operand
@@ -548,6 +619,8 @@ impl Emitter<'_, '_> {
                     "call void @imre_child_signal(ptr {control}, i64 {})",
                     args[1].value.operand
                 ));
+                self.jump(&done);
+                self.start(&done);
                 none()
             }
             ProcessOperation::AsyncSpawn { stdout, stderr } => {

@@ -1316,6 +1316,8 @@ impl Checker<'_> {
                             Builtin::TupleIndex
                         } else if ty == Type::Bytes {
                             Builtin::BytesGet
+                        } else if !reverse && self.consumes_list(ty, node.range()) {
+                            Builtin::SequenceTakeInBounds
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
@@ -2033,17 +2035,20 @@ impl Checker<'_> {
             });
         // The destination describes surviving values. The truth predicate may
         // still receive None from a generator, list display, or nested pipeline.
-        let input_hint = callback_input.or_else(|| {
-            if filter
-                && checked
-                    .as_ref()
-                    .is_some_and(|callback| callback.ty == Type::None)
-            {
-                element.map(|ty| self.types.optional(ty))
-            } else {
-                filter.then_some(element).flatten()
-            }
-        });
+        // The internal len argument frame belongs to the call, not the source iterable.
+        let input_hint = callback_input
+            .filter(|ty| !self.types.is_len_argument(*ty))
+            .or_else(|| {
+                if filter
+                    && checked
+                        .as_ref()
+                        .is_some_and(|callback| callback.ty == Type::None)
+                {
+                    element.map(|ty| self.types.optional(ty))
+                } else {
+                    filter.then_some(element).flatten()
+                }
+            });
         let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
@@ -2185,11 +2190,20 @@ impl Checker<'_> {
         let [parameter] = params.as_slice() else {
             return Err(message());
         };
-        let args = ir::CallArgs::positional(vec![self.coerce(
-            self.local(input.value),
-            *parameter,
-            call,
-        )?]);
+        let item = self.local(input.value);
+        let argument = if self.types.is_len_argument(*parameter) {
+            if matches!(item.ty, Type::None | Type::Bool | Type::Int) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "len callback requires items with a length",
+                ));
+            }
+            self.pack_len_value(item, call)?
+        } else {
+            self.coerce(item, *parameter, call)?
+        };
+        let args = ir::CallArgs::positional(vec![argument]);
         if matches!(returns, Type::Coroutine(_)) {
             let slot = self.hidden(callback.ty);
             input

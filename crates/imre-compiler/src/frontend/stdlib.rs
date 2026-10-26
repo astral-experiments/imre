@@ -340,6 +340,19 @@ impl Checker<'_> {
         clear: &mut Vec<usize>,
     ) -> Result<(), String> {
         let element = self.types.element(self.locals[result]).unwrap();
+        if let Some(slot) = callback
+            && let Type::CmpKey(frame, _) = self.locals[slot]
+        {
+            body.push(Statement::Expr(self.sort_cmp_key(
+                self.local(result),
+                self.local(slot),
+                frame,
+                element,
+                reverse,
+                call,
+            )?));
+            return Ok(());
+        }
         let keys = if let Some(callback) = callback {
             let (parameters, key) = self.types.signature(self.locals[callback]).unwrap();
             let [parameter] = parameters.as_slice() else {
@@ -415,7 +428,9 @@ impl Checker<'_> {
         } else {
             self.expr(expression)?
         };
-        if value.ty != Type::None && self.types.signature(value.ty).is_none() {
+        if !matches!(value.ty, Type::None | Type::CmpKey(..))
+            && self.types.signature(value.ty).is_none()
+        {
             return Err(error(
                 self.source,
                 expression,
@@ -452,6 +467,12 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
+        if self.joined_lines.finishes_buffer(call.range()) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
+            });
+        }
         self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 

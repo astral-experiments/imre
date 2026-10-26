@@ -571,7 +571,11 @@ fn word(s: Option<StrOwner>) -> usize {
 }
 fn text(result: Result<String>) -> *const Str {
     finish(
-        result.map(|s| StrOwner::into_raw(StrOwner::new(Str::from(s)))),
+        result.and_then(|s| {
+            StrOwner::try_new(Str::from(s))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }

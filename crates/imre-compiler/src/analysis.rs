@@ -98,10 +98,7 @@ impl Session {
                 "from tomllib import load as load, loads as loads\n",
             ),
             ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
-            (
-                "unidiff",
-                "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
-            ),
+            ("unidiff", include_str!("analysis/unidiff.pyi")),
             (
                 "tomli_w",
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
@@ -558,10 +555,12 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
+    UnboundLocalRead(TextRange),
     Decorator(TextRange),
     RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
     Call(TextRange),
+    NonCallable(TextRange),
     InertReturn(TextRange),
     DictDeletion(TextRange),
     DeferredName(TextRange),
@@ -569,42 +568,54 @@ pub(crate) enum CheckedDiagnostic {
     CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    BuiltinAttribute(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    ArgumentType(TextRange),
     RepeatedKeyword(TextRange),
     NonIterableSpread(TextRange),
+    CallableKey(TextRange),
 }
 
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
+            Self::UnboundLocalRead(range) => (range, 10),
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
+            Self::NonCallable(range) => (range, 12),
             Self::Keyword(range) => (range, 2),
             Self::CheckedIndexRead(range) => (range, 3),
             Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::BuiltinAttribute(range) => (range, 14),
             Self::ExcessArgument(range) => (range, 6),
             Self::InertReturn(range) => (range, 13),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
             Self::RuntimeOverload(range) => (range, 12),
+            Self::CallableKey(range) => (range, 16),
+            Self::ArgumentType(range) => (range, 15),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
+            Self::AbstractClassCall(call) | Self::CallableKey(call) => {
+                diagnostic == "call-non-callable" && call == range
+            }
+            Self::UnboundLocalRead(read) => diagnostic == "unresolved-reference" && read == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
@@ -623,6 +634,8 @@ impl CheckedDiagnostic {
             Self::NonIterableSpread(value) => diagnostic == "not-iterable" && value == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ArgumentType(arg) => diagnostic == "invalid-argument-type" && arg == range,
+            Self::BuiltinAttribute(name) => diagnostic == "unresolved-attribute" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }
@@ -672,8 +685,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
-/// already checked the exact open slots before requesting these diagnostics.
+/// ty 0.0.14 counts functools.Placeholder as occupied and can leave bound
+/// tuple fields open. Imre has already checked the exact remaining signature.
 /// The zero-argument constructor also has a native runtime TypeError. Match
 /// only the diagnosed invocation; unrelated binding errors remain diagnostics.
 fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
@@ -709,7 +722,8 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
         )
     };
     if is_partial(callee) {
-        return rule == "too-many-positional-arguments";
+        return rule == "too-many-positional-arguments"
+            || (rule == "missing-argument" && call.range() == range);
     }
     if !matches!(callee, Type::ClassLiteral(_)) {
         return false;

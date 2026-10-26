@@ -4,6 +4,32 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// int() on a closed string/integer value preserves the integer or parses the
+    /// string. Keep the original value alive and evaluate it only once.
+    pub(super) fn integer_from_text_or_int(&mut self, value: Expr) -> Expr {
+        let (slot, test, text, integer) = self.protocol_alternatives(value.ty).unwrap();
+        debug_assert_eq!((text.ty, integer.ty), (Type::Str, Type::Int));
+        let parsed = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Int, vec![text]),
+        };
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(parsed),
+                        Box::new(integer),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     /// Store a protocol operand once, then provide the test and exact values for
     /// its two possible layouts. The caller assigns the operand to the returned slot.
     pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
@@ -170,6 +196,22 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        use InstanceType::{Deque, Exact, List, Tuple};
+        match self.collection_class_name(expression) {
+            Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
+            Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
+            Some("collections.abc.Sequence") => {
+                return Ok(vec![
+                    List,
+                    Deque,
+                    Tuple,
+                    Exact(Type::Str),
+                    Exact(Type::Bytes),
+                ]);
+            }
+            _ => {}
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
@@ -205,7 +247,7 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
         if matches!(
-            self.resolve(expression),
+            self.collection_binding(expression),
             Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
         ) {
             let mut classes = vec![InstanceType::Dict];
@@ -219,6 +261,9 @@ impl Checker<'_> {
                     .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
             );
             return Ok(classes);
+        }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+            return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
         }
         if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
             return Ok(vec![InstanceType::IoBase(base)]);
@@ -306,14 +351,32 @@ impl Checker<'_> {
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {
-                if let Ok(target) = self.expr(classes)
-                    && matches!(target.ty, Type::ForwardRef(_))
-                {
-                    return Ok(Self::class_check_error(
-                        value,
-                        target,
-                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
-                    ));
+                if let Ok(target) = self.expr(classes) {
+                    match target.ty {
+                        Type::Placeholder(ir::PlaceholderKind::Class) => {
+                            // Looking up either operand can run Python code.
+                            let mut scope = calls::ArgumentScope::default();
+                            let value = scope.hold(self, value);
+                            scope.hold(self, target);
+                            let class =
+                                InstanceType::Exact(Type::Placeholder(ir::PlaceholderKind::Value));
+                            return Ok(scope.finish(Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Builtin(
+                                    Builtin::IsInstance(vec![class]),
+                                    vec![value],
+                                ),
+                            }));
+                        }
+                        Type::ForwardRef(_) | Type::Placeholder(ir::PlaceholderKind::Value) => {
+                            return Ok(Self::class_check_error(
+                                value,
+                                target,
+                                "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
                 return Err(diagnostic);
             }
@@ -383,6 +446,16 @@ impl Checker<'_> {
         };
         let first = self.expr(first)?;
         let second = self.expr(second)?;
+        self.builtin_subclass_values(first, second, call)
+    }
+
+    /// Compare evaluated class operands or raise for an invalid Python argument.
+    pub(super) fn builtin_subclass_values(
+        &self,
+        first: Expr,
+        second: Expr,
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
             (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
                 ty: Type::Bool,
@@ -403,7 +476,7 @@ impl Checker<'_> {
             )),
             _ => Err(error(
                 self.source,
-                call,
+                at,
                 "issubclass requires supported native class objects",
             )),
         }

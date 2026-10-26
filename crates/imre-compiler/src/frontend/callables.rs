@@ -7,7 +7,7 @@ use super::*;
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
     // The declaration reader boxes only owners it has proven to be noncapturing.
-    if matches!(ty, Type::AnnotationValue(_)) {
+    if matches!(ty, Type::AnnotationValue(_)) || types.constructor_base(ty).is_some() {
         return false;
     }
     (matches!(ty, Type::Callable(_)) && !types.is_plain_callback(ty))
@@ -20,7 +20,7 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(
         ty,
-        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_)
+        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_) | Type::CmpKey(..)
     ) || types.is_partial_frame(ty)
         || types.is_dispatch_registry(ty)
     {
@@ -154,6 +154,7 @@ impl Checker<'_> {
                 },
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: error(self.source, node, "recursive native method adapter"),
             },
         );
@@ -193,6 +194,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module]
                     .error(site, "recursive calls through str.join are unsupported"),
                 function: ir::Function {
@@ -439,6 +441,7 @@ impl Checker<'_> {
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
+                source_frame: true,
                 recursion_error: self.graph.modules[self.module]
                     .error(lambda, "recursive calls are unsupported in this prototype"),
             },
@@ -461,6 +464,12 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::Placeholder(kind) = callable.ty {
+            return self.placeholder_call(call, callable, kind);
+        }
+        if let Type::CmpKey(frame, _) = callable.ty {
+            return self.bind_cmp_key(call, callable, frame);
+        }
         let callable = if callable.ty == Type::FunctionRef
             && call.arguments.args.is_empty()
             && call.arguments.keywords.is_empty()

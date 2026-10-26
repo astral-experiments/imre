@@ -50,6 +50,13 @@ impl Checker<'_> {
             ),
             "clear" => (Builtin::DequeClear, vec![], Type::None),
             "reverse" => (Builtin::DequeReverse, vec![], Type::None),
+            "__getitem__" => (Builtin::DequeGet { method: true }, vec![Type::Int], element),
+            "__setitem__" => (Builtin::DequeSet, vec![Type::Int, element], Type::None),
+            "__delitem__" => (
+                Builtin::DequeDelete { method: true },
+                vec![Type::Int],
+                Type::None,
+            ),
             "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
             _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
         };
@@ -331,6 +338,19 @@ impl Checker<'_> {
                 element,
             ),
             ("clear", []) => (Builtin::DequeClear, Type::None),
+            ("__getitem__" | "__delitem__", [index]) => {
+                args.push(self.integer_index(index)?);
+                if name == "__getitem__" {
+                    (Builtin::DequeGet { method: true }, element)
+                } else {
+                    (Builtin::DequeDelete { method: true }, Type::None)
+                }
+            }
+            ("__setitem__", [index, value]) => {
+                args.push(self.integer_index(index)?);
+                args.push(self.expr_expected(value, element)?);
+                (Builtin::DequeSet, Type::None)
+            }
             ("copy" | "__copy__", []) => (Builtin::DequeCopy, args[0].ty),
             ("extend" | "extendleft", [source]) => {
                 let receiver = args.pop().unwrap();

@@ -24,6 +24,7 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
     def __init__(self, value, *rest):
@@ -81,6 +82,60 @@ except TypeError as e:
     print(str(e))
 
 print(repr(Child("nested", "forwarded").args))
+""",
+    "ordinary_forwarding_fields": """
+class Ordinary(Exception):
+    def __init__(self, value, *rest):
+        self.value = value
+        self.name = value
+        self.obj = value
+        self.errno = value
+        self.strerror = value
+        self.filename = value
+        self.filename2 = value
+        self.characters_written = value
+        super().__init__(value, *rest)
+
+error = Ordinary("ordinary")
+print(repr(error.value))
+print(repr(error.name))
+print(repr(error.obj))
+print(repr(error.errno))
+print(repr(error.strerror))
+print(repr(error.filename))
+print(repr(error.filename2))
+print(repr(error.characters_written))
+""",
+    "builtin_exception_forwarding_formats": """
+class Item(KeyError):
+    def __init__(self, tag, *args):
+        self.tag = tag
+        super().__init__(*args)
+
+class Root(ValueError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class Mixed(Root, KeyError):
+    pass
+
+class One(OSError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class OrdinaryOS(One, KeyError):
+    pass
+
+print(str(Item("marker")))
+print(str(Item("marker", "missing")))
+print(str(Item("marker", 17)))
+print(str(Item("marker", "x", "y")))
+print(repr(Item("marker", "missing").args))
+print(str(Mixed("through the MRO")))
+print(str(One("ordinary message")))
+print(str(OrdinaryOS("OSError takes precedence")))
 """,
     "classvar_exception_constructor": """
 from typing import ClassVar
@@ -958,6 +1013,69 @@ except KeyError:
 }
 
 REJECTED = {
+    "exception_descriptor_annotated_field": """
+class Problem(StopIteration):
+    value: str
+    def __init__(self, before: str, after: str):
+        self.value = before
+        super().__init__(after)
+Problem("before", "after")
+""",
+    **{
+        f"exception_descriptor_inherited_field_{base}": f"""
+class Ordinary(Exception):
+    def __init__(self, before, after, *rest):
+        self.{field} = before
+        super().__init__(after, *rest)
+class Mixed(Ordinary, {base}):
+    pass
+Mixed({arguments})
+"""
+        for base, field, arguments in [
+            ("StopIteration", "value", '"before", "after"'),
+            ("ImportError", "msg", '"before", "after"'),
+            ("UnicodeEncodeError", "reason", '"before", "ascii", "x", 0, 1, "after"'),
+        ]
+    },
+    **{
+        f"forwarding_exception_{base}_{name}": f"""
+class Parent({base}):
+    pass
+class Problem(Parent):
+    def __init__(self, before, after, *rest):
+        self.{name} = before
+        super().__init__(after, *rest)
+Problem("before", "after")
+"""
+        for base, fields in {
+            "StopIteration": ("value",),
+            "NameError": ("name",),
+            "UnboundLocalError": ("name",),
+            "AttributeError": ("name", "obj"),
+            "OSError": ("errno", "strerror", "filename", "filename2", "characters_written"),
+            "FileNotFoundError": ("filename",),
+        }.items()
+        for name in fields
+    },
+
+    "unsupported_forwarding_OSError": """
+class Problem(OSError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem(2, "missing", "path")
+print(repr(e.args))
+print(str(e))
+""",
+    "unsupported_forwarding_UnicodeEncodeError": """
+class Problem(UnicodeEncodeError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem("ascii", "ø", 0, 1, "invalid")
+print(repr(e.args))
+print(str(e))
+""",
     **{
         f"forwarding_exception_descriptor_{name}": f"""
 class Problem(Exception):
@@ -1058,7 +1176,6 @@ print(Report("message"))
         print(Problem("shadow"))
     """,
     "import_error_unsupported_argument": "ImportError([1, 2])",
-    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
     "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
@@ -1122,14 +1239,14 @@ try:
     value = None
     raise ValueError()
 except ValueError:
-    print(value + 1)
+    number: int = value
 """,
     "finally_optional_fact": """
 value: int | None = 1
 try:
     value = None
 finally:
-    print(value + 1)
+    number: int = value
 """,
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
@@ -1163,6 +1280,27 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "handler_optional_arithmetic": (
+        """\
+value: int | None = 1
+try:
+    value = None
+    raise ValueError()
+except ValueError:
+    print(value + 1)
+""",
+        "TypeError",
+    ),
+    "finally_optional_arithmetic": (
+        """\
+value: int | None = 1
+try:
+    value = None
+finally:
+    print(value + 1)
+""",
+        "TypeError",
+    ),
     "unhandled_cleanup": (
         'try:\n    values = [999999999999999999999999999999]\n    raise ValueError("terminal")\nfinally:\n    print("cleaned")\n',
         "ValueError",
@@ -1313,6 +1451,7 @@ def main() -> None:
                 )
                 assert built.returncode == 0, (name, level, built.stderr)
                 actual = run([str(binary)])
+                binary.unlink()
                 assert actual.stdout == reference.stdout, (
                     name,
                     level,
@@ -1325,9 +1464,14 @@ def main() -> None:
                             actual.stderr
                         ) == exception_report(reference.stderr), (name, level, actual)
                     else:
-                        assert actual.returncode == 1 and actual.stderr.startswith(
-                            category + ":"
-                        ), (name, level, actual)
+                        # Implicit context is not retained, but the terminal
+                        # category and message must match CPython.
+                        assert (
+                            actual.returncode == 1
+                            and actual.stderr.startswith(category + ":")
+                            and exception_report(actual.stderr)[-1:]
+                            == exception_report(reference.stderr)[-1:]
+                        ), (name, level, actual.stderr, reference.stderr)
                 else:
                     assert actual.returncode == 0 and not actual.stderr, (
                         name,

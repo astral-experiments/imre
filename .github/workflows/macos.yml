@@ -48,7 +48,7 @@ jobs:
           target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
-            --suites unittest_main differential io errno posix_readiness files bytes socket_tcp paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
+            --suites unittest_main differential io errno posix_readiness files bytes socket_tcp socketserver_tcp paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
           cat "$RUNNER_TEMP/imre-suites/errno.log"
           cat "$RUNNER_TEMP/imre-suites/socket_tcp.log"

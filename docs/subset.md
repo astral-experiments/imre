@@ -77,6 +77,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `left + right` evaluates both lists before copying their elements into a fresh list. Both inputs have the same element type. If an element is a nested list or a record, the result shares that object with the input lists.
 
+`in` and `not in` support integer and string lists. An integer needle may be optional: a subprocess return code of `None` is absent from `[0, 1]`. Integer membership uses value equality, including for integers too large to fit in a machine word.
+
 `sorted(source, key=callback, reverse=condition)` returns a fresh list. Both keywords are optional. `key=None` compares the elements themselves, and `reverse` defaults to false and requires an exact `bool`. Keys may be exact integers, booleans, strings, string enums, bytes, or fixed tuples recursively containing those scalar types. Tuple fields whose exact type is `None` are also allowed; nullable fields, floats, mutable containers, and records are not. Every key has the same concrete shape, and tuples compare lexicographically. Input and keyword expressions evaluate in source order, then the source is fully materialized before any key callback runs. Each key is evaluated once in input order. Sorting is stable in both directions, so equal keys retain their input order even with `reverse=True`. A callback may mutate the original source or its elements and may raise. The copy already contains all input elements when the first callback runs.
 
 `values.sort(key=callback, reverse=condition)` accepts the same keys and updates the list in place. It returns `None`. Aliases observe the new order. During key evaluation the list appears empty until a callback adds elements. If a key raises, the list regains its original membership and order and the exception propagates. If keys succeed after a callback appends to the list, the sorted original elements are restored and the sort raises `ValueError`.
@@ -127,6 +129,15 @@ The list snapshots both inputs. Changing an input or a shallow copy afterward
 preserves ordinary list semantics. A program that selects added or removed rows
 and sorts by the text after the two-character tag can skip intraline comparisons.
 Reading the raw rows yields the original ordering and `? ` guides.
+
+`unidiff.PatchSet(text)` reads unified text patches, including Git file metadata.
+Iterating a patch set yields files; iterating a file yields hunks. The supported
+projections are `patch_set.modified_files` (a fresh list), `file.path`,
+`hunk.source_start`, and `str(hunk)`. The hunk string includes its canonical
+header and preserves the line endings and no-newline markers in the patch.
+Invalid hunk boundaries raise `unidiff.UnidiffParseError`. These patch objects
+are read-only; mutation, per-line objects, byte inputs, and metadata-only parsing
+are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
@@ -684,7 +695,9 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
 
-`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
+`text.encode(encoding="utf-8", errors="strict")` accepts positional and named string arguments. UTF-8, UTF-8 with a signature, ASCII and Latin-1 use the native codec registry's implementations. For example, `"¢".encode("ascii", "backslashreplace")` yields `b"\\xa2"`. ASCII and Latin-1 also support `strict`, `ignore`, `replace` and `xmlcharrefreplace`. Native strings contain Unicode scalar values.
+
+`data.decode()` performs strict UTF-8 decoding. Its optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` supports strict ASCII and reports the first non-ASCII byte and its position. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Mutable `bytearray`, memory views, implicit text/byte conversions and other byte methods are outside this subset.
 
 ## Native paths and directory traversal
 
@@ -1173,6 +1186,10 @@ method keeps its receiver alive. An unannotated empty deque defaults to integer 
 Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
 same deque, and consumes the iterable. If iteration raises, items already
 appended remain visible through aliases. Omitting `maxlen` removes the old bound.
+Integer and boolean indices support reads, replacement, deletion and numeric
+augmented assignment, including negative positions. Replacement keeps an
+iterator valid; deletion invalidates it. Membership supports homogeneous
+integers, strings and booleans.
 
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots. Calling `reverse()` reverses either list in place and returns `None`; aliases and active iterators see the new order.
 
@@ -1190,6 +1207,15 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 `collections.Counter[K]` uses exact string or integer keys and arbitrary-precision integer counts. `Counter(iterable)` counts each key, and `Counter(mapping)` copies integer counts. A bare `Counter` annotation or unconstrained empty `Counter()` uses string keys. `Counter[int]()` and an annotated `Counter[int]` destination select integer keys. String-key counters also accept keyword counts. `update` adds its positional iterable or mapping and then the keyword counts, retaining negative and zero entries. A missing subscription returns zero without inserting. Membership, `get`, key iteration and `items()` inspect the stored entries. Deleting an absent key is a no-op. `total()` and `sum(c.values())` sum all counts. Frozen dataclasses can hold independently created counters with `field(default_factory=Counter)`. `subtract(iterable, **counts)` decrements instead of replacing counts and retains nonpositive values. Typed mappings contribute their counts; other iterables contribute one per occurrence. Bound and unbound update/subtract calls support native argument errors.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
+
+`Counter.elements()` returns an iterator over the stored keys in insertion
+order. Each positive integer count repeats its key; a change to a later entry
+is visible when the iterator reaches it.
+
+`_collections._count_elements(mapping, iterable)`, also exported by
+`collections`, adds one per yielded key. It accepts dictionaries with integer
+counts and concrete classes with `get` and `__setitem__` methods. It updates
+the receiver before requesting another key, so mutations survive later errors.
 
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
@@ -1217,11 +1243,24 @@ Unary `+` and `-` select positive counts and negated negative counts. Binary `+`
 insertion order. Each key and value is shared with the source; inserting or
 deleting an entry in the copy leaves the source dictionary unchanged.
 
+`array.array` is available as a class value: it retains its module, name,
+representation and identity. `issubclass` recognizes its virtual registration
+with `collections.abc.MutableSequence` and `collections.abc.Sequence`, and
+distinguishes both from `collections.abc.MutableMapping`.
+
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object
 among all keys. A bound call uses the receiver's class without copying its
 entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
+
+`collections.OrderedDict[K, V]` accepts the same typed mappings, pairs and
+keyword entries as `dict`. Replacing a value preserves its position; deleting
+and reinserting the key moves it to the end. Two ordered dictionaries compare
+both their keys' order and their values. When one operand is a plain dictionary
+of the same key and value types, equality ignores order. The bound `copy()`
+retains the concrete mapping type and shares its values. Changing keys during
+iteration raises `RuntimeError` if another key remained to be yielded.
 
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
 
@@ -1350,8 +1389,11 @@ can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
 values. On a constructed or narrowed import exception, these fields support
 `str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
 support length and integer indexing. Reinitializing an instance resets omitted
-fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
-and pickling remain outside this subset.
+fields. A fresh keyword dictionary display can supply the three fields. A
+repeated key inside one display uses its last value; supplying the same key in
+two call arguments raises `TypeError` before initialization. Arbitrary objects,
+unpacking a separately stored dictionary, direct field writes, and pickling
+remain outside this subset.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

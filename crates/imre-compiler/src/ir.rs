@@ -4,6 +4,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
+    /// Read-only nodes from the sealed unified-diff parser.
+    Patch(PatchKind),
     Int,
     Float,
     Bool,
@@ -37,6 +39,8 @@ pub(crate) enum Type {
     StringKeys,
     Tuple(usize),
     VarTuple(usize),
+    /// A functools key retains its comparator and, for a bound key, its object.
+    CmpKey(usize, bool),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
     /// Private state retained by an independently constructed function cache.
@@ -74,6 +78,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// The shared, independently retained metadata view of an exact concrete Path.
     PathInfo,
+    /// Native implementation metadata has one stable, struct-like owner.
+    SysImplementation,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -106,6 +112,8 @@ pub(crate) enum Type {
     Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// The functools singleton and its publicly observable constructor are distinct objects.
+    Placeholder(PlaceholderKind),
     /// A source function from a heterogeneous overload list.
     FunctionRef,
     /// The shared failing function returned by typing.overload.
@@ -117,8 +125,11 @@ pub(crate) enum Type {
     SimpleNamespace(usize),
     /// Nominal ModuleSpec backed by a record whose loader and state keep their exact types.
     ModuleSpec(usize),
+    CodecInfo,
     /// A POSIX IPv4 stream socket with shared descriptor ownership.
     Socket,
+    CodecWriterClass,
+    CodecWriter,
     Sha256,
     Poll,
     JsonDecoder,
@@ -221,6 +232,7 @@ pub(crate) enum SocketOp {
     Listen,
     Accept,
     Connect,
+    Shutdown,
     SockName,
     Recv,
     Send,
@@ -286,6 +298,7 @@ impl std::fmt::Display for Type {
             Self::BuiltinClass => "type",
             Self::ForwardRef(_) => "annotationlib.ForwardRef",
             Self::AnnotationValue(_) => "annotation value",
+            Self::CmpKey(..) => "functools.KeyWrapper",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
@@ -310,6 +323,7 @@ impl std::fmt::Display for Type {
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
+            Self::SysImplementation => "sys.implementation",
             Self::CompletedProcess(capture, _) if capture.text => {
                 "subprocess.CompletedProcess[str]"
             }
@@ -327,6 +341,9 @@ impl std::fmt::Display for Type {
             Self::ContextToken(_) => "contextvars.Token",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
+            Self::Patch(PatchKind::Set) => "unidiff.PatchSet",
+            Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
+            Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
@@ -341,11 +358,16 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::Placeholder(PlaceholderKind::Value) => "functools._PlaceholderType",
+            Self::Placeholder(PlaceholderKind::Class) => "type",
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
+            Self::CodecInfo => "codecs.CodecInfo",
             Self::Poll => "select.poll",
             Self::Socket => "socket.socket",
+            Self::CodecWriterClass => "type[codecs.StreamWriter]",
+            Self::CodecWriter => "codecs.StreamWriter",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -356,6 +378,7 @@ impl std::fmt::Display for Type {
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::Document(DocumentShape::Any) => "TOML or JSON value",
+            Self::Document(DocumentShape::Scalar) => "None, bool, int or str",
             Self::Document(DocumentShape::Map) => "mutable dict[str, Any]",
             Self::Document(DocumentShape::List) => "mutable list[Any]",
             Self::StrLiteral(_)
@@ -379,6 +402,12 @@ impl std::fmt::Display for Type {
     }
 }
 
+/// The information an actual Python call must keep until it returns or unwinds.
+pub(crate) enum SourceFrame {
+    Depth,
+    Module(String),
+}
+
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
@@ -395,6 +424,8 @@ pub(crate) struct Module {
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
+    /// Source functions and entry in emission order. Synthetic helpers have no frame.
+    pub source_frames: Vec<Option<SourceFrame>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -451,14 +482,20 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
-    /// Only programs that can own a display value need to clear the namespace at shutdown.
+    /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
         for function in self.functions.iter().chain([&self.entry]) {
             walk_expressions(&function.body, &mut |value| {
                 used |= matches!(
                     value.kind,
-                    ExprKind::Builtin(Builtin::BuiltinsSetLast | Builtin::SysDisplayHook, _)
+                    ExprKind::Builtin(
+                        Builtin::BuiltinsSetLast
+                            | Builtin::SysDisplayHook
+                            | Builtin::BuiltinsLen
+                            | Builtin::BuiltinsSetLen,
+                        _
+                    )
                 );
             });
         }
@@ -769,6 +806,8 @@ pub(crate) enum Builtin {
     Cycle,
     SysDisplayHook,
     BuiltinsLast,
+    BuiltinsLen,
+    BuiltinsSetLen,
     BuiltinsHasLast,
     BuiltinsSetLast,
     BuiltinsDeleteLast,
@@ -790,6 +829,9 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    ClassNamePart {
+        module: bool,
+    },
     NewForwardRef,
     ForwardRefField(usize),
     BoxAnnotation(usize),
@@ -812,6 +854,7 @@ pub(crate) enum Builtin {
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
     LiteralStringView,
+    IntListContains,
     StringListContains,
     StructListContains,
     StringContains,
@@ -836,6 +879,7 @@ pub(crate) enum Builtin {
     SysThreadText {
         version: bool,
     },
+    SysImplementation,
     SysVersionInfo {
         implementation: bool,
     },
@@ -939,10 +983,14 @@ pub(crate) enum Builtin {
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
+    SortByComparator,
     ListExtendUnhinted,
     SortDetach,
     SortRestore,
     StringJoin,
+    JoinBufferNew,
+    JoinBufferAppend,
+    JoinBufferFinish,
     StringFormat,
     StringReplace,
     Text(TextOperation),
@@ -962,6 +1010,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
@@ -1017,13 +1067,20 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    CodecLookup,
+    CodecName,
+    StrEncodeOptions,
+    CodecEncode,
+    CodecDecode,
     Socket(SocketOp),
+    CodecWriter(WriterOperation),
     Sha256Hex,
     Sha256New,
     HashNew,
     NewPlainObject,
     Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
+    Placeholder(PlaceholderKind),
     InspectSentinel,
     HashAvailable,
     Sha256Update,
@@ -1032,6 +1089,7 @@ pub(crate) enum Builtin {
     },
     Sha256Copy,
     BytesIo,
+    BytesIoValue,
     StringIo(StringIoOperation),
     ContextVar(ContextOperation),
     BinarySeek,
@@ -1068,6 +1126,8 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     SplitLines,
+    /// Only the first line and a joined remainder can be observed.
+    JoinedSplitLines,
     DecodeSplitLines,
     Ndiff,
     /// Copy an exact list of immutable strings into a distinct mutable list.
@@ -1082,6 +1142,9 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
         namespace: usize,
@@ -1159,6 +1222,7 @@ pub(crate) enum Builtin {
     PosixPath(PosixPathOperation),
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
+    Patch(PatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -1198,6 +1262,7 @@ pub(crate) enum Builtin {
     ModuleParentPrefix,
     ModuleCacheFromOrigin,
     CachePath(CachePathOperation),
+    OrderedDict,
     NamespaceWrap,
     NamespaceDict,
     NamespaceGet,
@@ -1224,6 +1289,14 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeGet {
+        method: bool,
+    },
+    DequeSet,
+    DequeDelete {
+        method: bool,
+    },
+    DequeContains,
     DequeMaxlen,
     DequeIter {
         reverse: bool,
@@ -1237,6 +1310,7 @@ pub(crate) enum Builtin {
     ChainMapContains,
     /// The stored type may be promoted to an optional result on a hit.
     ChainMapGet(Type),
+    CounterElements,
     CounterTotal,
     CounterMostCommon,
     CounterUpdate,
@@ -1348,6 +1422,8 @@ pub(crate) enum StringIoOperation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {
     Any,
+    /// A tagged Python scalar whose container equality does not depend on object identity.
+    Scalar,
     Map,
     List,
 }
@@ -1396,6 +1472,13 @@ pub(crate) enum RegexCapture {
     End,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum PlaceholderKind {
+    Value,
+    Class,
+}
+
 /// These descriptor values call the same native operation as their bound string methods.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[repr(u32)]
@@ -1426,6 +1509,26 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PatchKind {
+    Set,
+    File,
+    Hunk,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum PatchOperation {
+    Parse,
+    Len,
+    Files,
+    ModifiedFiles,
+    ModifiedCount,
+    Hunks,
+    Path,
+    SourceStart,
+    HunkText,
 }
 
 /// Closed string operations preserve exact argument and storage types.
@@ -1631,6 +1734,21 @@ pub(crate) enum LogRecordOperation {
     SetFlag,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriterOperation {
+    Class,
+    New,
+    Write,
+    Flush,
+    Close,
+    Reset,
+    Encoding,
+    SetEncoding,
+    Stream,
+    Errors,
+    SetErrors,
+}
+
 /// Operations on the native logging registry and its named loggers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
@@ -1652,6 +1770,9 @@ pub(crate) enum LogOperation {
     LevelName,
     LevelForName,
     CheckLevel,
+    InvalidLevel,
+    Disable,
+    EnabledCache,
     Names,
     Numbers,
     NamesCopy,
@@ -1770,6 +1891,11 @@ pub(crate) enum ProcessOperation {
     PopenStatus {
         poll: bool,
     },
+    PopenSetStatus,
+    PopenSetPoll {
+        returns_none: bool,
+    },
+    PopenDeletePoll,
     PopenWait,
     PopenCommunicate {
         text: bool,
@@ -1890,6 +2016,7 @@ pub(crate) enum InstanceType {
     ModuleSpec,
     StrEnum,
     List,
+    Deque,
     Dict,
     Set,
     Tuple,
@@ -1907,13 +2034,18 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
+            Self::Exact(Type::BuiltinClass) => matches!(
+                ty,
+                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+            ),
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
+            Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(

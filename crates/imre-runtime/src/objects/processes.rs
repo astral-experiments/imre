@@ -28,6 +28,7 @@ mod argv;
 mod asynchronous;
 mod launch_error;
 mod pass_fds;
+mod pipe_size;
 mod popen;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
@@ -487,14 +488,6 @@ impl Default for ChildAttributes {
     }
 }
 
-impl ChildAttributes {
-    /// A negative group other than -1 skips setpgid, but still selects CPython's
-    /// fork/exec path and preserves the caller's executable object on failure.
-    fn requires_fork(&self) -> bool {
-        self.new_session || self.group != -1 || self.mask.is_some() || !self.keep.is_empty()
-    }
-}
-
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -551,16 +544,25 @@ impl Launch {
         &mut self,
         close_fds: bool,
         attributes: &ChildAttributes,
+        inherited_pipe: Option<&libc::sigaction>,
     ) -> io::Result<()> {
         if let Some(mask) = attributes.mask {
             // SAFETY: this is the forked child; umask never fails.
             unsafe { libc::umask(mask) };
         }
-        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
-            // SAFETY: restore_signals resets dispositions Python ignores; signal
-            // is async-signal-safe and both arguments are valid signal constants.
-            if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+        if let Some(action) = inherited_pipe {
+            // Command can reset SIGPIPE before pre_exec. Restore the parent's
+            // actual action; exec itself handles any caught signal normally.
+            // SAFETY: sigaction is async-signal-safe and action was read before fork.
+            if unsafe { libc::sigaction(libc::SIGPIPE, action, std::ptr::null_mut()) } < 0 {
                 return Err(io::Error::last_os_error());
+            }
+        } else {
+            for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+                // SAFETY: signal is async-signal-safe and both constants are valid.
+                if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+                    return Err(io::Error::last_os_error());
+                }
             }
         }
         // SAFETY: setsid and setpgid are async-signal-safe. Apply them in
@@ -619,7 +621,7 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>, streams: u32) -> io::Result<Child> {
-        self.spawn_tagged(cwd, streams, [-1; 3], ChildAttributes::default())
+        self.spawn_tagged(cwd, streams, Default::default(), ChildAttributes::default())
             .map_err(|err| launch_error::decode(err).1)
     }
 
@@ -627,9 +629,11 @@ impl Launch {
         mut self,
         cwd: Option<&CString>,
         streams: u32,
-        descriptors: [RawFd; 3],
+        redirects: popen::Redirects,
         attributes: ChildAttributes,
     ) -> io::Result<Child> {
+        let descriptors = redirects.fds;
+        let mut pipes = redirects.prepared.unwrap_or_default();
         // STDOUT in the stdin slot reaches child descriptor setup as fd -2.
         if (streams >> 12) & 15 == 5 {
             return Err(io::Error::from_raw_os_error(libc::EBADF));
@@ -644,6 +648,9 @@ impl Launch {
         }
         // Check the original descriptor table before duplicating anything. A
         // duplicate for stdout must not make a closed stderr descriptor valid.
+        if pipes.closed_descriptor {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
         for fd in descriptors.into_iter().filter(|&fd| fd >= 0) {
             // SAFETY: fcntl validates the supplied integer even when it is closed.
             if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
@@ -679,11 +686,41 @@ impl Launch {
             .unwrap_or_else(|| &self.argv.strings[0]);
         let mut command = Command::new(OsStr::from_bytes(program.as_bytes()));
         let stderr = (streams >> 4) & 15;
+        let modes = [(streams >> 12) & 15, streams & 15, stderr];
+        // Move one shared devnull into its first target; the child can duplicate
+        // that standard fd to the remaining targets without another parent fd.
+        let devnull = pipes
+            .devnull
+            .as_ref()
+            .and_then(|_| modes.iter().position(|&m| m == 2));
+        let mut stream = |i: usize| {
+            if let Some(end) = pipes.ends[i].take() {
+                Ok(end)
+            } else if Some(i) == devnull {
+                Ok(Stdio::from(pipes.devnull.take().expect("prepared devnull")))
+            } else if modes[i] == 2 && devnull.is_some() {
+                Ok(Stdio::inherit())
+            } else {
+                output(modes[i], descriptors[i])
+            }
+        };
         command
-            .stdin(output((streams >> 12) & 15, descriptors[0])?)
-            .stdout(output(streams & 15, descriptors[1])?)
-            .stderr(output(stderr, descriptors[2])?);
+            .stdin(stream(0)?)
+            .stdout(stream(1)?)
+            .stderr(stream(2)?);
         let cwd = cwd.cloned();
+        let inherited_pipe = if streams & (1 << 20) != 0 {
+            let mut action = std::mem::MaybeUninit::uninit();
+            // SAFETY: a null new action queries the disposition without changing it.
+            if unsafe { libc::sigaction(libc::SIGPIPE, std::ptr::null(), action.as_mut_ptr()) } < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: sigaction successfully initialized its output.
+            Some(unsafe { action.assume_init() })
+        } else {
+            None
+        };
         // SAFETY: this private closure contains only owned immutable native data;
         // exec_child performs no allocation, locking, callback, or language drop.
         // It never returns Ok, so Command cannot fall through to libc execvp.
@@ -700,10 +737,21 @@ impl Launch {
                         errno,
                     ));
                 }
+                if let Some(source) = devnull {
+                    for (i, mode) in modes.into_iter().enumerate().skip(source + 1) {
+                        if mode == 2 && libc::dup2(source as RawFd, i as RawFd) < 0 {
+                            return Err(io::Error::last_os_error());
+                        }
+                    }
+                }
                 if stderr == 5 && libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                self.exec_child(streams & (1 << 17) == 0, &attributes)
+                self.exec_child(
+                    streams & (1 << 17) == 0,
+                    &attributes,
+                    inherited_pipe.as_ref(),
+                )
             })
         };
         command.spawn()
@@ -1270,7 +1318,7 @@ unsafe fn spawn_list(
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
     // SAFETY: the original configuration remains rooted while spawn reports any error.
     unsafe {
-        launch_error::spawn(&cmd, &config, streams, [-1; 3], false, |_| {
+        launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
             Ok(ChildAttributes::default())
         })
     }
@@ -1354,9 +1402,9 @@ unsafe fn prepare_process(
     let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
     // SAFETY: the legacy arguments have their original word representations.
     let (launch, cwd, _) = unsafe {
-        prepare_command(&WordKind::new(5).acquire(args as usize), &config, || {
-            Ok(ChildAttributes::default())
-        })?
+        let cmd = WordKind::new(5).acquire(args as usize);
+        validate_command_shape(&cmd, &config)?;
+        prepare_command(&cmd, &config, || Ok(ChildAttributes::default()))?
     };
     Ok((launch, cwd))
 }
@@ -1369,17 +1417,13 @@ fn c_int_overflow() -> Error {
     )
 }
 
+/// Validate the argument shape before CPython chooses a launch API or opens its fork error pipe.
+///
 /// # Safety
-/// The exact optional directory and environment stay rooted across conversion.
-unsafe fn prepare_command(
-    cmd: &OwnedWord,
-    config: &popen::LaunchConfig,
-    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
-) -> Result<(Launch, Option<CString>, ChildAttributes)> {
-    // SAFETY: the caller roots the exact argv, optional directory and environment.
+/// The command and configuration must remain rooted.
+unsafe fn validate_command_shape(cmd: &OwnedWord, config: &popen::LaunchConfig) -> Result<()> {
+    // SAFETY: the caller roots the exact argument representation.
     unsafe {
-        // Python selects args[0], validates every environment name, then
-        // converts native strings. Preserve that order for mixed failures.
         if config.shell
             && cmd.kind.raw() == 5
             && object(cmd.word as *const Object)
@@ -1394,6 +1438,21 @@ unsafe fn prepare_command(
         if !config.shell && config.executable.is_null() && argv::first(cmd).is_none() {
             return Err(Error::new(Kind::IndexError, "list index out of range"));
         }
+        Ok(())
+    }
+}
+
+/// # Safety
+/// The exact optional directory and environment stay rooted across conversion.
+unsafe fn prepare_command(
+    cmd: &OwnedWord,
+    config: &popen::LaunchConfig,
+    child_attributes: impl FnOnce() -> Result<ChildAttributes>,
+) -> Result<(Launch, Option<CString>, ChildAttributes)> {
+    // SAFETY: the caller roots the exact argv, optional directory and environment.
+    unsafe {
+        // Python selects args[0], validates every environment name, then
+        // converts native strings. Preserve that order for mixed failures.
         let env = if config.env.is_null() {
             None
         } else {

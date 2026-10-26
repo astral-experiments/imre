@@ -44,9 +44,9 @@ def known_blockers(reachable, level):
     archive = json.loads(gzip.decompress((HERE / 'patch-dict-default-linux.json.gz').read_bytes()))
     mode = ('reachable' if reachable else 'ordinary') + f'-O{level}'
     records = archive['modes'][mode]['records']
-    rechecked = json.loads((HERE / 'patch-dict-rechecked-linux.json').read_bytes())
-    records = [*records, *rechecked['modes'][mode]]
-    return {r['id']: r for r in records if r['outcome'] == 'blocked'}
+    for name in ('patch-dict-rechecked-linux.json', 'patch-dict-mixed-values-linux.json', 'patch-dict-compiler-blockers-linux.json'):
+        records.extend(json.loads((HERE / name).read_bytes())['modes'][mode])
+    return {(r['id'], r['occurrence']): r for r in records if r['outcome'] == 'blocked'}
 
 
 def recorded_blocker(row, prior, method_sha, root):
@@ -54,9 +54,12 @@ def recorded_blocker(row, prior, method_sha, root):
         return False
     reason = row['reason'].replace(str(root), '<root>').strip()
     row['reason'] = reason
-    row['evidence']['method_sha256'] = method_sha
-    if not prior or row['occurrence'] != prior['occurrence'] or prior['evidence']['definition_sha256'] != method_sha:
-        return False
     evidence = row['evidence']
-    return (evidence['stage'], evidence['source_blob'], reason) == (
-        prior['evidence']['stage'], prior['evidence']['source_blob'], prior['reason'])
+    if evidence['stage'] == 'original fixture':
+        # Staging stopped before a body could be emitted; pin the upstream definition.
+        evidence.setdefault('method_sha256', method_sha)
+    if not prior or (row['id'], row['occurrence']) != (prior['id'], prior['occurrence']):
+        return False
+    return (evidence['stage'], evidence['source_blob'], evidence.get('method_sha256'), reason) == (
+        prior['evidence']['stage'], prior['evidence']['source_blob'], method_sha, prior['reason']
+    ) and method_sha == prior['evidence']['definition_sha256']

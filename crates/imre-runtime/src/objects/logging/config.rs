@@ -413,10 +413,15 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
     let mut sections = Sections::new();
     let mut section = "";
     let mut last = None::<(Str, usize)>;
+    let mut blank_lines = 0;
     let mut errors = IniDiagnostic::default();
     for (i, raw) in source.split_inclusive('\n').enumerate() {
         let text = raw.trim();
-        if text.is_empty() || text.starts_with(['#', ';']) {
+        if text.is_empty() {
+            blank_lines += 1;
+            continue;
+        }
+        if text.starts_with(['#', ';']) {
             continue;
         }
         let indent = raw.len() - raw.trim_start().len();
@@ -425,28 +430,33 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
         {
             let option = sections.get_mut(section).unwrap().get_mut(key).unwrap();
             option
-                .try_reserve(text.len() + 1)
+                .try_reserve(text.len() + blank_lines + 1)
                 .map_err(|_| Error::allocation())?;
-            option.push('\n');
+            option.extend(std::iter::repeat_n('\n', blank_lines + 1));
+            blank_lines = 0;
             option.push_str(text);
             continue;
         }
+        blank_lines = 0;
         if let Some(header) = text
             .strip_prefix('[')
             .and_then(|s| s.rsplit_once(']'))
             .map(|(h, _)| h)
         {
             if sections.contains_key(header) {
-                return Err(ini_error(format_args!(
-                    "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
-                    Quoted(filename),
-                    i + 1,
-                    Quoted(header)
-                )));
+                if header != "DEFAULT" {
+                    return Err(ini_error(format_args!(
+                        "{filename} is invalid: While reading from {} [line {:2}]: section {} already exists",
+                        Quoted(filename),
+                        i + 1,
+                        Quoted(header)
+                    )));
+                }
+            } else {
+                sections.try_reserve(1).map_err(|_| Error::allocation())?;
+                sections.insert(header, HashMap::new());
             }
-            sections.try_reserve(1).map_err(|_| Error::allocation())?;
             section = header;
-            sections.insert(section, HashMap::new());
             last = None;
             continue;
         }
@@ -651,4 +661,24 @@ pub unsafe extern "C" fn imre_log_file_config(
     // SAFETY: nonzero encoding is the exact string payload of the optional word.
     let (path, encoding) = unsafe { (&*path, (encoding as *const Str).as_ref()) };
     finish(file_config(path, disable, encoding), ());
+}
+
+#[test]
+fn ini_preserves_empty_lines_inside_multiline_values() {
+    let sections = ini(
+        "[logger]\nname=alpha\n\n# comment\n   \n    beta\n\nafter=next\n",
+        "test.ini",
+    )
+    .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["logger"]["name"].as_str(), "alpha\n\n\nbeta");
+}
+
+#[test]
+fn ini_allows_repeated_default_sections_with_distinct_options() {
+    let sections = ini("[DEFAULT]\nfirst=1\n[DEFAULT]\nsecond=2\n", "test.ini")
+        .unwrap_or_else(|_| panic!("valid INI fixture should parse"));
+    assert_eq!(sections["DEFAULT"]["first"].as_str(), "1");
+    assert_eq!(sections["DEFAULT"]["second"].as_str(), "2");
+    assert!(ini("[DEFAULT]\nkey=1\n[DEFAULT]\nkey=2\n", "test.ini").is_err());
+    assert!(ini("[logger]\n[logger]\n", "test.ini").is_err());
 }

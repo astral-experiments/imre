@@ -149,8 +149,28 @@ impl Checker<'_> {
         if let Some(value) = self.context_missing_test(left, right, op == ast::CmpOp::IsNot)? {
             return Ok(value);
         }
-        let left = self.expr(left)?;
-        let right = self.expr(right)?;
+        let (left, right) = match (self.class_reference(left), self.class_reference(right)) {
+            (Some(class), None) | (None, Some(class)) => {
+                let class_first = self.class_reference(left).is_some();
+                let (literal, other) = if class_first {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                let other = self.expr(other)?;
+                let value = if let Some(base) = self.types.constructor_base(other.ty) {
+                    self.record_constructor_value(class, base, other.ty, literal)?
+                } else {
+                    self.expr(literal)?
+                };
+                if class_first {
+                    (value, other)
+                } else {
+                    (other, value)
+                }
+            }
+            _ => (self.expr(left)?, self.expr(right)?),
+        };
         if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
             return Ok(Self::identity_result(
                 vec![left, right],
@@ -289,6 +309,22 @@ impl Checker<'_> {
             ));
         }
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
+            && [left.ty, right.ty].iter().all(|&ty| {
+                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                self.types
+                    .signature(signature)
+                    .is_some_and(|(params, result)| {
+                        matches!(params.as_slice(), [arg] if self.types.is_len_argument(*arg))
+                            && result == Type::Int
+                    })
+            })
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if types.iter().any(|&ty| self.types.is_value_struct(ty)) {
             return Err(error(
                 self.source,
@@ -342,7 +378,8 @@ impl Checker<'_> {
             && types
                 .iter()
                 .all(|ty| matches!(ty, Type::SimpleNamespace(_) | Type::Dict(_) | Type::None));
-        if wrapper_attributes || namespace {
+        if wrapper_attributes || namespace || types.iter().all(|ty| matches!(ty, Type::CmpKey(..)))
+        {
             return Ok(Self::identity_result(
                 vec![left, right],
                 op == ast::CmpOp::IsNot,
@@ -361,10 +398,12 @@ impl Checker<'_> {
                 ),
             });
         }
-        if types
-            .iter()
-            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
-            && (types == [left.ty, right.ty] || types[0] == types[1])
+        if types.iter().any(|ty| {
+            matches!(
+                ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
+        }) && (types == [left.ty, right.ty] || types[0] == types[1])
         {
             if types[0] == types[1] {
                 return Ok(Self::identity_result(
@@ -459,6 +498,7 @@ impl Checker<'_> {
                 && types
                     .iter()
                     .any(|ty| self.types.tuple_metadata(*ty).is_some()))
+            || types == [Type::SysImplementation; 2]
             || types == [Type::Logger; 2]
             || types
                 .iter()
@@ -475,10 +515,14 @@ impl Checker<'_> {
                         .is_some_and(|p| matches!(p, Type::Calendar(_)))
             })
             || types == [Type::PathInfo; 2]
+            || types == [Type::CodecInfo; 2]
             || types == [Type::JsonDecoder; 2]
             || types == [Type::Poll; 2]
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]
+            || types == [Type::CodecWriterClass; 2]
+            || types == [Type::CodecWriter; 2]
+            || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
             return Err(error(

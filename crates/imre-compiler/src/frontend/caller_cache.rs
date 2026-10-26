@@ -310,6 +310,27 @@ mod tests {
     }
 
     #[test]
+    fn handler_class_slots_survive_a_cached_default_edit() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let entry = root.join("main.py");
+        let library = root.join("marker.py");
+        let echo = include_str!("../../../../tests/fixtures/socketserver/echo.py");
+        fs::write(
+            &entry,
+            format!("from marker import marker\n{echo}\nprint(marker())\n"),
+        )
+        .unwrap();
+        let default = "def marker(value: int = 1) -> int:\n    return value\n";
+        let mut compiler = IncrementalCompiler::default();
+        fs::write(&library, default).unwrap();
+        compile(&mut compiler, &entry, root);
+        fs::write(&library, default.replace("= 1", "= 19")).unwrap();
+        compile(&mut compiler, &entry, root);
+        compile(&mut compiler, &entry, root);
+    }
+
+    #[test]
     fn records_only_defaults_consumed_by_the_argument_binder() {
         let dir = tempdir().unwrap();
         let root = dir.path();

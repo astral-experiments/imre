@@ -10,6 +10,40 @@ pub(super) fn constant(name: &'static str) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn is_tcpserver(&self, class: usize) -> bool {
+        std::iter::once(&class)
+            .chain(&self.classes.declarations.definitions[class].bases)
+            .any(|&id| {
+                let record = &self.classes.declarations.definitions[id];
+                let module = &self.graph.modules[record.definition.module];
+                module.bundled && module.name == "socketserver" && record.name == "TCPServer"
+            })
+    }
+
+    /// TCPServer's non-suppressing context delegates to the concrete server_close.
+    pub(super) fn tcpserver_context_exit(
+        &mut self,
+        class: usize,
+        receiver: Expr,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        self.dispatch_record(class, receiver, site, |checker, actual, receiver| {
+            let close = &checker.classes.methods[actual]["server_close"];
+            if close.params.len() != 1 || close.returns != Type::None {
+                return Err(error(
+                    checker.source,
+                    site,
+                    "TCPServer context requires a zero-argument server_close",
+                ));
+            }
+            checker.calls.insert(close.id);
+            Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Call(close.id, ir::CallArgs::positional(vec![receiver])),
+            })
+        })
+    }
+
     pub(super) fn socket_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [
             ("family", constant("af_inet")),
@@ -40,6 +74,7 @@ impl Checker<'_> {
         let (op, ty, params): (_, _, Vec<(&str, Type, Option<Expr>)>) = match attr.attr.as_str() {
             "bind" => (Bind, Type::None, vec![("address", address, None)]),
             "connect" => (Connect, Type::None, vec![("address", address, None)]),
+            "shutdown" => (Shutdown, Type::None, vec![("how", int, None)]),
             "listen" => (
                 Listen,
                 Type::None,

@@ -3,6 +3,18 @@
 Each observation uses the [shared per-occurrence contract](../../SUITE_RUNNER.md)
 and includes every upstream ID at both optimization levels.
 
+## Latest complete Linux measurement
+
+[Compiler and binary hashes](observations/ab891d1/source.json) identify the exact
+source used for both optimization levels. The unchanged `TestSingleDispatch.test_wrapping_attributes` now compares the copied name and docstring in Imre. The parent already runs both C and Python live `builtins.len` reentrancy method bodies. CPython runs the module, class,
+and instance hooks; the compiled child creates its own native test instance.
+Compare the [parent measurement](observations/e0b6b46/evidence-linux.json) to check which individual occurrences changed.
+
+| Unchanged suite | Occurrences | Fully native | Native body, host fixture | Host-driven native operation | Mixed | Failed | Blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Primary](observations/ab891d1/evidence-linux.json) | 325 | 0 | 12 | 17 | 7 | 0 | 289 |
+| [Free-threading](observations/ab891d1/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+
 ## Canonical main at `56731b6`
 
 The [Linux job](https://github.com/astral-sh/imre/actions/runs/40179400348/job/121127002553)

@@ -208,6 +208,19 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if let Type::Class(class) = receiver.ty
+                    && self.classes.methods[class].contains_key("__setitem__")
+                {
+                    // Python evaluates the RHS, the receiver, then the index.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let receiver = scope.hold(self, receiver);
+                    let key = self.expr(&subscript.slice)?;
+                    let key = scope.hold(self, key);
+                    let assigned =
+                        self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
+                    return Ok(Statement::Expr(scope.finish(assigned)));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
@@ -243,7 +256,7 @@ impl Checker<'_> {
                     .mapping(receiver.ty)
                     .or_else(|| {
                         self.types
-                            .element(receiver.ty)
+                            .indexed_element(receiver.ty)
                             .map(|element| (Type::Int, element))
                     })
                     .ok_or_else(|| {
@@ -253,7 +266,11 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
-                let index = self.expr_expected(&subscript.slice, key)?;
+                let index = if matches!(receiver.ty, Type::Deque(_)) {
+                    self.integer_index(&subscript.slice)?
+                } else {
+                    self.expr_expected(&subscript.slice, key)?
+                };
                 let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(receiver, index, value))
             }
@@ -268,10 +285,10 @@ impl Checker<'_> {
                         ),
                     }));
                 }
-                if let Some(prefix) = self.cache_config(target) {
+                if self.cache_config(target) == Some(true) {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
                     return Ok(Statement::Expr(cache_paths::op(
-                        ir::CachePathOperation::Set(prefix),
+                        ir::CachePathOperation::Set(true),
                         Type::None,
                         vec![value],
                     )));
@@ -285,6 +302,13 @@ impl Checker<'_> {
                         Type::None,
                         vec![logging::number(mask), value],
                     )));
+                }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                    let value = self.coerce(value, self.builtin_len().ty, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
+                    }));
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
@@ -310,6 +334,50 @@ impl Checker<'_> {
                     return self.store_class_data(class, attribute, value);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(false),
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Int), target)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        vec![value, receiver],
+                    )));
+                }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
+                    let Some((params, returns)) = self.types.signature(value.ty) else {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable",
+                        ));
+                    };
+                    if !params.is_empty()
+                        || !(matches!(returns, Type::None | Type::Int)
+                            || returns == self.types.optional(Type::Int))
+                    {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable returning int or None",
+                        ));
+                    }
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                            returns_none: returns == Type::None,
+                        }),
+                        vec![value, receiver],
+                    )));
+                }
                 if let Some(class) =
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {
@@ -328,6 +396,25 @@ impl Checker<'_> {
                         ),
                     }));
                 }
+                if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
+                    let op = match (receiver.ty, attribute.attr.as_str()) {
+                        (_, "encoding") => ir::WriterOperation::SetEncoding,
+                        (Type::CodecWriter, "errors") => ir::WriterOperation::SetErrors,
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "unsupported stream writer assignment",
+                            ));
+                        }
+                    };
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(codecs::writer(
+                        op,
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
                 if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
@@ -341,6 +428,13 @@ impl Checker<'_> {
                 }
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
+                }
+                if let Type::CmpKey(frame, true) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    let cell = self.cmp_field(receiver, frame, 1);
+                    let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
+                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;

@@ -38,10 +38,56 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 }
 
 pub(super) fn builtin_type(name: &str) -> Option<Expr> {
-    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| Expr {
+    (is_builtin_type(name) || super::warnings::is_warning_class(name)).then(|| class_value(name))
+}
+
+/// Class objects use the pooled name for identity, including its module for
+/// types outside builtins. This does not require constructing an instance.
+pub(super) fn class_value(name: &str) -> Expr {
+    Expr {
         ty: Type::BuiltinClass,
         kind: ExprKind::Builtin(Builtin::ClassNameView, vec![unpacking::string(name)]),
-    })
+    }
+}
+
+/// Both annotations describe the same item interface; their class values differ.
+pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
+    matches!(
+        binding,
+        Some(Binding::Intrinsic(
+            Intrinsic::Sequence | Intrinsic::NominalClass("collections.abc.Sequence")
+        ))
+    )
+}
+
+impl Checker<'_> {
+    /// Resolve the class object exported by collections, collections.abc or array.
+    /// A local with the same name takes precedence over the module binding.
+    pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
+        match self.collection_binding(expression) {
+            Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
+            Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
+            Some(Binding::Intrinsic(Intrinsic::Mapping {
+                typing_alias: false,
+            })) => Some("collections.abc.Mapping"),
+            _ => None,
+        }
+    }
+
+    /// Resolve an imported collections class only when no local shadows its root.
+    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
+        let mut root = expression;
+        while let ast::Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        if root
+            .as_name_expr()
+            .is_some_and(|name| self.names.contains_key(name.id.as_str()))
+        {
+            return None;
+        }
+        self.resolve(expression)
+    }
 }
 
 pub(super) fn type_name(value: Expr) -> Expr {
