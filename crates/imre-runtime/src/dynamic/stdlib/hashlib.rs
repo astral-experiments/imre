@@ -19,6 +19,12 @@ fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
 }
 
 pub(super) fn sha1(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    ctx.optional_truth(
+        kwargs
+            .iter()
+            .find_map(|(key, id)| (key == "usedforsecurity").then_some(*id)),
+        true,
+    )?;
     let data = option(args, 0, kwargs, "data")?
         .map(|id| buffer(ctx, id))
         .transpose()?
