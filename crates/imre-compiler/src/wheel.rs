@@ -94,10 +94,7 @@ fn build_target(directory: Option<&Path>) -> Result<String, String> {
                 "scikit/FindPython.cmake",
                 include_str!("wheel/scikit/FindPython.cmake"),
             ),
-            (
-                "scikit/Imre.cmake",
-                include_str!("wheel/scikit/Imre.cmake"),
-            ),
+            ("scikit/Imre.cmake", include_str!("wheel/scikit/Imre.cmake")),
         ] {
             let path = dir.join(file);
             fs::create_dir_all(path.parent().unwrap())
