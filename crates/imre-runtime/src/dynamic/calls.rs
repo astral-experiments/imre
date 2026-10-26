@@ -34,9 +34,11 @@ impl Context {
             self.heap.get(value),
             Value::Class { .. }
                 | Value::Function { .. }
+                | Value::AttrGetter(_)
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
     }
@@ -52,15 +54,20 @@ impl Context {
             return self.call(get, vec![value, receiver, owner], Vec::new());
         }
         if receiver != NONE {
-            match self.heap.get(value) {
+            let method = match self.heap.get(value) {
                 Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => {
-                    return Ok(self.alloc(Value::Method {
-                        callable: value,
-                        receiver,
-                    }));
-                }
-                _ => {}
+                Value::Function { .. }
+                | Value::Cached { .. }
+                | Value::Partial { .. }
+                | Value::IoMethod { .. } => true,
+                Value::Native(name) => name == "object.__setattr__",
+                _ => false,
+            };
+            if method {
+                return Ok(self.alloc(Value::Method {
+                    callable: value,
+                    receiver,
+                }));
             }
         }
         Ok(value)
@@ -150,11 +157,14 @@ impl Context {
             _ => return false,
         };
         match (name, self.heap.get(value)) {
-            ("object", _)
+            ("bytearray", Value::ByteArray(_))
+            | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
+            | ("float", Value::Float(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("hmac.HMAC", Value::Hmac(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -163,8 +173,14 @@ impl Context {
             | ("contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
+            | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (class, Value::Calendar { value, .. }) => {
+                class.strip_prefix("datetime.").is_some_and(|c| {
+                    c == value.class() || (c == "date" && value.class() == "datetime")
+                })
+            }
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
             _ => false,
         }
@@ -177,6 +193,7 @@ impl Context {
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
                     || (name == "RuntimeError" && kind == "RecursionError")
+                    || (name == "ValueError" && kind == "JSONDecodeError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (name == "OSError"
@@ -194,6 +211,15 @@ impl Context {
     }
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         match self.heap.get(obj).clone() {
+            Value::Calendar { value, tzinfo } => {
+                return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
+            }
+            Value::Native(class) if class == "datetime.datetime" && name == "fromtimestamp" => {
+                return Ok(self.builtin("datetime.datetime.fromtimestamp"));
+            }
+            Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
+                return Ok(stdlib::datetime::utc(self));
+            }
             Value::Partial {
                 function,
                 args,
@@ -220,6 +246,15 @@ impl Context {
                 "block_size" => return Ok(self.int(64)),
                 _ => {}
             },
+            Value::Hmac(mac) => match name {
+                "digest_size" => return Ok(mac.digest_size),
+                "block_size" => return Ok(mac.block_size),
+                "name" => {
+                    let name = self.lookup_attr(mac.inner, "name")?;
+                    return Ok(self.text(format!("hmac-{}", self.str_value(name)?)));
+                }
+                _ => {}
+            },
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
@@ -227,6 +262,9 @@ impl Context {
             }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
+            }
+            Value::Native(class) if class == "object" && name == "__setattr__" => {
+                return Ok(self.builtin("object.__setattr__"));
             }
             Value::Module {
                 name: module,
@@ -254,9 +292,16 @@ impl Context {
             Value::Instance { class, fields } => {
                 return self.instance_attribute(obj, class, fields.get(name).copied(), name);
             }
-            Value::NamedTuple { names, values } => {
+            Value::NamedTuple {
+                class,
+                names,
+                values,
+            } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
+                }
+                if class == Some("time.struct_time") && matches!(name, "tm_zone" | "tm_gmtoff") {
+                    return Ok(NONE);
                 }
             }
             _ => {}
@@ -274,6 +319,15 @@ impl Context {
         ))
     }
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
+            let name = self.text(name);
+            self.call(hook, vec![name, value], Vec::new())?;
+            return Ok(());
+        }
+        self.default_set_attr(obj, name, value)
+    }
+
+    pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -305,9 +359,14 @@ impl Context {
                 self.bind(scope, name, value);
             }
             _ => {
+                let attr = self.text(name);
                 return Err(Error::new(
                     "AttributeError",
-                    format!("cannot set attribute {name:?}"),
+                    format!(
+                        "'{}' object has no attribute {} and no __dict__ for setting new attributes",
+                        self.type_name(obj),
+                        self.repr(attr)
+                    ),
                 ));
             }
         }
@@ -333,14 +392,17 @@ impl Context {
                                 | "set"
                                 | "tuple"
                                 | "bytes"
+                                | "bytearray"
                                 | "range"
                                 | "function"
+                                | "object"
                         )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
                 args: bound,
@@ -364,6 +426,7 @@ impl Context {
                 all.extend(args);
                 self.call(callable, all, kwargs)
             }
+            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()
@@ -546,13 +609,16 @@ impl Context {
                 }
                 Ok(value)
             }
-            Value::Instance { .. } => {
-                let Some(method) = self.bound_slot(callable, "__call__")? else {
-                    return Err(Error::new("TypeError", "object is not callable"));
-                };
-                self.call(method, args, kwargs)
+            _ => {
+                if let Some(method) = self.bound_slot(callable, "__call__")? {
+                    self.call(method, args, kwargs)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!("'{}' object is not callable", self.type_name(callable)),
+                    ))
+                }
             }
-            _ => Err(Error::new("TypeError", "object is not callable")),
         }
     }
     fn require_scalar(&self, value: Id, expected: &str, context: &str) -> Result<()> {
@@ -601,6 +667,12 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // The class body can read the enclosing module's docstring before the
+        // type supplies a default for an undocumented class.
+        class_scope
+            .names
+            .entry("__doc__".to_owned())
+            .or_insert(NONE);
         let members = class_scope
             .class_body
             .take()

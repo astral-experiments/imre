@@ -5,6 +5,7 @@
 use crate::StrOwner;
 mod arrays;
 mod constants;
+pub(crate) use deep::{DecodedJson, decode_json};
 mod deep;
 mod deep_values;
 pub(in crate::objects) mod document;
@@ -574,32 +575,44 @@ fn push_node(
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
-        _ => number(source.token(raw)),
+        _ => number(source.token(raw)).into(),
     };
     let index = nodes.len();
     push(nodes, node, source.refused)?;
     Ok(index)
 }
 
-fn number(raw: &str) -> Node {
-    match raw {
-        "NaN" => Node::ConstantNan,
-        "Infinity" => Node::Float(f64::INFINITY),
-        "-Infinity" => Node::Float(f64::NEG_INFINITY),
-        _ if raw.contains(['.', 'e', 'E']) => {
-            Node::Float(raw.parse().expect("validated JSON float"))
+pub(crate) enum JsonNumber {
+    Integer(Int),
+    Float(f64),
+}
+
+impl From<JsonNumber> for Node {
+    fn from(number: JsonNumber) -> Self {
+        match number {
+            JsonNumber::Integer(value) => Self::Integer(value),
+            JsonNumber::Float(value) if value.is_nan() => Self::ConstantNan,
+            JsonNumber::Float(value) => Self::Float(value),
         }
-        _ => Node::Integer(
-            raw.parse::<i64>()
-                .ok()
-                .and_then(Int::small)
-                .unwrap_or_else(|| {
-                    Int::new(
-                        num_bigint::BigInt::parse_bytes(raw.as_bytes(), 10)
-                            .expect("validated JSON integer"),
-                    )
-                }),
-        ),
+    }
+}
+
+fn number(raw: &str) -> JsonNumber {
+    match raw {
+        "NaN" => JsonNumber::Float(f64::NAN),
+        "Infinity" => JsonNumber::Float(f64::INFINITY),
+        "-Infinity" => JsonNumber::Float(f64::NEG_INFINITY),
+        _ if raw.contains(['.', 'e', 'E']) => {
+            JsonNumber::Float(raw.parse().expect("validated JSON float"))
+        }
+        _ => JsonNumber::Integer(raw.parse::<i64>().ok().and_then(Int::small).unwrap_or_else(
+            || {
+                Int::new(
+                    num_bigint::BigInt::parse_bytes(raw.as_bytes(), 10)
+                        .expect("validated JSON integer"),
+                )
+            },
+        )),
     }
 }
 
@@ -776,6 +789,10 @@ pub(super) fn loads(
     })
 }
 
+pub(crate) fn json_bom_error(doc: StrOwner) -> Error {
+    super::syntax::at_error(doc, 0, "Unexpected UTF-8 BOM (decode using utf-8-sig)")
+}
+
 /// # Safety
 /// The caller roots the input string. Success transfers a checked document owner.
 #[unsafe(no_mangle)]
@@ -787,11 +804,7 @@ pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // SAFETY: the caller roots this immutable string while the error takes its own reference.
     let owner = || unsafe { StrOwner::acquire_word(text as usize) };
     let result = if source.starts_with('\u{feff}') {
-        Err(super::syntax::at_error(
-            owner(),
-            0,
-            "Unexpected UTF-8 BOM (decode using utf-8-sig)",
-        ))
+        Err(json_bom_error(owner()))
     } else {
         loads(source, || Some(owner()))
     };

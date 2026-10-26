@@ -846,11 +846,11 @@ pub(crate) enum RandomOperation {
     Seed,
     Float,
     Bits,
-    ChoiceIndex,
+    ChoiceIndex { secure: bool },
     Randint,
     Randrange,
     RandrangeOne,
-    ChoiceRange,
+    ChoiceRange { secure: bool },
 }
 
 #[derive(Clone)]
@@ -973,6 +973,9 @@ pub(crate) enum Builtin {
     SysIntern,
     SysIsInterned,
     OsName,
+    OsSeparator {
+        alternate: bool,
+    },
     DocCaptureStart,
     DocCaptureTake,
     AsciiEscape,
@@ -1177,6 +1180,9 @@ pub(crate) enum Builtin {
     Socket(SocketOp),
     CodecWriter(WriterOperation),
     Sha1Hex,
+    HmacCompareDigest {
+        text: bool,
+    },
     Sha1New,
     Sha256Hex,
     Sha256New,
@@ -1650,6 +1656,7 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    Normalize,
     Lower,
     Upper,
     Capitalize,
@@ -1667,6 +1674,8 @@ pub(crate) enum TextOperation {
     UrlQuotePlus,
     UrlUnquote,
     UrlSplit,
+    UrlJoin,
+    ParseQsl,
     UrlProperty(UrlProperty),
     UrlGetUrl,
     UrlTranscode {

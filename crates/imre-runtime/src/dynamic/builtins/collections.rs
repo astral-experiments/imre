@@ -26,7 +26,14 @@ pub(in super::super) fn view_items(
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input {
-        if let Ok(source) = entries(ctx, input).map(<[_]>::to_vec) {
+        let source = match ctx.heap.get(input) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries.clone()),
+            Value::Context(bindings) => {
+                Some(bindings.iter().map(|(&key, &value)| (key, value)).collect())
+            }
+            _ => None,
+        };
+        if let Some(source) = source {
             for (key, value) in source {
                 ctx.put_item(dict, key, value)?;
             }
@@ -57,6 +64,7 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
 pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
     match ctx.heap.get(value) {
         Value::List(_)
+        | Value::ByteArray(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set(_)
@@ -154,17 +162,22 @@ pub(super) fn method(
                 kind,
             }))
         }
-        "dict.get" => {
+        "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
             if !hashable(ctx, args[0]) {
                 return Err(type_error("unhashable dictionary key"));
             }
-            let found = entries(ctx, receiver)?
+            if let Some(&(_, value)) = entries(ctx, receiver)?
                 .iter()
-                .find(|(key, _)| ctx.equal(*key, args[0]));
-            Ok(found
-                .map(|(_, v)| *v)
-                .unwrap_or_else(|| args.get(1).copied().unwrap_or(NONE)))
+                .find(|(key, _)| ctx.equal(*key, args[0]))
+            {
+                return Ok(value);
+            }
+            let default = args.get(1).copied().unwrap_or(NONE);
+            if name == "dict.setdefault" {
+                ctx.put_item(receiver, args[0], default)?;
+            }
+            Ok(default)
         }
         "dict.update" => {
             arity(name, args, 0, 1)?;

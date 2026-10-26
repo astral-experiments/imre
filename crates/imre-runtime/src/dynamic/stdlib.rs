@@ -9,23 +9,31 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 mod contextvars;
+pub(super) mod datetime;
 mod files;
 mod hashlib;
+mod hmac;
+pub(super) mod io;
 mod json;
+mod operator;
 mod regex;
 
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "io"
             | "sysconfig"
             | "os"
             | "os.path"
+            | "operator"
             | "platform"
             | "site"
             | "struct"
             | "json"
+            | "datetime"
             | "hashlib"
+            | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -67,6 +75,7 @@ fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Res
 
 fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::NamedTuple {
+        class: None,
         names: fields.iter().map(|(name, _)| (*name).to_owned()).collect(),
         values: fields.iter().map(|&(_, value)| value).collect(),
     })
@@ -158,6 +167,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("datetime", "UTC") => datetime::utc(ctx),
+        ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
+            ctx.builtin(&format!("datetime.{name}"))
+        }
         ("errno", "__doc__") => ctx.text(crate::objects::ERRNO_DOC),
         ("errno", "errorcode") => {
             let dict = ctx.dict(Vec::new());
@@ -180,6 +193,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.int(i64::from(value))
         }
         ("sys", "argv") => ctx.argv,
+        ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
             path_text(ctx, &layout(ctx)?.prefix)?
@@ -265,6 +279,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "fsdecode" | "uname")
         | ("os.path", "join" | "abspath" | "dirname")
+        | ("operator", "attrgetter")
         | (
             "platform",
             "system"
@@ -278,8 +293,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_implementation",
         )
         | ("struct", "calcsize" | "unpack" | "error")
-        | ("json", "dumps")
+        | ("json", "dumps" | "loads")
         | ("hashlib", "sha1")
+        | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
@@ -305,7 +321,13 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "operator.attrgetter" {
+        return operator::attrgetter(ctx, args, kwargs);
+    }
     // Reject unsupported options before a host primitive can silently use its default.
+    if let Some(method) = name.strip_prefix("datetime.") {
+        return datetime::call(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
@@ -351,15 +373,22 @@ pub(super) fn call(
     let (max_args, keywords): (usize, &[&str]) = match name {
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
-        "json.dumps" => (1, &["ensure_ascii"]),
+        "json.loads" => (1, &["s"]),
+        "json.dumps" => (
+            1,
+            &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
+        ),
         "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
+        "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
+        "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
+        "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
         "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
-        | "warnings.warn" => (2, &[]),
+        | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exit"
         | "sysconfig.get_config_var"
@@ -390,6 +419,9 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
+        "hmac.compare_digest" => return hmac::compare(ctx, args),
+        method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);
@@ -542,9 +574,24 @@ pub(super) fn call(
                 .collect();
             ctx.alloc(Value::Tuple(items))
         }
+        "json.loads" => {
+            let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    "loads() missing 1 required positional argument: 's'",
+                )
+            })?;
+            json::loads(ctx, input)?
+        }
         "json.dumps" => {
-            let ascii = ctx.optional_truth(kwargs.first().map(|(_, id)| *id), true)?;
-            ctx.text(json::dumps(ctx, argument(args, 0)?, ascii)?)
+            let input = option(args, 0, kwargs, "obj")?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    "dumps() missing 1 required positional argument: 'obj'",
+                )
+            })?;
+            let text = json::dumps(ctx, input, kwargs)?;
+            ctx.text(text)
         }
         "functools.lru_cache" => {
             if args.is_empty() && kwargs.is_empty() {

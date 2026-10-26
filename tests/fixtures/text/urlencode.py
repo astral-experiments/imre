@@ -1,4 +1,13 @@
+from enum import StrEnum
+from http import HTTPStatus
 from urllib.parse import quote, quote_plus, urlencode, urlsplit, urlunsplit
+
+
+class Word(StrEnum):
+    PATH = "a /b"
+    SAFE = "/"
+    CODEC = "ascii"
+    ERRORS = "strict"
 
 
 pairs = [("path", "one two/three"), ("path", "a+b"), ("", "&")]
@@ -26,6 +35,8 @@ print(urlencode(((b"\xff", "Snow ☃"), ("x", (4, "ü"))), True, safe="", encodi
 print(urlencode((("key", 1267650600228229401496703205376),)))
 print(urlencode({}))
 print(urlencode([]))
+print(urlencode([(Word.PATH, HTTPStatus.OK)], safe=Word.SAFE, encoding=Word.CODEC, errors=Word.ERRORS))
+print(urlencode([(HTTPStatus.NOT_FOUND, [Word.PATH, Word.SAFE])], doseq=True, quote_via=quote))
 print(quote_plus(b"a b+c/%", safe="/"))
 print(quote_plus("a b+c/%", safe="/", encoding="cp1251"))
 print(quote_plus("Ё", encoding="windows-1251"))

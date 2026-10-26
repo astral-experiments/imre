@@ -20,6 +20,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     sys_names: HashSet<String>,
+    operator_names: HashSet<String>,
     machinery_names: HashSet<String>,
     typed_machinery_receivers: HashSet<String>,
 }
@@ -113,6 +114,7 @@ impl<'a> Visitor<'a> for Imports {
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
+                        "operator" => self.operator_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
@@ -131,8 +133,11 @@ impl<'a> Visitor<'a> for Imports {
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0
-                        && name == "sys"
-                        && matches!(suffix, "path" | "version_info" | "implementation" | "exit")
+                        && matches!(
+                            (name, suffix),
+                            ("sys", "path" | "version_info" | "implementation" | "exit")
+                                | ("operator", "attrgetter")
+                        )
                     {
                         self.runtime_imports = true;
                     }
@@ -162,6 +167,13 @@ impl<'a> Visitor<'a> for Imports {
             && let Some(receiver) = UnqualifiedName::from_expr(&a.value)
         {
             self.typed_machinery_receivers.insert(receiver.to_string());
+        }
+        if let Expr::Attribute(attr) = e
+            && attr.attr.as_str() == "attrgetter"
+            && let Expr::Name(module) = &*attr.value
+            && self.operator_names.contains(module.id.as_str())
+        {
+            self.runtime_imports = true;
         }
         if self.sys_path(e)
             || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
@@ -231,18 +243,20 @@ pub(crate) fn compile(
         };
         source
     };
-    // The typed frontend handles normal programs. Parsing here is needed only
-    // for the standard namespaces that expose dynamic import and installation data.
-    if ![
-        "sys",
-        "platform",
-        "site",
-        "importlib",
-        "struct",
-        "SystemExit",
-    ]
-    .iter()
-    .any(|name| src.contains(name))
+    // An ordinary entry can import a package that uses the object runtime without
+    // accessing sys.path or installation metadata in the entry itself.
+    if !options.runtime_imports
+        && ![
+            "sys",
+            "platform",
+            "site",
+            "importlib",
+            "attrgetter",
+            "struct",
+            "SystemExit",
+        ]
+        .iter()
+        .any(|name| src.contains(name))
     {
         return Ok(None);
     }
@@ -254,7 +268,7 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports => i,
+        Ok(i) if i.runtime_imports || (options.runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -369,7 +383,8 @@ pub(crate) fn compile(
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,
     });
-    let llvm_ir = emit::emit(&sources, &config.to_string())?;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

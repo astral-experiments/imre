@@ -11,7 +11,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod text;
 pub(super) use collections::{hashable, view_items};
-pub(super) use text::{format_value, percent};
+pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
 pub(super) fn is_exception(name: &str) -> bool {
     matches!(
@@ -57,6 +57,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "range"
                 | "isinstance"
                 | "getattr"
+                | "setattr"
                 | "hasattr"
                 | "open"
                 | "print"
@@ -66,6 +67,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "int"
                 | "str"
                 | "bytes"
+                | "bytearray"
                 | "tuple"
                 | "list"
                 | "property"
@@ -102,18 +104,30 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "str"
         }
         Value::Bytes(_) if attr == "decode" => "bytes",
+        Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
+        Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
         Value::Dict(_) | Value::DefaultDict { .. }
-            if matches!(attr, "items" | "values" | "keys" | "get" | "update") =>
+            if matches!(
+                attr,
+                "items" | "values" | "keys" | "get" | "setdefault" | "update"
+            ) =>
         {
             "dict"
         }
         Value::File(_)
             if matches!(
                 attr,
-                "read" | "seek" | "tell" | "close" | "__enter__" | "__exit__"
+                "read"
+                    | "readline"
+                    | "readinto"
+                    | "seek"
+                    | "tell"
+                    | "close"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
             "file"
@@ -165,7 +179,7 @@ fn positional(name: &str, kwargs: &[(String, Id)]) -> Result<()> {
     }
 }
 
-fn bind<const N: usize>(
+pub(super) fn bind<const N: usize>(
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -191,6 +205,50 @@ fn bind<const N: usize>(
 
 fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
+}
+
+fn set_attribute(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let base = name == "object.__setattr__";
+    if base && args.is_empty() {
+        return Err(type_error(
+            "descriptor '__setattr__' of 'object' object needs an argument",
+        ));
+    }
+    if base && matches!(ctx.heap.get(args[0]), Value::Class { .. }) {
+        return Err(type_error("can't apply this __setattr__ to type object"));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(if base {
+            "wrapper __setattr__() takes no keyword arguments"
+        } else {
+            "setattr() takes no keyword arguments"
+        }));
+    }
+    let [obj, attr, value] = args else {
+        return Err(type_error(if base {
+            format!("__setattr__ expected 2 arguments, got {}", args.len() - 1)
+        } else {
+            format!("setattr expected 3 arguments, got {}", args.len())
+        }));
+    };
+    let Value::Str(attr_name) = ctx.heap.get(*attr) else {
+        return Err(type_error(format!(
+            "attribute name must be string, not '{}'",
+            ctx.type_name(*attr)
+        )));
+    };
+    let attr_name = attr_name.clone();
+    if base {
+        ctx.default_set_attr(*obj, &attr_name, *value)?;
+    } else {
+        ctx.set_attr(*obj, &attr_name, *value)?;
+    }
+    Ok(NONE)
 }
 
 /// Compute Python's range length without overflowing at either i64 endpoint.
@@ -230,9 +288,25 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "setattr" | "object.__setattr__") {
+        return set_attribute(ctx, name, args, kwargs);
+    }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "str" | "bytes" => text::method(ctx, method, args, kwargs),
+            "bytearray" if method == "extend" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 2)?;
+                let data = text::bytes_from_iterable(ctx, args[1])?;
+                let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected bytearray"));
+                };
+                target
+                    .try_reserve(data.len())
+                    .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
+                target.extend(data);
+                Ok(NONE)
+            }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
             "function" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -278,7 +352,7 @@ pub(super) fn call(
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
                 Value::Str(v) => v.chars().count(),
-                Value::Bytes(v) => v.len(),
+                Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
@@ -311,7 +385,9 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Range { start, stop, step }))
         }
         "dict" | "list" | "tuple" | "set" => collections::construct(ctx, name, args, kwargs),
-        "int" | "bool" | "str" | "bytes" | "repr" => text::construct(ctx, name, args, kwargs),
+        "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" => {
+            text::construct(ctx, name, args, kwargs)
+        }
         "format" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 2)?;
@@ -347,7 +423,9 @@ pub(super) fn call(
                 };
                 Error::new(kind, format!("{path}: {e}"))
             })?;
-            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(file))))))
+            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
+                io::BufReader::new(file),
+            ))))))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

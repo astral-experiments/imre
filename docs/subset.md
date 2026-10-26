@@ -362,6 +362,8 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 
 `urllib.parse.quote`, `quote_plus`, and `unquote` accept strings or bytes and the native text codecs. `urlencode` accepts concrete dictionaries and sequences of key/value tuples in insertion order. It supports `doseq`, `safe`, `encoding`, `errors`, and the built-in `quote` or `quote_plus` callback. `urlunsplit` reconstructs a URL from a `SplitResult` or a fixed tuple of five strings or five byte strings.
 
+`urllib.parse.parse_qsl` returns ordered name/value pairs from text or byte queries, including repeated names. It accepts blank-value and strict-parsing flags, native codec names and error policies, a field limit, and a string or bytes separator. `urljoin` resolves relative text and byte references and preserves an explicitly empty query or fragment.
+
 ## Datetime and fixed UTC offsets
 
 `datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable
@@ -583,6 +585,8 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 `separator.join(source)` accepts a supported immediate iterable yielding exact strings. The separator evaluates first and remains owned while the source evaluates and is consumed; rebinding its original variable does not change it. Empty input returns an empty string. `text.replace(old, new)` replaces all nonoverlapping occurrences using exact string arguments. An empty `old` inserts `new` at Unicode scalar boundaries, including both ends. Both methods accept positional arguments only; a replacement count and custom string or iteration protocols are unsupported.
 
 ## First-party module graphs
+
+For a script that imports source packages, `--runtime-imports` lets `imre build`, `run`, or `check` try the native object runtime when static compilation fails. The entry stays `__main__`; the executable evaluates imports using its startup search paths and the compiled Python module bodies. A missing runtime module raises `ModuleNotFoundError` when its import executes. An explicit `--entry-profile` requires a statically compiled graph.
 
 For native code, `--extension-path DIRECTORY` adds an installed [Imre extension wheel](extensions.md) to the compile-time search path. Its typed declarations and compiled archive supply the module.
 

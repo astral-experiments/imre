@@ -4,21 +4,31 @@ use crate::StrOwner;
 use std::rc::Rc;
 
 use super::super::syntax::{self, Cursor, Failure};
-use super::{Error, KeyMemo, Kind, Node, Nodes, Object, Str, View, Words, number};
+use super::{Error, JsonNumber, KeyMemo, Kind, Node, Nodes, Object, Str, View, Words, number};
 
 // Imre has one decoder. CPython's pure scanner counts Python calls and its C
 // scanner checks the native stack, so their platform-dependent boundaries differ.
 const MAX_OPEN_CONTAINERS: usize = 50_000;
 
-enum Frame {
-    Array(Vec<usize>),
+/// A completed JSON value whose children already have handles in the caller's storage.
+pub(crate) enum DecodedJson<T> {
+    Null,
+    Bool(bool),
+    Number(JsonNumber),
+    String(Str),
+    Array(Vec<T>),
+    Object(Vec<(Str, T)>),
+}
+
+enum Frame<T> {
+    Array(Vec<T>),
     Object {
-        fields: Vec<(Str, usize)>,
+        fields: Vec<(Str, T)>,
         key: Option<Str>,
     },
 }
 
-impl Frame {
+impl<T> Frame<T> {
     fn close(&self) -> u8 {
         match self {
             Self::Array(_) => b']',
@@ -46,20 +56,18 @@ impl Frame {
         Ok(())
     }
 
-    fn add(&mut self, value: usize) -> Result<(), Problem> {
+    fn add(&mut self, value: T) -> Result<(), Problem> {
         match self {
             Self::Array(items) => push(items, value),
             Self::Object { fields, key } => push(fields, (key.take().expect("parsed key"), value)),
         }
     }
 
-    fn finish(self, keys: &KeyMemo) -> Result<Node, Problem> {
-        Ok(match self {
-            Self::Array(items) => Node::Array(items),
-            Self::Object { fields, .. } => {
-                Node::Object(keys.fields(fields).map_err(|_| Problem::Memory)?)
-            }
-        })
+    fn finish(self) -> DecodedJson<T> {
+        match self {
+            Self::Array(items) => DecodedJson::Array(items),
+            Self::Object { fields, .. } => DecodedJson::Object(fields),
+        }
     }
 }
 
@@ -68,6 +76,7 @@ enum Problem {
     String(usize, serde_json::Error),
     Exhausted,
     Memory,
+    Build(Error),
 }
 
 impl From<Failure> for Problem {
@@ -88,14 +97,15 @@ fn string(token: &str, start: usize) -> Result<Str, Problem> {
         .map_err(|e| Problem::String(start, e))
 }
 
-fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
+fn parse<T>(
+    text: &str,
+    mut build: impl FnMut(DecodedJson<T>) -> Result<T, Error>,
+) -> Result<T, Problem> {
     let mut cursor = Cursor {
         source: text,
         pos: 0,
     };
-    let keys = KeyMemo::default();
     let mut frames = Vec::new();
-    let mut nodes = Vec::new();
     loop {
         cursor.space();
         let mut node = match cursor.peek() {
@@ -119,36 +129,33 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
                     continue;
                 }
                 cursor.pos += 1;
-                frame.finish(&keys)?
+                frame.finish()
             }
             _ => {
                 let start = cursor.pos;
                 match cursor.scalar()? {
-                    "true" => Node::Bool(true),
-                    "false" => Node::Bool(false),
-                    "null" => Node::Null,
-                    token if token.starts_with('"') => {
-                        Node::String(StrOwner::new(string(token, start)?))
-                    }
-                    token => number(token),
+                    "true" => DecodedJson::Bool(true),
+                    "false" => DecodedJson::Bool(false),
+                    "null" => DecodedJson::Null,
+                    token if token.starts_with('"') => DecodedJson::String(string(token, start)?),
+                    token => DecodedJson::Number(number(token)),
                 }
             }
         };
         loop {
-            let index = nodes.len();
-            push(&mut nodes, node)?;
+            let value = build(node).map_err(Problem::Build)?;
             cursor.space();
             let Some(frame) = frames.last_mut() else {
                 if cursor.pos != text.len() {
                     return Err((cursor.pos, "Extra data").into());
                 }
-                return Ok((nodes, index));
+                return Ok(value);
             };
-            frame.add(index)?;
+            frame.add(value)?;
             match cursor.peek() {
                 Some(close) if close == frame.close() => {
                     cursor.pos += 1;
-                    node = frames.pop().unwrap().finish(&keys)?;
+                    node = frames.pop().unwrap().finish();
                 }
                 Some(b',') => {
                     let comma = cursor.pos;
@@ -170,16 +177,19 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
     }
 }
 
-pub(super) fn loads(
+/// Parse bottom up so a typed arena and the boxed heap share token, number and error semantics.
+pub(crate) fn decode_json<T>(
     text: &str,
     owner: impl FnOnce() -> Option<StrOwner>,
-) -> Result<*const Object, Error> {
-    let (mut nodes, index) = parse(text).map_err(|problem| {
+    build: impl FnMut(DecodedJson<T>) -> Result<T, Error>,
+) -> Result<T, Error> {
+    parse(text, build).map_err(|problem| {
         let (at, message) = match problem {
             Problem::Exhausted => {
                 return Error::new(Kind::RecursionError, "maximum recursion depth exceeded");
             }
             Problem::Memory => return Error::allocation(),
+            Problem::Build(error) => return error,
             Problem::Syntax((at, message)) => (at, std::borrow::Cow::Borrowed(message)),
             Problem::String(start, error) => {
                 let message = error.to_string();
@@ -193,6 +203,30 @@ pub(super) fn loads(
             }
         };
         owner().map_or_else(Error::allocation, |doc| syntax::at_error(doc, at, &message))
+    })
+}
+
+pub(super) fn loads(
+    text: &str,
+    owner: impl FnOnce() -> Option<StrOwner>,
+) -> Result<*const Object, Error> {
+    let keys = KeyMemo::default();
+    let mut nodes = Vec::new();
+    let index = decode_json(text, owner, |value| {
+        let node = match value {
+            DecodedJson::Null => Node::Null,
+            DecodedJson::Bool(value) => Node::Bool(value),
+            DecodedJson::Number(value) => value.into(),
+            DecodedJson::String(value) => Node::String(StrOwner::new(value)),
+            DecodedJson::Array(items) => Node::Array(items),
+            DecodedJson::Object(fields) => {
+                Node::Object(keys.fields(fields).map_err(|_| Error::allocation())?)
+            }
+        };
+        let index = nodes.len();
+        nodes.try_reserve(1).map_err(|_| Error::allocation())?;
+        nodes.push(node);
+        Ok(index)
     })?;
     // A standard root list, unlike its nested views, may be mutated by its caller.
     if let Node::Array(children) = &mut nodes[index] {

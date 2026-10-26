@@ -33,6 +33,21 @@ def main():
                 timeout=60,
             )
 
+        entry = root / "serve.py"
+        entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
+        (root / "application.py").write_text(
+            "def make_endpoint(message):\n"
+            "    def endpoint():\n        return message\n"
+            "    return endpoint\n"
+        )
+        reference = run(sys.executable, "-B", entry)
+        assert (reference.returncode, reference.stdout) == (0, b"__main__ ready\n"), reference.stderr
+        opted_in = run(imre, "run", entry, "--runtime-imports", "--quiet")
+        assert (opted_in.returncode, opted_in.stdout) == (0, reference.stdout), opted_in.stderr
+        # A cached object-runtime executable cannot satisfy a subsequent static build.
+        ordinary = run(imre, "run", entry, "--quiet")
+        assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -76,6 +91,9 @@ def main():
                 actual.stderr,
                 expected.stderr,
             )
+
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
             "import sys\nfor arg in sys.argv:\n    print(arg)\nprint(__name__)\n"
@@ -288,9 +306,20 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
-        for fixture in ("boxed_contextvars.py", "boxed_descriptors.py", "boxed_proxy_truth.py"):
-            plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
+        fixtures = Path(__file__).with_name("fixtures")
+        for fixture in (
+            "boxed_contextvars.py",
+            "boxed_datetime.py",
+            "boxed_descriptors.py",
+            "boxed_proxy_truth.py",
+            "boxed_setattr.py",
+            "boxed_item_assignment.py",
+        ):
+            plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
+        for flags in ("-IB", "-IBOO"):
+            compare(flags, "-c", imports + "arithmetic.current()")
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",
@@ -301,6 +330,9 @@ def report(text):
             "errorcode[errno.EADDRINUSE] = 'changed'\n"
             "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
         )
+        (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"
@@ -317,6 +349,8 @@ def report(text):
             "except ValueError as exc:\n    print(str(exc))\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,
             "-IB",
@@ -345,6 +379,58 @@ try:
     high << -1
 except ValueError as err:
     print(err)
+""",
+        )
+        compare(
+            "-IB",
+            "-c",
+            """\
+import json, sysconfig
+
+def fallback(value):
+    return ["fallback", value.label]
+
+class Extra:
+    label = "π"
+
+data = json.loads(b'{"values": [39614081257132168796771975168, 3, -2]}')
+values = data["values"]
+options = {"default": fallback, "separators": (",", ":")}
+options.setdefault("default", None)
+options.setdefault("ensure_ascii", True)
+options.setdefault("sort_keys", True)
+print(json.dumps({"total": values[0] + values[1] + values[2], "count": len(values)}, **options))
+try:
+    json.loads(b"{}")["values"]
+except KeyError as err:
+    print(str(err))
+print(json.dumps({"ok": True}, **options))
+print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
+print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
+nan = json.loads("NaN")
+print(nan == nan, nan <= 1, [nan] == [nan])
+defaults = {"present": None}
+print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
+cache = (Ellipsis, Ellipsis)
+print(cache[False] is ..., cache[True] is Ellipsis, repr(cache[False]))
+class BrokenFlag:
+    def __bool__(self):
+        raise ValueError("invalid JSON option")
+try:
+    json.dumps({"ok": True}, sort_keys=BrokenFlag())
+except ValueError as err:
+    print(str(err))
+try:
+    json.loads(Ellipsis)
+except TypeError as err:
+    print(str(err))
+data = json.loads('{"k": 1, "other": [true], "k": 2}')
+data["other"].append(False)
+print(json.dumps(data))
+try:
+    json.loads(b'{"values": [1,]}')
+except ValueError as err:
+    print(isinstance(err, json.JSONDecodeError), str(err))
 """,
         )
     print("Python script and command-line semantics match CPython")

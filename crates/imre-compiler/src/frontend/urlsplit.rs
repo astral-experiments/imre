@@ -1,4 +1,5 @@
 //! Bind URL splitting, result methods, and quoting with normal argument evaluation.
+mod resolution;
 mod urlencode;
 
 use super::*;
@@ -117,7 +118,7 @@ impl Checker<'_> {
 
     /// A SplitResult and a five-field tuple share the same native record layout.
     pub(super) fn url_unsplit(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let args = self.arguments_with(
+        let mut args = self.arguments_with(
             call,
             &[slot("components", None)],
             None,
@@ -134,8 +135,26 @@ impl Checker<'_> {
         let ty = if fields.len() == 5
             && fields
                 .iter()
-                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_)))
+                .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)))
         {
+            if fields.iter().any(|ty| matches!(ty, Type::StrEnum(_))) {
+                let mut scope = calls::ArgumentScope::default();
+                let tuple = scope.hold(self, args.values[0].clone());
+                let components = fields
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, ty)| {
+                        Self::enum_text(Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(tuple.clone()), index),
+                        })
+                    })
+                    .collect();
+                args.values[0] = scope.finish(Expr {
+                    ty: self.types.tuple(vec![Type::Str; 5]),
+                    kind: ExprKind::Tuple(components),
+                });
+            }
             Type::Str
         } else if fields.len() == 5 && fields.iter().all(|ty| *ty == Type::Bytes) {
             Type::Bytes

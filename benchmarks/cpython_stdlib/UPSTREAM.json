@@ -43,11 +43,14 @@
     "Lib/test/test_pathlib/test_pathlib.py": "a1ea69a6b906e8e66f9518cf2999123f2406f373",
     "Lib/test/test_pathlib/test_read.py": "482203c290a3c4e136d11ae04ad52b1f15a2b277",
     "Lib/test/test_pathlib/test_write.py": "15054e804ec9fdf86c8b0b736b66242599579e92",
+    "Lib/test/test_pkgutil.py": "d4faaaeca0045726ce2c49e61497a6a7640a8115",
     "Lib/test/test_posixpath.py": "21f06712548d888ddf999ae127881420011d881e",
     "Lib/test/test_re.py": "f6e797b3785dbeb21c2e3bd94ebffed10f043b54",
+    "Lib/test/test_secrets.py": "d31d07e01f98ba3c1d9c9d0b948a57dfbc21f8ed",
     "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
     "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
     "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
+    "Lib/test/test_unicodedata.py": "93d573996407590982168d2a8a2e7d58ace99fa5",
     "Lib/test/test_zipfile/__init__.py": "4b16ecc31156a512db4a28fe272e5339994a4538",
     "Lib/test/test_zipfile/test_core.py": "0d407371f40a0f785558a829c1f1805ac5b6e3ed"
   }

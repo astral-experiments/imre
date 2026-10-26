@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 72 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 40 modules with recorded suites, 94 complete test executions pass natively at both optimization levels; 15,068 of 15,215 upstream executions have a classification.
+**At a glance:** 75 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 40 modules with recorded suites, 94 complete test executions pass natively at both optimization levels; 15,068 of 15,215 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -54,11 +54,13 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
+| `pkgutil` | Yes | No API example recorded. | — | — | — |
 | `platform` | Yes | Report the host operating system and machine with `system()` and `machine()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
 | `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
+| `secrets` | Yes | Draw an unpredictable item from native strings, bytes, lists, homogeneous tuples, or integer ranges with OS randomness. [Evidence](../tests/fixtures/iterables/secrets_choice.py) | — | — | — |
 | `select` | Yes | Wait for readable or writable POSIX file descriptors with `poll` or `select`. [Evidence](../benchmarks/cpython_stdlib/full/select/operations.py) | [0 / 134](../benchmarks/cpython_stdlib/full/select/) | 7 | 6 |
 | `selectors` | Yes | Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes. [Evidence](../tests/fixtures/processes/select_backend.py) | — | — | — |
 | `shlex` | Yes | POSIX shell word splitting, quoting and joining. [Evidence](../benchmarks/cpython_stdlib/full/shlex/README.md) | [0 / 19](../benchmarks/cpython_stdlib/full/shlex/) | 2 | 3 |
@@ -79,6 +81,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
+| `unicodedata` | Yes | Normalize Unicode scalar strings in NFC, NFD, NFKC and NFKD, and check whether they are normalized using Unicode 16. [Evidence](../tests/fixtures/text/unicodedata_normalize.py) | — | — | — |
 | `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
 | `urllib` | Yes | `urllib.parse.urlsplit` with named result fields, and `quote` and `unquote` with codec options for strings and bytes. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 178](../benchmarks/cpython_stdlib/full/urllib/) | 3 | 5 |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
@@ -151,7 +154,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `pdb` |
 | `pickle` |
 | `pickletools` |
-| `pkgutil` |
 | `plistlib` |
 | `poplib` |
 | `pprint` |
@@ -172,7 +174,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `rlcompleter` |
 | `runpy` |
 | `sched` |
-| `secrets` |
 | `shelve` |
 | `smtplib` |
 | `sqlite3` |
@@ -195,7 +196,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `traceback` |
 | `tracemalloc` |
 | `tty` |
-| `unicodedata` |
 | `uuid` |
 | `venv` |
 | `wave` |

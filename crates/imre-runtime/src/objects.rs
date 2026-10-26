@@ -17,6 +17,7 @@ mod builtins;
 mod bytes;
 mod cache_paths;
 mod calendar;
+pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
@@ -36,13 +37,17 @@ mod format_cursors;
 mod functools;
 mod hashlib;
 pub(crate) use hashlib::State as HashState;
+pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;
 mod join_buffer;
 mod joined_lines;
 mod json;
-pub(crate) use json::write_string as write_json_string;
+pub(crate) use json::{
+    DecodedJson, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
+    write_string as write_json_string,
+};
 mod linecache;
 mod logging;
 mod mappings;

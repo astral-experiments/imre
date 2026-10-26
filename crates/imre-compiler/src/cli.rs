@@ -145,6 +145,7 @@ impl BuildOptions {
                 && flag != "--module-root"
                 && flag != "--extension-path"
                 && flag != "--reachable-only"
+                && flag != "--runtime-imports"
                 && flag != "--entry-profile"
             {
                 return Err(USAGE.to_owned());
@@ -164,6 +165,7 @@ impl BuildOptions {
                     self.compile.reachable_only = true;
                 }
                 Some("--reachable-only") => self.compile.reachable_only = true,
+                Some("--runtime-imports") => self.compile.runtime_imports = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
                 Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),

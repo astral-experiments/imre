@@ -8,6 +8,7 @@ enum Place {
     Name(String),
     Attr(String, String),
     Item(String, String),
+    Slice(String, String),
 }
 
 impl Function<'_, '_> {
@@ -83,7 +84,7 @@ impl Function<'_, '_> {
                     } else {
                         self.op("list", &[])
                     };
-                    let init = self.define(v.name.as_str(), None, None, Body::Statements(&v.body));
+                    let init = self.define(v.name.as_str(), None, None, Body::Namespace(&v.body));
                     let name = self.text(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
@@ -293,7 +294,11 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                Place::Item(obj, self.expr(&s.slice))
+                if let ast::Expr::Slice(slice) = &*s.slice {
+                    Place::Slice(obj, self.slice_bounds(slice))
+                } else {
+                    Place::Item(obj, self.expr(&s.slice))
+                }
             }
             _ => {
                 self.unsupported("assignment target");
@@ -307,6 +312,7 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("lookup", &[&self.scope.clone(), n]),
             Place::Attr(v, n) => self.op("attr", &[v, n]),
             Place::Item(v, k) => self.op("get", &[v, k]),
+            Place::Slice(v, bounds) => self.op("slice", &[v, bounds]),
         }
     }
 
@@ -315,6 +321,7 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("assign", &[&self.scope.clone(), n, value]),
             Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
             Place::Item(v, k) => self.op("put", &[v, k, value]),
+            Place::Slice(v, bounds) => self.op("setslice", &[v, bounds, value]),
         };
     }
 

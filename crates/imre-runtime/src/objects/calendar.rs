@@ -1,6 +1,7 @@
 //! Immutable Python calendar values. Civil dates use an ordinal and microseconds of day;
 //! fixed zones keep their original offset and owner, including the canonical UTC singleton.
 use super::*;
+pub(super) mod boxed;
 mod conversion;
 mod maildates;
 /// # Safety
@@ -8,7 +9,10 @@ mod maildates;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_seconds(d: *const Object) -> f64 {
     // SAFETY: the caller roots the exact timedelta until the conversion returns.
-    let n = delta(unsafe { object(d) });
+    total_seconds(delta(unsafe { object(d) }))
+}
+
+fn total_seconds(n: i128) -> f64 {
     if n == 0 {
         return 0.0;
     }
@@ -815,7 +819,12 @@ pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *const Str {
     // SAFETY: the compiler roots this exact calendar value while its fields are formatted.
-    let s = with(unsafe { object(o) }, |v| match v {
+    let s = with(unsafe { object(o) }, |v| calendar_text(v, iso));
+    crate::StrOwner::into_raw(text::owned_string(&s))
+}
+
+fn calendar_text(value: &Value, iso: bool) -> String {
+    match value {
         Value::DateOnly(ord) => {
             let (y, m, d) = ymd(*ord);
             format!("{y:04}-{m:02}-{d:02}")
@@ -843,6 +852,5 @@ pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *con
         Value::Zone { offset, name } => name
             .as_ref()
             .map_or_else(|| zone_name(delta(offset)), |s| s.as_str().to_owned()),
-    });
-    crate::StrOwner::into_raw(text::owned_string(&s))
+    }
 }

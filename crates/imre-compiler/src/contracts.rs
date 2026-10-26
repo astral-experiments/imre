@@ -108,6 +108,7 @@ impl Builtin {
                 PreservesOwners,
             ),
             Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -147,6 +148,7 @@ impl Builtin {
                 match operation {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
+                    | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
                     | TextOperation::Capitalize
@@ -156,6 +158,8 @@ impl Builtin {
                     | TextOperation::UrlQuote
                     | TextOperation::UrlQuotePlus
                     | TextOperation::UrlUnquote
+                    | TextOperation::UrlJoin
+                    | TextOperation::ParseQsl
                     | TextOperation::UrlSplit
                     | TextOperation::UrlProperty(_)
                     | TextOperation::UrlGetUrl
@@ -671,6 +675,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart
@@ -1012,6 +1017,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_typing_call_stub"
                 | "imre_random_bits"
                 | "imre_random_choice_index"
+                | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
                 | "imre_int_pow"
@@ -1110,6 +1116,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"
+                | "imre_hmac_compare_digest_str"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"

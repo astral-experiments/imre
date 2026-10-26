@@ -137,6 +137,7 @@ pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
+pub(crate) use function_text::docstring;
 use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
@@ -1763,6 +1764,18 @@ fn annotation_with_aliases(
                 return Ok(types.namedtuple_layout(
                     crate::types::TupleOrigin::Declaration(definition),
                     vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
+                ));
+            }
+            if owner.is_bundled("pkgutil")
+                && types
+                    .namedtuple(definition)
+                    .is_some_and(|ty| ty.name == "ModuleInfo")
+                && let Some(Binding::Definition(finder)) = owner.bindings.get("FileFinder")
+                && let Some(&id) = classes.ids.get(finder)
+            {
+                return Ok(types.namedtuple_layout(
+                    crate::types::TupleOrigin::Declaration(definition),
+                    vec![classes.instance(id), Type::Str, Type::Bool],
                 ));
             }
             if classes.exceptions.contains_key(&definition) {
@@ -4919,10 +4932,14 @@ impl<'a> Checker<'a> {
                         raised.kind,
                         ExprKind::Exception { .. }
                             | ExprKind::Builtin(
-                                Builtin::NamedException { .. } | Builtin::ExceptionArgument(_),
+                                Builtin::NamedException { .. }
+                                    | Builtin::ImportErrorNew { .. }
+                                    | Builtin::ExceptionArgument(_),
                                 _
                             )
-                    ) && !matches!(&raised.kind,ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args) if matches!(args[0].kind,ExprKind::Builtin(Builtin::NamedException{..},_)))
+                    ) && !matches!(&raised.kind,
+                        ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::ExceptionView),args)
+                            if matches!(args[0].kind, ExprKind::Builtin(Builtin::NamedException { .. } | Builtin::ImportErrorNew { .. }, _)))
                     {
                         return Err(error(
                             self.source,
@@ -6151,6 +6168,26 @@ impl<'a> Checker<'a> {
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
+                Intrinsic::OsSeparator { alternate, posix } => {
+                    if posix {
+                        return Ok(if alternate {
+                            Expr {
+                                ty: Type::None,
+                                kind: ExprKind::None,
+                            }
+                        } else {
+                            unpacking::string("/")
+                        });
+                    }
+                    return Ok(Expr {
+                        ty: if alternate {
+                            self.types.optional(Type::Str)
+                        } else {
+                            Type::Str
+                        },
+                        kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
+                    });
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
@@ -6279,6 +6316,16 @@ impl<'a> Checker<'a> {
                         .into_owned(),
                 ),
             ),
+            ast::Expr::Name(name)
+                if name.id == "__package__"
+                    && !self.names.contains_key("__package__")
+                    && self.resolve(expression).is_none() =>
+            {
+                match self.graph.module_package(self.module) {
+                    Some(package) => (Type::Str, ExprKind::Str(package.to_owned())),
+                    None => (Type::None, ExprKind::None),
+                }
+            }
             ast::Expr::Name(name)
                 if name.id == "__name__" && !self.names.contains_key("__name__") =>
             {
@@ -8551,6 +8598,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
+                return self.unicode_normalize(call, check);
+            }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
                 let params = [Parameter {
@@ -8578,6 +8628,9 @@ impl<'a> Checker<'a> {
                 op @ (Intrinsic::Sha1 | Intrinsic::Sha256 | Intrinsic::HashNew),
             )) => {
                 return self.hash_constructor(call, op);
+            }
+            Some(Binding::Intrinsic(Intrinsic::HmacCompareDigest)) => {
+                return self.hmac_compare_digest(call);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
@@ -8691,7 +8744,9 @@ impl<'a> Checker<'a> {
                 return self.subprocess_list2cmdline(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Random(op))) => return self.random_call(op, call),
-            Some(Binding::Intrinsic(Intrinsic::RandomChoice)) => return self.random_choice(call),
+            Some(Binding::Intrinsic(Intrinsic::RandomChoice { secure })) => {
+                return self.random_choice(call, secure);
+            }
             Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::RmTree)) => return self.shutil_rmtree(call),
             Some(Binding::Intrinsic(Intrinsic::CopyTree)) => return self.shutil_copytree(call),
@@ -8878,6 +8933,8 @@ impl<'a> Checker<'a> {
                 )?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
+            Some(Binding::Intrinsic(Intrinsic::UrlJoin)) => return self.url_join(call),
+            Some(Binding::Intrinsic(Intrinsic::ParseQsl)) => return self.parse_qsl(call),
             Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
             Some(Binding::Intrinsic(Intrinsic::UrlUnsplit)) => return self.url_unsplit(call),
             Some(Binding::Intrinsic(Intrinsic::UrlEncode)) => return self.url_encode(call),

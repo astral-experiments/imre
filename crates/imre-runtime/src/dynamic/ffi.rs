@@ -133,6 +133,10 @@ impl Context {
                 }
             }
             "slice" => self.slice(a, b),
+            "setslice" => {
+                self.set_slice(a, b, c)?;
+                Ok(c)
+            }
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;

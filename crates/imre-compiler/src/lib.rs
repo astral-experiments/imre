@@ -69,6 +69,8 @@ pub struct CompileOptions {
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
     pub reachable_only: bool,
+    /// Allow file entries with ordinary imports to use the native object runtime after static lowering fails.
+    pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.

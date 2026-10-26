@@ -99,6 +99,7 @@ pub(crate) enum IntrinsicModule {
     TomliW,
     Shutil,
     Random,
+    Secrets,
     Sysconfig,
     Signal,
     Opcode,
@@ -110,6 +111,7 @@ pub(crate) enum IntrinsicModule {
     Selectors,
     Os,
     Posix,
+    OsPath,
     PosixPath,
     Urllib,
     UrllibParse,
@@ -125,9 +127,11 @@ pub(crate) enum IntrinsicModule {
     Textwrap,
     Io,
     Gzip,
+    UnicodeData,
     Codecs,
     Socket,
     Hashlib,
+    Hmac,
     Types,
     Base64,
     Binascii,
@@ -277,6 +281,7 @@ pub(crate) enum Intrinsic {
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
+    OsSeparator { alternate: bool, posix: bool },
     ErrnoAttribute,
     ErrnoFrom(usize),
     ModuleType,
@@ -330,10 +335,12 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     CodecInfoClass,
+    UnicodeNormalize { check: bool },
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
     HashNew,
+    HmacCompareDigest,
     SimpleNamespace,
     HashAvailable,
     ZipFile,
@@ -408,7 +415,7 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
-    RandomChoice,
+    RandomChoice { secure: bool },
     Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
@@ -450,6 +457,8 @@ pub(crate) enum Intrinsic {
     UrlEncode,
     UrlSplit,
     UrlUnsplit,
+    UrlJoin,
+    ParseQsl,
     EmailParseDate,
     EmailFormatDateTime,
     EmailFormatDate,
@@ -497,6 +506,7 @@ impl IntrinsicModule {
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
             "random" => Some(Self::Random),
+            "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
             "_opcode" => Some(Self::Opcode),
@@ -517,7 +527,8 @@ impl IntrinsicModule {
             "selectors" => Some(Self::Selectors),
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
-            "os.path" | "posixpath" => Some(Self::PosixPath),
+            "os.path" => Some(Self::OsPath),
+            "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
@@ -536,9 +547,11 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
+            "unicodedata" => Some(Self::UnicodeData),
             "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
+            "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
             "zipfile" => Some(Self::Zipfile),
@@ -572,9 +585,20 @@ impl IntrinsicModule {
         if self == Self::Sys && name == "_jit" {
             return Some(Binding::IntrinsicModule(Self::SysJit));
         }
+        if matches!(self, Self::Os | Self::OsPath | Self::PosixPath)
+            && matches!(name, "sep" | "altsep")
+        {
+            return Some(Binding::Intrinsic(Intrinsic::OsSeparator {
+                alternate: name == "altsep",
+                posix: self == Self::PosixPath,
+            }));
+        }
+        if self == Self::OsPath {
+            return Self::PosixPath.symbol(name);
+        }
         if self == Self::Os {
             if name == "path" {
-                return Some(Binding::IntrinsicModule(Self::PosixPath));
+                return Some(Binding::IntrinsicModule(Self::OsPath));
             }
             if let Some(symbol) = os::symbol(name) {
                 return Some(Binding::Intrinsic(symbol));
@@ -850,6 +874,8 @@ impl IntrinsicModule {
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::UnicodeData, "normalize") => Intrinsic::UnicodeNormalize { check: false },
+            (Self::UnicodeData, "is_normalized") => Intrinsic::UnicodeNormalize { check: true },
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
             (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
             (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
@@ -879,6 +905,7 @@ impl IntrinsicModule {
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
+            (Self::Hmac, "compare_digest") => Intrinsic::HmacCompareDigest,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
@@ -962,7 +989,8 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
-            (Self::Random, "choice") => Intrinsic::RandomChoice,
+            (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
+            (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
             (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
             (Self::Random, "random") => Intrinsic::Random(crate::ir::RandomOperation::Float),
             (Self::Random, "getrandbits") => Intrinsic::Random(crate::ir::RandomOperation::Bits),
@@ -1028,6 +1056,8 @@ impl IntrinsicModule {
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
+            (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
+            (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
@@ -1296,6 +1326,21 @@ impl SourceGraph {
         } else {
             &self.modules[module].path
         }
+    }
+
+    /// The import package of a linked source module; direct script entries have no package.
+    pub(crate) fn module_package(&self, module: ModuleId) -> Option<&str> {
+        let source = &self.modules[module];
+        (module != self.entry).then(|| {
+            if source.is_package {
+                source.name.as_str()
+            } else {
+                source
+                    .name
+                    .rsplit_once('.')
+                    .map_or("", |(parent, _)| parent)
+            }
+        })
     }
 
     /// Record only this call's overload diagnostic. Nested arguments still get
@@ -2715,6 +2760,7 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/http/__init__.py"),
             )),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "mimetypes" if cfg!(unix) => {
                 Some(("mimetypes.py", include_str!("../stdlib/mimetypes.py")))
             }
@@ -2737,6 +2783,42 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            let pkgutil_source;
+            let source = if name == "pkgutil" {
+                let roots = std::iter::once(&self.root)
+                    .skip(usize::from(self.skip_current_root))
+                    .chain(&self.extension_roots)
+                    .collect::<Vec<_>>();
+                let paths = serde_json::to_string(&roots).map_err(|e| e.to_string())?;
+                let version = crate::PYTHON_VERSION;
+                let abi = if cfg!(target_os = "macos") {
+                    "darwin".to_owned()
+                } else {
+                    let libc = if cfg!(target_env = "musl") {
+                        "musl"
+                    } else {
+                        "gnu"
+                    };
+                    format!("{}-linux-{libc}", std::env::consts::ARCH)
+                };
+                let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+                let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
+                let suffixes = serde_json::to_string(&[
+                    tagged.as_str(),
+                    ".abi3.so",
+                    &archive,
+                    ".so",
+                    ".py",
+                    ".pyc",
+                ])
+                .unwrap();
+                pkgutil_source = format!(
+                    "{source}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
+                );
+                &pkgutil_source
+            } else {
+                source
+            };
             let parent = if let Some((parent, child)) = name.rsplit_once('.') {
                 Some((self.load_module(parent)?, child))
             } else {

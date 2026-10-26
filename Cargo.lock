@@ -686,6 +686,7 @@ dependencies = [
  "base64",
  "cc",
  "compact_str",
+ "constant_time_eq",
  "corosensei",
  "flate2",
  "getrandom 0.3.4",
@@ -715,6 +716,7 @@ dependencies = [
  "toml_parser",
  "triomphe",
  "unicode-case-mapping",
+ "unicode-normalization",
  "unicode_names2",
  "zlib-rs",
 ]

@@ -5126,7 +5126,14 @@ impl Emitter<'_, '_> {
                 match op {
                     Float => self.call("imre_random_float", Type::Float, &[]),
                     Bits => self.call("imre_random_bits", Type::Int, &values),
-                    ChoiceIndex => self.call("imre_random_choice_index", Type::Int, &values),
+                    ChoiceIndex { secure } => {
+                        let symbol = if *secure {
+                            "imre_secrets_choice_index"
+                        } else {
+                            "imre_random_choice_index"
+                        };
+                        self.call(symbol, Type::Int, &values)
+                    }
                     Seed => {
                         let (symbol, params) = match values[0].ty {
                             Type::None => ("imre_random_seed_none", &[][..]),
@@ -5138,11 +5145,12 @@ impl Emitter<'_, '_> {
                         self.void_call(symbol, params);
                         none()
                     }
-                    Randrange | Randint | ChoiceRange | RandrangeOne => {
+                    Randrange | Randint | ChoiceRange { .. } | RandrangeOne => {
                         let mode = match op {
                             Randrange => 0,
                             Randint => 1,
-                            ChoiceRange => 2,
+                            ChoiceRange { secure: false } => 2,
+                            ChoiceRange { secure: true } => 4,
                             RandrangeOne => 3,
                             _ => unreachable!(),
                         };
@@ -5434,6 +5442,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsSeparator { alternate } => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_separator(i32 {})",
+                    u32::from(*alternate)
+                ));
+                Value {
+                    ty: returns,
+                    operand: if *alternate {
+                        self.instruction(format!("ptrtoint ptr {operand} to i64"))
+                    } else {
+                        operand
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::DocCaptureStart => {
                 self.checked_line("call void @imre_doctest_capture_start()");
                 none()
@@ -5790,6 +5813,15 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
+            Builtin::HmacCompareDigest { text } => self.call(
+                if *text {
+                    "imre_hmac_compare_digest_str"
+                } else {
+                    "imre_hmac_compare_digest_bytes"
+                },
+                Type::Bool,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::Sha1Hex => self.call("imre_sha1_hex", Type::Str, &[&args[0].value]),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
@@ -9163,6 +9195,8 @@ declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_sha1_hex(ptr)
+declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
+declare i1 @imre_hmac_compare_digest_str(ptr, ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
@@ -9606,6 +9640,7 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
+declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
@@ -9617,6 +9652,8 @@ declare ptr @imre_str_unquote(ptr)
 declare ptr @imre_url_quote(ptr, i32, ptr, i32, ptr, ptr)
 declare ptr @imre_url_quote_plus(ptr, i32, ptr, i32, ptr, ptr)
 declare ptr @imre_url_unquote(ptr, i32, ptr, ptr)
+declare i64 @imre_url_join(ptr, i32, ptr, i32, i32)
+declare ptr @imre_parse_qsl(ptr, i32, i32, i32, ptr, ptr, i64, ptr, i32, ptr)
 declare void @imre_url_split(ptr, i32, ptr, i32, i32, ptr)
 declare i64 @imre_url_property(ptr, i32, i32)
 declare ptr @imre_url_geturl(ptr, i32)
@@ -9713,6 +9750,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
 declare ptr @imre_ascii_escape(ptr)
@@ -9953,6 +9991,7 @@ declare void @imre_random_seed_bytes(ptr)
 declare double @imre_random_float()
 declare i64 @imre_random_bits(i64)
 declare i64 @imre_random_choice_index(i64)
+declare i64 @imre_secrets_choice_index(i64)
 declare i64 @imre_random_progression(i64, i64, i64, i32)
 declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)

@@ -8,9 +8,18 @@ use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
+
+#[derive(Clone, Copy)]
+pub(super) struct Hmac {
+    pub inner: Id,
+    pub outer: Id,
+    pub digest_size: Id,
+    pub block_size: Id,
+}
 pub(super) const NONE: Id = 0;
 pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
+pub(super) const ELLIPSIS: Id = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -43,11 +52,17 @@ impl Context {
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
             Value::None => "NoneType",
+            Value::Ellipsis => "ellipsis",
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
+            Value::Float(_) => "float",
+            Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
             Value::List(_) => "list",
+            Value::NamedTuple {
+                class: Some(class), ..
+            } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
             Value::Set(_) => "set",
@@ -128,8 +143,14 @@ pub(super) struct Scope {
 #[derive(Clone)]
 pub(super) enum Value {
     None,
+    Ellipsis,
     Bool(bool),
     Int(crate::Int),
+    Float(f64),
+    Calendar {
+        value: crate::objects::Calendar,
+        tzinfo: Id,
+    },
     Range {
         start: i64,
         stop: i64,
@@ -137,10 +158,13 @@ pub(super) enum Value {
     },
     Str(String),
     Bytes(Vec<u8>),
+    ByteArray(Vec<u8>),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
+    Hmac(Hmac),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
+        class: Option<&'static str>,
         names: Vec<String>,
         values: Vec<Id>,
     },
@@ -176,6 +200,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
     },
     Native(String),
+    AttrGetter(std::rc::Rc<[Vec<String>]>),
     Raised(Error),
     Method {
         callable: Id,
@@ -195,7 +220,11 @@ pub(super) enum Value {
         values: Vec<Id>,
         offset: usize,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::fs::File>>>),
+    IoMethod {
+        owner: Id,
+        name: &'static str,
+    },
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -237,6 +266,9 @@ impl Value {
                 }
             }
             Self::DictView { dict, .. } => visit.push(*dict),
+            Self::Hmac(mac) => {
+                visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
+            }
             Self::Context(bindings) => {
                 for (key, value) in bindings.iter() {
                     visit.extend([*key, *value]);
@@ -256,6 +288,7 @@ impl Value {
                 visit.extend(old);
             }
             Self::Range { .. } => {}
+            Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
@@ -297,13 +330,18 @@ impl Value {
                 }
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
+            Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::None
+            | Self::Ellipsis
             | Self::Bool(_)
             | Self::Int(_)
+            | Self::Float(_)
             | Self::Str(_)
             | Self::Bytes(_)
+            | Self::ByteArray(_)
             | Self::Hash(_)
             | Self::Native(_)
+            | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
             | Self::RegexPattern(_)
@@ -351,6 +389,7 @@ impl Heap {
                 Some(Value::None),
                 Some(Value::Bool(false)),
                 Some(Value::Bool(true)),
+                Some(Value::Ellipsis),
             ],
             free: Vec::new(),
             frames: vec![Frame::new(NONE)],
@@ -410,7 +449,7 @@ impl Heap {
             return;
         }
         let mut pending: Vec<_> = globals.collect();
-        pending.extend([NONE, FALSE, TRUE]);
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS]);
         for frame in &self.frames {
             pending.push(frame.scope);
             pending.extend(&frame.live);

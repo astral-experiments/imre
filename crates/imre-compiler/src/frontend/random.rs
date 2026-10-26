@@ -86,7 +86,16 @@ impl Checker<'_> {
         Ok(scope.finish(value))
     }
 
-    pub(super) fn random_choice(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn random_choice(
+        &mut self,
+        call: &ast::ExprCall,
+        secure: bool,
+    ) -> Result<Expr, String> {
+        let name = if secure {
+            "secrets.choice"
+        } else {
+            "random.choice"
+        };
         calls::reject_unpacking(call, self.source)?;
         let arg = match (
             call.arguments.args.as_ref(),
@@ -98,7 +107,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     call,
-                    "random.choice requires one sequence",
+                    &format!("{name} requires one sequence"),
                 ));
             }
         };
@@ -124,12 +133,15 @@ impl Checker<'_> {
                     ));
                 }
             };
-            return Ok(random(Op::ChoiceRange, Type::Int, bounds));
+            return Ok(random(Op::ChoiceRange { secure }, Type::Int, bounds));
         }
         let value = Self::string_value(self.expr(arg)?);
         let (ty, get) = match value.ty {
             Type::Str => (Type::Str, Builtin::StringGet),
             Type::Bytes => (Type::Int, Builtin::BytesGet),
+            ty if let Some(element) = self.types.homogeneous_tuple_element(ty) => {
+                (element, Builtin::TupleGet)
+            }
             Type::ListInt | Type::List(_) => {
                 (self.types.element(value.ty).unwrap(), Builtin::ListGet)
             }
@@ -137,7 +149,9 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     arg,
-                    "random.choice requires a native string, bytes, list or range",
+                    &format!(
+                        "{name} requires a native string, bytes, list, homogeneous tuple or range"
+                    ),
                 ));
             }
         };
@@ -147,7 +161,7 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Builtin(Builtin::Len, vec![seq.clone()]),
         };
-        let idx = random(Op::ChoiceIndex, Type::Int, vec![len]);
+        let idx = random(Op::ChoiceIndex { secure }, Type::Int, vec![len]);
         Ok(scope.finish(Expr {
             ty,
             kind: ExprKind::Builtin(get, vec![seq, idx]),

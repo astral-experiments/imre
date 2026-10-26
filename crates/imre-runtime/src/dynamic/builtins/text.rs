@@ -105,10 +105,11 @@ fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) ->
         return Err(type_error("decoding requires bytes"));
     };
     strict(ctx, errors)?;
-    if encoding(ctx, encoding_id)? && !bytes.is_ascii() {
-        return Err(Error::new("UnicodeDecodeError", "non-ASCII byte"));
-    }
-    String::from_utf8(bytes.clone()).map_err(|e| Error::new("UnicodeDecodeError", e.to_string()))
+    let encoding = encoding_id
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    Ok(crate::objects::Codec::lookup(encoding)?.decode(bytes, None)?)
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {
@@ -166,6 +167,7 @@ pub(super) fn construct(
                         "int() can't convert non-string with explicit base",
                     ));
                 }
+                Some(Value::Float(f)) => crate::Int::new(crate::floats::float_to_integer(*f)?),
                 _ => ctx.as_int(value.unwrap())?,
             };
             Ok(ctx.alloc(Value::Int(number)))
@@ -185,7 +187,7 @@ pub(super) fn construct(
             };
             Ok(ctx.text(rendered))
         }
-        "bytes" => {
+        "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
             let bytes = match value.map(|id| ctx.heap.get(id)) {
@@ -199,30 +201,42 @@ pub(super) fn construct(
                     return Err(type_error("encoding without a string argument"));
                 }
                 None => Vec::new(),
-                Some(Value::Bytes(_)) => return Ok(value.unwrap()),
+                Some(Value::Bytes(_)) if name == "bytes" => return Ok(value.unwrap()),
                 Some(Value::Int(_) | Value::Bool(_)) => {
-                    let size = usize::try_from(ctx.as_integer(value.unwrap())?)
-                        .map_err(|_| Error::new("ValueError", "negative count"))?;
-                    let mut v = Vec::new();
-                    v.try_reserve_exact(size)
-                        .map_err(|_| Error::new("MemoryError", "bytes allocation is too large"))?;
-                    v.resize(size, 0);
-                    v
+                    zeroed_bytes(ctx.as_integer(value.unwrap())?)?
                 }
-                _ => ctx
-                    .items(value.unwrap())?
-                    .into_iter()
-                    .map(|id| {
-                        let number = ctx.as_integer(id)?;
-                        u8::try_from(number)
-                            .map_err(|_| Error::new("ValueError", "bytes must be in range(0, 256)"))
-                    })
-                    .collect::<Result<_>>()?,
+                _ => bytes_from_iterable(ctx, value.unwrap())?,
             };
-            Ok(ctx.alloc(Value::Bytes(bytes)))
+            Ok(ctx.alloc(if name == "bytes" {
+                Value::Bytes(bytes)
+            } else {
+                Value::ByteArray(bytes)
+            }))
         }
         _ => Err(type_error(format!("unsupported type {name}"))),
     }
+}
+
+pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(obj) {
+        return Ok(data.clone());
+    }
+    ctx.items(obj)?
+        .into_iter()
+        .map(|id| {
+            u8::try_from(ctx.as_integer(id)?)
+                .map_err(|_| Error::new("ValueError", "bytes must be in range(0, 256)"))
+        })
+        .collect()
+}
+
+pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
+    let size = usize::try_from(size).map_err(|_| Error::new("ValueError", "negative count"))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(size)
+        .map_err(|_| Error::new("MemoryError", "bytes allocation is too large"))?;
+    data.resize(size, 0);
+    Ok(data)
 }
 
 /// Apply a scalar format specifier used by both f-strings and str.format.

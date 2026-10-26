@@ -14,6 +14,20 @@ use std::io;
 pub(super) mod links;
 pub(super) mod stat_result;
 
+/// Return the target OS separator as an interned one-character string, or None.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_separator(alternate: u32) -> *const Str {
+    let sep = match (cfg!(windows), alternate != 0) {
+        (false, true) => return std::ptr::null(),
+        (true, false) => r"\",
+        _ => "/",
+    };
+    finish(
+        super::text::try_owned_string(sep).map(StrOwner::into_raw),
+        std::ptr::null(),
+    )
+}
+
 /// Query the same POSIX metadata for Path views, fresh predicates, and metadata copies.
 pub(super) fn metadata(
     path: impl AsRef<std::path::Path>,

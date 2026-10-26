@@ -26,6 +26,64 @@ fn absent(ty: Type) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn unicode_normalize(
+        &mut self,
+        call: &ast::ExprCall,
+        check: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let name = if check { "is_normalized" } else { "normalize" };
+        let returns = if check { Type::Bool } else { Type::Str };
+        let args = &call.arguments;
+        let ([form, text], []) = (args.args.as_ref(), args.keywords.as_ref()) else {
+            let message = if args.keywords.is_empty() {
+                format!("{name} expected 2 arguments, got {}", args.args.len())
+            } else {
+                format!("unicodedata.{name}() takes no keyword arguments")
+            };
+            return self.positional_argument_error(call, &["form", "unistr"], returns, message);
+        };
+        self.graph.checked_overload(self.module, call.range());
+        let mut scope = calls::ArgumentScope::default();
+        let form = self.evaluated_argument(form)?;
+        let text = self.evaluated_argument(text)?;
+        let [form, text] = [form, text].map(|value| scope.hold(self, Self::string_value(value)));
+        for (position, value) in [(1, &form), (2, &text)] {
+            if !matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+                let actual = match value.ty {
+                    Type::None => "None",
+                    ty => self.exact_argument_type_name(ty).ok_or_else(|| {
+                        error(
+                            self.source,
+                            call,
+                            "normalization requires str or an exact argument type",
+                        )
+                    })?,
+                };
+                return Ok(scope.finish(calls::type_error(
+                    returns,
+                    vec![],
+                    format!("{name}() argument {position} must be str, not {actual}"),
+                )));
+            }
+        }
+        let normalized = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::Text(TextOperation::Normalize),
+                vec![form, text.clone()],
+            ),
+        };
+        Ok(scope.finish(if check {
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Compare(vec![normalized, text], vec![Compare::Equal]),
+            }
+        } else {
+            normalized
+        }))
+    }
+
     /// Convert a nullable string to text and evaluate its operand once.
     pub(super) fn optional_text(&mut self, value: Expr) -> Expr {
         let mut scope = calls::ArgumentScope::default();
