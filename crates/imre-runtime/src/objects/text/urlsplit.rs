@@ -76,7 +76,7 @@ fn check_netloc(netloc: &str) -> Result<()> {
             } else {
                 hostport.split(':').next().unwrap()
             };
-            if let Some(future) = host.strip_prefix('v') {
+            if let Some(future) = host.strip_prefix('v').or_else(|| host.strip_prefix('V')) {
                 if !future.split_once('.').is_some_and(|(v, rest)| {
                     !v.is_empty() && v.bytes().all(|b| b.is_ascii_hexdigit()) && !rest.is_empty()
                 }) {
