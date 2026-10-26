@@ -196,6 +196,12 @@ impl Checker<'_> {
                 }
                 (Target::Direct(function), has_receiver)
             }
+            ExprKind::Builtin(Builtin::StaticFunction(function), _) => {
+                // The function object carries metadata, but still calls this exact definition.
+                // Retain it in the partial and construct a distinct forwarding callable.
+                captured.push(scope.hold(self, callable));
+                (Target::Direct(function), false)
+            }
             _ => {
                 captured.push(scope.hold(self, callable));
                 (Target::Indirect, false)
