@@ -12,33 +12,58 @@ pub(super) mod timed;
 mod fields;
 pub(super) mod formatter;
 pub(super) mod record;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::exceptions::Result;
 use super::mappings::IntKey;
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
 
+/// A logger owns its state whether or not a manager registered its name.
+pub(super) struct Logger {
+    name: StrOwner,
+    level: RefCell<Int>,
+    enabled: cache::EnabledCache,
+    handlers: crate::ObjectOwner,
+    standalone_propagate: Option<Cell<bool>>,
+}
+
+impl Logger {
+    fn new(name: StrOwner, level: Int, standalone: bool) -> Rc<Self> {
+        Rc::new(Self {
+            name,
+            level: RefCell::new(level),
+            enabled: cache::EnabledCache::new(),
+            handlers: super::Words::new(6).into_object(),
+            standalone_propagate: standalone.then(|| Cell::new(true)),
+        })
+    }
+
+    fn handle(self: &Rc<Self>) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(self.clone()))))
+    }
+}
+
 struct Entry {
     handle: crate::ObjectOwner,
-    handlers: crate::ObjectOwner,
-    level: Int,
+    logger: Rc<Logger>,
     creation_order: usize,
-    enabled: cache::EnabledCache,
 }
 
 impl Entry {
     fn new(name: &str, level: i64, creation_order: usize) -> Self {
+        let logger = Logger::new(
+            StrOwner::new(Str::from(name)),
+            Int::small(level).unwrap(),
+            false,
+        );
         Self {
-            handle: crate::ObjectOwner::new(Object(StorageCell::new(Storage::Logger(
-                StrOwner::new(Str::from(name)),
-            )))),
-            level: Int::small(level).unwrap(),
-            handlers: super::Words::new(6).into_object(),
+            handle: logger.handle(),
+            logger,
             creation_order,
-            enabled: cache::EnabledCache::new(),
         }
     }
 }
@@ -60,16 +85,16 @@ impl Registry {
         }
     }
 
-    fn set_level(&mut self, name: &str, value: &Int) {
-        self.entries.get_mut(name).unwrap().level = value.clone();
+    fn set_level(&self, logger: &Logger, value: &Int) {
+        logger.level.replace(value.clone());
         self.clear_enabled();
     }
 
     /// Previously returned caches stay live when a level or the manager limit changes.
     fn clear_enabled(&self) {
-        // Manager._clear_cache invalidates every logger, even when the level is unchanged.
+        // Manager._clear_cache visits root and loggerDict, even when the level is unchanged.
         for entry in self.entries.values() {
-            entry.enabled.clear();
+            entry.logger.enabled.clear();
         }
     }
 
@@ -102,16 +127,24 @@ impl Registry {
         Some("root")
     }
 
-    fn effective(&self, mut name: &str) -> &Int {
+    fn parent(&self, logger: &Logger) -> Option<&Entry> {
+        if logger.standalone_propagate.is_some() {
+            return None;
+        }
+        self.parent_name(&logger.name)
+            .map(|name| &self.entries[name])
+    }
+
+    fn effective<'a>(&'a self, mut logger: &'a Logger) -> Int {
         loop {
-            let level = &self.entries[name].level;
+            let level = logger.level.borrow();
             if level.as_small() != Some(0) {
-                return level;
+                return level.clone();
             }
-            let Some(parent) = self.parent_name(name) else {
-                return level;
+            let Some(parent) = self.parent(logger) else {
+                return level.clone();
             };
-            name = parent;
+            logger = &parent.logger;
         }
     }
 }
@@ -225,14 +258,35 @@ fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Dura
     text
 }
 
-unsafe fn name(handle: *const Object) -> StrOwner {
-    // SAFETY: each caller supplies a rooted native Logger; the name acquires its own owner.
+unsafe fn state(handle: *const Object) -> Rc<Logger> {
+    // SAFETY: the caller supplies a rooted native Logger.
     unsafe {
         object(handle).0.with(|storage| match storage {
-            Storage::Logger(name) => name.clone(),
+            Storage::Logger(logger) => logger.clone(),
             _ => super::fail("SystemError", "expected logging.Logger"),
         })
     }
+}
+
+unsafe fn name(handle: *const Object) -> StrOwner {
+    // SAFETY: the caller retains the logger through the name read.
+    unsafe { state(handle) }.name.clone()
+}
+
+/// Construct a Logger without adding its name to the manager.
+///
+/// # Safety
+/// The caller owns the exact name and validated integer until this returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_log_new(name: *const Str, level: usize) -> *const Object {
+    // SAFETY: the name receives its own reference; the tagged integer is cloned.
+    let (name, level) = unsafe {
+        (
+            StrOwner::acquire_word(name as usize),
+            (*Int::borrow(level)).clone(),
+        )
+    };
+    crate::ObjectOwner::into_raw(Logger::new(name, level, true).handle())
 }
 
 /// # Safety
@@ -277,7 +331,7 @@ pub unsafe extern "C" fn imre_log_config(level: usize, fmt: usize, datefmt: usiz
         if level != 0 {
             // SAFETY: obtain an independent owner of the supplied integer.
             let level = unsafe { Int::borrow(level) };
-            logs.set_level("root", &level);
+            logs.set_level(&logs.entries["root"].logger, &level);
         }
         logs.format = Some(format);
         logs.datefmt = datefmt;
@@ -305,10 +359,10 @@ pub extern "C" fn imre_log_root(_logger: *const Object) -> *const Object {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_parent(logger: *const Object) -> usize {
     // SAFETY: the caller roots this logger while we acquire its name.
-    let name = unsafe { name(logger) };
+    let logger = unsafe { state(logger) };
     LOGGERS.with_borrow(|logs| {
-        logs.parent_name(&name).map_or(0, |parent| {
-            crate::ObjectOwner::into_raw(logs.entries[parent].handle.clone()) as usize
+        logs.parent(&logger).map_or(0, |parent| {
+            crate::ObjectOwner::into_raw(parent.handle.clone()) as usize
         })
     })
 }
@@ -318,8 +372,7 @@ pub unsafe extern "C" fn imre_log_parent(logger: *const Object) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_level(logger: *const Object) -> usize {
     // SAFETY: the caller roots this logger while we acquire its name.
-    let name = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.entries[name.as_str()].level.clone().into_raw())
+    unsafe { state(logger) }.level.borrow().clone().into_raw()
 }
 
 /// # Safety
@@ -327,8 +380,8 @@ pub unsafe extern "C" fn imre_log_level(logger: *const Object) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_effective_level(logger: *const Object) -> usize {
     // SAFETY: the caller roots this logger while we acquire its name.
-    let name = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.effective(&name).clone().into_raw())
+    let logger = unsafe { state(logger) };
+    LOGGERS.with_borrow(|logs| logs.effective(&logger).into_raw())
 }
 
 /// # Safety
@@ -336,8 +389,8 @@ pub unsafe extern "C" fn imre_log_effective_level(logger: *const Object) -> usiz
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize) {
     // SAFETY: both arguments are rooted by the caller.
-    let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
-    LOGGERS.with_borrow_mut(|logs| logs.set_level(&name, &value));
+    let (logger, value) = unsafe { (state(logger), Int::borrow(level)) };
+    LOGGERS.with_borrow(|logs| logs.set_level(&logger, &value));
 }
 
 /// # Safety
@@ -345,13 +398,13 @@ pub unsafe extern "C" fn imre_log_set_level(logger: *const Object, level: usize)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -> bool {
     // SAFETY: both arguments are rooted by the caller.
-    let (name, value) = unsafe { (name(logger), Int::borrow(level)) };
+    let (logger, value) = unsafe { (state(logger), Int::borrow(level)) };
     let result = LOGGERS.with_borrow(|logs| {
         let key = IntKey((*value).clone());
-        if let Some(enabled) = logs.entries[name.as_str()].enabled.get(&key) {
+        if let Some(enabled) = logger.enabled.get(&key) {
             return Ok(enabled);
         }
-        let threshold = logs.effective(&name);
+        let threshold = logs.effective(&logger);
         let enabled = match (
             value.as_small(),
             logs.disable.as_small(),
@@ -360,7 +413,7 @@ pub unsafe extern "C" fn imre_log_enabled(logger: *const Object, level: usize) -
             (Some(level), Some(disable), Some(threshold)) => level > disable && level >= threshold,
             _ => value.big() > logs.disable.big() && value.big() >= threshold.big(),
         };
-        logs.entries[name.as_str()].enabled.insert(key, enabled)?;
+        logger.enabled.insert(key, enabled)?;
         Ok(enabled)
     });
     finish(result, false)

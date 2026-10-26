@@ -28,13 +28,15 @@ each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
 The replay covers logger hierarchy, stream delivery, record fields, handler registration,
 formatters, and ordinary, timed and [size-based rotation](rotation.md). The counts agree at both levels.
 
+The [standalone logger comparison](standalone.md) measures the original handler-removal loop.
+
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 19 |
+| Imre | Imre | Imre | CPython hooks and native child | 20 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
 | CPython | CPython | Imre | CPython hooks and native child | 1 |
-| Blocked before execution | | | | 206 |
+| Blocked before execution | | | | 205 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -46,7 +48,7 @@ Four additional unchanged rotation bodies check actual files and rollover decisi
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
 The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
 Four bodies verify native stderr with the original
-CPython output helper. The 39 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 40 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
