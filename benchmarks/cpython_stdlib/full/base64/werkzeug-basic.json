@@ -1,0 +1,172 @@
+{
+  "cpython": "3.14.5",
+  "wheels": {
+    "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+    "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+    "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+    "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+    "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+    "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+  },
+  "module_sha256": "8808436302018c4e8b0c9c3f89c784f8694994b52f25108c2ada24cd528fd49e",
+  "error_mro": [
+    "binascii.Error",
+    "builtins.ValueError",
+    "builtins.Exception",
+    "builtins.BaseException",
+    "builtins.object"
+  ],
+  "incomplete_mro": [
+    "binascii.Incomplete",
+    "builtins.Exception",
+    "builtins.BaseException",
+    "builtins.object"
+  ],
+  "cases": {
+    "absent": {
+      "header": null,
+      "result": null
+    },
+    "empty_header": {
+      "header": "",
+      "result": null
+    },
+    "empty_basic": {
+      "header": "Basic",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "",
+          "password": ""
+        },
+        "token": null,
+        "to_header": "Basic Og=="
+      }
+    },
+    "empty_credentials": {
+      "header": "Basic Og==",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "",
+          "password": ""
+        },
+        "token": null,
+        "to_header": "Basic Og=="
+      }
+    },
+    "colon_in_password": {
+      "header": "basic dXNlcjphOmI=",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "user",
+          "password": "a:b"
+        },
+        "token": null,
+        "to_header": "Basic dXNlcjphOmI="
+      }
+    },
+    "missing_colon": {
+      "header": "Basic dXNlcg==",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "user",
+          "password": ""
+        },
+        "token": null,
+        "to_header": "Basic dXNlcjo="
+      }
+    },
+    "unicode_credentials": {
+      "header": "Basic z4A66Zuq",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "\u03c0",
+          "password": "\u96ea"
+        },
+        "token": null,
+        "to_header": "Basic z4A66Zuq"
+      }
+    },
+    "nul_credentials": {
+      "header": "Basic YToAYg==",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "a",
+          "password": "\u0000b"
+        },
+        "token": null,
+        "to_header": "Basic YToAYg=="
+      }
+    },
+    "invalid_utf8": {
+      "header": "Basic /w==",
+      "result": null
+    },
+    "one_data_char": {
+      "header": "Basic A",
+      "result": null
+    },
+    "missing_padding": {
+      "header": "Basic YTpiYw",
+      "result": null
+    },
+    "nonalphabet_only": {
+      "header": "Basic !!!!",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "",
+          "password": ""
+        },
+        "token": null,
+        "to_header": "Basic Og=="
+      }
+    },
+    "junk_and_whitespace": {
+      "header": "Basic Y!T o=",
+      "result": {
+        "scheme": "basic",
+        "parameters": {
+          "username": "a",
+          "password": ""
+        },
+        "token": null,
+        "to_header": "Basic YTo="
+      }
+    },
+    "nonascii_token": {
+      "header": "Basic \u00e9",
+      "exception": "builtins.ValueError",
+      "args": [
+        "string argument should contain only ASCII characters"
+      ]
+    },
+    "bearer": {
+      "header": "Bearer a/b==",
+      "result": {
+        "scheme": "bearer",
+        "parameters": {},
+        "token": "a/b==",
+        "to_header": "Bearer a/b=="
+      }
+    },
+    "digest": {
+      "header": "Digest name=\"two words\", flag",
+      "result": {
+        "scheme": "digest",
+        "parameters": {
+          "name": "two words",
+          "flag": null
+        },
+        "token": null,
+        "to_header": "Digest name=\"two words\", flag"
+      }
+    }
+  }
+}

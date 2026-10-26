@@ -108,6 +108,19 @@ class LoggerAdapter:
         return self.logger.name
 
 
+def _adapter_enabled(adapter: LoggerAdapter, level: int) -> bool:
+    return adapter.isEnabledFor(level)
+
+
+def _adapter_process(adapter: LoggerAdapter, msg: str, extra: dict[str, str] | None,
+                     supplied: bool) -> tuple[_AdapterLogger, str, dict[str, str] | None]:
+    kwargs: dict[str, dict[str, str] | None] = {}
+    if supplied:
+        kwargs["extra"] = extra
+    processed, fields = adapter.process(msg, kwargs)
+    return adapter.logger, processed, fields.get("extra")
+
+
 class Handler:
     _name: str | None
     _closed: bool

@@ -317,6 +317,8 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     UrlsafeB64encode,
+    Base64Encode,
+    Base64Decode,
     BinasciiDecode,
     BinasciiEncode,
     BinasciiError,
@@ -872,6 +874,8 @@ impl IntrinsicModule {
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
+            (Self::Base64, "b64encode") => Intrinsic::Base64Encode,
+            (Self::Base64, "b64decode") => Intrinsic::Base64Decode,
             (Self::Binascii, "a2b_base64") => Intrinsic::BinasciiDecode,
             (Self::Binascii, "b2a_base64") => Intrinsic::BinasciiEncode,
             (Self::Binascii, "Error") => Intrinsic::BinasciiError,
@@ -1772,6 +1776,7 @@ fn resolve_binding(
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
+const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1796,6 +1801,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     }
     module.symbol(name).or_else(|| {
         let implementation = match module {
+            IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
@@ -1808,7 +1814,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
+                    (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
@@ -2555,6 +2562,9 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Inspect)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
+            .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
@@ -2646,6 +2656,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == INSPECT_FUNCTIONS {
+            return Err("the private inspect implementation is not an importable module".into());
+        }
         if matches!(name, LOGGING_CLASSES | LOGGING_HANDLER_CLASSES) {
             return Err("the private logging implementation is not an importable module".into());
         }

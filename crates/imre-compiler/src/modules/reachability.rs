@@ -386,8 +386,11 @@ impl Reachable {
                 found.uses_logger,
                 found.instance_attributes.len(),
             );
-            // Logger methods lower to a bundled function without a Python call site.
-            if found.uses_logger
+            // Logger and adapter methods lower to bundled functions without a Python call site.
+            let adapter = graph
+                .logging_definition("LoggerAdapter")
+                .is_some_and(|id| found.definitions.contains(&id));
+            if (found.uses_logger || adapter)
                 && [
                     "log", "debug", "info", "warning", "error", "critical", "fatal",
                 ]
@@ -397,6 +400,11 @@ impl Reachable {
                 found
                     .definitions
                     .extend(graph.logging_definition("_deliver"));
+                if adapter {
+                    for name in ["_adapter_enabled", "_adapter_process"] {
+                        found.definitions.extend(graph.logging_definition(name));
+                    }
+                }
             }
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
@@ -928,6 +936,27 @@ class Other:
     def info(self) -> int:
         return 42
     def handle(self):
+        return globals()
+print(Other().info())
+"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn follows_adapter_event_calls() {
+        reachable(include_str!(
+            "../../../../tests/fixtures/files/logging_adapter_events.py"
+        ))
+        .unwrap();
+        // An unrelated info() method must not make process() reachable.
+        reachable(
+            r#"
+import logging
+class Other:
+    def info(self) -> int:
+        return 42
+    def process(self):
         return globals()
 print(Other().info())
 "#,

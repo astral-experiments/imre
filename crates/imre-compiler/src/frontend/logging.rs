@@ -374,7 +374,7 @@ impl Checker<'_> {
                 )
             })?;
         self.calls.insert(sig.id);
-        Ok(self.call_value(sig, Type::None, args))
+        Ok(self.call_value(sig, sig.returns, args))
     }
 
     pub(super) fn configure_logging(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -720,6 +720,58 @@ impl Checker<'_> {
         self.log_message(self.root_logger(), level, args, true, call)
     }
 
+    /// Bind an inherited adapter logging method at its original call site.
+    pub(super) fn adapter_event(
+        &mut self,
+        class: usize,
+        receiver: &Expr,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let method_level = match name {
+            "log" => None,
+            "debug" => Some(10),
+            "info" => Some(20),
+            "warning" => Some(30),
+            "error" => Some(40),
+            "critical" => Some(50),
+            _ => return Ok(None),
+        };
+        let Some(base) = self
+            .graph
+            .logging_definition("LoggerAdapter")
+            .and_then(|def| self.classes.declarations.ids.get(&def))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        if class != base
+            && !self.classes.declarations.definitions[class]
+                .bases
+                .contains(&base)
+        {
+            return Ok(None);
+        }
+        if name != "log" && self.classes.methods[class].contains_key("log") {
+            return Err(error(
+                self.source,
+                call,
+                "forwarding adapter methods to an overridden log signature is unsupported",
+            ));
+        }
+        let args = call.arguments.args.as_ref();
+        let (level, args) = if let Some(level) = method_level {
+            (number(level), args)
+        } else if let Some((level, rest)) = args.split_first() {
+            (self.expr_expected(level, Type::Int)?, rest)
+        } else {
+            return Err(error(self.source, call, "missing log level"));
+        };
+        let receiver = self.coerce(receiver.clone(), Type::Class(base), call)?;
+        self.log_message(receiver, level, args, false, call)
+            .map(Some)
+    }
+
     fn log_message(
         &mut self,
         logger: Expr,
@@ -731,14 +783,30 @@ impl Checker<'_> {
         let Some((message, operands)) = args.split_first() else {
             return Err(error(self.source, call, "missing log message"));
         };
-        let mut values = vec![logger, level, self.expr(message)?];
+        let adapter = logger.ty != Type::Logger;
+        let original = if adapter {
+            self.expr_expected(message, Type::Str)?
+        } else {
+            self.expr(message)?
+        };
+        let mut values = vec![logger, level, original];
         for operand in operands {
             values.push(self.expr(operand)?);
         }
         let extra = match call.arguments.keywords.as_ref() {
             [] => None,
             [kw] if kw.arg.as_ref().is_some_and(|name| name.as_str() == "extra") => {
-                Some(self.logging_extra(&kw.value)?)
+                if adapter {
+                    let fields = self.types.dict(Type::Str, Type::Str);
+                    let value = if matches!(kw.value, ast::Expr::Dict(_)) {
+                        self.expr_expected(&kw.value, fields)?
+                    } else {
+                        self.expr(&kw.value)?
+                    };
+                    Some(self.coerce(value, self.types.optional(fields), &kw.value)?)
+                } else {
+                    Some(self.logging_extra(&kw.value)?)
+                }
             }
             _ => {
                 return Err(error(
@@ -784,6 +852,65 @@ impl Checker<'_> {
                 .tuple(arguments.iter().map(|arg| arg.ty).collect()),
             kind: ExprKind::Tuple(arguments),
         };
+        let extra = extra_index.map(|i| self.local(clear[i]));
+        let event = if adapter {
+            let enabled = self.logging_source_call(
+                "_adapter_enabled",
+                ir::CallArgs::positional(vec![logger.clone(), level.clone()]),
+                call,
+            )?;
+            let has_extra = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(extra.is_some()),
+            };
+            let context = self.types.optional(self.types.dict(Type::Str, Type::Str));
+            let processed = self.logging_source_call(
+                "_adapter_process",
+                ir::CallArgs::positional(vec![
+                    logger,
+                    original,
+                    extra.unwrap_or_else(|| absent(context)),
+                    has_extra,
+                ]),
+                call,
+            )?;
+            let mut prepared = calls::ArgumentScope::default();
+            let held = prepared.hold(self, processed);
+            let field = |index, ty| Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(held.clone()), index),
+            };
+            let forwarded = self.log_event(
+                field(0, Type::Logger),
+                level,
+                field(1, Type::Str),
+                arguments,
+                Some(field(2, context)),
+                call,
+            )?;
+            when_enabled(enabled, prepared.finish(forwarded))
+        } else {
+            self.log_event(logger, level, original, arguments, extra, call)?
+        };
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                clear,
+                value: Box::new(event),
+            },
+        })
+    }
+
+    fn log_event(
+        &mut self,
+        logger: Expr,
+        level: Expr,
+        original: Expr,
+        arguments: Expr,
+        extra: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
         let enabled = operation(
             Log::Enabled,
             Type::Bool,
@@ -827,46 +954,17 @@ impl Checker<'_> {
                 none(),
             ],
         );
-        let record = if let Some(i) = extra_index {
-            self.record_with_extra(record, self.local(clear[i]))
+        let record = if let Some(extra) = extra {
+            self.record_with_extra(record, extra)
         } else {
             record
         };
-        let def = self
-            .graph
-            .logging_definition("_deliver")
-            .ok_or_else(|| error(self.source, call, "missing native logging delivery"))?;
-        let sig = self.functions.get(&def).ok_or_else(|| {
-            error(
-                self.source,
-                call,
-                "missing native logging delivery signature",
-            )
-        })?;
-        self.calls.insert(sig.id);
-        let emit = self.call_value(
-            sig,
-            Type::None,
+        let emit = self.logging_source_call(
+            "_deliver",
             ir::CallArgs::positional(vec![logger, level, record]),
-        );
-        Ok(Expr {
-            ty: Type::None,
-            kind: ExprKind::Scope {
-                body,
-                clear,
-                value: Box::new(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Conditional(
-                        Box::new(enabled),
-                        Box::new(emit),
-                        Box::new(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::None,
-                        }),
-                    ),
-                }),
-            },
-        })
+            call,
+        )?;
+        Ok(when_enabled(enabled, emit))
     }
 }
 
@@ -923,4 +1021,18 @@ fn caller_name(body: &[ast::Stmt], call: TextRange) -> &str {
     };
     caller.visit_body(body);
     caller.name
+}
+
+fn when_enabled(enabled: Expr, event: Expr) -> Expr {
+    Expr {
+        ty: Type::None,
+        kind: ExprKind::Conditional(
+            Box::new(enabled),
+            Box::new(event),
+            Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            }),
+        ),
+    }
 }
