@@ -16,6 +16,7 @@ def main():
     with sink as stream:
         assert stream is sink
         assert stream.write("π\x00🌍\n") == 4
+        assert stream.tell() == 5
         before = stream.getvalue()
         assert before == "π\x00🌍\r\nf"
         assert stream.write("!") == 1

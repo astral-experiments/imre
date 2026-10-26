@@ -43,6 +43,15 @@ impl TextFile {
         }
     }
 
+    pub(crate) fn memory_position(&self) -> Result<usize> {
+        // SAFETY: only a copy of the native character offset escapes this borrow.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|storage| storage.file_mut().string_io_position())
+        }
+    }
+
     pub(crate) fn closed(&self) -> bool {
         // SAFETY: this nonreentrant access only copies the file's closed flag.
         unsafe { self.0.0.with(|storage| storage.file().closed()) }

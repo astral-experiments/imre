@@ -39,7 +39,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         module,
         "StringIO",
         text,
-        &["__init__", "write", "getvalue", "read", "isatty"],
+        &["__init__", "write", "getvalue", "read", "tell", "isatty"],
     );
     ctx.builtins.insert("_io.StringIO".into(), string_io);
 }
@@ -322,6 +322,7 @@ fn string_io_method(
             Ok(ctx.int(text.chars().count() as i64))
         }
         "getvalue" => Ok(ctx.text(file.getvalue()?.into_string())),
+        "tell" => Ok(ctx.int(file.memory_position()? as i64)),
         "read" => {
             let size = match args.first().copied() {
                 None | Some(NONE) => None,

@@ -167,6 +167,10 @@ impl FileState {
         self.text_memory()?.read(size, false)
     }
 
+    pub(in crate::objects) fn string_io_position(&mut self) -> Result<usize> {
+        Ok(self.text_memory()?.pos)
+    }
+
     pub(in crate::objects) fn string_io_value(&mut self) -> Result<Str> {
         TextMemory::text(&self.text_memory()?.data)
     }
