@@ -294,6 +294,7 @@ pub(super) enum Value {
     },
     Set {
         items: Vec<Id>,
+        index: super::sets::SetIndex,
         frozen: bool,
     },
     Dict(super::dictionary::Entries),
@@ -640,6 +641,16 @@ impl Heap {
     }
     pub fn keep(&mut self, value: Id) {
         self.frames.last_mut().unwrap().live.push(value);
+    }
+
+    /// Mark the current frame's temporary roots before a callback returns a scalar.
+    pub fn temporary_mark(&self) -> usize {
+        self.frames.last().unwrap().live.len()
+    }
+
+    /// Release only roots added by the callback after its result has been consumed.
+    pub fn release_temporaries(&mut self, mark: usize) {
+        self.frames.last_mut().unwrap().live.truncate(mark);
     }
 
     pub fn active_exception(&self) -> Id {
