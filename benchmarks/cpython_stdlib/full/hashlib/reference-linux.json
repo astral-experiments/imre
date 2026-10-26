@@ -1,0 +1,116 @@
+{
+  "module": "test.test_hashlib",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 82,
+  "reference": {
+    "test.test_hashlib.HashLibTestCase.test_algorithms_available": "pass",
+    "test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed": "pass",
+    "test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_blake2b": "pass",
+    "test.test_hashlib.HashLibTestCase.test_blake2b_vectors": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_blake2s": "pass",
+    "test.test_hashlib.HashLibTestCase.test_blake2s_vectors": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_blocksize_and_name": "pass",
+    "test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2b_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2b_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2s_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2s_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_md5_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_md5_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_md5_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_md5_huge": {
+      "skipped": "not enough memory: 4.0G minimum needed"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_md5_uintmax": {
+      "skipped": "not enough memory: 4.0G minimum needed"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha224_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha224_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha224_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha224_3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha384_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha384_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha384_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha384_3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_224_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_256_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_384_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_512_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha512_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha512_1": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha512_2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_sha512_3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_shake128_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_shake256_vector": {
+      "skipped": "Use of the 'urlfetch' resource not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_shake_128_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_case_shake_256_0": "pass",
+    "test.test_hashlib.HashLibTestCase.test_clinic_signature": "pass",
+    "test.test_hashlib.HashLibTestCase.test_clinic_signature_errors": "pass",
+    "test.test_hashlib.HashLibTestCase.test_digest_length_overflow": "pass",
+    "test.test_hashlib.HashLibTestCase.test_disallow_instantiation": "pass",
+    "test.test_hashlib.HashLibTestCase.test_extra_sha3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_get_builtin_constructor": "pass",
+    "test.test_hashlib.HashLibTestCase.test_get_fips_mode": "pass",
+    "test.test_hashlib.HashLibTestCase.test_gil": "pass",
+    "test.test_hashlib.HashLibTestCase.test_hash_array": "pass",
+    "test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation": "pass",
+    "test.test_hashlib.HashLibTestCase.test_hexdigest": "pass",
+    "test.test_hashlib.HashLibTestCase.test_large_update": "pass",
+    "test.test_hashlib.HashLibTestCase.test_name_attribute": "pass",
+    "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower": "pass",
+    "test.test_hashlib.HashLibTestCase.test_no_unicode": "pass",
+    "test.test_hashlib.HashLibTestCase.test_no_unicode_blake2": "pass",
+    "test.test_hashlib.HashLibTestCase.test_no_unicode_sha3": "pass",
+    "test.test_hashlib.HashLibTestCase.test_readonly_types": "pass",
+    "test.test_hashlib.HashLibTestCase.test_sha256_gil": "pass",
+    "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_hashlib.HashLibTestCase.test_threaded_hashing": "pass",
+    "test.test_hashlib.HashLibTestCase.test_unknown_hash": "pass",
+    "test.test_hashlib.HashLibTestCase.test_usedforsecurity_false": "pass",
+    "test.test_hashlib.HashLibTestCase.test_usedforsecurity_true": "pass",
+    "test.test_hashlib.KDFTests.test_file_digest": "pass",
+    "test.test_hashlib.KDFTests.test_normalized_name": "pass",
+    "test.test_hashlib.KDFTests.test_pbkdf2_hmac_c": "pass",
+    "test.test_hashlib.KDFTests.test_scrypt": "pass"
+  }
+}

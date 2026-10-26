@@ -1,0 +1,212 @@
+{
+  "modes": [
+    "ordinary-O0",
+    "ordinary-O3",
+    "reachable-O0",
+    "reachable-O3"
+  ],
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "named_provider_controls": "matched CPython",
+  "whole_native_methods": 3,
+  "tests": {
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_0": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        0
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha1.sha1": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha1": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_1": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        3
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha1.sha1": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha1": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_2": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        56
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha1.sha1": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha1": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha1_3": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        1000000
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha1.sha1": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha1": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_0": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        0
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha2.sha256": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha256": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_1": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        3
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha2.sha256": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha256": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_2": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        56
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha2.sha256": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha256": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_case_sha256_3": {
+      "status": "mixed",
+      "native_one_shot_input_bytes": [
+        1000000
+      ],
+      "native_results_checked": {
+        "hexdigest": 1,
+        "digest": 1,
+        "digest_size": 1
+      },
+      "host_operations": {
+        "empty constructor for file_digest": 2,
+        "file_digest": 8
+      },
+      "host_reference_constructors": {
+        "_sha2.sha256": 3,
+        "test.test_hashlib.do_test_algorithm_via_hashlib_new_sha256": 3
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_large_update": {
+      "status": "mixed",
+      "native_sha1_operations": {
+        "construct": 4,
+        "update": 6,
+        "name": 1,
+        "digest": 8,
+        "copy": 1
+      },
+      "diagnostics": []
+    },
+    "test.test_hashlib.HashLibTestCase.test_sha256_gil": {
+      "status": "pass",
+      "native_assertions": 2,
+      "method_sha256": "2612a21fe937bd3dc22a2ab799dc74e76b718e5cbb9dc8dfc4792d9d387d44ea",
+      "host_fixture_gil_minsize": 2048
+    },
+    "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb": {
+      "status": "pass",
+      "native_assertions": 1,
+      "method_sha256": "4992a078db52fd2cfcce516039a2d2fb7942b48f7f08957b7b66cfa7291638e6"
+    },
+    "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower": {
+      "status": "pass",
+      "native_assertions": 1,
+      "method_sha256": "ccef92a74574e64a848bf2eea2f50160ed9b2a1866d960107ac81c5f041517e6"
+    }
+  },
+  "werkzeug_generate_etag": {
+    "function_sha256": "eed813cb52b619c5deb62f18bc09fdaa3a410bcb5d96b5fb4fafab93fed72d4a",
+    "matched_input_bytes": [
+      0,
+      5,
+      256,
+      55,
+      56,
+      64,
+      1000000
+    ]
+  }
+}
