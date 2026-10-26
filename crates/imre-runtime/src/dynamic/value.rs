@@ -61,6 +61,8 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
+            Value::ByteArray(_) => "bytearray",
+            Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -174,6 +176,11 @@ pub(super) enum Value {
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
+    CodecInfo {
+        entry: crate::objects::CodecInfo,
+        decode: Id,
+    },
+    CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
     Socket(crate::ObjectOwner),
@@ -374,6 +381,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::IoMethod { owner, .. } => visit.push(*owner),
+            Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
             | Self::Ellipsis
             | Self::Bool(_)
@@ -382,6 +390,7 @@ impl Value {
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
+            | Self::CodecDecoder(_)
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
