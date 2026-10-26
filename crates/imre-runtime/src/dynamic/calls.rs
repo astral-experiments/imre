@@ -1426,6 +1426,7 @@ impl Context {
                 class_cell,
                 code,
                 defaults,
+                kwdefaults,
                 ..
             } => {
                 let parameters = self.code_object(code).parameters;
@@ -1503,12 +1504,37 @@ impl Context {
                     let v = self.dict(extra);
                     self.bind(local, n, v);
                 }
-                for n in pos.iter().chain(&kwonly) {
+                let default_values = if defaults == NONE {
+                    Vec::new()
+                } else {
+                    self.items(defaults)?
+                };
+                for (index, n) in pos.iter().enumerate() {
                     if !self.scope_data(local).names.contains_key(n) {
-                        let key = self.text(n);
-                        let val = self.get_item(defaults, key).map_err(|_| {
-                            Error::new("TypeError", format!("{name} requires argument {n:?}"))
-                        })?;
+                        let offset = index + default_values.len();
+                        let val = offset
+                            .checked_sub(pos.len())
+                            .and_then(|i| default_values.get(i))
+                            .copied()
+                            .ok_or_else(|| {
+                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
+                            })?;
+                        self.bind(local, n, val);
+                    }
+                }
+                for n in &kwonly {
+                    if !self.scope_data(local).names.contains_key(n) {
+                        let val = self
+                            .dict_entries(kwdefaults)
+                            .and_then(|entries| {
+                                entries.iter().find_map(|&(key, value)| {
+                                    matches!(self.heap.get(key), Value::Str(text) if text == n)
+                                        .then_some(value)
+                                })
+                            })
+                            .ok_or_else(|| {
+                                Error::new("TypeError", format!("{name} requires argument {n:?}"))
+                            })?;
                         self.bind(local, n, val);
                     }
                 }

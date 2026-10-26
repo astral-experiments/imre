@@ -386,6 +386,7 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
+            "boxed_function_defaults.py",
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_class_attribute.py",
