@@ -176,14 +176,18 @@ fn data_hash(bytes: &[u8]) -> i64 {
 impl Context {
     fn stored_entries(&self, dict: Id) -> &Entries {
         match self.heap.get(dict) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries,
+            Value::Set { entries, .. }
+            | Value::Dict(entries)
+            | Value::DefaultDict { entries, .. } => entries,
             _ => unreachable!("dictionary storage"),
         }
     }
 
     fn stored_entries_mut(&mut self, dict: Id) -> &mut Entries {
         match self.heap.get_mut(dict) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries,
+            Value::Set { entries, .. }
+            | Value::Dict(entries)
+            | Value::DefaultDict { entries, .. } => entries,
             _ => unreachable!("dictionary storage"),
         }
     }
@@ -213,7 +217,7 @@ impl Context {
         )
     }
 
-    fn dictionary_hash_error(&self, key: Id, error: Error) -> Error {
+    fn dictionary_hash_error(&self, container: Id, key: Id, error: Error) -> Error {
         if error.kind != "TypeError" {
             return error;
         }
@@ -235,7 +239,15 @@ impl Context {
         };
         Error::new(
             "TypeError",
-            format!("cannot use '{name}' as a dict key ({})", error.message),
+            format!(
+                "cannot use '{name}' as a {} ({})",
+                if matches!(self.heap.get(container), Value::Set { .. }) {
+                    "set element"
+                } else {
+                    "dict key"
+                },
+                error.message
+            ),
         )
     }
 
@@ -310,17 +322,16 @@ impl Context {
                 hash as i64
             }
         } else if let Value::Set {
-            items,
+            entries,
             frozen: true,
         } = self.heap.get(key)
         {
             // Frozenset hashes are independent of item order. Cache the successful
             // result so repeated dictionary probes leave the members untouched.
-            let items = items.clone();
-            let size = items.len();
+            let size = entries.len();
             let mut hash = 0_u64;
-            for item in items {
-                let lane = self.dictionary_hash(item)? as u64;
+            for i in 0..size {
+                let lane = entries.stored_hash(i).expect("stored set hash") as u64;
                 hash ^= ((lane ^ 89_869_747) ^ (lane << 16)).wrapping_mul(3_644_798_167);
             }
             hash ^= (size as u64 + 1).wrapping_mul(1_927_868_237);
@@ -412,6 +423,21 @@ impl Context {
             let answer = super::super::slice::compare(self, "==", *a, *b)?;
             return self.truth(answer);
         }
+        if let (Value::Set { entries: a, .. }, Value::Set { entries: b, .. }) =
+            (self.heap.get(left), self.heap.get(right))
+        {
+            if a.len() != b.len() {
+                return Ok(false);
+            }
+            let mut position = 0;
+            while let Some((at, key, _, hash)) = self.dictionary_pair(left, position) {
+                if self.find_dictionary_key(right, key, hash)?.1.is_none() {
+                    return Ok(false);
+                }
+                position = at + 1;
+            }
+            return Ok(true);
+        }
         if let (Some(left), Some(right)) = (self.tuple_keys(left), self.tuple_keys(right)) {
             if left.len() != right.len() {
                 return Ok(false);
@@ -469,7 +495,7 @@ impl Context {
             Some(hash) => hash,
             None => self
                 .dictionary_hash(key)
-                .map_err(|error| self.dictionary_hash_error(key, error))?,
+                .map_err(|error| self.dictionary_hash_error(dict, key, error))?,
         };
         self.index_dictionary(dict)?;
         'restart: loop {

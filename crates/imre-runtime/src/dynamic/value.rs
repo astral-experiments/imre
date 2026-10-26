@@ -347,7 +347,7 @@ pub(super) enum Value {
         extras: Vec<(&'static str, Id)>,
     },
     Set {
-        items: Vec<Id>,
+        entries: super::dictionary::Entries,
         frozen: bool,
     },
     Dict(super::dictionary::Entries),
@@ -512,7 +512,8 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) => visit.extend(v),
+            Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),

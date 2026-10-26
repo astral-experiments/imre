@@ -103,7 +103,8 @@ impl Function<'_, '_> {
                     if let Some(target) = self.place(&v.target) {
                         let left = self.read(&target);
                         let right = self.expr(&v.value);
-                        let value = self.op(v.op.as_str(), &[&left, &right]);
+                        let value =
+                            self.op(&format!("inplace:{}", v.op.as_str()), &[&left, &right]);
                         self.write(&target, &value);
                     }
                 }

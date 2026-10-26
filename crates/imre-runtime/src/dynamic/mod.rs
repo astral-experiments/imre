@@ -460,11 +460,12 @@ impl Context {
             return self.items(dict);
         }
         match self.heap.get(id).clone() {
-            Value::List(items)
-            | Value::Tuple(items)
-            | Value::Set { items, .. }
-            | Value::NamedTuple { values: items, .. } => Ok(items),
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Ok(items)
+            }
+            Value::Set { entries, .. }
+            | Value::Dict(entries)
+            | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),

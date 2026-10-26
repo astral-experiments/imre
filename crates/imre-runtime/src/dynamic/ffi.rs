@@ -87,7 +87,7 @@ impl Context {
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
             "set" => Ok(self.alloc(Value::Set {
-                items: Vec::new(),
+                entries: Default::default(),
                 frozen: false,
             })),
             "dict" => Ok(self.dict(Vec::new())),
@@ -325,6 +325,7 @@ impl Context {
                 Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
+            _ if let Some(op) = op.strip_prefix("inplace:") => self.inplace(op, a, b),
             _ => self.binary(op, a, b),
         }
     }

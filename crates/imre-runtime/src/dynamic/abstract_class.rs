@@ -37,29 +37,31 @@ impl Context {
         };
         for &base in bases {
             if let Some(methods) = self.own_class_attr(base, "__abstractmethods__")
-                && let Value::Set { items, .. } = self.heap.get(methods)
+                && let Value::Set { entries, .. } = self.heap.get(methods)
             {
-                for &key in items {
+                for &(key, _) in entries.iter() {
                     names.insert(self.str_value(key)?.to_owned());
                 }
             }
         }
-        let mut items = Vec::new();
+        let methods = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: true,
+        });
         for name in names {
             let Some(value) = self.class_attr(class, &name) else {
                 continue;
             };
             match self.lookup_attr(value, "__isabstractmethod__") {
-                Ok(value) if self.truth(value)? => items.push(self.text(name)),
+                Ok(value) if self.truth(value)? => {
+                    let key = self.text(name);
+                    super::builtins::set_add(self, methods, key)?;
+                }
                 Ok(_) => {}
                 Err(err) if err.kind == "AttributeError" => {}
                 Err(err) => return Err(err),
             }
         }
-        let methods = self.alloc(Value::Set {
-            items,
-            frozen: true,
-        });
         self.set_abstract_methods(scope, methods)
     }
 
