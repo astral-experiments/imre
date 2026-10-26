@@ -30,7 +30,7 @@ impl Checker<'_> {
         }
         if let ast::Expr::Generator(generator) = source
             && let Some(filtered) =
-                self.string_list_filter(&generator.generators, &generator.elt, element)?
+                self.string_list_filter(&generator.generators, &generator.elt, element, true)?
         {
             return Ok(filtered);
         }

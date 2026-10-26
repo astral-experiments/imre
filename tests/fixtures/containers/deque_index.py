@@ -16,6 +16,19 @@ def replacement() -> str:
     return "replacement"
 
 
+def plain_index(index: int) -> int:
+    return index
+
+
+def mixed_readers(values: deque[int], flag: bool) -> None:
+    read = values.__getitem__
+    selected = read if flag else plain_index
+    if flag:
+        read = plain_index
+    print(selected(1))
+    print(read(1))
+
+
 values = deque("abcd", maxlen=4)
 values.popleft()
 values.append("e")
@@ -26,6 +39,9 @@ print(values[-1])
 get = values.__getitem__
 put = values.__setitem__
 erase = values.__delitem__
+for position in [False, True]:
+    print(get(position))
+    put(position, get(position))
 put(-2, "third")
 print(get(-2))
 original = values
@@ -83,3 +99,13 @@ for oversized in [-9223372036854775809, 9223372036854775808]:
         erase(oversized)
     except OverflowError as error:
         print(str(error))
+
+flags = deque([6, 7, 8])
+remove = flags.__delitem__
+remove(True)
+print(flags[True])
+read = flags.__getitem__
+print(list(map(read, [True, False])))
+print(list(filter(read, [False, True])))
+mixed_readers(flags, True)
+mixed_readers(flags, False)

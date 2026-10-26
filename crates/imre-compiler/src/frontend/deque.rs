@@ -60,7 +60,11 @@ impl Checker<'_> {
             "copy" | "__copy__" => (Builtin::DequeCopy, vec![], receiver.ty),
             _ => return Err(error(self.source, attribute, "unsupported deque attribute")),
         };
-        Ok(self.bound_builtin(attribute, receiver, builtin, parameters, returns))
+        let mut bound = self.bound_builtin(attribute, receiver, builtin, parameters, returns);
+        if matches!(name, "__getitem__" | "__setitem__" | "__delitem__") {
+            bound.ty = self.types.index_callable(bound.ty);
+        }
+        Ok(bound)
     }
 
     pub(super) fn deque_new(

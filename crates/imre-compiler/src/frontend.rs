@@ -1052,7 +1052,7 @@ pub(crate) fn lower_with_caller_cache(
         class_reads.push(helper.class_reads);
         recursion_errors.push(helper.recursion_error);
     }
-    let entry = entry.expect("source graph has an entry module");
+    let mut entry = entry.expect("source graph has an entry module");
     typing::validate_functions(&functions, &entry, &types)?;
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
@@ -1081,17 +1081,20 @@ pub(crate) fn lower_with_caller_cache(
     }
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
-    let mut count = python_frames.iter().filter(|&&frame| frame).count() > 1000;
+    let source_functions = python_frames.iter().filter(|&&frame| frame).count();
+    let mut generator_sites = 0;
+    let mut count = false;
     for function in functions.iter().chain([&entry]) {
         ir::walk_expressions(&function.body, &mut |value| match value.kind {
             ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
             ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
+            ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
             _ => {}
         });
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames = if names || count {
+    let source_frames = if names || count || source_functions + generator_sites > 1000 {
         python_frames
             .into_iter()
             .zip(owners.iter().copied().chain([graph.entry]))
@@ -1112,9 +1115,27 @@ pub(crate) fn lower_with_caller_cache(
     } else {
         Vec::new()
     };
+    if generator_sites != 0 && source_frames.is_empty() {
+        for function in functions.iter_mut().chain([&mut entry]) {
+            ir::walk_expressions_mut(&mut function.body, &mut |value| {
+                if matches!(
+                    value.kind,
+                    ExprKind::Builtin(
+                        Builtin::GeneratorFrameEnter(_) | Builtin::GeneratorFrameLeave,
+                        _
+                    )
+                ) {
+                    value.kind = ExprKind::None;
+                }
+            });
+        }
+    }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
-    for (id, sums) in zip_sums {
-        zip_sums::fuse(&mut functions, id, &sums);
+    // Fusing adjacent sums also inlines their generator bodies and scalar calls.
+    if source_frames.is_empty() {
+        for (id, sums) in zip_sums {
+            zip_sums::fuse(&mut functions, id, &sums);
+        }
     }
     globals
         .class_data
@@ -2067,6 +2088,11 @@ fn annotation_with_aliases(
                     types.list(element)
                 })
             }
+            ast::Expr::Name(name)
+                if name.id == "frozenset" && nested(&value.slice)? == Type::Str =>
+            {
+                Ok(Type::FrozenStrings)
+            }
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
                 if !types.hashable_key(element) {
@@ -2561,10 +2587,16 @@ impl<'a> Checker<'a> {
         {
             return self.document_coerce(value, expected, node);
         }
+        if value.ty == Type::FrozenStrings && expected == Type::StringKeys {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
         if value.ty == expected {
             return Ok(value);
         }
-        if self.types.wrapper_signature(value.ty) == Some(expected) {
+        if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -2751,8 +2783,8 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if self.types.is_len_argument(expected) {
             self.pack_len_value(value, site)
-        } else if self.types.is_unread_argument(expected) {
-            self.pack_unread_value(value, site, expected)
+        } else if self.types.is_callback_argument(expected) {
+            self.pack_callback_value(value, site, expected)
         } else {
             self.coerce(value, expected, site)
         }
@@ -2790,7 +2822,7 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+        if self.types.is_len_argument(expected) || self.types.is_callback_argument(expected) {
             let value = self.expr(expression)?;
             // A partial consumes its marker before the target's own argument ABI.
             // Keep the evaluated value so a lookup or callback runs exactly once.
@@ -3360,16 +3392,13 @@ impl<'a> Checker<'a> {
             _ => value,
         };
         if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
-            && self
-                .types
-                .partial_function(args[0].ty)
-                .is_some_and(|p| p.callable == self.locals[slot])
-        {
-            self.narrowed.insert_mut(slot, args[0].ty);
-        }
-        if self.locals[slot] == documents::ANY
-            && let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
-            && matches!(args[0].ty, documents::LIST | documents::MAP)
+            && ((self.locals[slot] == documents::ANY
+                && matches!(args[0].ty, documents::LIST | documents::MAP))
+                || self
+                    .types
+                    .partial_function(args[0].ty)
+                    .is_some_and(|p| p.callable == self.locals[slot])
+                || self.types.index_callable_signature(args[0].ty) == Some(self.locals[slot]))
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -3824,10 +3853,7 @@ impl<'a> Checker<'a> {
             );
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let string = iterable.ty == Type::Str;
         let bytes = iterable.ty == Type::Bytes;
         let element = self
@@ -5378,6 +5404,8 @@ impl<'a> Checker<'a> {
             && self.types.payload(nullable) == Some(value.ty)
         {
             self.coerce(value, nullable, target)?
+        } else if let Some(signature) = self.types.index_callable_signature(value.ty) {
+            self.coerce(value, signature, target)?
         } else {
             value
         };
@@ -5490,6 +5518,11 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::OptionalStrConcat, vec![left, right]),
             });
+        }
+        if op == ast::Operator::Mod
+            && let Some(formatted) = single_dispatch::format_argument(self.types, &left, &right)
+        {
+            return Ok(formatted);
         }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
@@ -5854,6 +5887,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysStdlibModuleNames => {
+                    return Ok(Expr {
+                        ty: Type::FrozenStrings,
+                        kind: ExprKind::Builtin(Builtin::SysStdlibModuleNames, vec![]),
+                    });
+                }
                 Intrinsic::SysImplementation => {
                     return Ok(Expr {
                         ty: Type::SysImplementation,
@@ -6219,11 +6258,7 @@ impl<'a> Checker<'a> {
                             self.types.deque_element(receiver.ty)
                         {
                             (element, Builtin::DequeContains)
-                        } else if let Some(element) = self
-                            .types
-                            .set_element(receiver.ty)
-                            .or((receiver.ty == Type::StringKeys).then_some(Type::Str))
-                        {
+                        } else if let Some(element) = self.types.readable_set_element(receiver.ty) {
                             (element, Builtin::SetContains)
                         } else if let Some(ty) = self.types.element(receiver.ty)
                             && self.types.is_value_struct(ty)
@@ -6656,6 +6691,7 @@ impl<'a> Checker<'a> {
                         | Type::BuiltinClass
                         | Type::Path
                         | Type::PurePath(_)
+                        | Type::FrozenStrings
                         | Type::Set(_)
                         | Type::Deque(_)
                         | Type::SimpleNamespace(_)
@@ -8631,6 +8667,12 @@ impl<'a> Checker<'a> {
                     vec![receiver],
                 ));
             }
+            if receiver.ty == Type::FrozenStrings
+                && attribute.attr.as_str() == "copy"
+                && call.arguments.is_empty()
+            {
+                return Ok(receiver);
+            }
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
@@ -9409,11 +9451,17 @@ impl<'a> Checker<'a> {
             });
         }
         if name.id == "frozenset"
+            && let [value] = args.as_slice()
+            && value.ty == Type::FrozenStrings
+        {
+            return Ok(value.clone());
+        }
+        if name.id == "frozenset"
             && args.len() == 1
             && self.types.element(args[0].ty) == Some(Type::Str)
         {
             return Ok(Expr {
-                ty: Type::StringKeys,
+                ty: Type::FrozenStrings,
                 kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
             });
         }
@@ -9746,6 +9794,7 @@ impl<'a> Checker<'a> {
                             | Type::Dict(_)
                             | Type::Set(_)
                             | Type::Deque(_)
+                            | Type::FrozenStrings
                             | Type::StringKeys
                             | Type::CodecInfo
                             | Type::Tuple(_)

@@ -57,18 +57,19 @@ impl Ignore {
 
 impl Ignored {
     /// Retain the callback's container, so a custom copier can mutate it between entries.
-    pub(super) fn contains(&self, name: &Name) -> bool {
+    pub(super) fn contains(&self, name: &Name) -> Result<bool> {
         let key = callback::handle(name) as usize;
         // SAFETY: key and all entries have the exact path kind checked at the call site.
         unsafe {
             if self.set {
-                mappings::imre_set_contains(crate::ObjectOwner::as_ptr(&self.names), key) != 0
+                Ok(mappings::imre_set_contains(crate::ObjectOwner::as_ptr(&self.names), key) != 0)
             } else {
                 self.names.0.with(|s| {
-                    let list = s.sequence();
-                    list.values
+                    let list = s.sequence()?;
+                    Ok(list
+                        .values
                         .iter()
-                        .any(|&word| values::equal(key, word, list.kind))
+                        .any(|&word| values::equal(key, word, list.kind)))
                 })
             }
         }
@@ -106,7 +107,7 @@ pub unsafe extern "C" fn imre_shutil_ignore_patterns_call(
     let result = unsafe {
         let patterns = &*(*context as *const Object);
         patterns.0.with(|s| {
-            let source = s.sequence();
+            let source = s.sequence()?;
             let mut patterns = Vec::new();
             patterns
                 .try_reserve(source.values.len())
@@ -118,7 +119,7 @@ pub unsafe extern "C" fn imre_shutil_ignore_patterns_call(
                 )));
             }
             (*names).0.with(|s| {
-                let names = s.sequence();
+                let names = s.sequence()?;
                 let output = crate::ObjectOwner::from_raw(mappings::imre_set_new(names.kind.raw()));
                 for &name in &names.values {
                     let text = spelling(name, names.kind.raw());

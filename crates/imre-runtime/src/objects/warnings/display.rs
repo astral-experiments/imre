@@ -42,7 +42,7 @@ pub unsafe extern "C" fn imre_warning_format(
                 layout,
             )
             .ok()
-            .and_then(|ls| linecache::line_at(&ls, index))
+            .and_then(|ls| linecache::line_at(&ls, index).ok().flatten())
         } else {
             None
         };

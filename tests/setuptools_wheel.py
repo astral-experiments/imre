@@ -24,6 +24,7 @@ def make_project(source):
     for directory in (package, headers, native):
         directory.mkdir(parents=True)
     shutil.copy(FIXTURES / "setuptools/pyproject.toml", source)
+    shutil.copy(FIXTURES / "setuptools/extconfig.py", source)
     shutil.copy(FIXTURES / "setuptools/module.c", native)
     shutil.copy(FIXTURES / "extensions/retainer.pyi", package)
     (package / "__init__.py").touch()
@@ -40,7 +41,7 @@ def check_wheel(path):
     name, version, _, tags = parse_wheel_filename(path.name)
     assert (name, str(version)) == ("retained-values", "2.4.1")
     (tag,) = tags
-    assert (tag.interpreter, tag.abi) == ("im314", "imre1")
+    assert (tag.interpreter, tag.abi) == ("imre314", "imre1")
     assert tag.platform in {t.platform for t in sys_tags()}
     with WheelFile(path) as wheel:
         names = wheel.namelist()
@@ -60,6 +61,7 @@ def check_wheel(path):
         assert metadata["Requires-Python"] == ">=3.11"
         assert metadata.get_all("Requires-Dist") == ["packaging>=23"]
         wheel_info = BytesParser().parsebytes(wheel.read(f"{info}/WHEEL"))
+        assert wheel_info["Generator"] == "retained-values"
         assert wheel_info.get_all("Tag") == [str(tag)]
         assert wheel_info["Root-Is-Purelib"] == "false"
 
@@ -144,7 +146,7 @@ def main():
             "--no-deps",
             "--only-binary=:all:",
             "--implementation",
-            "im",
+            "imre",
             "--abi",
             "imre1",
             "--python-version",

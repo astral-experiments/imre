@@ -37,6 +37,8 @@ pub(crate) enum Type {
     Deque(usize),
     /// The immutable top-level string keys of a private TOML document.
     StringKeys,
+    /// A concrete immutable set of strings.
+    FrozenStrings,
     Tuple(usize),
     VarTuple(usize),
     /// A functools key retains its comparator and, for a bound key, its object.
@@ -302,6 +304,7 @@ impl std::fmt::Display for Type {
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::StringKeys => "collections.abc.Set[str]",
+            Self::FrozenStrings => "frozenset[str]",
             Self::ListInt => "list[int]",
             Self::ByteOutput => "private byte output",
             Self::TupleBuffer => "private tuple buffer",
@@ -882,6 +885,7 @@ pub(crate) enum Builtin {
         version: bool,
     },
     SysImplementation,
+    SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
         errors: bool,
@@ -1150,6 +1154,8 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    GeneratorFrameEnter(String),
+    GeneratorFrameLeave,
     SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {

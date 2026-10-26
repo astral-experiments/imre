@@ -2,7 +2,63 @@
 
 Imre compiles suitable C extensions against its own `Python.h`. Applications import the resulting modules with ordinary Python syntax. Each installed module supplies a typed stub and a static archive. Imre links the archive into the application when it builds.
 
-## Build from a setuptools project
+## Build with uv
+
+`imre build-target` prints the native target as JSON. Add `--output-dir`
+to export the header and build adapters embedded in the compiler. Run this
+on the Linux or Apple Silicon macOS machine that will build the wheel.
+
+```sh
+work=$(mktemp -d)
+imre build-target --output-dir "$work/sdk"
+export IMRE_BUILD_TARGET="$work/sdk/target.json"
+```
+
+The descriptor's `wheel_tag` identifies the Python implementation and language
+version, native ABI, and platform. For example, an x86-64 Linux compiler emits
+`imre314-imre1-linux_x86_64`. The descriptor also gives the archive suffix,
+link mode, and absolute paths to the exported files. Re-export it after moving
+the SDK or updating the compiler.
+
+**Setuptools.** For an upstream package called `my-package`, load the exported
+`imre-setuptools` plugin in uv's isolated build environment. The following
+configuration lives outside the project.
+
+```sh
+cat > "$work/uv.toml" <<EOF
+[extra-build-dependencies]
+my-package = ["imre-setuptools @ file://$work/sdk/setuptools"]
+EOF
+uv build --wheel --config-file "$work/uv.toml" ./my-package
+```
+
+The plugin activates when `IMRE_BUILD_TARGET` is set. It uses the project's
+extension declarations. Packages can ship their own `.pyi` declarations or
+supply them through `IMRE_WHEEL_OVERLAY`. `IMRE_SYSTEM_LIBRARIES` lists
+system libraries to link, separated by commas.
+[Build google-crc32c from its upstream checkout or sdist](../examples/google_crc32c/README.md)
+
+**scikit-build-core.** For a CMake project using `find_package(Python
+COMPONENTS Development.Module)` and `Python_add_library`, pass the compiler's
+CMake include and wheel tag to scikit-build-core. From the Imre repository,
+this builds the same `bitcount` project that produces a CPython wheel with
+`uv build --wheel tests/fixtures/scikit_build`. The Imre build requires
+scikit-build-core 1.0 or newer and CMake 3.24 or newer.
+
+```sh
+uv build --wheel --out-dir "$work/dist" \
+  -Cwheel.tags="$(jq -r .wheel_tag "$IMRE_BUILD_TARGET")" \
+  -Ccmake.define.CMAKE_PROJECT_TOP_LEVEL_INCLUDES="$(jq -r .cmake_project_include "$IMRE_BUILD_TARGET")" \
+  tests/fixtures/scikit_build
+```
+
+The host interpreter can still run build tools. Imre supplies the extension's
+`Python.h` and links the resulting static archive into the application. This
+CMake integration covers the module declaration used by the example. A backend
+that generates additional Python C API calls also needs those operations in
+the Imre runtime.
+
+## Build with `imre wheel`
 
 `imre wheel` builds a native wheel from an existing directory containing a
 `pyproject.toml` that uses `setuptools.build_meta`. Run it on the target platform
@@ -50,11 +106,11 @@ For a package module such as `checksums._native`, put `_native.pyi` and `_native
 
 ## Install and use it
 
-The wheel tag is `im314-imre1-<platform>`. Its interpreter tag identifies Imre’s Python 3.14 language target, so pip can enforce the package's original `Requires-Python`. The ABI tag identifies Imre's first native extension interface. With the wheel above, these commands install it in an isolated directory and run an application that imports it.
+The wheel tag is `imre314-imre1-<platform>`. Its interpreter tag identifies Imre’s Python 3.14 language target, so pip can enforce the package's original `Requires-Python`. The ABI tag identifies Imre's first native extension interface. With the wheel above, these commands install it in an isolated directory and run an application that imports it.
 
 ```sh
 python -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-  --implementation im --python-version 3.14 --abi imre1 --target build/site dist/retainer-*.whl
+  --implementation imre --python-version 3.14 --abi imre1 --target build/site dist/retainer-*.whl
 imre run tests/fixtures/extensions/retained.py --extension-path build/site
 ```
 

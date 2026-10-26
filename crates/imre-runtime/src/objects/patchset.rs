@@ -564,8 +564,8 @@ pub unsafe extern "C" fn imre_patch_len(node: *const Object) -> usize {
     // SAFETY: the rooted node owns any inspected immutable sequence for this read.
     let len = unsafe {
         object(node).0.with(|storage| match storage {
-            Storage::PatchSet(set) => set.files.0.with(|s| s.sequence().values.len()),
-            Storage::PatchedFile(file) => file.hunks.0.with(|s| s.sequence().values.len()),
+            Storage::PatchSet(set) => set.files.0.with(|s| s.sequence_storage().values.len()),
+            Storage::PatchedFile(file) => file.hunks.0.with(|s| s.sequence_storage().values.len()),
             Storage::Hunk(hunk) => hunk.lines(),
             _ => unreachable!("checked unidiff length"),
         })

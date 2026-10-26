@@ -94,7 +94,7 @@ impl Emitter<'_, '_> {
                     value.operand
                 )),
                 Type::ObjectValue => {
-                    let bit = self.instruction(format!(
+                    let bit = self.checked_instruction(format!(
                         "call i32 @imre_system_exit_code_truth(ptr {})",
                         value.operand
                     ));
@@ -108,10 +108,12 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::Union(_) => {
-                    let byte = self.instruction(format!(
-                        "call i32 @imre_union_truthy(i64 {})",
-                        value.operand
-                    ));
+                    let call = format!("call i32 @imre_union_truthy(i64 {})", value.operand);
+                    let byte = if self.module.types.truth_may_materialize(value.ty) {
+                        self.checked_instruction(call)
+                    } else {
+                        self.instruction(call)
+                    };
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
                 Type::ChainMap(_) => {
@@ -126,6 +128,13 @@ impl Emitter<'_, '_> {
                         .instruction(format!("call i64 @imre_patch_len(ptr {})", value.operand));
                     self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
+                Type::List(_) if self.module.types.element(value.ty) == Some(Type::Str) => {
+                    let bit = self.checked_instruction(format!(
+                        "call i32 @imre_str_list_nonempty(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {bit}, 0"))
+                }
                 Type::List(_) => {
                     let length = self
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
@@ -136,11 +145,12 @@ impl Emitter<'_, '_> {
                 | Type::Dict(_)
                 | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
+                | Type::FrozenStrings
                 | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
                         Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
-                        Type::Set(_) | Type::StringKeys => "set",
+                        Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "set",
                         Type::Deque(_) => "deque",
                         _ => unreachable!(),
                     };

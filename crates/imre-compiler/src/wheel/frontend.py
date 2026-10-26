@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import nullcontext
-from functools import partial
+from email.parser import BytesParser
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -42,6 +42,7 @@ def copy_project(source, dest, out_dir):
 
 def build_wheel(args):
     import tomllib
+
     from build import ProjectBuilder
     from build.env import DefaultIsolatedEnv
 
@@ -64,33 +65,42 @@ def build_wheel(args):
     out_dir = (args.out_dir or source / "dist").resolve()
     staged = TOOLS / "project"
     copy_project(source, staged, out_dir)
-    settings = json.dumps([str(overlay) if overlay else None, args.system_library])
+    manifest = TOOLS / "target.json"
+    target = json.loads(manifest.read_text())
 
     def run_hook(cmd, cwd, extra_environ):
-        # Use PyPA's normal hook subprocess and environment. Retarget setuptools
-        # before it imports setup.py (projects can subclass its commands there).
+        if args.no_build_isolation:
+            cmd = [cmd[0], __file__, "--backend-hook", *cmd[1:]]
         subprocess.run(
-            [cmd[0], __file__, "--backend-hook", settings, *cmd[1:]],
+            cmd,
             cwd=cwd,
-            env={**os.environ, **extra_environ},
+            env={
+                **os.environ,
+                **extra_environ,
+                "IMRE_BUILD_TARGET": str(manifest),
+                "IMRE_WHEEL_OVERLAY": str(overlay) if overlay else "",
+                "IMRE_SYSTEM_LIBRARIES": ",".join(args.system_library),
+            },
             check=True,
         )
 
     with nullcontext() if args.no_build_isolation else DefaultIsolatedEnv() as env:
         if env is None:
-            make_builder = partial(ProjectBuilder, staged)
-            missing = make_builder().check_dependencies("wheel")
+            builder = ProjectBuilder(staged, runner=run_hook)
+            missing = builder.check_dependencies("wheel")
             if missing:
                 raise ValueError(
                     "missing build dependencies: "
                     + ", ".join(sorted(req[0] for req in missing))
                 )
         else:
-            make_builder = partial(ProjectBuilder.from_isolated_env, env, staged)
-            builder = make_builder()
-            env.install(builder.build_system_requires)
+            builder = ProjectBuilder.from_isolated_env(env, staged, runner=run_hook)
+            adapter = Path(target["setuptools_adapter"]).as_uri()
+            env.install(
+                builder.build_system_requires | {f"imre-setuptools @ {adapter}"}
+            )
             env.install(builder.get_requires_for_build("wheel"))
-        wheel = Path(make_builder(runner=run_hook).build("wheel", TOOLS / "wheelhouse"))
+        wheel = Path(builder.build("wheel", TOOLS / "wheelhouse"))
 
     # A setup.py may swallow a compiler error and successfully build a pure
     # wheel. Only deliver an artifact for this target after the hook succeeds.
@@ -98,9 +108,15 @@ def build_wheel(args):
 
     tags = parse_wheel_filename(wheel.name)[3]
     with ZipFile(wheel) as archive:
-        if any(
-            (tag.interpreter, tag.abi) != ("im314", "imre1") for tag in tags
-        ) or not any(name.endswith(".imre.a") for name in archive.namelist()):
+        members = archive.namelist()
+        info = [name for name in members if name.endswith(".dist-info/WHEEL")]
+        if (
+            {str(tag) for tag in tags} != {target["wheel_tag"]}
+            or len(info) != 1
+            or BytesParser().parsebytes(archive.read(info[0])).get_all("Tag")
+            != [target["wheel_tag"]]
+            or not any(name.endswith(target["archive_suffix"]) for name in members)
+        ):
             raise ValueError(
                 f"setuptools produced {wheel.name} without an Imre native extension"
             )
@@ -136,7 +152,7 @@ def main():
         "--python", help="host Python with the build package (default: python3)"
     )
     args = parser.parse_args()
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11):  # noqa: UP036 -- the user selects the build host.
         parser.exit(
             1,
             "imre wheel requires a build host with Python 3.11 or newer; pass --python to select it\n",
@@ -161,12 +177,20 @@ def main():
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--backend-hook"]:
-        overlay, libraries = json.loads(sys.argv[2])
-        install_target = runpy.run_path(str(TOOLS / "setuptools_target.py"))[
-            "install_target"
-        ]
-        install_target(TOOLS, overlay, libraries)
-        sys.argv = sys.argv[3:]
+        # Expose the same entry point without installing anything in the caller's
+        # Python environment when --no-build-isolation is requested.
+        sys.path.insert(0, str(TOOLS / "setuptools"))
+        from imre_setuptools import activate
+        from setuptools.dist import Distribution
+
+        upstream = Distribution.finalize_options
+
+        def finalize_options(self):
+            upstream(self)
+            activate(self)
+
+        Distribution.finalize_options = finalize_options
+        sys.argv = sys.argv[2:]
         runpy.run_path(sys.argv[0], run_name="__main__")
     else:
         main()

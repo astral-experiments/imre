@@ -236,12 +236,16 @@ impl Words {
 
     /// An inline buffer can never have a saturated length. Reserve its unused
     /// header value for an owned plan, keeping the ordinary sequence layout.
-    pub(super) fn deferred(plan: Deferred) -> Self {
+    pub(super) fn deferred(plan: Deferred) -> Result<Self, super::Error> {
+        let owner =
+            allocator_api2::boxed::Box::try_new(plan).map_err(|_| super::Error::memory_error())?;
         let mut words = Self::new(3);
         words.header = u32::MAX;
         words.kind = WordKind::DEFERRED;
-        words.values.push(Box::into_raw(Box::new(plan)) as usize);
         words
+            .values
+            .push(allocator_api2::boxed::Box::into_raw(owner) as usize);
+        Ok(words)
     }
 
     pub(super) fn from_rows(rows: super::structs::Rows) -> Self {
@@ -277,28 +281,32 @@ impl Words {
         }
     }
 
-    pub(super) fn resolved(&self) -> &Self {
+    pub(super) fn resolved(&self) -> Result<&Self, super::exceptions::Error> {
         if let Some(rows) = self.rows() {
-            return rows.boxed();
+            return Ok(rows.boxed());
         }
-        self.plan().map_or(self, Deferred::ordered)
+        self.plan().map_or(Ok(self), Deferred::ordered)
     }
 
     /// A mutating alias gets its own ordinary buffer. Copies share only the
     /// immutable snapshot and retain independent list identities and contents.
-    pub(super) fn resolve_mut(&mut self) {
+    pub(super) fn resolve_mut(&mut self) -> Result<(), super::exceptions::Error> {
         if let Some(rows) = self.rows_mut() {
             *self = rows.take_boxed();
         } else if let Some(plan) = self.plan() {
-            *self = plan.ordered().copy_strings();
+            *self = plan.ordered()?.copy_strings()?;
         }
+        Ok(())
     }
 
-    pub(super) fn copy_strings(&self) -> Self {
+    pub(super) fn copy_strings(&self) -> Result<Self, super::exceptions::Error> {
         debug_assert!(self.plan().is_none());
         self.check_kind(3);
         let mut result = Self::new(3);
-        result.values.reserve(self.values.len());
+        result
+            .values
+            .try_reserve_exact(self.values.len())
+            .map_err(|_| super::exceptions::Error::memory_error())?;
         for &word in &self.values {
             // SAFETY: the source independently owns this exact string.
             result
@@ -306,7 +314,7 @@ impl Words {
                 .push(unsafe { self.kind.acquire(word) }.into_word());
         }
         result.update_header();
-        result
+        Ok(result)
     }
 
     /// Borrows each exact string together with its independently owned word.
@@ -320,9 +328,10 @@ impl Words {
 
     /// Deferred words live in their plan even when their resolved list is
     /// small. Its inline bit must never address the plan pointer as an element.
-    pub(super) fn resolved_header(&self) -> u32 {
-        self.plan()
-            .map_or(self.header, |plan| Self::header_for(plan.len(), false))
+    pub(super) fn resolved_header(&self) -> Result<u32, super::exceptions::Error> {
+        self.plan().map_or(Ok(self.header), |plan| {
+            Ok(Self::header_for(plan.len()?, false))
+        })
     }
 
     /// An empty inline buffer normally has header 1. Publishing length zero
@@ -499,7 +508,7 @@ impl Drop for Words {
         }
         if self.kind == WordKind::DEFERRED {
             // SAFETY: the deferred header owns exactly this one boxed plan.
-            drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
+            drop(unsafe { allocator_api2::boxed::Box::from_raw(self.values[0] as *mut Deferred) });
             return;
         }
         if self.values.spilled() && self.kind.can_queue_release() {
@@ -555,11 +564,14 @@ mod tests {
             }
             assert_eq!(cached.read(), 7);
             assert_eq!(crate::ObjectOwner::strong_count(&child), 4);
-            assert!(
-                !sequence
-                    .0
-                    .with(|storage| storage.sequence().values.spilled())
-            );
+            assert!(!sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             {
                 let view = imre_seq_data_readonly(crate::ObjectOwner::as_ptr(&sequence));
                 assert_eq!(
@@ -574,11 +586,14 @@ mod tests {
             imre_seq_append(crate::ObjectOwner::as_ptr(&alias), word, 5);
             assert_eq!(cached.read(), 8);
             assert_eq!(crate::ObjectOwner::strong_count(&child), 5);
-            assert!(
-                sequence
-                    .0
-                    .with(|storage| storage.sequence().values.spilled())
-            );
+            assert!(sequence.0.with(|storage| {
+                storage
+                    .sequence()
+                    .ok()
+                    .expect("fixture sequence")
+                    .values
+                    .spilled()
+            }));
             assert_eq!(
                 Int(imre_seq_len(crate::ObjectOwner::as_ptr(&sequence))).as_small(),
                 Some(4)

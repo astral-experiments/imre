@@ -1181,10 +1181,7 @@ impl Checker<'_> {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);
         if fields.as_ref().is_some_and(Vec::is_empty) {
             let source = self.hidden(iterable.ty);
@@ -1932,20 +1929,19 @@ impl Checker<'_> {
                 cases,
             )];
         }
+        // The leftmost iterator is already acquired. Restore the caller on yield or unwind.
+        let resume = self.generator_frame(Statement::While(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(true, vec![not(self.local(ready)), not(self.local(done))]),
+            },
+            cases,
+            Vec::new(),
+        ));
         let next = vec![
             Statement::Clear(value),
             Statement::Assign(ready, boolean(false)),
-            Statement::While(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Boolean(
-                        true,
-                        vec![not(self.local(ready)), not(self.local(done))],
-                    ),
-                },
-                cases,
-                Vec::new(),
-            ),
+            Statement::If(not(self.local(done)), vec![resume], Vec::new()),
         ];
         Ok(Prepared {
             evaluate,
@@ -1958,6 +1954,30 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// Run one prepared generator step or an equivalent callback-free bulk operation.
+    pub(super) fn generator_frame(&self, step: Statement) -> Statement {
+        let module = if self.module == self.graph.entry {
+            "__main__"
+        } else {
+            &self.graph.modules[self.module].name
+        };
+        let marker = |builtin| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(builtin, Vec::new()),
+            })
+        };
+        Statement::Try {
+            body: vec![
+                marker(Builtin::GeneratorFrameEnter(module.to_owned())),
+                step,
+            ],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![marker(Builtin::GeneratorFrameLeave)],
+        }
     }
 
     /// Convert StopIteration escaping suspended generator code, retaining its cause.
@@ -2020,6 +2040,7 @@ impl Checker<'_> {
         };
         let callback_input = checked
             .as_ref()
+            .filter(|value| self.types.index_callable_signature(value.ty).is_none())
             .and_then(|value| self.types.signature(value.ty))
             .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
             .or_else(|| {
@@ -2200,6 +2221,8 @@ impl Checker<'_> {
                 ));
             }
             self.pack_len_value(item, call)?
+        } else if self.types.index_callable_signature(callback.ty).is_some() {
+            self.index_value(item, call)?
         } else {
             self.coerce(item, *parameter, call)?
         };

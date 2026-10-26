@@ -91,6 +91,8 @@ def main() -> None:
             sys.executable,
             ROOT / "scripts/pack_extension_wheel.py",
             stage,
+            "--imre",
+            compiler,
             "--name",
             "retainer",
             "--version",
@@ -101,7 +103,7 @@ def main() -> None:
         (wheel,) = dist.glob("*.whl")
         _, _, _, tags = parse_wheel_filename(wheel.name)
         (tag,) = tags
-        assert (tag.interpreter, tag.abi) == ("im314", "imre1")
+        assert (tag.interpreter, tag.abi) == ("imre314", "imre1")
         pip = (
             sys.executable,
             "-m",
@@ -118,7 +120,7 @@ def main() -> None:
         run(
             *pip,
             "--implementation",
-            "im",
+            "imre",
             "--python-version",
             "3.14",
             "--abi",

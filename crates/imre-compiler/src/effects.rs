@@ -206,7 +206,9 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            expression(left, functions, targets) || expression(right, functions, targets)
+            targets.types.truth_may_materialize(left.ty)
+                || expression(left, functions, targets)
+                || expression(right, functions, targets)
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
@@ -451,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn proven_sequence_pulls_remove_only_their_own_index_errors() {
+    fn proven_sequence_pulls_preserve_deferred_read_errors() {
         let source = crate::modules::SourceGraph::single(
             r#"
 def checked(values: list[str], index: int) -> str:
@@ -465,11 +467,14 @@ def backward(values: list[str]) -> bool:
 
 def conversion(values: list[str]) -> bool:
     return any(int(value) for value in values)
+
+def integers(values: list[int]) -> int:
+    return len(values)
 "#,
         )
         .unwrap();
         let module = crate::frontend::lower(&source).unwrap();
-        assert_eq!(analyze(&module).functions, [true, false, false, true]);
+        assert_eq!(analyze(&module).functions, [true, true, true, true, false]);
     }
 
     #[test]

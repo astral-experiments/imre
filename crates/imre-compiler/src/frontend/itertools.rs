@@ -297,6 +297,10 @@ impl Checker<'_> {
 
     pub(super) fn integer_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
+        self.index_value(value, node)
+    }
+
+    pub(super) fn index_value(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == Type::Bool {
             return Ok(Expr {
                 ty: Type::Int,

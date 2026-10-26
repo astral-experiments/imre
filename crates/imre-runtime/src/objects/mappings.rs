@@ -860,6 +860,7 @@ pub(super) struct Mapping {
 }
 pub(super) struct Set {
     tables: Tables<()>,
+    frozen: bool,
 }
 
 impl Mapping {
@@ -1312,11 +1313,45 @@ impl Mapping {
 }
 
 impl Set {
+    pub(super) fn is_empty(&self) -> bool {
+        self.tables.len() == 0
+    }
+
+    fn mutable_tables(&mut self, method: &str) -> Result<&mut Tables<()>, Error> {
+        if self.frozen {
+            return Err(Error::new(
+                Kind::AttributeError,
+                format!("'frozenset' object has no attribute '{method}'"),
+            ));
+        }
+        Ok(&mut self.tables)
+    }
+
+    /// Transfer exact string keys into a new, immutable set.
+    fn frozen_strings(
+        keys: impl Iterator<Item = Result<OwnedWord, Error>>,
+    ) -> Result<crate::ObjectOwner, Error> {
+        let mut tables = Tables::new(3);
+        for key in keys {
+            tables.insert(key?, ())?;
+        }
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(TableOwner::new(
+            Self {
+                tables,
+                frozen: true,
+            },
+        )))))
+        .map_err(|_| Error::allocation())
+    }
+
     /// Deep-copy admission proves each set member is unchanged by deepcopy.
     pub(super) fn copy_keys(&self) -> Result<Self, Error> {
         let mut tables = Tables::new(self.tables.key_kind());
         self.tables.copy_keys(&mut tables)?;
-        Ok(Self { tables })
+        Ok(Self {
+            tables,
+            frozen: self.frozen,
+        })
     }
 
     /// Borrow these integer keys while the caller copies a child descriptor set.
@@ -1347,13 +1382,16 @@ impl Set {
         use std::fmt::Write as _;
         if position == 0 {
             if self.tables.len() == 0 {
-                output.write_str("set()")?;
+                output.write_str(if self.frozen { "frozenset()" } else { "set()" })?;
                 return Ok(None);
+            }
+            if self.frozen {
+                output.write_str("frozenset(")?;
             }
             output.write_char('{')?;
         }
         let Some((next, key, ())) = self.tables.next(position) else {
-            output.write_char('}')?;
+            output.write_str(if self.frozen { "})" } else { "}" })?;
             return Ok(None);
         };
         if position != 0 {
@@ -2597,6 +2635,7 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::Set(TableOwner::new(Set {
             tables: Tables::new(kind),
+            frozen: false,
         })),
     ))))
 }
@@ -2607,21 +2646,44 @@ pub extern "C" fn imre_set_new(kind: u32) -> *const Object {
 /// The caller roots the list and checks pending state before using the result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const Object {
-    // SAFETY: a fresh set cannot alias the list or reenter it during hashing.
-    unsafe {
-        let set = crate::ObjectOwner::from_raw(imre_set_new(3));
-        let ok = object(source).0.with(|s| {
-            s.sequence().strings().all(|(word, _)| {
-                imre_set_add(crate::ObjectOwner::as_ptr(&set), word);
-                super::exceptions::imre_error_pending() == 0
-            })
-        });
-        if ok {
-            crate::ObjectOwner::into_raw(set)
-        } else {
-            std::ptr::null()
-        }
+    // SAFETY: the source roots each exact string and insertion cannot reenter Python.
+    let result = unsafe {
+        object(source).0.with(|s| {
+            Set::frozen_strings(
+                s.sequence()?
+                    .strings()
+                    .map(|(word, _)| Ok(WordKind::new(3).acquire(word))),
+            )
+        })
+    };
+    crate::finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+}
+
+/// Return the immutable standard library name set for the Python language target.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
+    thread_local! {
+        static NAMES: std::cell::OnceCell<crate::ObjectOwner> = const { std::cell::OnceCell::new() };
     }
+    NAMES.with(|root| {
+        if let Some(names) = root.get() {
+            return crate::ObjectOwner::into_raw(names.clone());
+        }
+        let keys = include_str!("../../native/stdlib-module-names.txt")
+            .lines()
+            .map(|name| {
+                let text = Str::try_new(name).map_err(|_| Error::allocation())?;
+                let key = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
+                // SAFETY: transfer the newly owned native string to the set.
+                Ok(unsafe {
+                    OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
+                })
+            });
+        match Set::frozen_strings(keys) {
+            Ok(names) => crate::ObjectOwner::into_raw(root.get_or_init(|| names).clone()),
+            Err(error) => error.returning(std::ptr::null()),
+        }
+    })
 }
 
 /// Reads distinct string keys directly from their source indexes and sorts the
@@ -2723,7 +2785,10 @@ pub unsafe extern "C" fn imre_key_union(
         }
     }
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Set(TableOwner::new(Set { tables: result })),
+        Storage::Set(TableOwner::new(Set {
+            tables: result,
+            frozen: false,
+        })),
     ))))
 }
 /// Builds an intersection directly from two key views or sets. The output owns
@@ -2833,7 +2898,7 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
     let old = unsafe {
         object(value)
             .0
-            .with_mut(|s| s.set_mut().tables.insert(key, ()))
+            .with_mut(|s| s.set_mut().mutable_tables("add")?.insert(key, ()))
     };
     old.map(drop)
 }
@@ -2842,7 +2907,11 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_set_discard(value: *const Object, key: usize) {
     // SAFETY: returned key owners remain independent of their former table slots.
-    let removed = unsafe { object(value).0.with_mut(|s| s.set_mut().tables.remove(key)) };
+    let removed = unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.set_mut().mutable_tables("discard")?.remove(key))
+    };
     if let Err(error) = removed {
         error.raise();
     }
