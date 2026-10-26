@@ -4506,7 +4506,10 @@ impl<'a> Checker<'a> {
                         let index = self.integer_index(&target.slice)?;
                         statements.push(Statement::Expr(Expr {
                             ty: Type::None,
-                            kind: ExprKind::Builtin(Builtin::DequeDelete, vec![receiver, index]),
+                            kind: ExprKind::Builtin(
+                                Builtin::DequeDelete { method: false },
+                                vec![receiver, index],
+                            ),
                         }));
                         continue;
                     }
@@ -6674,7 +6677,10 @@ impl<'a> Checker<'a> {
                     let index = self.integer_index(&subscript.slice)?;
                     return Ok(Expr {
                         ty: element,
-                        kind: ExprKind::Builtin(Builtin::DequeGet, vec![list, index]),
+                        kind: ExprKind::Builtin(
+                            Builtin::DequeGet { method: false },
+                            vec![list, index],
+                        ),
                     });
                 }
                 if list.ty == Type::BuiltinClass {

@@ -582,9 +582,9 @@ impl Builtin {
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
-            | Self::DequeGet
+            | Self::DequeGet { .. }
             | Self::DequeSet
-            | Self::DequeDelete
+            | Self::DequeDelete { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
