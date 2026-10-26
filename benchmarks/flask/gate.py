@@ -159,12 +159,10 @@ def exercise(command, work, expected, *, prove_binary=None):
     return row
 
 
-def native(compiler, runtime, site, work, expected, opt, reachable, *, prove=False):
+def native(compiler, runtime, site, work, expected, opt, flags, *, prove=False):
     binary = work / "server"
     command = [compiler, "build", site / "serve.py", "--module-root", site,
-               "--runtime", runtime, "--opt-level", str(opt), "-o", binary]
-    if reachable:
-        command.append("--reachable-only")
+               "--runtime", runtime, "--opt-level", str(opt), "-o", binary, *flags]
     try:
         p = subprocess.run(command, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired as exc:
@@ -181,6 +179,7 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--reference-only", action="store_true")
     parser.add_argument("--prove-native", action="store_true", help="attest the native executable, sockets and process tree on Linux")
+    parser.add_argument("--runtime-imports", action="store_true", help="also try native runtime imports at O0 and O3")
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
     args = parser.parse_args()
@@ -189,8 +188,8 @@ def main():
         parser.error(f"run the gate with CPython {expected['python']}")
     if not args.reference_only and not (args.compiler and args.runtime):
         parser.error("supply --compiler and --runtime, or explicitly select --reference-only")
-    if args.prove_native and args.reference_only:
-        parser.error("--prove-native requires a native compiler and runtime")
+    if args.reference_only and (args.prove_native or args.runtime_imports):
+        parser.error("--prove-native and --runtime-imports require a native compiler and runtime")
     report = {"python": sys.version.split()[0], "app_sha256": digest(HERE / "tiny_flask_app.py"), "modes": {}}
     if report["app_sha256"] != expected["app_sha256"]:
         parser.error("the app differs from the recorded reference")
@@ -217,12 +216,15 @@ def main():
         if not args.reference_only:
             compiler, runtime = args.compiler.resolve(), args.runtime.resolve()
             report.update(compiler_sha256=digest(compiler), runtime_sha256=digest(runtime))
-            for reachable in (False, True):
+            modes = [("normal", []), ("reachable", ["--reachable-only"])]
+            if args.runtime_imports:
+                modes.append(("runtime-imports", ["--runtime-imports"]))
+            for name, flags in modes:
                 for opt in (0, 3):
-                    mode = f"{'reachable' if reachable else 'normal'}-O{opt}"
+                    mode = f"{name}-O{opt}"
                     work = root / mode
                     work.mkdir()
-                    row = native(compiler, runtime, site, work, expected, opt, reachable, prove=args.prove_native)
+                    row = native(compiler, runtime, site, work, expected, opt, flags, prove=args.prove_native)
                     report["modes"][mode] = row
                     if args.prove_native:
                         row["verified_native_responses"] = len(row["responses"]) if row["outcome"] == "pass" else 0

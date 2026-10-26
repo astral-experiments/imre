@@ -584,6 +584,8 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 ## First-party module graphs
 
+For a script that imports source packages, `--runtime-imports` lets `imre build`, `run`, or `check` try the native object runtime when static compilation fails. The entry stays `__main__`; the executable evaluates imports using its startup search paths and the compiled Python module bodies. A missing runtime module raises `ModuleNotFoundError` when its import executes. An explicit `--entry-profile` requires a statically compiled graph.
+
 For native code, `--extension-path DIRECTORY` adds an installed [Imre extension wheel](extensions.md) to the compile-time search path. Its typed declarations and compiled archive supply the module.
 
 An imported Python module may check its identity before other imports, for example
