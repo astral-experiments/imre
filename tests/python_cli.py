@@ -311,6 +311,7 @@ def report(text):
             "boxed_contextvars.py",
             "boxed_datetime.py",
             "boxed_descriptors.py",
+            "boxed_type_identity.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_item_assignment.py",
