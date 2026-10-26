@@ -29,6 +29,7 @@ pub(crate) struct Context {
     token_missing: Id,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
+    builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     pending: Option<Error>,
 }
@@ -45,6 +46,21 @@ impl Context {
     }
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
         self.alloc(Value::Dict(entries))
+    }
+
+    fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {
+        let Value::Dict(entries) = self.heap.get(dict) else {
+            return Err(Error::new("TypeError", "expected keyword dict"));
+        };
+        entries
+            .iter()
+            .map(|&(key, value)| {
+                let name = self
+                    .str_value(key)
+                    .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                Ok((name.to_owned(), value))
+            })
+            .collect()
     }
 
     fn str_value(&self, id: Id) -> Result<&str> {
@@ -142,7 +158,12 @@ impl Context {
             }
         }
         if builtins::is_builtin(name) {
-            return Ok(self.alloc(Value::Native(name.to_owned())));
+            if let Some(&value) = self.builtins.get(name) {
+                return Ok(value);
+            }
+            let value = self.alloc(Value::Native(name.to_owned()));
+            self.builtins.insert(name.to_owned(), value);
+            return Ok(value);
         }
         Err(Error::new(
             "NameError",
