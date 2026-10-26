@@ -192,16 +192,9 @@ impl Context {
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
-        let message = match args {
-            [] => String::new(),
-            [one] => self.display(*one),
-            many => {
-                let tuple = self.alloc(Value::Tuple(many.to_vec()));
-                self.display(tuple)
-            }
-        };
-        let mut error = Error::new(kind, message);
+        let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),

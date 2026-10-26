@@ -272,6 +272,27 @@ impl Context {
         self.format_value(id, true, &mut Vec::new())
     }
 
+    /// Renders positional values inside tuples and exception representations.
+    fn format_elements(&self, values: &[Id], active: &mut Vec<Id>) -> String {
+        values
+            .iter()
+            .map(|&arg| self.format_value(arg, true, active))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Formats the current arguments, preserving native diagnostic text when present.
+    pub(super) fn exception_message(&self, error: &Error, active: &mut Vec<Id>) -> String {
+        match error.args.as_deref() {
+            None => error.message.clone(),
+            Some([]) => String::new(),
+            Some([arg]) => {
+                self.format_value(*arg, self.is_builtin_error(error, "KeyError"), active)
+            }
+            Some(args) => format!("({})", self.format_elements(args, active)),
+        }
+    }
+
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
@@ -379,11 +400,7 @@ impl Context {
                     .join(", ")
             ),
             Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => {
-                let body = v
-                    .iter()
-                    .map(|&v| self.format_value(v, true, active))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let body = self.format_elements(v, active);
                 match self.heap.get(id) {
                     Value::List(_) => format!("[{body}]"),
                     Value::Set { frozen: true, .. } if v.is_empty() => "frozenset()".into(),
@@ -403,10 +420,7 @@ impl Context {
                         crate::objects::exceptions::string_repr(&os.description)
                     )
                 } else if let Some(args) = &error.args {
-                    args.iter()
-                        .map(|&arg| self.format_value(arg, true, active))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    self.format_elements(args, active)
                 } else if error.message.is_empty() {
                     String::new()
                 } else {
@@ -414,7 +428,7 @@ impl Context {
                 };
                 format!("{kind}({args})")
             }
-            Value::Raised(Error { message, .. }) => message.clone(),
+            Value::Raised(error) => self.exception_message(error, active),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {

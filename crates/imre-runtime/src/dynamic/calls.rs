@@ -475,10 +475,15 @@ impl Context {
 
     /// Match an attribute lookup failure using the ordinary exception hierarchy.
     pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
-        error.kind == "AttributeError"
+        self.is_builtin_error(error, "AttributeError")
+    }
+
+    /// Includes runtime-loaded subclasses of the named builtin exception.
+    pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
+        error.kind == kind
             || self
                 .builtins
-                .get("AttributeError")
+                .get(kind)
                 .is_some_and(|&base| self.error_matches(&error.kind, base))
     }
 
