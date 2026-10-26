@@ -100,7 +100,7 @@ pub unsafe extern "C" fn imre_path_read_text_options(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_path_write_text_options(
     path: *const Object,
-    text: *const Str,
+    text_handle: *const Str,
     encoding: usize,
     errors: usize,
     newline: usize,
@@ -109,7 +109,7 @@ pub unsafe extern "C" fn imre_path_write_text_options(
     let (path, text, encoding, errors, newline) = unsafe {
         (
             object(path),
-            &*text,
+            &*text_handle,
             string_option(encoding),
             string_option(errors),
             string_option(newline),
@@ -129,8 +129,9 @@ pub unsafe extern "C" fn imre_path_write_text_options(
                 };
                 file.write_bytes(&codec.encode(value, errors, || {
                     if value == text.as_str() {
-                        // The native write roots its input until conversion finishes.
-                        Ok(StrOwner::acquire_word(text as *const Str as usize))
+                        // The string borrow covers the value. Its original allocation
+                        // handle also covers the reference count that we increment.
+                        Ok(StrOwner::acquire_word(text_handle as usize))
                     } else {
                         StrOwner::try_new(Str::try_new(value).map_err(|_| Error::allocation())?)
                             .map_err(|_| Error::allocation())
