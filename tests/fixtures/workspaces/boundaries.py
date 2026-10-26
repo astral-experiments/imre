@@ -6,16 +6,13 @@ def create(directory: str, prefix: str, suffix: str) -> str:
     try:
         with TemporaryDirectory(dir=directory, prefix=prefix, suffix=suffix):
             return "ok"
-    except FileNotFoundError:
-        return "FileNotFoundError"
-    except NotADirectoryError:
-        return "NotADirectoryError"
-    except PermissionError:
-        return "PermissionError"
     except ValueError:
         return "ValueError"
-    except OSError:
-        return "OSError"
+    except OSError as error:
+        filename = repr(error.filename)
+        return repr((repr(error), error.errno, error.strerror, repr(error.args),
+                     filename.startswith("'" + directory + "/" + prefix),
+                     filename.endswith(suffix + "'"), repr(error.filename2)))
 
 
 print(create("missing", "tmp", ""))

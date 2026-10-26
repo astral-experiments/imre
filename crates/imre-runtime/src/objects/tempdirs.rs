@@ -20,7 +20,7 @@ use rustix::io::Errno;
 
 use super::Str;
 use super::exceptions::{Error, Kind, Result, finish};
-use super::files::os_error;
+use super::files::{errno_with_filename, os_error};
 
 const ATTEMPTS: usize = 20;
 
@@ -174,7 +174,7 @@ fn create(directory: Option<&str>, prefix: &str, suffix: &str) -> Result<Str> {
         match fs::DirBuilder::new().mode(0o700).create(&path) {
             Ok(()) => return Ok(name),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(os_error(error)),
+            Err(error) => return Err(errno_with_filename(error, path.to_str())),
         }
     }
     Err(Error::new(
