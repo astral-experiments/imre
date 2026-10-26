@@ -5926,6 +5926,9 @@ impl<'a> Checker<'a> {
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
+            return Err(self.runtime_attrgetter(expression));
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::PopenActive)) {
             return Ok(Expr {
                 ty: self.types.list(Type::ActivePopen),
@@ -7978,6 +7981,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(value) = self.literal_attrgetter_call(call)? {
+            return Ok(value);
+        }
         if let Some(method) = self.request_method_lookup(call)? {
             return Ok(method);
         }
@@ -8687,6 +8693,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
+            Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
+                return Err(self.runtime_attrgetter(call));
+            }
             Some(Binding::Intrinsic(Intrinsic::LengthHint)) => {
                 return self.cursor_length_hint(call);
             }

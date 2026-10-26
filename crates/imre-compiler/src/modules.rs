@@ -373,6 +373,7 @@ pub(crate) enum Intrinsic {
     CountElements,
     Deque,
     Repeat,
+    AttrGetter,
     LengthHint,
     MathProd,
     Count,
@@ -952,6 +953,7 @@ impl IntrinsicModule {
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
@@ -1129,6 +1131,7 @@ pub(crate) struct SourceGraph {
     pub(crate) virtual_command: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
+    pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -2101,6 +2104,7 @@ impl<'a> Loader<'a> {
             virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
+            needs_object_runtime: std::cell::Cell::new(false),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
