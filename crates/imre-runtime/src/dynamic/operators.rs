@@ -29,7 +29,20 @@ impl Context {
         value.map_or(Ok(default), |id| self.truth(id))
     }
 
-    pub(super) fn index_integer(&mut self, value: Id) -> Result<Option<crate::Int>> {
+    /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
+    pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
+        self.try_index_integer(value)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer",
+                    self.type_name(value)
+                ),
+            )
+        })
+    }
+
+    pub(super) fn try_index_integer(&mut self, value: Id) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }
@@ -53,15 +66,7 @@ impl Context {
             return Ok(None);
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
-        let length = self.index_integer(value)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "'{}' object cannot be interpreted as an integer",
-                    self.type_name(value)
-                ),
-            )
-        })?;
+        let length = self.index_integer(value)?;
         let length = length
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())
@@ -80,6 +85,12 @@ impl Context {
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
         Ok(match self.heap.get(id) {
             Value::None => false,
+            Value::NotImplemented => {
+                return Err(Error::new(
+                    "TypeError",
+                    "NotImplemented should not be used in a boolean context",
+                ));
+            }
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
             Value::Float(f) => *f != 0.0,
@@ -268,6 +279,7 @@ impl Context {
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
+            Value::NotImplemented => "NotImplemented".into(),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
@@ -373,6 +385,9 @@ impl Context {
         }
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
+            return self.call(getter, vec![key], Vec::new());
+        }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;
             return bindings
@@ -395,9 +410,6 @@ impl Context {
                 return Ok(v);
             }
             return Err(self.lookup_error("KeyError", key));
-        }
-        if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
-            return self.call(getter, vec![key], Vec::new());
         }
         if matches!(self.heap.get(obj), Value::DictView { .. } | Value::Set(_)) {
             return Err(Error::new("TypeError", "object is not subscriptable"));
@@ -599,6 +611,9 @@ impl Context {
         Ok(())
     }
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        if let Some(result) = self.binary_special(op, a, b)? {
+            return Ok(result);
+        }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
             "%" if let Value::Str(text) = self.heap.get(a) => {
@@ -636,7 +651,38 @@ impl Context {
             },
             _ => {}
         }
+        if op == "*" {
+            let (sequence, count) = if matches!(self.heap.get(a), Value::List(_) | Value::Tuple(_))
+            {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            if let Value::List(items) | Value::Tuple(items) = self.heap.get(sequence) {
+                let out = repeat_values(items, self.as_integer(count)?)?;
+                return Ok(
+                    self.alloc(if matches!(self.heap.get(sequence), Value::List(_)) {
+                        Value::List(out)
+                    } else {
+                        Value::Tuple(out)
+                    }),
+                );
+            }
+        }
+        if op == "@" {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for @: '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
+        if op == "/" {
+            return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
+        }
         let result = if op == "**" {
             let (x, y) = (x.big(), y.big());
             if y.is_negative() {
@@ -687,4 +733,167 @@ impl Context {
         };
         Ok(self.alloc(Value::Int(result)))
     }
+}
+
+/// Special-method names for the two operands of a Python binary expression.
+fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    Some(match op {
+        "+" => ("__add__", "__radd__", "__iadd__"),
+        "-" => ("__sub__", "__rsub__", "__isub__"),
+        "*" => ("__mul__", "__rmul__", "__imul__"),
+        "@" => ("__matmul__", "__rmatmul__", "__imatmul__"),
+        "/" => ("__truediv__", "__rtruediv__", "__itruediv__"),
+        "//" => ("__floordiv__", "__rfloordiv__", "__ifloordiv__"),
+        "%" => ("__mod__", "__rmod__", "__imod__"),
+        "**" => ("__pow__", "__rpow__", "__ipow__"),
+        "<<" => ("__lshift__", "__rlshift__", "__ilshift__"),
+        ">>" => ("__rshift__", "__rrshift__", "__irshift__"),
+        "&" => ("__and__", "__rand__", "__iand__"),
+        "^" => ("__xor__", "__rxor__", "__ixor__"),
+        "|" => ("__or__", "__ror__", "__ior__"),
+        "<" => ("__lt__", "__gt__", ""),
+        "<=" => ("__le__", "__ge__", ""),
+        "==" => ("__eq__", "__eq__", ""),
+        "!=" => ("__ne__", "__ne__", ""),
+        ">=" => ("__ge__", "__le__", ""),
+        ">" => ("__gt__", "__lt__", ""),
+        _ => return None,
+    })
+}
+
+impl Context {
+    fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        let Some(method) = self.bound_slot(obj, name)? else {
+            return Ok(None);
+        };
+        let result = self.call(method, vec![other], vec![])?;
+        Ok((result != value::NOT_IMPLEMENTED).then_some(result))
+    }
+
+    fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        let Some((left, right, inplace)) = binary_slots(op) else {
+            return Ok(None);
+        };
+        let class = |id| match self.heap.get(id) {
+            Value::Instance { class, .. } => Some(*class),
+            _ => None,
+        };
+        let (ac, bc) = (class(a), class(b));
+        if ac.is_none() && bc.is_none() {
+            return Ok(None);
+        }
+        let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
+            ac != bc
+                && self.subclass(bc, ac)
+                && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
+        } else {
+            false
+        };
+        if reflected_first && let Some(result) = self.operator_slot(b, right, a)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.operator_slot(a, left, b)? {
+            return Ok(Some(result));
+        }
+        if !reflected_first && (ac != bc || inplace.is_empty()) {
+            return self.operator_slot(b, right, a);
+        }
+        Ok(None)
+    }
+
+    pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        if let Some((_, _, slot)) = binary_slots(op)
+            && let Some(result) = self.operator_slot(a, slot, b)?
+        {
+            return Ok(result);
+        }
+        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
+            let extra = self.items(b)?;
+            let Value::List(values) = self.heap.get_mut(a) else {
+                unreachable!()
+            };
+            values.extend(extra);
+            return Ok(a);
+        }
+        if op == "*"
+            && let Value::List(values) = self.heap.get(a)
+        {
+            let values = repeat_values(values, self.as_integer(b)?)?;
+            let Value::List(items) = self.heap.get_mut(a) else {
+                unreachable!()
+            };
+            *items = values;
+            return Ok(a);
+        }
+        self.binary(op, a, b)
+    }
+
+    pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        if let Some(method) = self.bound_slot(obj, "__delitem__")? {
+            self.call(method, vec![key], vec![])?;
+            return Ok(());
+        }
+        match self.heap.get(obj) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+                if !builtins::hashable(self, key) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("unhashable type: '{}'", self.type_name(key)),
+                    ));
+                }
+                let i = entries
+                    .iter()
+                    .position(|(k, _)| self.equal(*k, key))
+                    .ok_or_else(|| Error::new("KeyError", self.repr(key)))?;
+                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                    self.heap.get_mut(obj)
+                else {
+                    unreachable!()
+                };
+                entries.remove(i);
+            }
+            Value::List(entries) => {
+                let i = self.as_integer(key)?;
+                let i = if i < 0 { entries.len() as i64 + i } else { i };
+                if !(0..entries.len() as i64).contains(&i) {
+                    return Err(Error::new(
+                        "IndexError",
+                        "list assignment index out of range",
+                    ));
+                }
+                let Value::List(entries) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                entries.remove(i as usize);
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "'{}' object doesn't support item deletion",
+                        self.type_name(obj)
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn repeat_values(values: &[Id], times: i64) -> Result<Vec<Id>> {
+    if values.is_empty() || times <= 0 {
+        return Ok(Vec::new());
+    }
+    let size = usize::try_from(times)
+        .ok()
+        .and_then(|n| values.len().checked_mul(n))
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(size)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for _ in 0..times {
+        output.extend_from_slice(values);
+    }
+    Ok(output)
 }

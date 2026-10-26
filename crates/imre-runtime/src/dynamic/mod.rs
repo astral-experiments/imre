@@ -196,6 +196,9 @@ impl Context {
         if name == "Ellipsis" {
             return Ok(value::ELLIPSIS);
         }
+        if name == "NotImplemented" {
+            return Ok(value::NOT_IMPLEMENTED);
+        }
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }

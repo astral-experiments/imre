@@ -537,7 +537,7 @@ pub(super) fn method(
         }
         let mut bound = |arg: Option<&Id>| match arg {
             None | Some(&NONE) => Ok(None),
-            Some(&arg) => ctx.index_integer(arg)?.map(Some).ok_or_else(|| {
+            Some(&arg) => ctx.try_index_integer(arg)?.map(Some).ok_or_else(|| {
                 type_error("slice indices must be integers or None or have an __index__ method")
             }),
         };

@@ -20,6 +20,7 @@ pub(super) const NONE: Id = 0;
 pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
+pub(super) const NOT_IMPLEMENTED: Id = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -32,7 +33,7 @@ pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
-    pub os_args: Option<Box<(i64, String)>>,
+    pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -55,12 +56,15 @@ impl Context {
         match self.heap.get(value) {
             Value::None => "NoneType",
             Value::Ellipsis => "ellipsis",
+            Value::NotImplemented => "NotImplementedType",
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
+            Value::ByteArray(_) => "bytearray",
+            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -158,6 +162,7 @@ pub(super) struct Scope {
 pub(super) enum Value {
     None,
     Ellipsis,
+    NotImplemented,
     Bool(bool),
     Int(crate::Int),
     Float(f64),
@@ -249,6 +254,7 @@ pub(super) enum Value {
         name: &'static str,
     },
     File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -376,6 +382,7 @@ impl Value {
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::None
             | Self::Ellipsis
+            | Self::NotImplemented
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
@@ -388,6 +395,7 @@ impl Value {
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
+            | Self::TextFile(_)
             | Self::RegexPattern(_)
             | Self::RegexMatch { .. } => {}
         }
@@ -434,6 +442,7 @@ impl Heap {
                 Some(Value::Bool(false)),
                 Some(Value::Bool(true)),
                 Some(Value::Ellipsis),
+                Some(Value::NotImplemented),
             ],
             free: Vec::new(),
             frames: vec![Frame::new(NONE)],
@@ -497,7 +506,7 @@ impl Heap {
             return;
         }
         let mut pending: Vec<_> = globals.collect();
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS]);
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
             pending.push(frame.scope);
             pending.extend(&frame.live);

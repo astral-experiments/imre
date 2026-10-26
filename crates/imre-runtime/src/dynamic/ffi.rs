@@ -10,7 +10,7 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
-    fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
+    pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "lookup" => {
                 let name = self.str_value(b)?.to_owned();
@@ -178,6 +178,14 @@ impl Context {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
             "neg" | "pos" | "~" => {
+                let slot = match op {
+                    "neg" => "__neg__",
+                    "pos" => "__pos__",
+                    _ => "__invert__",
+                };
+                if let Some(method) = self.bound_slot(a, slot)? {
+                    return self.call(method, vec![], vec![]);
+                }
                 let v = self.as_int(a)?;
                 let result = match op {
                     "neg" => crate::integer_binary(&crate::Int::from(0), &v, 1)?,
