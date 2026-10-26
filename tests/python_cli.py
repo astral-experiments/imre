@@ -350,6 +350,8 @@ nan = json.loads("NaN")
 print(nan == nan, nan <= 1, [nan] == [nan])
 defaults = {"present": None}
 print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
+cache = (Ellipsis, Ellipsis)
+print(cache[False] is ..., cache[True] is Ellipsis, repr(cache[False]))
 data = json.loads('{"k": 1, "other": [true], "k": 2}')
 data["other"].append(False)
 print(json.dumps(data))

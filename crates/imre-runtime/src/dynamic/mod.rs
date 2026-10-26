@@ -134,6 +134,9 @@ impl Context {
                 break;
             }
         }
+        if name == "Ellipsis" {
+            return Ok(value::ELLIPSIS);
+        }
         if builtins::is_builtin(name) {
             return Ok(self.alloc(Value::Native(name.to_owned())));
         }

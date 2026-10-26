@@ -11,6 +11,7 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) const NONE: Id = 0;
 pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
+pub(super) const ELLIPSIS: Id = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -101,6 +102,7 @@ pub(super) struct Scope {
 #[derive(Clone)]
 pub(super) enum Value {
     None,
+    Ellipsis,
     Bool(bool),
     Int(crate::Int),
     Float(f64),
@@ -261,6 +263,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::None
+            | Self::Ellipsis
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
@@ -314,6 +317,7 @@ impl Heap {
                 Some(Value::None),
                 Some(Value::Bool(false)),
                 Some(Value::Bool(true)),
+                Some(Value::Ellipsis),
             ],
             free: Vec::new(),
             frames: vec![Frame::new(NONE)],
@@ -373,7 +377,7 @@ impl Heap {
             return;
         }
         let mut pending: Vec<_> = globals.collect();
-        pending.extend([NONE, FALSE, TRUE]);
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS]);
         for frame in &self.frames {
             pending.push(frame.scope);
             pending.extend(&frame.live);
