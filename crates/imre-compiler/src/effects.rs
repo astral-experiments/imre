@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn proven_sequence_pulls_remove_only_their_own_index_errors() {
+    fn proven_sequence_pulls_preserve_deferred_read_errors() {
         let source = crate::modules::SourceGraph::single(
             r#"
 def checked(values: list[str], index: int) -> str:
@@ -462,11 +462,14 @@ def backward(values: list[str]) -> bool:
 
 def conversion(values: list[str]) -> bool:
     return any(int(value) for value in values)
+
+def integers(values: list[int]) -> int:
+    return len(values)
 "#,
         )
         .unwrap();
         let module = crate::frontend::lower(&source).unwrap();
-        assert_eq!(analyze(&module).functions, [true, false, false, true]);
+        assert_eq!(analyze(&module).functions, [true, true, true, true, false]);
     }
 
     #[test]

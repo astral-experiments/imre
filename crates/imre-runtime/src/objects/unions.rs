@@ -103,7 +103,7 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
             1 => !(*(word as *const Bytes)).is_empty(),
             2 => object(word as *const Object)
                 .0
-                .with(|s| !s.sequence().values.is_empty()),
+                .with(|s| crate::finish(s.sequence().map(|words| !words.values.is_empty()), false)),
             7 => !(*(word as *const BigInt)).is_zero(),
             _ => true,
         })

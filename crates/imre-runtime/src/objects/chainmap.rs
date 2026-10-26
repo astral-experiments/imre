@@ -78,7 +78,7 @@ unsafe fn with_layers<T>(value: *const Object, f: impl FnOnce(&[usize]) -> T) ->
     unsafe {
         object(value)
             .0
-            .with(|s| s.chainmap().0.with(|maps| f(&maps.sequence().values)))
+            .with(|s| s.chainmap().0.with(|maps| f(&maps.sequence_storage().values)))
     }
 }
 

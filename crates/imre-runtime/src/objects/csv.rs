@@ -21,12 +21,12 @@ impl Lines {
                 // SAFETY: the concrete list and its string stay rooted during this nonreentrant read.
                 let value = unsafe {
                     lines.0.with(|s| {
-                        s.sequence()
+                        Ok(s.sequence()?
                             .values
                             .get(*index)
-                            .map(|&word| crate::StrOwner::acquire_word(word))
+                            .map(|&word| crate::StrOwner::acquire_word(word)))
                     })
-                };
+                }?;
                 if value.is_some() {
                     *index += 1;
                 } else {

@@ -343,7 +343,8 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                         (None, Some(b)) => return Comparison::Done(b.equal_words(left)),
                         (None, None) => {}
                     }
-                    let (left, right) = (left.resolved(), right.resolved());
+                    let left = match left.resolved() { Ok(v) => v, Err(error) => return Comparison::Error(error) };
+                    let right = match right.resolved() { Ok(v) => v, Err(error) => return Comparison::Error(error) };
                     if left.kind != right.kind || left.values.len() != right.values.len() {
                         return Comparison::Done(false);
                     }
@@ -367,9 +368,10 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::ModuleMember(left), Storage::ModuleMember(right)) => {
                     Comparison::Done(left.equal_member(right))
                 }
-                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => Comparison::Done(
-                    super::boxed_values::equal((l.kind, l.word), (r.kind, r.word)),
-                ),
+                (Storage::ObjectValue(l), Storage::ObjectValue(r)) => {
+                    super::boxed_values::try_equal((l.kind, l.word), (r.kind, r.word))
+                        .map_or_else(Comparison::Error, Comparison::Done)
+                }
                 (Storage::SimpleNamespace(left), Storage::SimpleNamespace(right)) => {
                     object_element(
                         crate::ObjectOwner::as_ptr(left),
@@ -617,7 +619,7 @@ unsafe fn write_repr_with(
                                 output.write_char(']')?;
                                 return Ok(None);
                             }
-                            let values = values.resolved();
+                            let values = match values.resolved() { Ok(words) => words, Err(error) => { error.raise(); return Some(ReprTask::Stop); } };
                             if position == 0 {
                                 output.write_char('[')?;
                             }
@@ -647,7 +649,7 @@ unsafe fn write_repr_with(
                                 }
                                 output.write_str("ChainMap(")?;
                             }
-                            let mapping = maps.0.with(|s| s.sequence().values.get(position).copied());
+                            let mapping = maps.0.with(|s| s.sequence_storage().values.get(position).copied());
                             if let Some(mapping) = mapping {
                                 if position != 0 {
                                     output.write_str(", ")?;

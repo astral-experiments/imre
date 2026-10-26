@@ -236,7 +236,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
     // SAFETY: only the owned permutation escapes, never a reference to key storage.
     unsafe {
         object(keys.cast()).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence().ok()?;
             values.check_kind(kind);
             if kind == 6 {
                 return tuple_key_order(&values.values, reverse);
@@ -278,18 +278,20 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
                     debug_assert_eq!(kind, 6);
                     storage.sequence_storage_mut()
                 } else {
-                    let words = storage.sequence_mut();
+                    let words = storage.sequence_mut()?;
                     words.check_kind(kind);
                     words
                 };
-                std::mem::replace(words, Words::sorting_empty(kind))
+                Ok(std::mem::replace(words, Words::sorting_empty(kind)))
             })
         };
         // Preserve the header verbatim, including a surrounding sort's marker.
-        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-            Storage::Sequence(saved),
-        ))))
-        .cast()
+        crate::finish(
+            saved.map(|saved| {
+                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+            }),
+            std::ptr::null(),
+        )
     }
 }
 
@@ -390,7 +392,10 @@ pub unsafe extern "C" fn imre_sort_by_keys(
         // SAFETY: the exclusive list access roots both strings across comparison.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = storage.sequence_mut();
+                let values = match storage.sequence_mut() {
+                    Ok(words) => words,
+                    Err(error) => return error.raise(),
+                };
                 values.check_kind(key_kind);
                 sort_strings(
                     &mut values.values,
@@ -434,7 +439,7 @@ unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize])
                         Err(error) => error.raise(),
                     }
                 } else {
-                    let values = storage.sequence_mut();
+                    let values = match storage.sequence_mut() { Ok(words) => words, Err(error) => return error.raise() };
                     values.check_kind(element_kind);
                     permute(&mut values.values, order);
                 }
@@ -469,7 +474,10 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
             {
                 return joined;
             }
-            let values = storage.sequence();
+            let values = match storage.sequence() {
+                Ok(values) => values,
+                Err(error) => return error.returning(std::ptr::null()),
+            };
             values.check_kind(3);
             if let [word] = values.values.as_slice() {
                 let value = *word as *const Str;
@@ -867,7 +875,7 @@ mod tests {
                 imre_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
                 list.0.with(|storage| {
                     assert_eq!(
-                        storage.sequence().values.as_slice(),
+                        storage.sequence().ok().expect("fixture sequence").values.as_slice(),
                         order.map(|i| StrOwner::as_ptr(&texts[i]) as usize),
                     );
                 });
@@ -911,7 +919,7 @@ mod tests {
             super::super::imre_seq_append(target, StrOwner::as_ptr(&original) as usize, 3);
             let saved =
                 crate::ObjectOwner::from_raw(imre_sort_detach(target.cast(), 3).cast::<Object>());
-            assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
+            assert!(alias.0.with(|storage| storage.sequence().ok().expect("fixture sequence").values.is_empty()));
             assert_eq!(StrOwner::strong_count(&original), 2);
             super::super::imre_seq_append(target, StrOwner::as_ptr(&addition) as usize, 3);
             imre_sort_restore(
@@ -921,7 +929,7 @@ mod tests {
                 0,
             );
             assert_eq!(
-                alias.0.with(|storage| storage.sequence().values[0]),
+                alias.0.with(|storage| storage.sequence().ok().expect("fixture sequence").values[0]),
                 StrOwner::as_ptr(&original) as usize,
             );
             drop(saved);

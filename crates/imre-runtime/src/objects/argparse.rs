@@ -776,19 +776,19 @@ pub unsafe extern "C" fn imre_argparse_parse(
     let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let reserved = unsafe {
+    let reserved: Result<(), Error> = unsafe {
         argv.0.with(|storage| {
-            let sequence = storage.sequence();
+            let sequence = storage.sequence()?;
             sequence.check_kind(3);
             let words = sequence.values.iter().skip(usize::from(process_argv));
-            owners.try_reserve_exact(words.len())?;
-            args.try_reserve_exact(words.len())?;
+            owners.try_reserve_exact(words.len()).map_err(|_| Error::allocation())?;
+            args.try_reserve_exact(words.len()).map_err(|_| Error::allocation())?;
             owners.extend(words.map(|&word| crate::StrOwner::acquire_word(word)));
-            Ok::<_, std::collections::TryReserveError>(())
+            Ok(())
         })
     };
-    if reserved.is_err() {
-        return Error::allocation().returning(std::ptr::null_mut());
+    if let Err(error) = reserved {
+        return error.returning(std::ptr::null_mut());
     }
     args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {

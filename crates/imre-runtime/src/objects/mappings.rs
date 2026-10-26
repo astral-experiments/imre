@@ -2611,7 +2611,11 @@ pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const
     unsafe {
         let set = crate::ObjectOwner::from_raw(imre_set_new(3));
         let ok = object(source).0.with(|s| {
-            s.sequence().strings().all(|(word, _)| {
+            let words = match s.sequence() {
+                Ok(words) => words,
+                Err(error) => return error.returning(false),
+            };
+            words.strings().all(|(word, _)| {
                 imre_set_add(crate::ObjectOwner::as_ptr(&set), word);
                 super::exceptions::imre_error_pending() == 0
             })

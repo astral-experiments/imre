@@ -372,7 +372,7 @@ pub unsafe extern "C" fn imre_seq_slice(
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.slice(SliceIndices::new(rows.len(), start, stop, step)?);
             }
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
             let mut result = Words::new(values.kind.raw());
             result
@@ -956,7 +956,15 @@ mod tests {
                     integer(-1),
                 ));
                 drop(source);
-                assert_eq!(slice.0.with(|storage| storage.sequence().kind.raw()), kind);
+                assert_eq!(
+                    slice.0.with(|storage| storage
+                        .sequence()
+                        .ok()
+                        .expect("fixture sequence")
+                        .kind
+                        .raw()),
+                    kind
+                );
                 for (at, &expected) in values.iter().rev().enumerate() {
                     assert_eq!(
                         imre_seq_get_index(crate::ObjectOwner::as_ptr(&slice), at),
