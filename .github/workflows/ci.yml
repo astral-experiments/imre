@@ -61,7 +61,9 @@ jobs:
 
   unittest-source:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' }}
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: &linux-x64 >-
+      ${{ github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' ||
+          github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     env:
       UNITTEST_SOURCE: ${{ inputs.unittest_source }}
@@ -117,7 +119,7 @@ jobs:
 
   sys-source:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' && !inputs.unittest_source }}
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: *linux-x64
     timeout-minutes: 35
     env:
       SYS_SOURCE: ${{ inputs.sys_source }}
@@ -190,7 +192,7 @@ jobs:
 
   check:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: *linux-x64
     timeout-minutes: 120
     env: &wheel-env
       IMRE_REAL_WHEEL: .cpython-stdlib-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
@@ -633,7 +635,7 @@ jobs:
 
   pr-check:
     if: github.event_name == 'pull_request'
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: *linux-x64
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -645,7 +647,7 @@ jobs:
   pr-asan:
     needs: scope
     if: github.event_name == 'pull_request' && needs.scope.outputs.full_asan == 'true'
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: *linux-x64
     timeout-minutes: 45
     env: *wheel-env
     steps:
@@ -662,7 +664,7 @@ jobs:
   thinlto:
     needs: scope
     if: needs.scope.outputs.thinlto == 'true'
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: *linux-x64
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
