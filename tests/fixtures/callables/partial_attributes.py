@@ -25,6 +25,10 @@ def use(fn: Callable[[int], int], value: int) -> int:
     return fn(value)
 
 
+def use_pair(fn: Callable[[int, int], int]) -> int:
+    return fn(2, 3)
+
+
 def choose(flag: bool) -> int:
     current = partial(combine, 1, 2)
     if flag:
@@ -38,6 +42,9 @@ def main() -> None:
     print(first.args[1])
     print(first.args is first.args)
     print(first.func is combine)
+    original: Callable[[int, int, int], int] = first.func
+    print(original is combine)
+    print(original(3, 2, 1))
     print(partial(combine).func is combine)
     print(first.func(1, 2, 3))
     print(first(4, 5))
@@ -71,6 +78,7 @@ def main() -> None:
     bound = partial(counter.add, 6)
     print(bound.func is bound.func)
     print(bound.func(2, 3))
+    print(use_pair(bound.func))
     print(bound(4))
     print(choose(False))
     print(choose(True))
