@@ -153,6 +153,7 @@ impl Context {
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
+            Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
             Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
@@ -285,6 +286,10 @@ pub(super) enum Value {
     CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Struct {
+        format: String,
+        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+    },
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -557,6 +562,7 @@ impl Value {
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
+            | Self::Struct { .. }
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
