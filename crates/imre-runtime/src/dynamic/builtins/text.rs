@@ -502,6 +502,28 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
+    if name == "rstrip"
+        && let Value::Bytes(data) = ctx.heap.get(receiver)
+    {
+        positional(name, kwargs)?;
+        arity(name, args, 0, 1)?;
+        let chars: &[u8] = match args.first().filter(|&&id| id != NONE) {
+            None => b" \t\n\x0b\x0c\r",
+            Some(&id) => match ctx.heap.get(id) {
+                Value::Bytes(chars) | Value::ByteArray(chars) => chars,
+                _ => {
+                    return Err(type_error(format!(
+                        "a bytes-like object is required, not '{}'",
+                        ctx.type_name(id)
+                    )));
+                }
+            },
+        };
+        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
+            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+            None => receiver,
+        });
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => {
