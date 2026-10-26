@@ -92,6 +92,9 @@ def main():
                 expected.stderr,
             )
 
+        getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
+        compare("-IB", getters / "fields.py")
+        compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")

@@ -278,6 +278,7 @@ pub(crate) fn compile(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    runtime_imports: bool,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -292,7 +293,7 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    if !options.runtime_imports
+    if !runtime_imports
         && ![
             "sys",
             "platform",
@@ -315,7 +316,7 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports || (options.runtime_imports && !i.names.is_empty()) => i,
+        Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
