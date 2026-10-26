@@ -22,8 +22,15 @@ declare void @imre_dyn_statement(ptr, ptr, i64, ptr, i32)
 ";
 
 /// All module source has already been resolved. Import execution remains conditional.
-pub(crate) fn emit(modules: &[(String, PathBuf, String)], config: &str) -> Result<String, String> {
-    let mut output = Output::default();
+pub(crate) fn emit(
+    modules: &[(String, PathBuf, String)],
+    config: &str,
+    keep_docstrings: bool,
+) -> Result<String, String> {
+    let mut output = Output {
+        keep_docstrings,
+        ..Output::default()
+    };
     let config = output.data(config.as_bytes());
     let mut main = format!(
         "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
@@ -48,7 +55,7 @@ pub(crate) fn emit(modules: &[(String, PathBuf, String)], config: &str) -> Resul
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, Body::Statements(&parsed.syntax().body));
+        let code = output.code(&location, Body::Namespace(&parsed.syntax().body));
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -63,6 +70,7 @@ pub(crate) fn emit(modules: &[(String, PathBuf, String)], config: &str) -> Resul
 }
 
 enum Body<'a> {
+    Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
     Expression(&'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
@@ -76,6 +84,7 @@ struct SourceMap<'a> {
 
 #[derive(Default)]
 struct Output {
+    keep_docstrings: bool,
     strings: HashMap<Vec<u8>, u32>,
     constants: String,
     functions: String,
@@ -124,6 +133,15 @@ impl Output {
             caught: Vec::new(),
         };
         match body {
+            Body::Namespace(stmts) => {
+                if f.output.keep_docstrings
+                    && let Some(doc) = crate::frontend::docstring(stmts)
+                {
+                    let value = f.text(&doc);
+                    f.bind("__doc__", &value);
+                }
+                f.statements(stmts);
+            }
             Body::Statements(stmts) => f.statements(stmts),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);

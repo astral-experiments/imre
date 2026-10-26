@@ -83,7 +83,7 @@ impl Function<'_, '_> {
                     } else {
                         self.op("list", &[])
                     };
-                    let init = self.define(v.name.as_str(), None, None, Body::Statements(&v.body));
+                    let init = self.define(v.name.as_str(), None, None, Body::Namespace(&v.body));
                     let name = self.text(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);

@@ -638,6 +638,12 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // The class body can read the enclosing module's docstring before the
+        // type supplies a default for an undocumented class.
+        class_scope
+            .names
+            .entry("__doc__".to_owned())
+            .or_insert(NONE);
         let members = class_scope
             .class_body
             .take()

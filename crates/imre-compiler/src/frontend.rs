@@ -137,6 +137,7 @@ pub(crate) use caller_cache::CallerCache;
 pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
+pub(crate) use function_text::docstring;
 use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
