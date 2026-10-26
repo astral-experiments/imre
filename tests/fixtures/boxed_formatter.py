@@ -16,6 +16,8 @@ class Child(Tagged):
 
 
 def current():
+    wrapper = classmethod(len)
+    assert wrapper.__func__ is len and wrapper.__wrapped__ is len
     assert type(Child.native) is type(Child.owner)
     assert Child.native.__func__ is len and Child.native.__self__ is Child
     print(Child.owner() is Child, Child().owner() is Child, Tagged.owner.__self__ is Tagged)
