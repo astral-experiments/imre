@@ -11,6 +11,9 @@ def mark(value: str) -> str:
     return value
 
 
+print(unquote(b"abc"))
+print(unquote("abc", encoding="ascii"))
+print(unquote("abc", errors="strict"))
 print(quote("a /%+é☃", safe=b"/%"))
 print(quote(b"\xff\x00 =+/", safe="é=+"))
 print(quote("雪ü", safe="", encoding="iso-8859-1", errors="xmlcharrefreplace"))
