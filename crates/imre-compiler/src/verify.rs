@@ -164,6 +164,7 @@ impl Verifier<'_> {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
             Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
+            Type::SysImplementation => crate::version::implementation_fields(&self.module.types),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
                     0 => same(value, self.module.types.completed_command(cmd)),

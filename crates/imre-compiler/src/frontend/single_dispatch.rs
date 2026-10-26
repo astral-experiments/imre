@@ -253,13 +253,13 @@ impl Registration {
 }
 
 impl Checker<'_> {
-    /// Evaluate and root the supplied object before inspecting its class or formatting it.
-    pub(super) fn pack_callback_argument(
+    /// Root the evaluated argument before inspecting its class or formatting it.
+    pub(super) fn pack_callback_value(
         &mut self,
+        value: Expr,
         arg: &ast::Expr,
         ty: Type,
     ) -> Result<Expr, String> {
-        let value = self.expr(arg)?;
         if value.ty == ty {
             return Ok(value);
         }

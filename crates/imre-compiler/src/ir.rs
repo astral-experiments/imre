@@ -78,6 +78,8 @@ pub(crate) enum Type {
     PurePath(PathFlavor),
     /// The shared, independently retained metadata view of an exact concrete Path.
     PathInfo,
+    /// Native implementation metadata has one stable, struct-like owner.
+    SysImplementation,
     /// A sealed process result whose capture modes fix each field’s ownership.
     CompletedProcess(ProcessCapture, Option<usize>),
     /// A synchronous child with statically known captured stream types.
@@ -110,6 +112,8 @@ pub(crate) enum Type {
     Calendar(CalendarType),
     /// An exact instance of Python's plain, identity-only object.
     PlainObject,
+    /// The functools singleton and its publicly observable constructor are distinct objects.
+    Placeholder(PlaceholderKind),
     /// A source function from a heterogeneous overload list.
     FunctionRef,
     /// The shared failing function returned by typing.overload.
@@ -319,6 +323,7 @@ impl std::fmt::Display for Type {
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
+            Self::SysImplementation => "sys.implementation",
             Self::CompletedProcess(capture, _) if capture.text => {
                 "subprocess.CompletedProcess[str]"
             }
@@ -353,6 +358,8 @@ impl std::fmt::Display for Type {
             Self::PlainObject => "object",
             Self::FunctionRef | Self::OverloadStub => "function",
             Self::StrDescriptor(_) => "method_descriptor",
+            Self::Placeholder(PlaceholderKind::Value) => "functools._PlaceholderType",
+            Self::Placeholder(PlaceholderKind::Class) => "type",
             Self::ProcessSelectorClass => "subprocess selector class",
             Self::SimpleNamespace(_) => "types.SimpleNamespace",
             Self::ModuleSpec(_) => "importlib.machinery.ModuleSpec",
@@ -872,6 +879,7 @@ pub(crate) enum Builtin {
     SysThreadText {
         version: bool,
     },
+    SysImplementation,
     SysVersionInfo {
         implementation: bool,
     },
@@ -975,6 +983,7 @@ pub(crate) enum Builtin {
     Abs,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
+    SortByComparator,
     ListExtendUnhinted,
     SortDetach,
     SortRestore,
@@ -1060,6 +1069,7 @@ pub(crate) enum Builtin {
     UrlsafeB64encode,
     CodecLookup,
     CodecName,
+    StrEncodeOptions,
     CodecEncode,
     CodecDecode,
     Socket(SocketOp),
@@ -1070,6 +1080,7 @@ pub(crate) enum Builtin {
     NewPlainObject,
     Typing(TypingOperation),
     StrDescriptor(StrDescriptor),
+    Placeholder(PlaceholderKind),
     InspectSentinel,
     HashAvailable,
     Sha256Update,
@@ -1278,9 +1289,13 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
-    DequeGet,
+    DequeGet {
+        method: bool,
+    },
     DequeSet,
-    DequeDelete,
+    DequeDelete {
+        method: bool,
+    },
     DequeContains,
     DequeMaxlen,
     DequeIter {
@@ -1455,6 +1470,13 @@ pub(crate) enum RegexCapture {
     Absent,
     Start,
     End,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub(crate) enum PlaceholderKind {
+    Value,
+    Class,
 }
 
 /// These descriptor values call the same native operation as their bound string methods.
@@ -2011,6 +2033,10 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
+            Self::Exact(Type::BuiltinClass) => matches!(
+                ty,
+                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+            ),
             Self::Exact(expected) => expected == ty,
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),

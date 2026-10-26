@@ -271,6 +271,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::ActivePopen
             | Type::EventLoop
@@ -290,6 +291,7 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject
@@ -740,6 +742,7 @@ impl Types {
             | Type::HandlerLock
             | Type::Path
             | Type::PurePath(_)
+            | Type::SysImplementation
             | Type::CompletedProcess(..)
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -762,6 +765,7 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject

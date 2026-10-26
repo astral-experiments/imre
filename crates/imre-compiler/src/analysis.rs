@@ -559,6 +559,7 @@ pub(crate) enum CheckedDiagnostic {
     RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
     Call(TextRange),
+    NonCallable(TextRange),
     InertReturn(TextRange),
     DictDeletion(TextRange),
     DeferredName(TextRange),
@@ -582,6 +583,7 @@ impl CheckedDiagnostic {
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
+            Self::NonCallable(range) => (range, 12),
             Self::Keyword(range) => (range, 2),
             Self::CheckedIndexRead(range) => (range, 3),
             Self::RepeatedKeyword(range) => (range, 11),
@@ -610,6 +612,7 @@ impl CheckedDiagnostic {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,

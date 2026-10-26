@@ -8,6 +8,8 @@ from assignments import main
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
+REQUIRE_INT = "def require_int(value: int) -> int:\n    return value\n"
+
 REJECTED = {
     "producer_escape": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        yield i\nsaved = values()\n",
     "producer_handler": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        try:\n            yield i\n        finally:\n            print(i)\nfor x in values():\n    print(x)\n",
@@ -37,7 +39,7 @@ REJECTED = {
     "generator_argument": "def take(value: int) -> int:\n    return value\nprint(take(value for value in range(3)))\n",
     "generator_target_leaks": "values = list(target for target in range(3))\nprint(target)\n",
     "generator_later_target_unbound": "def bad() -> list[int]:\n    later = 9\n    return list(later for first in range(1) if later > 0 for later in range(2))\nbad()\n",
-    "generator_optional_unchecked": "def bad(values: list[int | None]) -> int:\n    return sum(value + 1 for value in values)\nbad([None])\n",
+    "generator_optional_unchecked": REQUIRE_INT + "def bad(values: list[int | None]) -> int:\n    return sum(require_int(value) for value in values)\nbad([None])\n",
     "generator_wrong_context": 'values: list[int] = list(value for value in ["wrong"])\n',
     "generator_dynamic_dead_element": 'print(any(eval("1") for value in range(0)))\n',
     "generator_target_rebound": "print(any((value := 1) for value in range(3)))\n",
@@ -70,14 +72,14 @@ REJECTED = {
     "all_extra": "print(all([1], [2]))\n",
     "all_keyword": "print(all(iterable=[1]))\n",
     "all_scalar": "print(all(None))\n",
-    "any_not_optional_guard": "def bad(value: int | None) -> None:\n    if any(value is not None for index in range(1)):\n        print(value + 1)\nbad(None)\n",
+    "any_not_optional_guard": "def bad(value: int | None) -> None:\n    if any(value is not None for index in range(1)):\n        required: int = value\nbad(None)\n",
     "generator_backedge_optional": 'value: str | None = "ok"\nprint(all((value := None) for index in range(2) if len(value) > 0))\n',
     "generator_inner_backedge_optional": 'value: str | None = "ok"\nprint(any((value := None) for outer in range(1) if value is not None for inner in range(2) if len(value) > 0))\n',
-    "generator_export_invalidates_optional": "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nprint(value + 1)\n",
-    "generator_after_start_optional": "value: int | None = None\nprint(sum(((value := None) or 0 for index in [1]), (value := 1)))\nprint(value + 1)\n",
-    "generator_after_strict_optional": "value: int | None = None\nfor left, right in zip(((value := None) or 0 for index in [1]), [2], strict=(value := 1)):\n    print(value + 1)\n",
-    "generator_suspended_optional": "value: int | None = 1\nfor result in (value + item for outer in [0] if value is not None for item in range(2)):\n    value = None\n",
-    "generator_sibling_suspended_optional": "value: int | None = 1\nfor result, ignored in zip((value + item for outer in [0] if value is not None for item in range(2)), ((value := None) for index in range(2))):\n    print(result)\n",
+    "generator_export_invalidates_optional": "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nrequired: int = value\n",
+    "generator_after_start_optional": "value: int | None = None\nprint(sum(((value := None) or 0 for index in [1]), (value := 1)))\nrequired: int = value\n",
+    "generator_after_strict_optional": "value: int | None = None\nfor left, right in zip(((value := None) or 0 for index in [1]), [2], strict=(value := 1)):\n    required: int = value\n",
+    "generator_suspended_optional": REQUIRE_INT + "value: int | None = 1\nfor result in (require_int(value) + item for outer in [0] if value is not None for item in range(2)):\n    value = None\n",
+    "generator_sibling_suspended_optional": REQUIRE_INT + "value: int | None = 1\nfor result, ignored in zip((require_int(value) + item for outer in [0] if value is not None for item in range(2)), ((value := None) for index in range(2))):\n    print(result)\n",
 }
 
 ERRORS = {

@@ -369,6 +369,7 @@ impl Builtin {
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
             | Self::CodecLookup
+            | Self::StrEncodeOptions
             | Self::CodecEncode
             | Self::CodecDecode
             | Self::BytesIoValue
@@ -448,6 +449,7 @@ impl Builtin {
             | Self::Sha256Hex
             | Self::Sha256New
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
@@ -526,6 +528,7 @@ impl Builtin {
             Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
+            Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
@@ -579,9 +582,9 @@ impl Builtin {
             | Self::ArgparseText { .. }
             | Self::DequeAppend { .. }
             | Self::DequePop { .. }
-            | Self::DequeGet
+            | Self::DequeGet { .. }
             | Self::DequeSet
-            | Self::DequeDelete
+            | Self::DequeDelete { .. }
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -601,6 +604,7 @@ impl Builtin {
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode
             | Self::SystemExitCodeEqual { .. }
+            | Self::SysImplementation
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }
@@ -1049,6 +1053,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_codec_lookup"
+                | "imre_str_encode_options"
                 | "imre_codec_encode"
                 | "imre_codec_decode"
                 | "imre_bytes_io_value"
