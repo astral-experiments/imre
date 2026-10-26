@@ -132,6 +132,7 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
@@ -311,6 +312,10 @@ pub(super) enum Value {
         callable: Id,
         receiver: Id,
     },
+    StaticMethod {
+        callable: Id,
+        dictionary: Id,
+    },
     Property(super::property::Property),
     ReadOnlyDescriptor {
         get: Id,
@@ -451,6 +456,10 @@ impl Value {
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
+            Self::StaticMethod {
+                callable,
+                dictionary,
+            } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {

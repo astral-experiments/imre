@@ -83,6 +83,7 @@ impl Context {
             Value::Class { .. }
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
+                | Value::StaticMethod { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -108,6 +109,9 @@ impl Context {
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
         if let Some(get) = self.slot(value, "__get__") {
             return self.call(get, vec![value, receiver, owner], Vec::new());
+        }
+        if let Value::StaticMethod { callable, .. } = *self.heap.get(value) {
+            return Ok(callable);
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
@@ -234,6 +238,7 @@ impl Context {
             | Value::PythonFrame { .. }
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -474,10 +479,26 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
+            Value::StaticMethod {
+                callable,
+                dictionary,
+            } => {
+                if let Some(value) =
+                    super::static_method::attribute(self, callable, dictionary, name)?
+                {
+                    return Ok(value);
+                }
+            }
+            Value::None if name == "__doc__" => {
+                return Ok(self.text("The type of the None singleton."));
+            }
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
                 }
+            }
+            Value::Native(class) if class == "staticmethod" && name == "__get__" => {
+                return Ok(self.builtin("staticmethod.__get__"));
             }
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
@@ -679,6 +700,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
+            return super::static_method::set_attribute(self, obj, dictionary, name, value);
+        }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);
         }
@@ -775,12 +799,14 @@ impl Context {
                                 | "function"
                                 | "object"
                                 | "property"
+                                | "staticmethod"
                         )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {

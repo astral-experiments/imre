@@ -359,6 +359,7 @@ def report(text):
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
+            "boxed_staticmethod.py",
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",

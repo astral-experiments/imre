@@ -355,6 +355,9 @@ impl Context {
             Value::Raised(Error { message, .. }) => message.clone(),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
+            Value::StaticMethod { callable, .. } => {
+                format!("<staticmethod({})>", self.repr(*callable))
+            }
             Value::Function { fields, .. } => {
                 format!("<function {}>", self.display(fields.qualname))
             }

@@ -7,6 +7,7 @@ mod ffi;
 mod function_fields;
 mod operators;
 mod property;
+mod static_method;
 mod stdlib;
 mod super_object;
 mod value;
