@@ -37,7 +37,7 @@ REJECTED = {
     "endswith_keyword": '"abc".endswith(suffix="c")',
     "find_keyword": '"abc".find("a", start=0)',
     "find_end": '"abc".find("a", 0, 1)',
-    "find_wrong_start": '"abc".find("a", True)',
+    "find_wrong_start": '"abc".find("a", 1.5)',
     "partition_keyword": '"abc".partition(sep="b")',
     "partition_missing": '"abc".partition()',
     "translate_sequence": 'def tr(table: list[str]) -> str:\n    return "a".translate(table)',
