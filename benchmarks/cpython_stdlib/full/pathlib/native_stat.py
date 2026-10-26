@@ -18,11 +18,32 @@ FIELD_CALLS = {'new': 3, 'join': 3, 'stat': 3, 'st_mode': 7, 'st_ino': 7, 'st_de
 FIELD_ASSERTIONS = {'assertIsInstance': 3, 'assertEqual': 3, 'assertNotEqual': 5}
 
 
+def check_fixture_stats(binary, work, case):
+    # This independent probe compares each real fixture path with CPython.
+    # The original method below performs its own cross-path assertions.
+    bridge = Bridge(binary, work, os.getcwd())
+    devices = {}
+    try:
+        for name in ('fileA', 'dirB/fileB', 'dirC'):
+            path = os.path.join(case.base, name)
+            host = os.stat(path)
+            result = bridge.call('stat', bridge.call('new', path))
+            for field in ('st_mode', 'st_ino', 'st_dev'):
+                native = bridge.call(field, result)
+                if native != getattr(host, field):
+                    raise AssertionError((path, field, getattr(host, field), native))
+            devices[name] = host.st_dev
+    finally:
+        bridge.close()
+    print(f'{case.id()} CPython/Imre fixture st_dev: {devices}', flush=True)
+
+
 def driven_stat(tools, work, case, original, failure):
     ctor = case.cls.__name__
     driver = Path(__file__).with_name('stat_driver.py').read_bytes().replace(
         b'from pathlib import Path', f'from pathlib import {ctor} as Path'.encode())
     binary = tools.build(driver, work)
+    check_fixture_stats(binary, work, case)
     bridge = Bridge(binary, work, os.getcwd())
 
     class Result:

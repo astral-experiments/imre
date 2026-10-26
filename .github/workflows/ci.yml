@@ -342,7 +342,8 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/cpython-path-cohorts.json"
+          # Upstream test_stat expects files and directories on the same device.
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --fixture-dir /dev/shm --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --links "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat "$RUNNER_TEMP/cpython-path-cohorts.json"
