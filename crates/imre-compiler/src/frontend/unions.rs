@@ -265,6 +265,10 @@ impl Checker<'_> {
             }
             _ => {}
         }
+        if let Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) = self.resolve(expression)
+        {
+            return Ok(vec![Exact(self.types.url_split_result(bytes))]);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }

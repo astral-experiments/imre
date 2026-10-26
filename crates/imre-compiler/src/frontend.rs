@@ -123,6 +123,7 @@ mod unittest_mock;
 mod unittest_patch;
 mod unittest_setup;
 mod unpacking;
+mod urlsplit;
 mod warnings;
 mod zip_sums;
 mod zipfile;
@@ -1815,6 +1816,9 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Hunk)) => return Ok(Type::Patch(ir::PatchKind::Hunk)),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
+        Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
+            return Ok(types.url_split_result(bytes));
+        }
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(
@@ -7276,6 +7280,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Field(Box::new(receiver), index),
                     });
                 }
+                if let Some(field) = self.url_property(&receiver, attribute.attr.as_str()) {
+                    return Ok(field);
+                }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
                     if self.types.is_stat_result(receiver.ty) {
                         return self.stat_result_attribute(receiver, attribute, &declaration);
@@ -8613,6 +8620,7 @@ impl<'a> Checker<'a> {
                 )?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
+            Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
             Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
                 return self.text_function(call, "string", ir::TextOperation::Unquote);
             }
@@ -8808,6 +8816,11 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            if let Some(result) =
+                self.url_result_method(&receiver, attribute.attr.as_str(), call)?
+            {
+                return Ok(result);
+            }
             if let Some(layout) = self.types.dispatcher(receiver.ty) {
                 return self.single_dispatch_method(call, attribute, receiver, layout);
             }

@@ -46,7 +46,7 @@ REJECTED = {
     "unquote_bytes": 'from urllib.parse import unquote\nunquote(b"abc")',
     "unquote_codec": 'from urllib.parse import unquote\nunquote("abc", encoding="ascii")',
     "unquote_errors": 'from urllib.parse import unquote\nunquote("abc", errors="strict")',
-    "unsupported_url_api": 'from urllib.parse import urlsplit\nurlsplit("a:b")',
+    "unsupported_url_api": 'from urllib.parse import urljoin\nurljoin("http://host", "child")',
     "escaped_unquote": 'from urllib.parse import unquote\ncallback = unquote',
     "unused_invalid_method": 'def unused(value: str) -> str:\n    return value.strip(chars="x")',
     "regex_dynamic": 'import re\ndef bad(value: str) -> None:\n    re.compile(value)',

@@ -93,6 +93,12 @@ impl Checker<'_> {
         let origin = match self.resolve(expr)? {
             Binding::Definition(id) => TupleOrigin::Declaration(id),
             Binding::Intrinsic(Intrinsic::CacheInfo) => CACHE_INFO,
+            Binding::Intrinsic(Intrinsic::SplitResult { bytes: false }) => {
+                crate::types::SPLIT_RESULT
+            }
+            Binding::Intrinsic(Intrinsic::SplitResult { bytes: true }) => {
+                crate::types::SPLIT_RESULT_BYTES
+            }
             _ => return None,
         };
         Some((origin, self.types.namedtuple_metadata(origin)?))
@@ -215,6 +221,19 @@ impl Checker<'_> {
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| error(self.source, call, "missing namedtuple field argument"))?;
+        if matches!(
+            origin,
+            crate::types::SPLIT_RESULT | crate::types::SPLIT_RESULT_BYTES
+        ) && fields.iter().any(|value| match origin {
+            crate::types::SPLIT_RESULT => !matches!(value.ty, Type::Str | Type::StrLiteral(_)),
+            _ => value.ty != Type::Bytes,
+        }) {
+            return Err(error(
+                self.source,
+                call,
+                "URL result fields must match their string or bytes layout",
+            ));
+        }
         let ty = self
             .types
             .namedtuple_layout(origin, fields.iter().map(|field| field.ty).collect());

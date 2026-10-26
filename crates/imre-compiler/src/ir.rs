@@ -1629,9 +1629,24 @@ pub(crate) enum TextOperation {
     Partition,
     Translate,
     Unquote,
+    UrlSplit,
+    UrlProperty(UrlProperty),
+    UrlGetUrl,
+    UrlTranscode {
+        encode: bool,
+    },
     Dedent,
     ShlexSplit,
     ShlexQuote,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum UrlProperty {
+    Username,
+    Password,
+    Hostname,
+    Port,
 }
 
 #[derive(Clone, Copy)]

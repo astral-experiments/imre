@@ -50,8 +50,12 @@ fn decimal_limit() -> &'static DecimalLimit {
     DIGITS.get_or_init(|| DecimalLimit::new(DEFAULT_DIGITS))
 }
 
+pub(super) fn decimal_digit_limit() -> u32 {
+    decimal_limit().digits
+}
+
 pub(super) fn decimal_digits_allowed(count: usize) -> bool {
-    let limit = decimal_limit().digits;
+    let limit = decimal_digit_limit();
     limit == 0 || count <= limit as usize
 }
 
