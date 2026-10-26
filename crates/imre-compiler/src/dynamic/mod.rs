@@ -383,7 +383,8 @@ pub(crate) fn compile(
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,
     });
-    let llvm_ir = emit::emit(&sources, &config.to_string())?;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

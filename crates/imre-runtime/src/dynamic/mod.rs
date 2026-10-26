@@ -282,6 +282,7 @@ impl Context {
         });
         self.modules.insert(name.to_owned(), module);
         if let Some((path, code)) = source {
+            self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
