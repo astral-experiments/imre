@@ -40,6 +40,22 @@ except KeyError as original:
             capture(outer, limit=0)
             capture(outer, limit=0, chain=False)
 
+def nested_error():
+    class Local(ValueError):
+        __module__ = "builtins"
+    return Local("inside function")
+
+
+class Outer:
+    class Local(ValueError):
+        __module__ = "builtins"
+
+
+for error in (nested_error(), Outer.Local("inside class")):
+    print(type(error).__qualname__)
+    capture(error, limit=0)
+
+
 print_exception(None, file=Writer())
 print(sys.exception() is None)
 
