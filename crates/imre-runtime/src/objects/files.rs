@@ -14,6 +14,7 @@ use super::{
 mod buffered;
 mod gzip;
 mod path_text;
+mod random;
 mod seekable;
 mod text_memory;
 use seekable::Memory;
@@ -40,6 +41,7 @@ pub(super) struct FileState {
 enum FileKind {
     Text,
     BinaryRead,
+    BinaryRandom,
     GzipBinaryRead,
     Memory,
     TextMemory,
@@ -50,6 +52,7 @@ enum FileKind {
 enum Stream {
     Standard(bool),
     Read(Input),
+    Random(random::Random),
     UnreadGzip { file: File, capacity: usize },
     Write(Output),
     Memory(Memory),
@@ -63,6 +66,7 @@ impl Stream {
         let (file, flushed) = match self {
             Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
             Self::Read(input) => (input.into_file(), Ok(())),
+            Self::Random(file) => return file.close(),
             Self::UnreadGzip { file, .. } => (file, Ok(())),
             Self::Write(writer) => writer.finish(),
             Self::Memory(_) | Self::TextMemory(_) | Self::Member(_) => return Ok(()),
@@ -190,6 +194,7 @@ impl FileState {
         match self.kind {
             FileKind::Memory => "_io.BytesIO",
             FileKind::BinaryRead => "_io.BufferedReader",
+            FileKind::BinaryRandom => "_io.BufferedRandom",
             FileKind::BinaryWrite => "_io.BufferedWriter",
             FileKind::GzipBinaryRead => "GzipFile",
             FileKind::Member => "ZipExtFile",
@@ -279,6 +284,9 @@ impl FileState {
                 "read length must be non-negative or -1",
             ));
         }
+        if self.kind == FileKind::BinaryRandom {
+            return self.read_bytes(usize::try_from(size).ok());
+        }
         if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
             return Ok(Bytes::new());
         }
@@ -286,6 +294,12 @@ impl FileState {
     }
 
     pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.kind == FileKind::BinaryRandom {
+            let Some(Stream::Random(file)) = self.stream.as_mut() else {
+                return Err(Error::new(Kind::ValueError, "write to closed file"));
+            };
+            return file.write(bytes).map_err(errno_error);
+        }
         if self.kind == FileKind::Memory {
             let Stream::Memory(memory) = self.stream()? else {
                 unreachable!()
@@ -386,6 +400,7 @@ impl FileState {
             | Stream::Memory(_)
             | Stream::TextMemory(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(errno_error),
+            Stream::Random(file) => file.flush().map_err(errno_error),
         }
     }
 }
@@ -584,6 +599,36 @@ pub unsafe extern "C" fn imre_binary_open(path: *const Str, mode: u32) -> *const
     // SAFETY: the caller keeps this string owner live throughout the call.
     let path = unsafe { StrOwner::acquire_word(path as usize) };
     finish(open(&path, mode, true, false), std::ptr::null())
+}
+
+/// Open an anonymous binary update file in the selected temporary directory.
+///
+/// # Safety
+/// A present directory must be a rooted string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tempfile_new(directory: *const Str) -> *const Object {
+    // SAFETY: the caller retains the optional directory through creation.
+    let directory = unsafe { directory.as_ref() }.map(Str::as_str);
+    let result = super::tempdirs::anonymous_file(directory).and_then(|file| {
+        let fd = file.as_raw_fd();
+        let capacity = crate::text_output::binary_capacity(
+            file.metadata().map_err(errno_error)?.blksize().into(),
+        );
+        let stream = random::Random::new(file, capacity)?;
+        Ok(crate::ObjectOwner::into_raw(
+            FileState {
+                fd: Some(fd),
+                raw: false,
+                stream: Some(Stream::Random(stream)),
+                name: None,
+                encoding: None,
+                errors: None,
+                kind: FileKind::BinaryRandom,
+            }
+            .into_object(),
+        ))
+    });
+    finish(result, std::ptr::null())
 }
 
 /// Opens a gzip source without consuming a header until the first read.

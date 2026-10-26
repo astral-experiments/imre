@@ -259,6 +259,17 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::TemporaryFile => {
+                let directory =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let operand = self
+                    .checked_instruction(format!("call ptr @imre_tempfile_new(ptr {directory})"));
+                self.owned(Value {
+                    ty: Type::BinaryIO,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::Query(query) => {
                 let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 let byte = self.instruction(format!(

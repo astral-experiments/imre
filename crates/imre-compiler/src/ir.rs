@@ -1771,6 +1771,7 @@ pub(crate) enum PathOperation {
     Replace,
     /// Scoped creation returns a hidden owned pathname, not an escaping manager.
     TemporaryDirectory,
+    TemporaryFile,
     CleanupTemporaryDirectory,
     ContextNew {
         temporary: bool,
