@@ -224,7 +224,7 @@ impl Checker<'_> {
             for bound in [start, stop, step] {
                 let value = match bound {
                     Some(node) => {
-                        let value = self.expr(node)?;
+                        let value = Self::enum_integer(self.expr(node)?);
                         match value.ty {
                             Type::Int | Type::None => value,
                             Type::Bool => Expr {
@@ -301,6 +301,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn index_value(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
+        let value = Self::enum_integer(value);
         if value.ty == Type::Bool {
             return Ok(Expr {
                 ty: Type::Int,

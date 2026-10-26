@@ -1,5 +1,6 @@
 """Supplemental differential exercise; this is not an upstream test ID."""
-from itertools import repeat
+from http import HTTPStatus
+from itertools import islice, repeat
 from operator import length_hint
 
 
@@ -26,6 +27,11 @@ def main() -> None:
             print("exhausted")
     infinite = repeat("x")
     print(f"{next(infinite)} {next(infinite)} {length_hint(infinite, -3)}")
+    print(length_hint(infinite, HTTPStatus.OK))
+    print(length_hint(repeat("x", HTTPStatus.NOT_FOUND)))
+    source = iter(range(700))
+    print(list(islice(source, HTTPStatus.OK, HTTPStatus.NOT_FOUND, HTTPStatus.CONTINUE)))
+    print(next(source))
     probe = repeat(4, 1)
     print(f"{next(probe, count(log))} {next(probe, count(log))} {len(log)}")
     try:
