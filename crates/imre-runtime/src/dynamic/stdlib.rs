@@ -21,7 +21,9 @@ mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
+mod marshal;
 mod operator;
+mod pickle;
 pub(super) mod readiness;
 mod regex;
 mod socket;
@@ -45,6 +47,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "json"
+            | "marshal"
+            | "pickle"
             | "datetime"
             | "time"
             | "hashlib"
@@ -328,6 +332,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("codecs", "lookup")
+        | ("marshal", "loads")
+        | ("pickle", "dumps")
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
@@ -398,6 +404,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
+    }
+    if name == "marshal.loads" {
+        return marshal::loads(ctx, args, kwargs);
+    }
+    if name == "pickle.dumps" {
+        return pickle::dumps(ctx, args, kwargs);
     }
     if name == "functools.partial" {
         let Some((&function, bound)) = args.split_first() else {
