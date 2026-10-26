@@ -1929,20 +1929,19 @@ impl Checker<'_> {
                 cases,
             )];
         }
+        // The leftmost iterator is already acquired. Restore the caller on yield or unwind.
+        let resume = self.generator_frame(Statement::While(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(true, vec![not(self.local(ready)), not(self.local(done))]),
+            },
+            cases,
+            Vec::new(),
+        ));
         let next = vec![
             Statement::Clear(value),
             Statement::Assign(ready, boolean(false)),
-            Statement::While(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Boolean(
-                        true,
-                        vec![not(self.local(ready)), not(self.local(done))],
-                    ),
-                },
-                cases,
-                Vec::new(),
-            ),
+            Statement::If(not(self.local(done)), vec![resume], Vec::new()),
         ];
         Ok(Prepared {
             evaluate,
@@ -1955,6 +1954,30 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// Run one prepared generator step or an equivalent callback-free bulk operation.
+    pub(super) fn generator_frame(&self, step: Statement) -> Statement {
+        let module = if self.module == self.graph.entry {
+            "__main__"
+        } else {
+            &self.graph.modules[self.module].name
+        };
+        let marker = |builtin| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(builtin, Vec::new()),
+            })
+        };
+        Statement::Try {
+            body: vec![
+                marker(Builtin::GeneratorFrameEnter(module.to_owned())),
+                step,
+            ],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![marker(Builtin::GeneratorFrameLeave)],
+        }
     }
 
     /// Convert StopIteration escaping suspended generator code, retaining its cause.

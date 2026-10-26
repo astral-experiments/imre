@@ -1,6 +1,23 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SysEncoding {
+    Default,
+    Filesystem,
+    FilesystemErrors,
+}
+
+impl SysEncoding {
+    pub(crate) fn method(self) -> &'static str {
+        match self {
+            Self::Default => "getdefaultencoding",
+            Self::Filesystem => "getfilesystemencoding",
+            Self::FilesystemErrors => "getfilesystemencodeerrors",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
@@ -892,6 +909,7 @@ pub(crate) enum Builtin {
         descriptor: u8,
         errors: bool,
     },
+    SysEncoding(SysEncoding),
     SysVersionInfo {
         implementation: bool,
     },
@@ -1156,6 +1174,8 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    GeneratorFrameEnter(String),
+    GeneratorFrameLeave,
     SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
@@ -1378,6 +1398,8 @@ pub(crate) enum Builtin {
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
+    /// Record the source location of a raised Python exception.
+    ExceptionOrigin(u64),
     ExceptionCause,
     ActiveException,
     ExceptionSuppressContext,

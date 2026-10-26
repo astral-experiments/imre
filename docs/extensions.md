@@ -2,6 +2,16 @@
 
 Imre compiles suitable C extensions against its own `Python.h`. Applications import the resulting modules with ordinary Python syntax. Each installed module supplies a typed stub and a static archive. Imre links the archive into the application when it builds.
 
+## Find the interpreter with uv
+
+With `imre` on `PATH`, run `uv python find imre` to get its executable path.
+uv supplies its own Python probe and prepends its temporary package directory
+to `sys.path`. Imre compiles the probe and its imported modules to native code.
+An isolated command can add a literal directory this way while ignoring
+`PYTHONPATH` and the current directory.
+
+To run a standalone script, use `uv run --python imre app.py`.
+
 ## Build with uv
 
 `imre build-target` prints the native target as JSON. Add `--output-dir`

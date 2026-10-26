@@ -383,10 +383,21 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::SysGetFrameModuleName)) => {
                 return self.frame_module_name(call).map(Some);
             }
-            Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
-                return self
-                    .sys_no_args(call, name, unpacking::string("utf-8"))
-                    .map(Some);
+            Some(Binding::Intrinsic(Intrinsic::SysEncoding(query))) => {
+                calls::reject_unpacking(call, self.source)?;
+                let result = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::SysEncoding(query), vec![]),
+                };
+                let result = self.sys_no_args(call, query.method(), result)?;
+                for arg in &call.arguments.args {
+                    self.graph.checked_excess_argument(self.module, arg.range());
+                }
+                self.graph.checked_keywords(
+                    self.module,
+                    call.arguments.keywords.iter().map(Ranged::range),
+                );
+                return Ok(Some(result));
             }
             Some(Binding::Intrinsic(Intrinsic::SysIntern { query })) => {
                 return self.intern_call(call, query).map(Some);

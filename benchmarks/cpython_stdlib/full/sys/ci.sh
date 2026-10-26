@@ -20,6 +20,10 @@ if [[ -f benchmarks/cpython_stdlib/full/sys/stdin_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stdin_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdin-encoding.json"
   cmp benchmarks/cpython_stdlib/full/sys/stdin-encoding-linux.json "$RUNNER_TEMP/sys-stdin-encoding.json"
 fi
+if [[ -f benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py ]]; then
+  python3 -B benchmarks/cpython_stdlib/full/sys/filesystem_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-filesystem-encoding.json"
+  cmp benchmarks/cpython_stdlib/full/sys/filesystem-encoding-linux.json "$RUNNER_TEMP/sys-filesystem-encoding.json"
+fi
 for opt in 0 3; do
   python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
   python3 -B -X utf8 "${sys_runner[@]}" --opt-level "$opt" --locale-audit "$RUNNER_TEMP/sys-locale-utf8-O$opt.json"

@@ -4,10 +4,12 @@ use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
+pub(crate) use intern::canonical;
 use std::io::{self, Write};
 mod encoding;
 mod input;
 pub(super) use input::read_input_line;
+mod encoding_names;
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::settings(isolated, utf8);

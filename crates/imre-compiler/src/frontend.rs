@@ -1052,7 +1052,7 @@ pub(crate) fn lower_with_caller_cache(
         class_reads.push(helper.class_reads);
         recursion_errors.push(helper.recursion_error);
     }
-    let entry = entry.expect("source graph has an entry module");
+    let mut entry = entry.expect("source graph has an entry module");
     typing::validate_functions(&functions, &entry, &types)?;
     let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
@@ -1081,17 +1081,20 @@ pub(crate) fn lower_with_caller_cache(
     }
     python_frames.push(true); // The program entry runs a Python module body.
     let mut names = false;
-    let mut count = python_frames.iter().filter(|&&frame| frame).count() > 1000;
+    let source_functions = python_frames.iter().filter(|&&frame| frame).count();
+    let mut generator_sites = 0;
+    let mut count = false;
     for function in functions.iter().chain([&entry]) {
         ir::walk_expressions(&function.body, &mut |value| match value.kind {
             ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
             ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
+            ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
             _ => {}
         });
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames = if names || count {
+    let source_frames = if names || count || source_functions + generator_sites > 1000 {
         python_frames
             .into_iter()
             .zip(owners.iter().copied().chain([graph.entry]))
@@ -1112,9 +1115,27 @@ pub(crate) fn lower_with_caller_cache(
     } else {
         Vec::new()
     };
+    if generator_sites != 0 && source_frames.is_empty() {
+        for function in functions.iter_mut().chain([&mut entry]) {
+            ir::walk_expressions_mut(&mut function.body, &mut |value| {
+                if matches!(
+                    value.kind,
+                    ExprKind::Builtin(
+                        Builtin::GeneratorFrameEnter(_) | Builtin::GeneratorFrameLeave,
+                        _
+                    )
+                ) {
+                    value.kind = ExprKind::None;
+                }
+            });
+        }
+    }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
-    for (id, sums) in zip_sums {
-        zip_sums::fuse(&mut functions, id, &sums);
+    // Fusing adjacent sums also inlines their generator bodies and scalar calls.
+    if source_frames.is_empty() {
+        for (id, sums) in zip_sums {
+            zip_sums::fuse(&mut functions, id, &sums);
+        }
     }
     globals
         .class_data
@@ -4710,6 +4731,7 @@ impl<'a> Checker<'a> {
                                 vec![raised, group],
                             ),
                         };
+                        let member = self.exception_origin(member, raise);
                         return Ok((vec![Statement::Raise(Some(member))], false));
                     }
                     if !matches!(
@@ -4739,6 +4761,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![raised, cause]),
                     });
                 }
+                let value = value.map(|exception| self.exception_origin(exception, raise));
                 return Ok((vec![Statement::Raise(value)], false));
             }
             ast::Stmt::Pass(_) => None,
@@ -4979,6 +5002,32 @@ impl<'a> Checker<'a> {
                 message: arg.map(Box::new),
             },
         })
+    }
+
+    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
+        if self.graph.command_startup.is_none() {
+            return exception;
+        }
+        let filename = if self.graph.virtual_command && self.module == self.graph.entry {
+            "<string>".to_owned()
+        } else {
+            self.graph
+                .module_filename(self.module)
+                .to_string_lossy()
+                .into_owned()
+        };
+        let line = self.source[..usize::from(site.start())]
+            .bytes()
+            .filter(|&byte| byte == b'\n')
+            .count() as u64
+            + 1;
+        Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(
+                Builtin::ExceptionOrigin(line),
+                vec![exception, unpacking::string(filename)],
+            ),
+        }
     }
 
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
@@ -5947,7 +5996,7 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name)
                 if name.id == "__file__"
                     && self.module == self.graph.entry
-                    && self.graph.command_startup.is_some() =>
+                    && self.graph.virtual_command =>
             {
                 let exception = Expr {
                     ty: Type::Exception,
@@ -7472,6 +7521,16 @@ impl<'a> Checker<'a> {
                     "unsupported expression in the Imre subset",
                 ));
             }
+        };
+        let kind = match kind {
+            ExprKind::Builtin(Builtin::RaiseException, mut operands) => {
+                let exception = operands
+                    .pop()
+                    .expect("a failing expression carries an exception");
+                operands.push(self.exception_origin(exception, expression));
+                ExprKind::Builtin(Builtin::RaiseException, operands)
+            }
+            kind => kind,
         };
         Ok(Expr { ty, kind })
     }

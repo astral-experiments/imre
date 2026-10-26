@@ -1,3 +1,4 @@
+import sys
 from typing import Callable
 
 
@@ -51,6 +52,42 @@ class Changes:
         return value > 0
 
 
+def frame_item(value: int) -> int:
+    caller = sys._getframemodulename(1)
+    if caller is None:
+        return 0
+    return value + 1
+
+
+def prefix_count(names: list[str]) -> int:
+    return len(list(item for item in names if item.startswith('x')))
+
+
+def generator_frames() -> None:
+    depth = 0
+    while sys._getframemodulename(depth) is not None:
+        depth += 1
+    old_limit = sys.getrecursionlimit()
+    for extra in (1, 2, 1):
+        sys.setrecursionlimit(depth + extra)
+        try:
+            total = sum(frame_item(item) for item in [1, 2])
+        except RecursionError:
+            total = -9
+        finally:
+            sys.setrecursionlimit(old_limit)
+        print(total)
+        sys.setrecursionlimit(depth + extra)
+        try:
+            count = prefix_count(['x', 'y'])
+        except RecursionError:
+            count = -9
+        finally:
+            sys.setrecursionlimit(old_limit)
+        print(count)
+    print(any(frame_item(item) > 0 for item in [1, 2]))
+
+
 def main() -> None:
     print(sum(map(callback(), source()), start()))
     print(consume(convert, ["4", "5"]))
@@ -91,3 +128,4 @@ def main() -> None:
 
 
 main()
+generator_frames()

@@ -1694,6 +1694,21 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn enter_frame(&mut self, name: Option<&str>) -> &'static str {
+        if let Some(name) = name {
+            let name = self.pooled_literal(name.as_bytes(), Type::Str);
+            // The frame takes this reference, including on rejected entry.
+            self.checked_line(format!(
+                "call void @imre_named_frame_enter(ptr {})",
+                name.operand
+            ));
+            "call void @imre_named_frame_leave()"
+        } else {
+            self.checked_line("call void @imre_recursion_enter()");
+            "call void @imre_recursion_leave()"
+        }
+    }
+
     /// Only errors from the try body enter these handlers. Handler and else
     /// failures first execute finally, then continue to an enclosing handler.
     fn try_statement(
@@ -1703,6 +1718,21 @@ impl Emitter<'_, '_> {
         orelse: &[Statement],
         finalbody: &[Statement],
     ) {
+        if handlers.is_empty()
+            && orelse.is_empty()
+            && finalbody.iter().all(|statement| {
+                matches!(
+                    statement,
+                    Statement::Expr(Expr {
+                        kind: ExprKind::None,
+                        ..
+                    })
+                )
+            })
+        {
+            self.block(body);
+            return;
+        }
         if self.try_nesting == 0 {
             self.cleanup_bytes = 0;
         }
@@ -1955,19 +1985,8 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
         let leave_frame = match frame {
-            Some(ir::SourceFrame::Module(name)) => {
-                let name = self.pooled_literal(name.as_bytes(), Type::Str);
-                // The frame takes this reference, including on a rejected entry.
-                self.checked_line(format!(
-                    "call void @imre_named_frame_enter(ptr {})",
-                    name.operand
-                ));
-                Some("call void @imre_named_frame_leave()")
-            }
-            Some(ir::SourceFrame::Depth) => {
-                self.checked_line("call void @imre_recursion_enter()");
-                Some("call void @imre_recursion_leave()")
-            }
+            Some(ir::SourceFrame::Module(name)) => Some(self.enter_frame(Some(name))),
+            Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
         self.block(&function.body);
@@ -5116,6 +5135,28 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::GeneratorFrameEnter(name) => {
+                match self.module.source_frames.iter().flatten().next() {
+                    Some(ir::SourceFrame::Module(_)) => {
+                        self.enter_frame(Some(name));
+                    }
+                    Some(ir::SourceFrame::Depth) => {
+                        self.enter_frame(None);
+                    }
+                    None => unreachable!("unused generator frames were removed"),
+                }
+                none()
+            }
+            Builtin::GeneratorFrameLeave => {
+                match self.module.source_frames.iter().flatten().next() {
+                    Some(ir::SourceFrame::Module(_)) => {
+                        self.line("call void @imre_named_frame_leave()")
+                    }
+                    Some(ir::SourceFrame::Depth) => self.line("call void @imre_recursion_leave()"),
+                    None => unreachable!("unused generator frames were removed"),
+                }
+                none()
+            }
             Builtin::SysGetRecursionLimit => {
                 self.call("imre_sys_getrecursionlimit", Type::Int, &[])
             }
@@ -5131,6 +5172,16 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::SysEncoding(query) => {
+                use crate::ir::SysEncoding;
+                self.uses_string_interning = true;
+                let function = match query {
+                    SysEncoding::Default => "imre_sys_default_encoding",
+                    SysEncoding::Filesystem => "imre_sys_filesystem_encoding",
+                    SysEncoding::FilesystemErrors => "imre_sys_filesystem_errors",
+                };
+                self.call(function, returns, &[])
+            }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
@@ -5996,6 +6047,14 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::ExceptionOrigin(line) => Value {
+                ty: Type::Exception,
+                operand: self.instruction(format!(
+                    "call ptr @imre_exception_with_origin(ptr {}, ptr {}, i64 {line})",
+                    args[0].value.operand, args[1].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::ExceptionWithCause => {
                 let cause =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -8933,6 +8992,7 @@ declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_exception_with_cause(ptr, ptr)
+declare ptr @imre_exception_with_origin(ptr, ptr, i64)
 declare ptr @imre_exception_cause(ptr)
 declare i32 @imre_exception_suppress_context(ptr)
 declare ptr @imre_exception_current()
@@ -8946,6 +9006,10 @@ declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
+declare void @imre_sys_init_encoding_names()
+declare ptr @imre_sys_default_encoding()
+declare ptr @imre_sys_filesystem_encoding()
+declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
