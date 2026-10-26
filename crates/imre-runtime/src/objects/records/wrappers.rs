@@ -2,9 +2,11 @@
 use super::{Header, RecordDescriptor, descriptor, imre_record_release, imre_record_retain};
 use crate::objects::exceptions::{Error, Kind};
 
+const PYTHON_FUNCTION: u32 = 3;
+
 pub(super) fn is_function(layout: &RecordDescriptor) -> bool {
     // SAFETY: record descriptors have static metadata or a null pointer.
-    unsafe { layout.semantics.as_ref() }.is_some_and(|info| info.kind == 2)
+    unsafe { layout.semantics.as_ref() }.is_some_and(|info| info.kind == PYTHON_FUNCTION)
 }
 
 /// # Safety
@@ -93,7 +95,7 @@ mod tests {
     #[test]
     fn a_live_alias_keeps_the_entire_ring_until_its_last_release() {
         let info = RecordSemantics {
-            kind: 2,
+            kind: PYTHON_FUNCTION,
             flags: 0,
             name: std::ptr::null(),
             name_len: 0,
@@ -107,6 +109,11 @@ mod tests {
             kinds: function_kinds.as_ptr(),
             semantics: &info,
         };
+        let module_spec = RecordSemantics { kind: 2, ..info };
+        assert!(!is_function(&RecordDescriptor {
+            semantics: &module_spec,
+            ..function
+        }));
         let leaf_kinds = [3];
         let leaf = RecordDescriptor {
             length: 1,

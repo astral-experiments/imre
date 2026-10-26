@@ -2748,6 +2748,17 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        self.expr_expected_or(expression, expected, None)
+    }
+
+    /// A partial can accept a sentinel in place of a parameter. Preserve its type
+    /// while checking ordinary operands in the declared parameter's context.
+    fn expr_expected_or(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: Option<Type>,
+    ) -> Result<Expr, String> {
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -2767,11 +2778,17 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) {
-            return self.pack_len_argument(expression);
-        }
-        if self.types.is_unread_argument(expected) {
-            return self.unread_argument(expression, expected);
+        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+            let value = self.expr(expression)?;
+            // A partial consumes its marker before the target's own argument ABI.
+            // Keep the evaluated value so a lookup or callback runs exactly once.
+            return if alternative == Some(value.ty) {
+                Ok(value)
+            } else if self.types.is_len_argument(expected) {
+                self.pack_len_value(value, expression)
+            } else {
+                self.pack_unread_value(value, expression, expected)
+            };
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -3125,6 +3142,9 @@ impl<'a> Checker<'a> {
             }
             _ => self.typed_expr(expression)?,
         };
+        if alternative == Some(value.ty) {
+            return Ok(value);
+        }
         self.coerce(value, expected, expression)
     }
 
@@ -3336,7 +3356,8 @@ impl<'a> Checker<'a> {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
-            && matches!(args[0].ty, Type::Str | Type::Bytes)
+            && (matches!(args[0].ty, Type::Str | Type::Bytes)
+                || args[0].ty == Type::Int && value.ty == self.types.string_or_int())
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -4494,7 +4515,10 @@ impl<'a> Checker<'a> {
                         let index = self.integer_index(&target.slice)?;
                         statements.push(Statement::Expr(Expr {
                             ty: Type::None,
-                            kind: ExprKind::Builtin(Builtin::DequeDelete, vec![receiver, index]),
+                            kind: ExprKind::Builtin(
+                                Builtin::DequeDelete { method: false },
+                                vec![receiver, index],
+                            ),
                         }));
                         continue;
                     }
@@ -5332,14 +5356,10 @@ impl<'a> Checker<'a> {
     }
 
     fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {
-        if op == ast::Operator::Add
-            && value.ty == Type::Bool
+        if matches!(op, ast::Operator::Add | ast::Operator::Sub)
             && matches!(other, Type::Int | Type::Bool)
         {
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-            }
+            powers::integer(value)
         } else {
             value
         }
@@ -5570,7 +5590,7 @@ impl<'a> Checker<'a> {
             return Ok(typing::dummy());
         }
 
-        if let Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) = self.resolve(expression) {
+        if let Some(name) = self.collection_class_name(expression) {
             return Ok(annotations::class_value(name));
         }
         if let ast::Expr::Attribute(attr) = expression
@@ -5782,6 +5802,9 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::Placeholder => {
+                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
+                }
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -5962,13 +5985,31 @@ impl<'a> Checker<'a> {
                 }
                 let mut values = Vec::new();
                 let mut element = Type::Int;
+                let mut mixed = false;
                 for value in &list.elts {
                     let item = self.expr(value)?;
                     if values.is_empty() {
                         element = item.ty;
                     }
-                    self.expect(element, item.ty, value)?;
+                    if !self.module_scope
+                        && matches!(element, Type::Int | Type::Str)
+                        && matches!(item.ty, Type::Int | Type::Str)
+                    {
+                        mixed |= item.ty != element;
+                    } else {
+                        self.expect(element, item.ty, value)?;
+                    }
                     values.push(item);
+                }
+                if mixed {
+                    // Local storage can infer this closed layout. Module globals and
+                    // lists with a declared element type retain their storage contract.
+                    element = self.types.string_or_int();
+                    values = values
+                        .into_iter()
+                        .zip(&list.elts)
+                        .map(|(item, at)| self.coerce(item, element, at))
+                        .collect::<Result<_, _>>()?;
                 }
                 (self.types.list(element), ExprKind::List(values))
             }
@@ -6662,7 +6703,10 @@ impl<'a> Checker<'a> {
                     let index = self.integer_index(&subscript.slice)?;
                     return Ok(Expr {
                         ty: element,
-                        kind: ExprKind::Builtin(Builtin::DequeGet, vec![list, index]),
+                        kind: ExprKind::Builtin(
+                            Builtin::DequeGet { method: false },
+                            vec![list, index],
+                        ),
                     });
                 }
                 if list.ty == Type::BuiltinClass {
@@ -6977,6 +7021,30 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
+                }
+                if let Type::Placeholder(kind) = receiver.ty {
+                    let result = match (kind, attribute.attr.as_str()) {
+                        (ir::PlaceholderKind::Value, "__class__") => {
+                            partials::singleton(ir::PlaceholderKind::Class)
+                        }
+                        (ir::PlaceholderKind::Class, "__class__") => {
+                            annotations::builtin_type("type").unwrap()
+                        }
+                        (ir::PlaceholderKind::Class, "__name__" | "__qualname__") => {
+                            unpacking::string("_PlaceholderType")
+                        }
+                        (ir::PlaceholderKind::Class, "__module__") => {
+                            unpacking::string("functools")
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported Placeholder attribute",
+                            ));
+                        }
+                    };
+                    return Ok(partials::after(receiver, result));
                 }
                 if let Type::CmpKey(frame, bound) = receiver.ty
                     && attribute.attr.as_str() == "obj"
@@ -7965,6 +8033,13 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
+                return self.placeholder_call(
+                    call,
+                    partials::singleton(ir::PlaceholderKind::Value),
+                    ir::PlaceholderKind::Value,
+                );
+            }
             Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
                 return self.single_dispatch(call);
             }
@@ -8554,6 +8629,11 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+                && attribute.attr.as_str() == "encode"
+            {
+                return self.str_encode(Self::string_value(receiver), call);
+            }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);
             }
@@ -8818,20 +8898,15 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
                 });
             }
-            if call.arguments.args.is_empty()
-                || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8"))
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "decode"
+                && (call.arguments.args.is_empty()
+                    || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8")))
             {
-                let conversion = match (receiver.ty, attribute.attr.as_str()) {
-                    (Type::Str, "encode") => Some((Builtin::Encode, Type::Bytes)),
-                    (Type::Bytes, "decode") => Some((Builtin::Decode, Type::Str)),
-                    _ => None,
-                };
-                if let Some((builtin, ty)) = conversion {
-                    return Ok(Expr {
-                        ty,
-                        kind: ExprKind::Builtin(builtin, vec![receiver]),
-                    });
-                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Decode, vec![receiver]),
+                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "fromkeys" {
@@ -9117,6 +9192,24 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [value] = args.as_slice()
+            && let Type::Placeholder(kind) = value.ty
+        {
+            let result = match name.id.as_str() {
+                "type" if kind == ir::PlaceholderKind::Value => {
+                    Some(partials::singleton(ir::PlaceholderKind::Class))
+                }
+                "type" => annotations::builtin_type("type"),
+                "callable" => Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(kind == ir::PlaceholderKind::Class),
+                }),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(partials::after(value.clone(), result));
+            }
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Calendar(_))
             && matches!(name.id.as_str(), "str" | "print" | "repr")
@@ -9354,7 +9447,10 @@ impl<'a> Checker<'a> {
             return Ok(rendered);
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(
+                args[0].ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
             && matches!(name.id.as_str(), "repr" | "str" | "print")
         {
             let rendered = Expr {
@@ -9510,6 +9606,13 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Str, Type::Str)
+            }
+            "int"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Union(_))
+                    && args[0].ty == self.types.string_or_int() =>
+            {
+                return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
             }
             "int"
                 if args.len() == 1

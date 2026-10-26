@@ -1207,6 +1207,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// Native evaluation of this exact call raises for a known noncallable object.
+    pub(crate) fn checked_noncallable(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::NonCallable(call));
+    }
+
     /// A checked runtime overload can legally stand alone: calling the dummy raises.
     pub(crate) fn runtime_overload(&self, module: ModuleId, name: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]

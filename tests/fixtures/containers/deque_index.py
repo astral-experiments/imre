@@ -69,3 +69,17 @@ nested[0] = nested[-1]
 del nested[-1]
 print(kept[0])
 print(nested[0][0])
+
+for oversized in [-9223372036854775809, 9223372036854775808]:
+    try:
+        get(oversized)
+    except OverflowError as error:
+        print(str(error))
+    try:
+        original.__setitem__(oversized, replacement())
+    except OverflowError as error:
+        print(str(error))
+    try:
+        erase(oversized)
+    except OverflowError as error:
+        print(str(error))

@@ -398,10 +398,12 @@ impl Checker<'_> {
                 ),
             });
         }
-        if types
-            .iter()
-            .any(|ty| matches!(ty, Type::PlainObject | Type::StrDescriptor(_)))
-            && (types == [left.ty, right.ty] || types[0] == types[1])
+        if types.iter().any(|ty| {
+            matches!(
+                ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
+        }) && (types == [left.ty, right.ty] || types[0] == types[1])
         {
             if types[0] == types[1] {
                 return Ok(Self::identity_result(

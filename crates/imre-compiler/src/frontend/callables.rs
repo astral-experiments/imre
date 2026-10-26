@@ -464,6 +464,9 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::Placeholder(kind) = callable.ty {
+            return self.placeholder_call(call, callable, kind);
+        }
         if let Type::CmpKey(frame, _) = callable.ty {
             return self.bind_cmp_key(call, callable, frame);
         }

@@ -289,6 +289,7 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject
@@ -763,6 +764,7 @@ impl Types {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::FunctionRef
             | Type::OverloadStub
             | Type::PlainObject

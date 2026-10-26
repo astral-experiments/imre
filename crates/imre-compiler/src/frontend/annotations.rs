@@ -60,6 +60,28 @@ pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
     )
 }
 
+impl Checker<'_> {
+    /// Resolve the class object exported by collections, collections.abc or array.
+    /// A local with the same name takes precedence over the module binding.
+    pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
+        let mut root = expression;
+        while let ast::Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        if root
+            .as_name_expr()
+            .is_some_and(|name| self.names.contains_key(name.id.as_str()))
+        {
+            return None;
+        }
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
+            Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
+            _ => None,
+        }
+    }
+}
+
 pub(super) fn type_name(value: Expr) -> Expr {
     Expr {
         ty: Type::Str,

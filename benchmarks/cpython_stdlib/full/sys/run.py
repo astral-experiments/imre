@@ -20,6 +20,7 @@ from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
 import encoding_methods
+import executable_case
 import jit_case
 import locale_case
 import recursion_case
@@ -127,7 +128,7 @@ def select(toolchain, work, source, module):
         raise AssertionError("unexpected output from language version checks")
 
     # Process regressions use the real hooks and retained objects; none adds a test ID.
-    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_callbacks.py", "codec_error_args.py"):
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_callbacks.py", "codec_error_args.py", "executable_encoding.py"):
         exercise = HERE / filename
         ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
@@ -191,6 +192,8 @@ def select(toolchain, work, source, module):
 
     executions[argv_case.CASE_ID] = argv_case.observer(
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
+    executions[executable_case.CASE_ID] = executable_case.observer(
+        module, toolchain, pinned_methods["SysModuleTest", "test_executable"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
     executions.update(recursion_case.cases(module, toolchain, work, source))

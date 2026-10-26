@@ -31,6 +31,7 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod format_cursors;
+mod functools;
 mod hashlib;
 mod inspect;
 mod itertools;
@@ -102,6 +103,9 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    FunctoolsPlaceholder {
+        class: bool,
+    },
     Context(Rc<contextvars::State>),
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),

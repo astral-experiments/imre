@@ -114,6 +114,7 @@ impl Type {
             | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
@@ -208,6 +209,7 @@ impl Type {
             | Self::Calendar(_)
             | Self::PlainObject
             | Self::StrDescriptor(_)
+            | Self::Placeholder(_)
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
@@ -895,6 +897,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -3653,6 +3656,7 @@ impl Emitter<'_, '_> {
                 | Type::ProcessSelectorClass
                 | Type::TimedFileHandler
                 | Type::StrDescriptor(_)
+                | Type::Placeholder(_)
                 | Type::FunctionRef
                 | Type::OverloadStub
                 | Type::PlainObject
@@ -4824,6 +4828,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SortByKeys
+            | Builtin::SortByComparator
             | Builtin::SortDetach
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
@@ -5422,6 +5427,11 @@ impl Emitter<'_, '_> {
                     }
                 }
             }
+            Builtin::StrEncodeOptions => self.call(
+                "imre_str_encode_options",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::CodecEncode | Builtin::CodecDecode => self.call(
                 if matches!(builtin, Builtin::CodecEncode) {
                     "imre_codec_encode"
@@ -5438,6 +5448,14 @@ impl Emitter<'_, '_> {
                 Type::Sha256,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::Placeholder(kind) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @imre_functools_placeholder(i32 {})",
+                    *kind as u32
+                )),
+                small_integer: false,
+            },
             Builtin::StrDescriptor(method) => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -6641,7 +6659,10 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DequeMaxlen => self.call("imre_deque_maxlen", returns, &[&args[0].value]),
-            Builtin::DequeGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DequeGet { method } => {
+                self.check_deque_method_index(&args[1].value, *method);
+                self.get_item(&args[0].value, &args[1].value, returns, false)
+            }
             Builtin::DequeContains => {
                 let word = self.word(&args[0].value);
                 let found = self.instruction(format!(
@@ -6655,10 +6676,12 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::DequeSet => {
+                self.check_deque_method_index(&args[1].value, true);
                 self.set_item(&args[0].value, &args[1].value, &args[2].value, false);
                 none()
             }
-            Builtin::DequeDelete => {
+            Builtin::DequeDelete { method } => {
+                self.check_deque_method_index(&args[1].value, *method);
                 self.checked_line(format!(
                     "call void @imre_deque_delete(ptr {}, i64 {})",
                     args[0].value.operand, args[1].value.operand
@@ -7208,6 +7231,7 @@ impl Emitter<'_, '_> {
                     | Type::ClockTime
                     | Type::Calendar(_)
                     | Type::StrDescriptor(_)
+                    | Type::Placeholder(_)
                     | Type::OverloadStub
                     | Type::PlainObject
                     | Type::SimpleNamespace(_)
@@ -7503,6 +7527,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -7611,6 +7636,7 @@ impl Emitter<'_, '_> {
             | Type::ClockTime
             | Type::Calendar(_)
             | Type::StrDescriptor(_)
+            | Type::Placeholder(_)
             | Type::OverloadStub
             | Type::PlainObject
             | Type::SimpleNamespace(_)
@@ -7879,6 +7905,15 @@ impl Emitter<'_, '_> {
         self.release_operand(&source);
         self.release_operand(&list);
         true
+    }
+
+    fn check_deque_method_index(&mut self, index: &Value, method: bool) {
+        if method {
+            self.checked_line(format!(
+                "call void @imre_deque_check_method_index(i64 {})",
+                index.operand
+            ));
+        }
     }
 
     /// A proved nonnegative immediate can cross the specialized ABI as an
@@ -8255,6 +8290,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ClockTime
         | Type::Calendar(_)
         | Type::StrDescriptor(_)
+        | Type::Placeholder(_)
         | Type::OverloadStub
         | Type::PlainObject
         | Type::SimpleNamespace(_)
@@ -8675,6 +8711,7 @@ declare ptr @imre_bytes_concat(ptr, ptr)
 declare ptr @imre_bytes_repeat(ptr, i64)
 declare ptr @imre_bytes_iter(ptr)
 declare ptr @imre_str_encode(ptr)
+declare ptr @imre_str_encode_options(ptr, ptr, ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
@@ -8705,6 +8742,7 @@ declare ptr @imre_linecache_line_int(ptr, i64, ptr)
 declare ptr @imre_linecache_line_float(ptr, double, ptr)
 declare ptr @imre_inspect_sentinel()
 declare ptr @imre_inspect_str_descriptor(i32)
+declare ptr @imre_functools_placeholder(i32)
 @imre_socket_af_inet = external constant i64
 @imre_socket_sock_stream = external constant i64
 @imre_socket_sol_socket = external constant i64
@@ -9027,6 +9065,7 @@ declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
 declare void @imre_deque_reverse(ptr)
+declare void @imre_deque_check_method_index(i64)
 declare i64 @imre_deque_get(ptr, i64)
 declare void @imre_deque_set(ptr, i64, i64)
 declare void @imre_deque_delete(ptr, i64)
@@ -9119,6 +9158,7 @@ declare void @imre_list_extend_unhinted(ptr, i32)
 declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
+declare void @imre_sort_by_comparator(ptr, i32, ptr, ptr, i32, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
 declare ptr @imre_join_buffer_new(ptr)
 declare i32 @imre_join_buffer_append(ptr, ptr)

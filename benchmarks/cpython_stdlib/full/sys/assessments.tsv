@@ -28,7 +28,6 @@ SysModuleTest.test_current_frames	blocked	Requires a live frame snapshot for a b
 SysModuleTest.test_debugmallocstats	proposed	The stderr assertions name pymalloc arenas and the free PyDictObjects list. Imre does not use those CPython allocators or freelists.
 SysModuleTest.test_disable_gil_abi	proposed	This sole assertion ties the CPython extension ABI suffix 't' to its Py_GIL_DISABLED configure flag. Imre does not implement that binary extension ABI.
 SysModuleTest.test_dlopenflags	blocked	A persistent native loader policy must be shared by get/setdlopenflags and future extension loading, with errors for invalid arity.
-SysModuleTest.test_executable	blocked	Imre currently returns the host helper interpreter; the original also relaunches with overridden argv[0], executable and PATH. A host Python child cannot validate the native boundary (#302).
 SysModuleTest.test_exit	blocked	The unchanged method verifies the native caught payloads and child exits through stderr flushing. Compiling its next child with lone U+DCFF fails before the final Latin-1 check (#405, #409).
 SysModuleTest.test_exit_codes_under_repl	blocked	Requires interactive stdin/REPL execution and exit propagation from exit(), __import__('sys').exit and raise SystemExit for statuses 0 and 123.
 SysModuleTest.test_getallocatedblocks	blocked	The check uses live allocation counts before and after gc.collect, with optional total refcount/intern accounting. The native allocator does not expose these counters.
