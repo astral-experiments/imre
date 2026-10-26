@@ -162,17 +162,9 @@ impl Context {
                 };
                 Ok(flag(*offset < values.len()))
             }
-            "next" => {
-                let Value::Iterator { values, offset } = self.heap.get_mut(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                let v = values
-                    .get(*offset)
-                    .copied()
-                    .ok_or_else(|| Error::new("StopIteration", ""))?;
-                *offset += 1;
-                Ok(v)
-            }
+            "next" => self
+                .next_item(a)?
+                .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
