@@ -253,9 +253,14 @@ impl Checker<'_> {
             ));
         }
         if evaluated.is_empty() && matches!(target, Target::Indirect) {
-            // An indirect wrapper with this same signature would include itself in its
-            // closed target set. Retain the existing target after evaluating empty spreads.
-            return Ok(scope.finish(captured[0].clone()));
+            // No arguments change the target's ABI. Keep its identity as the owner
+            // of a new partial rather than emitting a recursive forwarding helper.
+            let ty = self.types.callable(parameters, returns);
+            let original = self.coerce(captured[0].clone(), ty, function)?;
+            return Ok(scope.finish(Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::EmptyPartial, vec![original]),
+            }));
         }
         let mut slots = Vec::with_capacity(parameters.len());
         let mut remaining = Vec::new();

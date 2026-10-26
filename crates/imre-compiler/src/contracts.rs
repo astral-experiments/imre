@@ -423,6 +423,7 @@ impl Builtin {
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
             | Self::CacheInsert(_)
+            | Self::EmptyPartial
             | Self::ListGetI32
             | Self::ListSliceSum
             | Self::Slice
@@ -762,6 +763,9 @@ impl Builtin {
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
                     .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
+            }
+            Self::EmptyPartial => {
+                matches!(args, [target] if matches!(result, Type::Callable(_)) && target.ty == result)
             }
             Self::CacheParameter(_) => {
                 matches!(args, [wrapper] if types.cached_function(wrapper.ty).is_some())
