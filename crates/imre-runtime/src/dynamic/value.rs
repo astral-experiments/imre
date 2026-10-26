@@ -32,7 +32,7 @@ pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
-    pub os_args: Option<Box<(i64, String)>>,
+    pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -61,6 +61,8 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
+            Value::ByteArray(_) => "bytearray",
+            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -249,6 +251,7 @@ pub(super) enum Value {
         name: &'static str,
     },
     File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -388,6 +391,7 @@ impl Value {
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
+            | Self::TextFile(_)
             | Self::RegexPattern(_)
             | Self::RegexMatch { .. } => {}
         }

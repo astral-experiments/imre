@@ -355,6 +355,10 @@ def report(text):
         )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.check()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_text_output.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('port.txt')")
+        if Path("/dev/full").exists():
+            compare("-IB", "-c", imports + "arithmetic.full_device()")
         checked = run(
             imre,
             "-IB",

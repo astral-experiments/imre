@@ -356,6 +356,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("TextIOWrapper.") {
+        return files::text_method(ctx, method, args, kwargs);
+    }
     if name == "functools.partial" {
         let Some((&function, bound)) = args.split_first() else {
             return Err(Error::new(
