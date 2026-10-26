@@ -309,6 +309,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_contextvars.py",
+            "boxed_datetime.py",
             "boxed_descriptors.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",

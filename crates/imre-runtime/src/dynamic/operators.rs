@@ -71,6 +71,9 @@ impl Context {
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
             Value::Float(f) => *f != 0.0,
+            Value::Calendar { value, .. } => {
+                value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
+            }
             Value::Str(s) => !s.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::List(v)
@@ -143,6 +146,7 @@ impl Context {
                 .cmp(&self.as_int(b).unwrap())
                 .is_eq(),
             (Value::Float(x), Value::Float(y)) => x == y,
+            (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. }) => a.equal(b),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
             }
@@ -244,6 +248,20 @@ impl Context {
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
+            Value::Calendar { value, .. } => value.text(),
+            Value::NamedTuple {
+                class: Some(class),
+                names,
+                values,
+            } => {
+                let fields = names
+                    .iter()
+                    .zip(values)
+                    .map(|(k, v)| format!("{k}={}", self.repr(*v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{class}({fields})")
+            }
             Value::Str(s) => s.clone(),
             Value::Bytes(bytes) => format!(
                 "b'{}'",
@@ -283,6 +301,9 @@ impl Context {
         }
     }
     pub(super) fn repr(&self, id: Id) -> String {
+        if let Value::Calendar { value, .. } = self.heap.get(id) {
+            return value.repr();
+        }
         if let Value::Str(s) = self.heap.get(id) {
             let mut quoted = String::new();
             crate::objects::exceptions::write_string_repr(s, &mut quoted)

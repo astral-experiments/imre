@@ -166,6 +166,7 @@ pub(super) fn construct(
                         "int() can't convert non-string with explicit base",
                     ));
                 }
+                Some(Value::Float(f)) => crate::Int::new(crate::floats::float_to_integer(*f)?),
                 _ => ctx.as_int(value.unwrap())?,
             };
             Ok(ctx.alloc(Value::Int(number)))
