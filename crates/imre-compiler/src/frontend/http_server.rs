@@ -34,34 +34,61 @@ impl Checker<'_> {
         let result = self.types.callable(vec![], Type::None);
         let value = self.dispatch_record(base, receiver, call, |checker, class, receiver| {
             let declared = &checker.classes.declarations.definitions[class];
-            if declared.fields.iter().any(|f| f.name.starts_with("do_"))
-                || declared.static_bindings.keys().any(|n| n.starts_with("do_")) {
-                return Err(error(checker.source, call, "HTTP command attributes require an instance method"));
+            if declared.fields.iter().any(|field| field.name.starts_with("do_"))
+                || declared.static_bindings.keys().any(|name| name.starts_with("do_"))
+            {
+                return Err(error(
+                    checker.source, call, "HTTP command attributes require an instance method",
+                ));
             }
-            let mut right = if let Some(sig) = checker.classes.methods[class].get("__getattr__").cloned() {
+            let methods = &checker.classes.methods[class];
+            let mut fallback = if let Some(sig) = methods.get("__getattr__").cloned() {
                 if sig.params.len() != 2 || sig.params[1].ty != Type::Str || sig.returns != result {
-                    return Err(error(checker.source, call, "an HTTP handler's dynamic command lookup requires a bound zero-argument Callable"));
+                    return Err(error(
+                        checker.source, call,
+                        "an HTTP handler's dynamic command lookup requires a bound zero-argument Callable",
+                    ));
                 }
                 checker.calls.insert(sig.id);
-                Expr { ty: result, kind: ExprKind::Call(sig.id, ir::CallArgs::positional(vec![receiver.clone(), key.clone()])) }
+                Expr {
+                    ty: result,
+                    kind: ExprKind::Call(
+                        sig.id, ir::CallArgs::positional(vec![receiver.clone(), key.clone()]),
+                    ),
+                }
             } else {
-                let exception = Expr { ty: Type::Exception, kind: ExprKind::Exception {
-                    kind: exception_kind("AttributeError").unwrap(), message: Some(Box::new(key.clone())),
-                }};
-                Expr { ty: result, kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]) }
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("AttributeError").unwrap(),
+                        message: Some(Box::new(key.clone())),
+                    },
+                };
+                Expr {
+                    ty: result,
+                    kind: ExprKind::Builtin(Builtin::RaiseException, vec![exception]),
+                }
             };
-            let mut methods: Vec<_> = checker.classes.methods[class].iter()
+            let mut commands: Vec<_> = methods.iter()
                 .filter(|(name, _)| name.starts_with("do_"))
-                .map(|(name, sig)| (name.clone(), sig.clone())).collect();
-            methods.sort_by(|a, b| a.0.cmp(&b.0));
-            for (name, sig) in methods {
+                .map(|(name, sig)| (name.clone(), sig.clone()))
+                .collect();
+            commands.sort_by(|a, b| a.0.cmp(&b.0));
+            for (name, sig) in commands {
                 let bound = checker.callable_value(&sig, Some(receiver.clone()), Some(result), call)?;
                 checker.expect(bound.ty, result, call)?;
-                let test = Expr { ty: Type::Bool, kind: ExprKind::Compare(
-                    vec![key.clone(), unpacking::string(name)], vec![ir::Compare::Equal]) };
-                right = Expr { ty: result, kind: ExprKind::Conditional(Box::new(test), Box::new(bound), Box::new(right)) };
+                let test = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Compare(
+                        vec![key.clone(), unpacking::string(name)], vec![ir::Compare::Equal],
+                    ),
+                };
+                fallback = Expr {
+                    ty: result,
+                    kind: ExprKind::Conditional(Box::new(test), Box::new(bound), Box::new(fallback)),
+                };
             }
-            Ok(right)
+            Ok(fallback)
         })?;
         Ok(Some(scope.finish(value)))
     }

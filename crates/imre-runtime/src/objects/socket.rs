@@ -226,8 +226,8 @@ fn fqdn(name: &str) -> Result<String> {
     let mut name = name.trim().to_owned();
     if name.is_empty() || name == "0.0.0.0" {
         let mut buffer = [0u8; 256];
-        // SAFETY: the buffer is writable; a final zero bounds CStr even on truncation.
         let n = buffer.len() - 1;
+        // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
         checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) })
             .map_err(errno_error)?;
         name = CStr::from_bytes_until_nul(&buffer)

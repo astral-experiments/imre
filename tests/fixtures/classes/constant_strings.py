@@ -39,9 +39,6 @@ def label(value: C) -> str:
     return value.label
 
 
-print(C.label, D.label, label(C()), label(D()))
-
-
 class Other:
     repeated = ("hi", "ß")
 
@@ -68,6 +65,10 @@ class Sequences:
 
 
 log: list[str] = []
+print(C.label)
+print(D.label)
+print(label(C()))
+print(label(D()))
 print(Defaults.text)
 print(Inherited.text)
 print(Inherited().read())
