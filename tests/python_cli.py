@@ -385,6 +385,7 @@ def report(text):
             "boxed_zip.py",
             "boxed_bytes_separators.py",
             "boxed_reversed_list.py",
+            "boxed_string_new.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

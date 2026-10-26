@@ -335,6 +335,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        text: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -507,11 +508,13 @@ impl Value {
                 class,
                 fields,
                 dictionary,
+                text,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
+                visit.extend(text);
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {

@@ -173,7 +173,7 @@ impl Context {
                 let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
-            (None, None) => Err(self.missing_attribute(object, name)),
+            (None, None) => self.builtin_attribute(object, name),
         }
     }
 
@@ -743,6 +743,9 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
+            Value::Native(class) if class == "str" && name == "__new__" => {
+                return Ok(self.builtin("str.__new__"));
+            }
             Value::Module {
                 name: module,
                 scope,
@@ -768,6 +771,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__new__" && self.has_base(obj, "str") {
+                    return Ok(self.builtin("str.__new__"));
+                }
             }
             Value::NamedTuple {
                 class,
@@ -792,7 +798,12 @@ impl Context {
             }
             _ => {}
         }
-        if let Some(method) = builtins::method_name(self.heap.get(obj), name) {
+        self.builtin_attribute(obj, name)
+    }
+
+    fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let base = self.string_storage(obj).unwrap_or(obj);
+        if let Some(method) = builtins::method_name(self.heap.get(base), name) {
             let fun = self.alloc(Value::Native(method));
             return Ok(self.alloc(Value::Method {
                 callable: fun,
@@ -1053,7 +1064,45 @@ impl Context {
             dictionary,
             text_memory: None,
             fields: HashMap::new(),
+            text: None,
         })
+    }
+
+    /// Allocate the immutable str payload while retaining the actual Python class.
+    pub(super) fn new_str(
+        &mut self,
+        class: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let base = self.builtin("str");
+        if !self.subclass(class, base) {
+            let message = match self.heap.get(class) {
+                Value::Class { name, .. } => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                Value::Native(name) if builtins::is_builtin_type(name) => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                _ => format!(
+                    "str.__new__(X): X is not a type object ({})",
+                    self.type_name(class)
+                ),
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        let text = builtins::call(self, "str", args, kwargs)?;
+        if class == base {
+            return Ok(text);
+        }
+        let text = self.string_storage(text).expect("str() returns a string");
+        Ok(self.alloc(Value::Instance {
+            class,
+            fields: HashMap::new(),
+            dictionary: None,
+            text: Some(text),
+            text_memory: None,
+        }))
     }
 
     pub(super) fn call(
@@ -1189,19 +1238,36 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
+                        text: None,
                         text_memory: None,
                     }));
                 }
-                let dictionary = self
-                    .has_base(callable, "dict")
-                    .then(|| self.dict(Vec::new()));
-                let instance = self.instance(callable, dictionary);
-                if self.class_attr(callable, "__init__").is_some() {
-                    let init = self.lookup_attr(instance, "__init__")?;
+                let new = self.class_attr(callable, "__new__");
+                let str_subclass = self.has_base(callable, "str");
+                let instance = if let Some(new) = new {
+                    let allocate = self.bind_attribute(new, NONE, callable)?;
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect();
+                    let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if !self.instance_of(instance, callable) {
+                        return Ok(instance);
+                    }
+                    instance
+                } else if str_subclass {
+                    self.new_str(callable, &args, &kwargs)?
+                } else {
+                    let dictionary = self
+                        .has_base(callable, "dict")
+                        .then(|| self.dict(Vec::new()));
+                    self.instance(callable, dictionary)
+                };
+                if let Some(init) = self.bound_slot(instance, "__init__")? {
                     if self.call(init, args, kwargs)? != NONE {
                         return Err(Error::new("TypeError", "__init__ must return None"));
                     }
-                } else if !args.is_empty() || !kwargs.is_empty() {
+                } else if new.is_none() && !str_subclass && (!args.is_empty() || !kwargs.is_empty())
+                {
                     return Err(Error::new(
                         "TypeError",
                         format!("{name} takes no arguments"),

@@ -63,7 +63,9 @@ impl Context {
 
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
-            return Ok(None);
+            return Ok(self
+                .string_storage(id)
+                .map(|text| self.str_value(text).unwrap().chars().count()));
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
         let length = self.index_integer(value)?;
@@ -163,6 +165,8 @@ impl Context {
             *exhausted = true;
             return false;
         }
+        let a = self.string_storage(a).unwrap_or(a);
+        let b = self.string_storage(b).unwrap_or(b);
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
@@ -305,6 +309,9 @@ impl Context {
                 format!("{class}({fields})")
             }
             Value::Str(s) => s.clone(),
+            Value::Instance {
+                text: Some(text), ..
+            } => self.display(*text),
             Value::Bytes(bytes) => format!(
                 "b'{}'",
                 bytes
