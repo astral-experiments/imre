@@ -366,7 +366,10 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
         context.replace(t.key.clone(), t.old.clone());
         Ok(())
     });
-    finish(result, ());
+    // Formatting an invalid token can raise while rendering its variable's default.
+    if super::exceptions::imre_error_pending() == 0 {
+        finish(result, ());
+    }
 }
 /// # Safety
 /// An exact variable roots its immutable name.
