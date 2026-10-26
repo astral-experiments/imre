@@ -7,6 +7,7 @@ mod handler;
 mod hierarchy;
 mod levels;
 pub(super) mod locks;
+pub(super) mod manager;
 pub(super) mod timed;
 
 mod fields;
