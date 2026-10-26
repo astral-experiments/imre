@@ -1,4 +1,5 @@
 """POSIX mktime, struct_time and local timezone behavior observable by a caller."""
+from http import HTTPStatus
 from time import gmtime, localtime, mktime, struct_time
 
 
@@ -126,6 +127,8 @@ try:
 except OverflowError as exc:
     print(str(exc))
 print(indexed_offset(None))
+enum_offset = struct_time((1970, 1, 1, 0, 0, 0, 0, 1, -1, "UTC", HTTPStatus.OK))
+assert mktime(enum_offset) == mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 1, -1, "UTC", 200)))
 for n in (0, -3600, 1 << 100):
     try:
         print(indexed_offset(Indexed(n)))

@@ -92,7 +92,7 @@ impl Checker<'_> {
         let ints = fields.iter().all(|&ty| ty == Type::Int);
         let offset = self.types.time_attributes(value.ty).and_then(|[_, ty]| {
             let payload = self.types.payload(ty)?;
-            matches!(payload, Type::Class(_)).then_some((ty, payload))
+            matches!(payload, Type::Class(_) | Type::IntEnum(_)).then_some((ty, payload))
         });
         if ints && offset.is_none() {
             return Ok(op(Builtin::Mktime, Type::Float, vec![value]));

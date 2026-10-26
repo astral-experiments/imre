@@ -79,8 +79,8 @@ impl Checker<'_> {
         at: &ast::Expr,
         returned: bool,
     ) -> Result<Expr, String> {
-        if value.ty == Type::Int {
-            return Ok(value);
+        if value.ty == Type::Int || !returned && matches!(value.ty, Type::IntEnum(_)) {
+            return Ok(Self::enum_integer(value));
         }
         if value.ty == Type::Bool {
             if returned {
