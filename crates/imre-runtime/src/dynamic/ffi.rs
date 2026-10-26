@@ -153,7 +153,7 @@ impl Context {
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "iter" => self.iterator(a),
-            "more" => Ok(flag(self.peek_item(a)?.is_some())),
+            "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
