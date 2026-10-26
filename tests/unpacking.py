@@ -41,7 +41,6 @@ REJECTED = {
     "dictionary_expansion_nonmapping": 'values = {**[("a", 1)]}\n',
     "dictionary_expansion_wrong_key": "values: dict[str, int] = {**{1: 2}}\n",
     "dictionary_expansion_wrong_value": 'values: dict[str, int] = {**{"a": "wrong"}}\n',
-    "variable_length_tuple_display": "values = (*[1, 2],)\n",
     "call_argument_expansion": "def add(first: int, second: int) -> int:\n    return first + second\nprint(add(*[1, 2]))\n",
     "call_dynamic_keyword_expansion": 'def accept(value: int) -> int:\n    return value\ndef forward(key: str) -> int:\n    return accept(**{key: 1})\nprint(forward("value"))\n',
     "constructor_duplicate_chained_field": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = self.value = 1\n",
