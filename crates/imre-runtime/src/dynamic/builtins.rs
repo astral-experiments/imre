@@ -175,7 +175,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "socket.socket"
         }
         Value::TextFile(_)
-            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+            if matches!(
+                attr,
+                "write" | "flush" | "close" | "isatty" | "__enter__" | "__exit__"
+            ) =>
         {
             "TextIOWrapper"
         }

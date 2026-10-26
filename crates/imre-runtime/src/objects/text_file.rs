@@ -22,6 +22,17 @@ impl TextFile {
         unsafe { self.0.0.with(|storage| storage.file().closed()) }
     }
 
+    /// Reports whether the live descriptor is attached to a terminal.
+    pub(crate) fn isatty(&self) -> Result<bool> {
+        // SAFETY: the borrow is nonreentrant and fileno rejects a closed stream.
+        unsafe {
+            self.0.0.with(|storage| {
+                let fd = storage.file().fileno()?;
+                Ok(libc::isatty(fd) != 0)
+            })
+        }
+    }
+
     pub(crate) fn write(&self, value: &str) -> Result<()> {
         // SAFETY: the text writer uses no Python callbacks during this borrow.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
