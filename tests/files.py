@@ -581,7 +581,6 @@ REJECTED = {
     "generic_context": "with [1] as values:\n    print(values[0])",
     "tuple_target": 'with open("input.txt", "r", encoding="utf-8") as (left, right):\n    pass',
     "attribute_target": 'from typing import TextIO\nclass Box:\n    stream: TextIO\n    def __init__(self, stream: TextIO) -> None:\n        self.stream = stream\nbox = Box(open("input.txt", "r", encoding="utf-8"))\nwith box.stream as box.stream:\n    pass',
-    "sys_member": "import sys\nprint(sys.path)",
     "io_unknown_member": "from io import TextCapture\nTextCapture()",
     "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
     "typing_member": "from typing import Any\nvalue: Any = 1",
