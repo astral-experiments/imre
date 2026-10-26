@@ -1177,6 +1177,9 @@ pub(crate) enum Builtin {
     Socket(SocketOp),
     CodecWriter(WriterOperation),
     Sha1Hex,
+    HmacCompareDigest {
+        text: bool,
+    },
     Sha1New,
     Sha256Hex,
     Sha256New,

@@ -5790,6 +5790,15 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
+            Builtin::HmacCompareDigest { text } => self.call(
+                if *text {
+                    "imre_hmac_compare_digest_str"
+                } else {
+                    "imre_hmac_compare_digest_bytes"
+                },
+                Type::Bool,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::Sha1Hex => self.call("imre_sha1_hex", Type::Str, &[&args[0].value]),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
@@ -9163,6 +9172,8 @@ declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_sha1_hex(ptr)
+declare i1 @imre_hmac_compare_digest_bytes(ptr, ptr)
+declare i1 @imre_hmac_compare_digest_str(ptr, ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)

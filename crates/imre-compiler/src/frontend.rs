@@ -8608,6 +8608,9 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.hash_constructor(call, op);
             }
+            Some(Binding::Intrinsic(Intrinsic::HmacCompareDigest)) => {
+                return self.hmac_compare_digest(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
                 return self.context_constructor(call, None);

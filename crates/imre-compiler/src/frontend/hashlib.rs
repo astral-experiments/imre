@@ -2,6 +2,48 @@
 use super::*;
 
 impl Checker<'_> {
+    pub(super) fn hmac_compare_digest(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [left, right] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "compare_digest requires two positional arguments",
+            ));
+        };
+        let left = self.evaluated_argument(left)?;
+        let right = self.evaluated_argument(right)?;
+        let text = match (left.ty, right.ty) {
+            (Type::Bytes, Type::Bytes) => false,
+            (Type::Str | Type::StrLiteral(_), Type::Str | Type::StrLiteral(_)) => true,
+            (a, b) => {
+                let (Some(a_name), Some(b_name)) =
+                    (self.known_nonbuffer_type(a), self.known_nonbuffer_type(b))
+                else {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "compare_digest requires concrete bytes or ASCII string operands",
+                    ));
+                };
+                let message = if a == Type::Bytes || b == Type::Bytes {
+                    let other = if a == Type::Bytes { b_name } else { a_name };
+                    format!("a bytes-like object is required, not '{other}'")
+                } else {
+                    format!(
+                        "unsupported operand types(s) or combination of types: '{a_name}' and '{b_name}'"
+                    )
+                };
+                self.graph.checked_overload(self.module, call.range());
+                return Ok(calls::type_error(Type::Bool, vec![left, right], message));
+            }
+        };
+        Ok(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::HmacCompareDigest { text }, vec![left, right]),
+        })
+    }
+
     pub(super) fn hash_constructor(
         &mut self,
         call: &ast::ExprCall,

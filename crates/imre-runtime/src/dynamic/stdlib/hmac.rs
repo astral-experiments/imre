@@ -1,5 +1,6 @@
 use super::super::value::Hmac;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option};
+use crate::objects::hmac::{compare_bytes, compare_text};
 
 fn hash_call(ctx: &mut Context, hash: Id, method: &str, args: Vec<Id>) -> Result<Id> {
     let callable = ctx.lookup_attr(hash, method)?;
@@ -118,16 +119,10 @@ pub(super) fn compare(ctx: &Context, args: &[Id]) -> Result<Id> {
         ctx.heap.get(argument(args, 0)?),
         ctx.heap.get(argument(args, 1)?),
     );
-    let (left, right) = match (left, right) {
-        (Value::Bytes(a), Value::Bytes(b)) => (a.as_slice(), b.as_slice()),
-        (Value::Str(a), Value::Str(b)) if a.is_ascii() && b.is_ascii() => {
-            (a.as_bytes(), b.as_bytes())
-        }
-        (Value::Str(_), Value::Str(_)) => {
-            return Err(Error::new(
-                "TypeError",
-                "comparing strings with non-ASCII characters is not supported",
-            ));
+    let equal = match (left, right) {
+        (Value::Bytes(a), Value::Bytes(b)) => compare_bytes(a, b),
+        (Value::Str(a), Value::Str(b)) => {
+            compare_text(a, b).map_err(|message| Error::new("TypeError", message))?
         }
         (Value::Str(_), Value::Bytes(_)) | (Value::Bytes(_), Value::Str(_)) => {
             return Err(Error::new(
@@ -142,9 +137,5 @@ pub(super) fn compare(ctx: &Context, args: &[Id]) -> Result<Id> {
             ));
         }
     };
-    Ok(if constant_time_eq::constant_time_eq(left, right) {
-        TRUE
-    } else {
-        FALSE
-    })
+    Ok(if equal { TRUE } else { FALSE })
 }
