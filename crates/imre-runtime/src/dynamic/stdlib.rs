@@ -218,7 +218,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
         ("datetime", "UTC") => datetime::utc(ctx),
-        ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
+        ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
