@@ -1,0 +1,222 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "levels": {
+    "0": {
+      "observed": {
+        "test.test_logging.BasicConfigTest.test_datefmt": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Read the date format of the formatter attached to the root handler",
+            "fixture": "CPython BasicConfigTest setup, teardown and cleanup; native child starts with the observed empty root and saved level",
+            "opt_level": 0,
+            "method_sha256": "3fd1cdccb6ef8a4288d81aa4ee78512461378cd4333a19b681f00e36babaa50e",
+            "assertion": "Native optional string equality on the two original operands",
+            "shared_assertion_blocker": "expected bool | int, got str | None; annotations are enforced contracts"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_encoding": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Configure and inspect a native FileHandler, emit UTF-8 through the root, and close it before the original file assertion",
+            "fixture": "Original CPython setup and cleanup; native root starts at the saved level",
+            "native_calls": [
+              [
+                "debug-level",
+                "10"
+              ],
+              [
+                "filename,encoding,errors,format,level",
+                "ok"
+              ],
+              [
+                "count",
+                "1"
+              ],
+              [
+                "handler-kind",
+                "True"
+              ],
+              [
+                "handler-encoding",
+                "utf-8"
+              ],
+              [
+                "debug",
+                "ok"
+              ],
+              [
+                "handler-close",
+                "ok"
+              ],
+              [
+                "count",
+                "1"
+              ]
+            ],
+            "opt_level": 0,
+            "native_body_diagnostic": "Compiling <native-case>/case.py (-O0)\n<native-case>/case.py:32:13: Imre: unknown class method",
+            "native_body_statement": "self.assertIsInstance(handler, logging.FileHandler)"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_force": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Close and replace the live root handler; verify both streams and the new threshold",
+            "fixture": "CPython BasicConfigTest setup, teardown and cleanup; native child starts with the observed empty root and saved level",
+            "opt_level": 0,
+            "method_sha256": "55ce1f3f1a0a6dd26f94a4561193be38101ebdeecd605ee5525223c9acc6241b",
+            "assertion": "Native unittest.TestCase on the original operands"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_incompatible": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create one native StreamHandler and run five basicConfig calls, including four native ValueErrors",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "c018650e34be6f9cd256e21a6faf78ec6f16a407f2e92ee283ae120f2554ca49"
+          }
+        }
+      },
+      "controls": {
+        "logging_root_stream_config.py": {
+          "observations": 24,
+          "stdout_sha256": "1777b2b9390d441a45cd803a9f87a38b650703445d6b5c7f0a5be497f6ed5263"
+        },
+        "logging_basic_filename.py": {
+          "observations": 30,
+          "stdout_sha256": "065363fb99f5f68f482c6c1c25378c388d12c43739ebda895af81aab9880033e"
+        }
+      }
+    },
+    "3": {
+      "observed": {
+        "test.test_logging.BasicConfigTest.test_datefmt": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Read the date format of the formatter attached to the root handler",
+            "fixture": "CPython BasicConfigTest setup, teardown and cleanup; native child starts with the observed empty root and saved level",
+            "opt_level": 3,
+            "method_sha256": "3fd1cdccb6ef8a4288d81aa4ee78512461378cd4333a19b681f00e36babaa50e",
+            "assertion": "Native optional string equality on the two original operands",
+            "shared_assertion_blocker": "expected bool | int, got str | None; annotations are enforced contracts"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_encoding": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Configure and inspect a native FileHandler, emit UTF-8 through the root, and close it before the original file assertion",
+            "fixture": "Original CPython setup and cleanup; native root starts at the saved level",
+            "native_calls": [
+              [
+                "debug-level",
+                "10"
+              ],
+              [
+                "filename,encoding,errors,format,level",
+                "ok"
+              ],
+              [
+                "count",
+                "1"
+              ],
+              [
+                "handler-kind",
+                "True"
+              ],
+              [
+                "handler-encoding",
+                "utf-8"
+              ],
+              [
+                "debug",
+                "ok"
+              ],
+              [
+                "handler-close",
+                "ok"
+              ],
+              [
+                "count",
+                "1"
+              ]
+            ],
+            "opt_level": 3,
+            "native_body_diagnostic": "Compiling <native-case>/case.py (-O3)\n<native-case>/case.py:32:13: Imre: unknown class method",
+            "native_body_statement": "self.assertIsInstance(handler, logging.FileHandler)"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_force": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Close and replace the live root handler; verify both streams and the new threshold",
+            "fixture": "CPython BasicConfigTest setup, teardown and cleanup; native child starts with the observed empty root and saved level",
+            "opt_level": 3,
+            "method_sha256": "55ce1f3f1a0a6dd26f94a4561193be38101ebdeecd605ee5525223c9acc6241b",
+            "assertion": "Native unittest.TestCase on the original operands"
+          }
+        },
+        "test.test_logging.BasicConfigTest.test_incompatible": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create one native StreamHandler and run five basicConfig calls, including four native ValueErrors",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 3,
+            "method_sha256": "c018650e34be6f9cd256e21a6faf78ec6f16a407f2e92ee283ae120f2554ca49"
+          }
+        }
+      },
+      "controls": {
+        "logging_root_stream_config.py": {
+          "observations": 24,
+          "stdout_sha256": "1777b2b9390d441a45cd803a9f87a38b650703445d6b5c7f0a5be497f6ed5263"
+        },
+        "logging_basic_filename.py": {
+          "observations": 30,
+          "stdout_sha256": "065363fb99f5f68f482c6c1c25378c388d12c43739ebda895af81aab9880033e"
+        }
+      }
+    }
+  }
+}

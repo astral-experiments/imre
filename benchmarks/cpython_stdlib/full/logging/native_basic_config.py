@@ -10,7 +10,8 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
-sys.path.insert(0, str(STDLIB))
+sys.path[:0] = [str(HERE), str(STDLIB)]
+from native_basic_config_options import option_cases
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures, testcase_fixture
 
@@ -87,7 +88,11 @@ def config_cases(toolchain, directory):
             return result
         return execute
 
-    return {PREFIX + method: configure(method, description) for method, description in METHODS.items()}
+    callbacks = {PREFIX + method: configure(method, description) for method, description in METHODS.items()}
+    options = directory / "file-options"
+    options.mkdir()
+    callbacks.update(option_cases(toolchain, options, SOURCE, PREPARE, SETUP))
+    return callbacks
 
 
 def main():
@@ -103,10 +108,16 @@ def main():
     from test import test_logging
     if Path(test_logging.__file__).read_bytes() != SOURCE.read_bytes():
         raise ValueError("loaded test_logging differs from the verified source")
-    fixture = HERE.parents[3] / "tests/fixtures/files/logging_root_stream_config.py"
-    oracle = subprocess.run([sys.executable, "-I", "-B", fixture], capture_output=True, check=True)
-    if oracle.stderr:
-        raise AssertionError(oracle.stderr)
+    fixtures = [HERE.parents[3] / "tests/fixtures/files" / name
+                for name in ("logging_root_stream_config.py", "logging_basic_filename.py")]
+    expected = {}
+    for source in fixtures:
+        with tempfile.TemporaryDirectory() as tmp:
+            oracle = subprocess.run([sys.executable, "-I", "-B", source], cwd=tmp,
+                                    capture_output=True, timeout=60, check=True)
+        if oracle.stderr:
+            raise AssertionError(oracle.stderr)
+        expected[source.name] = oracle.stdout
     report = {"cpython_commit": manifest["commit"], "denominator": 272, "levels": {}}
     for level in (0, 3):
         suite = load_suite(manifest["module"])
@@ -115,17 +126,22 @@ def main():
         tools = Toolchain(args.imre, args.runtime, args.clang, level)
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
-            binary = tools.build(fixture.read_bytes(), work)
-            control = subprocess.run([binary], capture_output=True, timeout=60, check=True)
-            if (control.stdout, control.stderr) != (oracle.stdout, oracle.stderr):
-                raise AssertionError((level, control, oracle))
+            controls = {}
+            for source in fixtures:
+                directory = work / source.stem
+                directory.mkdir()
+                binary = tools.build(source.read_bytes(), directory)
+                control = subprocess.run([binary], cwd=directory, capture_output=True, timeout=60, check=True)
+                if control.stdout != expected[source.name] or control.stderr:
+                    raise AssertionError((level, source.name, control, expected[source.name]))
+                controls[source.name] = {"observations": len(control.stdout.splitlines()),
+                                         "stdout_sha256": hashlib.sha256(control.stdout).hexdigest()}
             executions = config_cases(tools, work)
             records, failures, skips = run_in_fixtures(suite, executions)
             if failures or skips or set(records) != set(executions) or any(len(v) != 1 for v in records.values()):
                 raise AssertionError((failures, skips, records))
-            report["levels"][str(level)] = {"observed": {k: v[0]["observation"] for k, v in records.items()},
-                "control_observations": len(control.stdout.splitlines()),
-                "control_stdout_sha256": hashlib.sha256(control.stdout).hexdigest()}
+            report["levels"][str(level)] = {"observed": {k: v[0].get("observation", v[0]) for k, v in records.items()},
+                "controls": controls}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     print("Original root configuration methods passed at O0 and O3 under their CPython fixtures.")
 

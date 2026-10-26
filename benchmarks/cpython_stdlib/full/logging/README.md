@@ -38,11 +38,11 @@ CPython also accepts assignment to `logger.manager`. Imre rejects that assignmen
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 22 |
+| Imre | Imre | Imre | CPython hooks and native child | 23 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| CPython | CPython | Imre | CPython hooks and native child | 3 |
-| Blocked before execution | | | | 201 |
+| CPython | CPython | Imre | CPython hooks and native child | 4 |
+| Blocked before execution | | | | 199 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -54,9 +54,10 @@ Four additional unchanged rotation bodies check actual files and rollover decisi
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
 The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
 Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
+Two more [filename configuration methods](config.md#filename-configuration) check native option conflicts and the UTF-8 bytes emitted through the root. The option-conflict assertions run in Imre; CPython checks the emitted file.
 FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
-CPython output helper. The 42 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 43 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
