@@ -19,6 +19,7 @@ mod functools;
 mod hashlib;
 mod hmac;
 mod inspect;
+pub(super) mod itertools;
 mod time;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
@@ -47,6 +48,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "os"
             | "os.path"
             | "fnmatch"
+            | "itertools"
             | "operator"
             | "platform"
             | "site"
@@ -229,6 +231,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("itertools", "count") => ctx.builtin("itertools.count"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
@@ -426,6 +429,12 @@ pub(super) fn call(
     }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
+    }
+    if name == "itertools.count" {
+        return itertools::count(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("itertools.count.") {
+        return itertools::method(ctx, method, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);

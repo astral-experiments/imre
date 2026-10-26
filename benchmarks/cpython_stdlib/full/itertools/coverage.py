@@ -215,14 +215,21 @@ def missing_itertools_import(directory, fixture, node):
     if not first_line.startswith("from itertools import "):
         return None
     result = subprocess.run([directory / "case"], cwd=directory, capture_output=True, text=True, timeout=60)
-    error = 'ModuleNotFoundError: no module named "itertools"'
+    if result.returncode != 1 or result.stdout:
+        return None
     entry = (directory / "case.py").resolve()
-    traceback = f'Traceback (most recent call last):\n  File "{entry}", line 1\n{error}\n'
-    if result.returncode == 1 and not result.stdout and result.stderr == traceback:
-        return {"outcome": "blocked", "reason": f"case.py:1: {error}",
-                "roles": dict.fromkeys(ROLES, "unobserved"),
-                "evidence": {"stage": "native fixture import", "source": first_line,
-                             "upstream_method_line": node.lineno}}
+    prefix = f'Traceback (most recent call last):\n  File "{entry}", line 1\n'
+    names = first_line.removeprefix("from itertools import ").split(", ")
+    errors = ['ModuleNotFoundError: no module named "itertools"']
+    missing = next((name for name in names if name != "count"), None)
+    if missing in {"accumulate", "combinations", "islice", "permutations", "product"}:
+        errors.append(f'ModuleNotFoundError: parent of "itertools.{missing}" is not a package')
+    for error in errors:
+        if result.stderr == f"{prefix}{error}\n":
+            return {"outcome": "blocked", "reason": f"case.py:1: {error}",
+                    "roles": dict.fromkeys(ROLES, "unobserved"),
+                    "evidence": {"stage": "native fixture import", "source": first_line,
+                                 "upstream_method_line": node.lineno}}
     return None
 
 
