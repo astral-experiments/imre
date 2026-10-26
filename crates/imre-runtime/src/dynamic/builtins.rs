@@ -432,6 +432,13 @@ pub(super) fn call(
         };
     }
     match name {
+        "object" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(type_error("object() takes no arguments"));
+            }
+            let class = ctx.builtin("object");
+            Ok(ctx.instance(class, None))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {

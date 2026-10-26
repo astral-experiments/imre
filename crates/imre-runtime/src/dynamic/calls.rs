@@ -706,6 +706,7 @@ impl Context {
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
+        let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
@@ -725,7 +726,7 @@ impl Context {
                 let scope = *scope;
                 self.bind(scope, name, value);
             }
-            Value::Instance { fields, .. } => {
+            Value::Instance { class, fields, .. } if Some(*class) != object_class => {
                 fields.insert(name.to_owned(), value);
             }
             Value::Class { scope, .. } => {
@@ -745,6 +746,14 @@ impl Context {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
+        self.alloc(Value::Instance {
+            class,
+            dictionary,
+            fields: HashMap::new(),
+        })
     }
 
     pub(super) fn call(
@@ -886,11 +895,7 @@ impl Context {
                 let dictionary = self
                     .has_base(callable, "dict")
                     .then(|| self.dict(Vec::new()));
-                let instance = self.alloc(Value::Instance {
-                    class: callable,
-                    dictionary,
-                    fields: HashMap::new(),
-                });
+                let instance = self.instance(callable, dictionary);
                 if self.class_attr(callable, "__init__").is_some() {
                     let init = self.lookup_attr(instance, "__init__")?;
                     if self.call(init, args, kwargs)? != NONE {
