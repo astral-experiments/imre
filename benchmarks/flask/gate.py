@@ -128,19 +128,14 @@ def main():
     parser.add_argument("--wheelhouse", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--reference-only", action="store_true")
-    parser.add_argument("--hosted-launcher", type=Path, help="run Imre LLVM views with CPython Flask")
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
     args = parser.parse_args()
     expected = json.loads((HERE / "expected.json").read_text())
     if sys.implementation.name != "cpython" or sys.version.split()[0] != expected["python"]:
         parser.error(f"run the gate with CPython {expected['python']}")
-    if bool(args.compiler) != bool(args.runtime):
-        parser.error("--compiler and --runtime must be supplied together")
-    if args.reference_only and args.hosted_launcher:
-        parser.error("--reference-only excludes the hosted configuration")
-    if not (args.reference_only or args.hosted_launcher or args.compiler):
-        parser.error("select --compiler and --runtime, --hosted-launcher, or --reference-only")
+    if not args.reference_only and not (args.compiler and args.runtime):
+        parser.error("supply --compiler and --runtime, or explicitly select --reference-only")
     report = {"python": sys.version.split()[0], "app_sha256": digest(HERE / "tiny_flask_app.py"), "modes": {}}
     if report["app_sha256"] != expected["app_sha256"]:
         parser.error("the app differs from the recorded reference")
@@ -164,21 +159,7 @@ def main():
         work.mkdir()
         # -E ignores PYTHON*; -S omits site-packages. The staged script directory supplies all seven wheels.
         report["modes"]["cpython"] = exercise([sys.executable, "-ESB", site / "serve.py"], work, expected)
-        if args.hosted_launcher:
-            work = root / "imre-views-on-cpython"
-            work.mkdir()
-            hosted = exercise(
-                [sys.executable, "-ISB", args.hosted_launcher.resolve(), site], work, expected)
-            if hosted["outcome"] == "pass":
-                marker = 'tiny_flask_app.py", line '
-                def view_frames(row):
-                    return [line.split(marker)[-1] for line in row["stderr"].splitlines() if marker in line]
-                frames = view_frames(report["modes"]["cpython"])
-                if not frames or view_frames(hosted) != frames:
-                    hosted["outcome"] = "response_mismatch"
-                    hosted["mismatches"].append("view exception source location")
-            report["modes"]["imre-views-on-cpython"] = hosted
-        if args.compiler and not args.reference_only:
+        if not args.reference_only:
             compiler, runtime = args.compiler.resolve(), args.runtime.resolve()
             report.update(compiler_sha256=digest(compiler), runtime_sha256=digest(runtime))
             for reachable in (False, True):
