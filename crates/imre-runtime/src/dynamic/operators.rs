@@ -10,6 +10,13 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
         .map(|i| i as usize)
 }
 
+pub(super) fn quoted(text: &str) -> String {
+    let mut buffer = String::new();
+    crate::objects::exceptions::write_string_repr(text, &mut buffer)
+        .expect("writing into a string cannot fail");
+    buffer
+}
+
 impl Context {
     fn sequence(&self, id: Id) -> Option<Vec<Id>> {
         match self.heap.get(id) {
@@ -379,10 +386,7 @@ impl Context {
             return value.repr();
         }
         if let Value::Str(s) = self.heap.get(id) {
-            let mut quoted = String::new();
-            crate::objects::exceptions::write_string_repr(s, &mut quoted)
-                .expect("writing into a string cannot fail");
-            quoted
+            quoted(s)
         } else {
             self.display(id)
         }

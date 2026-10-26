@@ -159,6 +159,34 @@ sys.path.append("unused")""",
         assert surrogate in imported.stderr, imported.stderr
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
+
+        imports = root / "import_members"
+        imports.mkdir()
+        (imports / "__init__.py").write_text("")
+        (imports / "child.py").write_text("import missing_child_dependency\n")
+        (imports / "found.py").write_text("value = 37\n")
+        compare(
+            "-B", "-c",
+            """from sys import path
+try:
+    from import_members import absent
+except ModuleNotFoundError:
+    print("missing module")
+except ImportError as error:
+    print(error.args, error.name, error.path, error.name_from)
+try:
+    from sys import missing_export
+except ImportError as error:
+    print(error.msg, error.name, error.path, error.name_from)
+try:
+    from import_members import child
+except ModuleNotFoundError as error:
+    print(error.msg, error.name)
+from import_members import found
+print(found.value)
+""",
+        )
+
         diagnostic = run(imre, "-c", "print(__file__)")
         assert diagnostic.returncode != 0 and b"<string>" in diagnostic.stderr, (
             diagnostic.stderr

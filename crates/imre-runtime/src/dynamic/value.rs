@@ -28,6 +28,13 @@ pub(super) struct Location {
     pub line: u32,
 }
 
+#[derive(Debug)]
+pub(super) struct ImportFields {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub name_from: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
@@ -36,6 +43,7 @@ pub(super) struct Error {
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
+    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 impl Error {
@@ -47,7 +55,26 @@ impl Error {
             os_args: None,
             trace: Vec::new(),
             exit_status: None,
+            import: None,
         }
+    }
+
+    pub fn with_import(
+        mut self,
+        name: Option<&str>,
+        path: Option<String>,
+        name_from: Option<&str>,
+    ) -> Self {
+        let fields = ImportFields {
+            name: name.map(str::to_owned),
+            path,
+            name_from: name_from.map(str::to_owned),
+        };
+        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+            return Self::new("MemoryError", "");
+        };
+        self.import = Some(fields);
+        self
     }
 }
 
@@ -218,6 +245,8 @@ pub(super) enum Value {
     Module {
         name: String,
         scope: Id,
+        origin: Option<Id>,
+        initializing: bool,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -353,7 +382,10 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, .. } => visit.push(*scope),
+            Self::Module { scope, origin, .. } => {
+                visit.push(*scope);
+                visit.extend(origin);
+            }
             Self::Function {
                 scope,
                 class_cell,

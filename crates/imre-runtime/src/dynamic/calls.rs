@@ -519,6 +519,27 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Raised(error)
+                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
+                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+            {
+                if name == "msg" {
+                    return Ok(match error.args.as_deref() {
+                        Some([one]) => *one,
+                        Some(_) => NONE,
+                        None => self.text(error.message),
+                    });
+                }
+                let Some(fields) = error.import else {
+                    return Ok(NONE);
+                };
+                let value = match name {
+                    "name" => fields.name.as_deref(),
+                    "path" => fields.path.as_deref(),
+                    _ => fields.name_from.as_deref(),
+                };
+                return Ok(value.map_or(NONE, |value| self.text(value)));
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -576,6 +597,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if let Some(value) = self.scope_data(scope).names.get(name) {
                     return Ok(*value);
@@ -678,6 +700,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
