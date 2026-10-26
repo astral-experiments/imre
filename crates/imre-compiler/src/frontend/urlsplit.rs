@@ -37,8 +37,10 @@ impl Checker<'_> {
             slot("encoding", Some(encoding)),
             slot("errors", Some(errors)),
         ]);
-        let args =
-            self.arguments_with(call, &params, None, |checker, _, node| checker.expr(node))?;
+        let args = self.arguments_with(call, &params, None, |checker, _, node| {
+            let value = checker.expr(node)?;
+            checker.optional_scalar_value(value, Type::Str, node)
+        })?;
         for (i, &index) in args.order.iter().enumerate() {
             let ty = args.values[index].ty;
             let valid = if i == 0 || (quote && i == 1) {

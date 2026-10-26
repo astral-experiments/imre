@@ -1,4 +1,15 @@
+from enum import StrEnum
 from urllib.parse import quote, unquote
+
+class UrlWord(StrEnum):
+    PATH = "a/b!é"
+    ESCAPED = "a%2Fb%21"
+    SAFE = "!"
+    CODEC = "latin-1"
+    ERROR = "ignore"
+
+def enum_options(codec: UrlWord | None, errors: UrlWord | None) -> str:
+    return unquote("caf%E9", encoding=codec, errors=errors)
 
 def encoded(value: str, codec: str | None, errors: str | None) -> str:
     return quote(value, errors=errors, encoding=codec)
@@ -12,6 +23,10 @@ def mark(value: str) -> str:
 
 
 print(unquote(b"abc"))
+print(quote(UrlWord.PATH, safe=UrlWord.SAFE, encoding=UrlWord.CODEC, errors=UrlWord.ERROR))
+print(unquote(UrlWord.ESCAPED))
+print(enum_options(UrlWord.CODEC, UrlWord.ERROR))
+print(enum_options(None, None))
 print(unquote("abc", encoding="ascii"))
 print(unquote("abc", errors="strict"))
 print(quote("a /%+é☃", safe=b"/%"))
