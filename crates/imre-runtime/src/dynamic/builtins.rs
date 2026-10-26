@@ -80,6 +80,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "getattr"
                 | "globals"
                 | "setattr"
+                | "delattr"
                 | "hasattr"
                 | "open"
                 | "print"
@@ -356,6 +357,44 @@ fn set_attribute(
     Ok(NONE)
 }
 
+fn delete_attribute(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let base = name == "object.__delattr__";
+    if base && args.is_empty() {
+        return Err(type_error(
+            "descriptor '__delattr__' of 'object' object needs an argument",
+        ));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(if base {
+            "wrapper __delattr__() takes no keyword arguments"
+        } else {
+            "delattr() takes no keyword arguments"
+        }));
+    }
+    let [obj, attr] = args else {
+        return Err(type_error(if base {
+            format!("expected 1 argument, got {}", args.len() - 1)
+        } else {
+            format!("delattr expected 2 arguments, got {}", args.len())
+        }));
+    };
+    if base && ctx.builtin_type_name(*obj) == Some("type") {
+        return Err(type_error("can't apply this __delattr__ to type object"));
+    }
+    let attr = attribute_name(ctx, *attr)?;
+    if base {
+        ctx.default_delete_attr(*obj, &attr)?;
+    } else {
+        ctx.delete_attr(*obj, &attr)?;
+    }
+    Ok(NONE)
+}
+
 /// Compute Python's range length without overflowing at either i64 endpoint.
 pub(super) fn range_len(start: i64, stop: i64, step: i64) -> Result<usize> {
     if step == 0 {
@@ -415,6 +454,9 @@ pub(super) fn call(
     }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
+    }
+    if matches!(name, "delattr" | "object.__delattr__") {
+        return delete_attribute(ctx, name, args, kwargs);
     }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
