@@ -8,6 +8,7 @@ use super::{
 };
 use crate::objects::interpreter_stdlib as system;
 
+pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
@@ -28,6 +29,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "codecs"
             | "io"
             | "sysconfig"
             | "os"
@@ -37,6 +39,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "site"
             | "selectors"
             | "struct"
+            | "base64"
             | "json"
             | "datetime"
             | "time"
@@ -318,7 +321,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_implementation",
         )
         | ("struct", "calcsize" | "unpack" | "error")
+        | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
+        | ("codecs", "lookup")
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
@@ -370,6 +375,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
+    }
+    if name == "codecs.lookup" {
+        return codecs::lookup(ctx, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
@@ -429,6 +437,7 @@ pub(super) fn call(
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
         "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
+        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => (1, &["s"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -470,6 +479,38 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
+            let id = option(args, 0, kwargs, "s")?
+                .ok_or_else(|| Error::new("TypeError", "missing required argument 's'"))?;
+            let decode = name == "base64.urlsafe_b64decode";
+            let bytes = match ctx.heap.get(id) {
+                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+                Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
+                Value::Str(_) if decode => {
+                    return Err(Error::new(
+                        "ValueError",
+                        "string argument should contain only ASCII characters",
+                    ));
+                }
+                _ => {
+                    let ty = ctx.type_name(id);
+                    let message = if decode {
+                        format!(
+                            "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                        )
+                    } else {
+                        format!("a bytes-like object is required, not '{ty}'")
+                    };
+                    return Err(Error::new("TypeError", message));
+                }
+            };
+            let result = if decode {
+                crate::objects::urlsafe_decode(bytes)?
+            } else {
+                crate::objects::urlsafe_encode(bytes)?
+            };
+            ctx.alloc(Value::Bytes(result))
+        }
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),

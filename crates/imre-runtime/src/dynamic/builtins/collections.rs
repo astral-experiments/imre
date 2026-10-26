@@ -26,10 +26,9 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
     if let Some(input) = input
         && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
     {
-        // Unpacking a pair may mutate the input list or consume the same iterator.
-        let iter = ctx.iterator(input)?;
+        let iterator = ctx.iterator(input)?;
         for index in 0.. {
-            let Some(pair) = ctx.next_item(iter)? else {
+            let Some(pair) = ctx.next_item(iterator)? else {
                 break;
             };
             let pair = ctx.items(pair)?;
@@ -204,8 +203,7 @@ pub(super) fn method(
         }
         "dict.__iter__" => {
             arity(name, args, 0, 0)?;
-            let values = ctx.items(receiver)?;
-            Ok(ctx.alloc(Value::Iterator { values, offset: 0 }))
+            ctx.iterator(receiver)
         }
         "dict.__contains__" => {
             arity(name, args, 1, 1)?;

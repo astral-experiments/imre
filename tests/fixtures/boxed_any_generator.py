@@ -9,7 +9,7 @@ def current():
     value = "outer"
     gen = (observe(value) for value in items if value != 1)
     assert not seen and iter(gen) is gen
-    for it in [gen, iter(items), iter(range(3))]:
+    for it in [gen, iter(items), iter((0, 1)), iter(range(3))]:
         print(type(it).__name__, isinstance(it, type(it)), type(type(it)) is type)
     items.append(3)
     assert any(gen)

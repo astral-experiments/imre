@@ -139,7 +139,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "str"
         }
         Value::Property(_) if attr == "setter" => "property",
-        Value::Bytes(_) if attr == "decode" => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
@@ -286,6 +286,15 @@ fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 
+fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
+    ctx.str_value(value).map(str::to_owned).map_err(|_| {
+        type_error(format!(
+            "attribute name must be string, not '{}'",
+            ctx.type_name(value)
+        ))
+    })
+}
+
 fn set_attribute(
     ctx: &mut Context,
     name: &str,
@@ -315,13 +324,7 @@ fn set_attribute(
             format!("setattr expected 3 arguments, got {}", args.len())
         }));
     };
-    let Value::Str(attr_name) = ctx.heap.get(*attr) else {
-        return Err(type_error(format!(
-            "attribute name must be string, not '{}'",
-            ctx.type_name(*attr)
-        )));
-    };
-    let attr_name = attr_name.clone();
+    let attr_name = attribute_name(ctx, *attr)?;
     if base {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
@@ -367,6 +370,26 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "object.__getattribute__" {
+        let Some((&object, values)) = args.split_first() else {
+            return Err(type_error(
+                "descriptor '__getattribute__' of 'object' object needs an argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __getattribute__() takes no keyword arguments",
+            ));
+        }
+        let [key] = values else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                values.len()
+            )));
+        };
+        let attr = attribute_name(ctx, *key)?;
+        return ctx.default_get_attr(object, &attr);
+    }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
@@ -439,7 +462,7 @@ pub(super) fn call(
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
-            let attr = ctx.str_value(args[1])?.to_owned();
+            let attr = attribute_name(ctx, args[1])?;
             match ctx.lookup_attr(args[0], &attr) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),

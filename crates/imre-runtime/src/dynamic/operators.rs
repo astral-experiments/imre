@@ -29,27 +29,33 @@ impl Context {
         value.map_or(Ok(default), |id| self.truth(id))
     }
 
-    /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
-    pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
+    fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
-            return Ok(integer);
+            return Ok(Some(integer));
         }
         let Some(index) = self.bound_slot(value, "__index__")? else {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "'{}' object cannot be interpreted as an integer",
-                    self.type_name(value)
-                ),
-            ));
+            return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map_err(|_| {
+        self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
                     "__index__ returned non-int (type {})",
                     self.type_name(result)
+                ),
+            )
+        })
+    }
+
+    /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
+    pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
+        self.index_value(value)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer",
+                    self.type_name(value)
                 ),
             )
         })
@@ -607,6 +613,26 @@ impl Context {
         }
         Ok(())
     }
+
+    fn repeat_bytes(&mut self, bytes: Id, multiplier: Id) -> Result<Id> {
+        let count = self.index_value(multiplier)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "can't multiply sequence by non-int of type '{}'",
+                    self.type_name(multiplier)
+                ),
+            )
+        })?;
+        let Value::Bytes(data) = self.heap.get(bytes) else {
+            unreachable!()
+        };
+        Ok(match crate::objects::repeat_bytes(data, &count)? {
+            Some(repeated) => self.alloc(Value::Bytes(repeated)),
+            None => bytes,
+        })
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
@@ -662,6 +688,8 @@ impl Context {
                 }
                 _ => {}
             },
+            "*" if matches!(self.heap.get(a), Value::Bytes(_)) => return self.repeat_bytes(a, b),
+            "*" if matches!(self.heap.get(b), Value::Bytes(_)) => return self.repeat_bytes(b, a),
             _ => {}
         }
         if op == "*" {

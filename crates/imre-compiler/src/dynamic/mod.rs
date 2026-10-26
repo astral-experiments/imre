@@ -278,6 +278,7 @@ pub(crate) fn compile(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    runtime_imports: bool,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -292,7 +293,7 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    if !options.runtime_imports
+    if !runtime_imports
         && ![
             "sys",
             "platform",
@@ -315,7 +316,7 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports || (options.runtime_imports && !i.names.is_empty()) => i,
+        Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -351,6 +352,7 @@ pub(crate) fn compile(
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    let bundled_root = "<imre stdlib>";
     let mut sources = vec![(
         "__main__".to_owned(),
         if command.is_some() {
@@ -387,6 +389,13 @@ pub(crate) fn compile(
                 if !seen.insert(prefix.clone()) {
                     continue;
                 }
+                if let Some((filename, source)) = crate::modules::bundled_runtime_source(&prefix) {
+                    let path = Path::new(bundled_root).join(filename);
+                    let package = path.ends_with("__init__.py");
+                    let imports = imports_for_module(&path, source)?;
+                    sources.push((prefix.clone(), path, source.to_owned()));
+                    work.push_back((prefix.clone(), package, imports));
+                }
                 for root in &roots {
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
@@ -422,6 +431,7 @@ pub(crate) fn compile(
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let config = serde_json::json!({
+        "bundled_root":bundled_root,
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),

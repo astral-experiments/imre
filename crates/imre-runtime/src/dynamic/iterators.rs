@@ -29,21 +29,25 @@ impl Context {
                 remaining,
             }));
         }
-        if matches!(self.heap.get(value), Value::List(_)) {
-            return Ok(self.alloc(Value::ListIterator {
-                list: Some(value),
-                offset: 0,
-            }));
-        }
-        let values = self.items(value)?;
-        Ok(self.alloc(Value::Iterator { values, offset: 0 }))
+        let (sequence, kind) = match self.heap.get(value) {
+            Value::List(_) => (value, "list_iterator"),
+            Value::Tuple(_) => (value, "tuple_iterator"),
+            _ => {
+                let values = self.items(value)?;
+                (self.alloc(Value::Tuple(values)), "iterator")
+            }
+        };
+        Ok(self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+            kind,
+        }))
     }
 
     fn is_native_iterator(&self, value: Id) -> bool {
         matches!(
             self.heap.get(value),
             Value::Generator { .. }
-                | Value::ListIterator { .. }
                 | Value::RangeIterator { .. }
                 | Value::PythonIterator { .. }
                 | Value::Iterator { .. }
@@ -124,24 +128,7 @@ impl Context {
                 buffered: Some(_), ..
             } => return Ok(true),
             Value::Generator { code, scope, .. } => (code, scope),
-            Value::ListIterator { list: None, .. } => return Ok(false),
-            Value::ListIterator {
-                list: Some(list),
-                offset,
-            } => {
-                let Value::List(items) = self.heap.get(list) else {
-                    unreachable!()
-                };
-                if offset < items.len() {
-                    return Ok(true);
-                }
-                let Value::ListIterator { list, .. } = self.heap.get_mut(iter) else {
-                    unreachable!()
-                };
-                *list = None;
-                return Ok(false);
-            }
-            Value::Iterator { ref values, offset } => return Ok(offset < values.len()),
+            Value::Iterator { .. } => return Ok(self.peek_sequence_item(iter)?.is_some()),
             _ => return Err(Error::new("TypeError", "expected iterator")),
         };
         let Value::Generator { running, .. } = self.heap.get_mut(iter) else {
@@ -180,6 +167,16 @@ impl Context {
         if let Some(method) = self.bound_slot(iter, "__next__")? {
             return self.call(method, Vec::new(), Vec::new());
         }
+        if matches!(self.heap.get(iter), Value::Iterator { .. }) {
+            let item = self
+                .peek_sequence_item(iter)?
+                .ok_or_else(|| Error::new("StopIteration", ""))?;
+            let Value::Iterator { offset, .. } = self.heap.get_mut(iter) else {
+                unreachable!()
+            };
+            *offset += 1;
+            return Ok(item);
+        }
         if !self.iterator_more(iter)? {
             return Err(Error::new("StopIteration", ""));
         }
@@ -198,22 +195,6 @@ impl Context {
                     *next += *step;
                 }
                 Ok(self.int(item))
-            }
-            Value::Iterator { values, offset } => {
-                let item = values[*offset];
-                *offset += 1;
-                Ok(item)
-            }
-            Value::ListIterator {
-                list: Some(list),
-                offset,
-            } => {
-                let (list, index) = (*list, *offset);
-                *offset += 1;
-                let Value::List(items) = self.heap.get(list) else {
-                    unreachable!()
-                };
-                Ok(items[index])
             }
             _ => unreachable!("checked iterator"),
         }

@@ -31,6 +31,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     builtins: HashMap<String, Id>,
@@ -107,12 +108,40 @@ impl Context {
             )
         })
     }
+    /// Borrows the unconsumed part of the iterator's current sequence.
+    fn iterator_remaining(&self, id: Id) -> Result<&[Id]> {
+        let Value::Iterator {
+            sequence, offset, ..
+        } = self.heap.get(id)
+        else {
+            return Err(Error::new("TypeError", "expected iterator"));
+        };
+        let Some(sequence) = sequence else {
+            return Ok(&[]);
+        };
+        let (Value::List(values) | Value::Tuple(values)) = self.heap.get(*sequence) else {
+            unreachable!("iterator sequence")
+        };
+        Ok(values.get(*offset..).unwrap_or_default())
+    }
+
+    /// Reads the current position and permanently detaches the source on exhaustion.
+    fn peek_sequence_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let item = self.iterator_remaining(id)?.first().copied();
+        if item.is_none()
+            && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
+        {
+            *sequence = None;
+        }
+        Ok(item)
+    }
+
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
-        if self.iterator_more(id)? {
-            self.iterator_next(id).map(Some)
-        } else {
-            Ok(None)
+        match self.iterator_next(id) {
+            Ok(item) => Ok(Some(item)),
+            Err(error) if error.kind == "StopIteration" => Ok(None),
+            Err(error) => Err(error),
         }
     }
 
@@ -133,7 +162,6 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Generator { .. }
-            | Value::ListIterator { .. }
             | Value::RangeIterator { .. }
             | Value::PythonIterator { .. } => {
                 let mut items = Vec::new();
@@ -142,21 +170,19 @@ impl Context {
                 }
                 Ok(items)
             }
-            Value::Iterator { values, offset } => {
-                if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-                    *offset = values.len();
+            Value::Iterator { .. } => {
+                let values = self.iterator_remaining(id)?.to_vec();
+                if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+                    *sequence = None;
                 }
-                Ok(values[offset..].to_vec())
+                Ok(values)
             }
             Value::Instance {
                 dictionary: Some(_),
                 ..
             } => {
-                let iter = self
-                    .bound_slot(id, "__iter__")?
-                    .expect("dict iterator slot");
-                let values = self.call(iter, Vec::new(), Vec::new())?;
-                self.items(values)
+                let iterator = self.iterator(id)?;
+                self.items(iterator)
             }
             Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self
@@ -310,12 +336,20 @@ impl Context {
             };
             let mut selected = None;
             let mut namespace = None;
-            for root in self.items(search)? {
-                let Ok(root) = self.str_value(root) else {
-                    continue;
-                };
-                let root = if root.is_empty() {
+            // A bundled package contributes its own __path__. A first-party
+            // regular package can never acquire one of its children implicitly.
+            let search = self.items(search)?;
+            let bundle = self.config["bundled_root"]
+                .as_str()
+                .map(std::path::Path::new);
+            let roots = search
+                .iter()
+                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
+            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
+                let root = if root.as_os_str().is_empty() {
                     std::env::current_dir()
+                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
+                    Ok(root.to_owned())
                 } else {
                     std::path::absolute(root)
                 };

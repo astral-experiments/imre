@@ -37,6 +37,57 @@ fn type_error(message: &str) -> Statement {
 }
 
 impl Checker<'_> {
+    pub(super) fn runtime_attrgetter(&self, node: &impl Ranged) -> String {
+        self.graph.needs_object_runtime.set(true);
+        error(
+            self.source,
+            node,
+            "operator.attrgetter requires native runtime attribute lookup",
+        )
+    }
+
+    /// A literal, single-path getter can use the receiver's ordinary native attribute loads.
+    pub(super) fn literal_attrgetter_call(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let ast::Expr::Call(factory) = call.func.as_ref() else {
+            return Ok(None);
+        };
+        if self.resolve(&factory.func) != Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
+            return Ok(None);
+        }
+        let ([ast::Expr::StringLiteral(path)], [operand]) = (
+            factory.arguments.args.as_ref(),
+            call.arguments.args.as_ref(),
+        ) else {
+            return Err(self.runtime_attrgetter(call));
+        };
+        let parts = path.value.to_str().split('.');
+        // A long runtime string must not manufacture unbounded recursive compiler nodes.
+        if !factory.arguments.keywords.is_empty()
+            || !call.arguments.keywords.is_empty()
+            || operand.is_starred_expr()
+            || parts.clone().nth(8).is_some()
+        {
+            return Err(self.runtime_attrgetter(call));
+        }
+        let range = call.range();
+        let mut lookup = operand.clone();
+        for part in parts {
+            lookup = ast::Expr::Attribute(ast::ExprAttribute {
+                node_index: ast::AtomicNodeIndex::NONE,
+                range,
+                value: Box::new(lookup),
+                attr: ast::Identifier::new(part, range),
+                ctx: ast::ExprContext::Load,
+            });
+        }
+        self.expr(&lookup)
+            .map(Some)
+            .inspect_err(|_| self.graph.needs_object_runtime.set(true))
+    }
+
     /// Check each argument in source order and hold it across the later calls.
     fn wrapper_arguments<const N: usize>(
         &mut self,

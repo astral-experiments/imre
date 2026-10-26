@@ -65,6 +65,7 @@ impl Context {
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -76,7 +77,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Generator { .. } => "generator",
-            Value::ListIterator { .. } => "list_iterator",
+            Value::Iterator { kind, .. } => kind,
             Value::RangeIterator { .. } => "range_iterator",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
@@ -185,6 +186,11 @@ pub(super) enum Value {
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
+    CodecInfo {
+        entry: crate::objects::CodecInfo,
+        decode: Id,
+    },
+    CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
     Socket(crate::ObjectOwner),
@@ -274,12 +280,9 @@ pub(super) enum Value {
         source: Id,
         buffered: Option<Id>,
     },
-    ListIterator {
-        list: Option<Id>,
-        offset: usize,
-    },
     Iterator {
-        values: Vec<Id>,
+        kind: &'static str,
+        sequence: Option<Id>,
         offset: usize,
     },
     IoMethod {
@@ -318,9 +321,8 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set(v) | Self::Iterator { values: v, .. } => {
-                visit.extend(v)
-            }
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -363,7 +365,6 @@ impl Value {
                 visit.extend(buffered);
             }
             Self::Yielded(item) => visit.push(*item),
-            Self::ListIterator { list, .. } => visit.extend(list),
             Self::Range { .. } | Self::RangeIterator { .. } => {}
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -430,6 +431,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::IoMethod { owner, .. } => visit.push(*owner),
+            Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -439,6 +441,7 @@ impl Value {
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
+            | Self::CodecDecoder(_)
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
