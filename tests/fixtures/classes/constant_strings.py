@@ -27,6 +27,21 @@ class Inherited(Defaults):
     pass
 
 
+class C:
+    label = "first"
+
+
+class D(C):
+    label = "second"
+
+
+def label(value: C) -> str:
+    return value.label
+
+
+print(C.label, D.label, label(C()), label(D()))
+
+
 class Other:
     repeated = ("hi", "ß")
 

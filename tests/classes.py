@@ -64,7 +64,7 @@ REJECTED = {
     "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
     "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
     "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
-    "subclass_rebinds_fixed_string": 'class C:\n    label = "first"\nclass D(C):\n    label = "second"\n',
+    "incompatible_subclass_class_string": 'class C:\n    label = "first"\nclass D(C):\n    label = 2\n',
     "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
     "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
