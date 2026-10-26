@@ -957,6 +957,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_patch_parse"
                 | "imre_json_index"
                 | "imre_json_decoder_decode"
+                | "imre_exception_args"
                 | "imre_exception_message"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
