@@ -1,4 +1,4 @@
-use super::{Context, Error, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, Id, Result, Value};
 use crate::objects::fnmatch::{byte_spelling, compile, mixed_message};
 
 fn arguments(args: &[Id], kwargs: &[(String, Id)]) -> Result<(Id, Id)> {
@@ -74,10 +74,9 @@ pub(super) fn filter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             ));
         }
     };
-    let iter = ctx.op("iter", names, NONE, NONE)?;
+    let iter = ctx.iterator(names)?;
     let result = ctx.alloc(Value::List(Vec::new()));
-    while ctx.op("more", iter, NONE, NONE)? == TRUE {
-        let name = ctx.op("next", iter, NONE, NONE)?;
+    while let Some(name) = ctx.next_item(iter)? {
         let selected = match ctx.heap.get(name) {
             Value::Str(text) if !bytes => matches(text),
             Value::Bytes(value) | Value::ByteArray(value) if bytes => {

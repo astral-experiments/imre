@@ -23,3 +23,23 @@ def current():
         filter([], "*", pat="?")
     except TypeError as error:
         print(error.args)
+
+    cursor = dict.__iter__({"head": None, "one.cache": None, b"wrong": None, "tail.cache": None})
+    for name in cursor:
+        print(name)
+        break
+    try:
+        filter(cursor, "*.cache")
+    except TypeError as error:
+        print(error.args)
+    print(filter(cursor, "*.cache"), filter(cursor, "*"))
+
+    class Broken(dict):
+        def __iter__(self):
+            print("producer")
+            raise ValueError("producer failure")
+
+    try:
+        filter(Broken(), "*")
+    except ValueError as error:
+        print(error.args)

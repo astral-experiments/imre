@@ -44,6 +44,38 @@ def current():
     data.get = lambda key: "shadow"
     print(data.get("visits"), dict.get(data, "visits"))
 
+    pairs = dict.__iter__({"first": None, "second": None, "third": None})
+    from operator import length_hint
+
+    print(length_hint(pairs))
+    for key in pairs:
+        print(key)
+        break
+    print(length_hint(pairs))
+
+    class Shared(dict):
+        def __iter__(self):
+            return pairs
+
+    for key in Shared():
+        print(key)
+        break
+    print(length_hint(pairs), list(pairs), length_hint(pairs))
+
+    def replace_and_append(value):
+        if value == 1:
+            sequence[1] = 3
+            sequence.append(4)
+        return value
+
+    sequence = [1, 2]
+    visited = []
+    for value in sequence:
+        visited.append(replace_and_append(value))
+    print(visited)
+    sequence = [1, 2]
+    print([replace_and_append(value) for value in sequence])
+
     class Filtered(Data):
         def __iter__(self):
             raise AssertionError("dict copying uses keys")
