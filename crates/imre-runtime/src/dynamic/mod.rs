@@ -76,6 +76,8 @@ pub(crate) struct Context {
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     pending: Option<Error>,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    slot_depth: usize,
 }
 
 impl Context {
