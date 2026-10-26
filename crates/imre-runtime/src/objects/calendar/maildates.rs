@@ -36,14 +36,16 @@ fn year_starts_digit(c: char) -> bool {
         0x1f100..=0x1f10a)
 }
 
-fn integer(text: &str) -> Option<Int> {
+fn integer(text: &str) -> Result<Option<Int>, Error> {
     let digits = text
         .chars()
         .filter(|&c| crate::integer_text::decimal_digit(c).is_some())
         .count();
-    crate::integer_text::decimal_digits_allowed(digits)
-        .then(|| crate::parse_decimal_int(text))
-        .flatten()
+    if crate::integer_text::decimal_digits_allowed(digits) {
+        crate::parse_decimal_int(text)
+    } else {
+        Ok(None)
+    }
 }
 
 fn parsed_zone(word: &str) -> Result<Option<crate::ObjectOwner>, Error> {
@@ -56,7 +58,7 @@ fn parsed_zone(word: &str) -> Result<Option<crate::ObjectOwner>, Error> {
         "MST" | "PDT" => -7,
         "PST" => -8,
         _ => {
-            let Some(hhmm) = integer(word) else {
+            let Some(hhmm) = integer(word)? else {
                 return Ok(None);
             };
             if hhmm.as_small() == Some(0) && word.starts_with('-') {
@@ -136,14 +138,15 @@ fn parse(text: &str) -> Result<crate::ObjectOwner, Error> {
         ':'
     };
     let mut clock = tm.split(delim);
-    let hour = clock.next().and_then(integer).ok_or_else(invalid)?;
-    let min = clock.next().and_then(integer).ok_or_else(invalid)?;
-    let sec = integer(clock.next().unwrap_or("0")).ok_or_else(invalid)?;
+    let field = |word| integer(word)?.ok_or_else(invalid);
+    let hour = field(clock.next().unwrap_or(""))?;
+    let min = field(clock.next().unwrap_or(""))?;
+    let sec = field(clock.next().unwrap_or("0"))?;
     if clock.next().is_some() {
         return Err(invalid());
     }
-    let mut year = integer(yy).ok_or_else(invalid)?;
-    let day = integer(dd).ok_or_else(invalid)?;
+    let mut year = field(yy)?;
+    let day = field(dd)?;
     if year.cmp(&Int::from(100)).is_lt() {
         let century = if year.cmp(&Int::from(68)).is_gt() {
             1900
