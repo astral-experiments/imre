@@ -51,12 +51,15 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
         // SAFETY: the owning field roots the exact string.
         return Ok(unsafe { StrOwner::acquire_word(word) });
     }
+    rendered(word_repr(kind, word)?.into())
+}
+
+/// Render directly into the buffer used by a short-lived consumer such as stderr.
+pub(super) fn word_repr(kind: WordKind, word: usize) -> Result<String, std::fmt::Error> {
     let mut result = String::new();
-    // SAFETY: only concrete, representable field types reach this routine.
-    unsafe {
-        values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind)?;
-    }
-    rendered(result.into())
+    // SAFETY: callers retain this exact value throughout structural formatting.
+    unsafe { values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind) }?;
+    Ok(result)
 }
 
 /// Transfer the formatted string only after all visited fields and callbacks succeed.

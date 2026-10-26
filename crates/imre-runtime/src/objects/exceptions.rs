@@ -2215,36 +2215,64 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
     let Some(pending) = pending else {
         return 0;
     };
-    // SAFETY: pending roots its immutable exception payload through this visit.
-    let exit = unsafe {
-        pending.0.with(|storage| {
-            let code = match &storage.exception().payload {
-                Payload::Exit(code) => code.as_ref(),
-                Payload::ExitArguments(args) => Some(&args.0),
-                _ => return None,
-            };
-            let (status, message) = match code {
-                None => (0, None),
-                Some(code) if code.kind == WordKind::new(0) => (0, None),
-                Some(code) if code.kind == WordKind::new(1) => (code.word as i32, None),
-                Some(code) if code.kind == WordKind::new(2) => {
-                    // CPython converts through signed long long, using -1 on overflow.
-                    let integer = crate::Int::borrow(code.word);
-                    (integer.big().to_i64().unwrap_or(-1) as i32, None)
-                }
-                Some(code) => (
-                    1,
-                    Some(super::boxed_values::word_text(code.kind, code.word, false)),
-                ),
-            };
-            Some((status, message))
-        })
+    enum ExitText {
+        Original(StrOwner),
+        Rendered(String),
+    }
+    // SAFETY: snapshot the owned exit code before formatting can call Python.
+    let code = unsafe {
+        pending
+            .0
+            .with(|storage| match &storage.exception().payload {
+                Payload::Exit(code) => Some(code.clone()),
+                Payload::ExitArguments(args) => Some(Some(args.0.clone())),
+                _ => None,
+            })
     };
+    let exit = code.map(|code| match code.as_ref() {
+        None => (0, None),
+        Some(code) if code.kind == WordKind::new(0) => (0, None),
+        Some(code) if code.kind == WordKind::new(1) => (code.word as i32, None),
+        Some(code) if code.kind == WordKind::new(2) => {
+            // SAFETY: the snapshot owns the exact integer. CPython uses -1 on overflow.
+            let integer = unsafe { crate::Int::borrow(code.word) };
+            (integer.big().to_i64().unwrap_or(-1) as i32, None)
+        }
+        Some(code) => {
+            let message = if code.kind == WordKind::new(3) {
+                // SAFETY: the code owns an exact, live string.
+                Some(ExitText::Original(unsafe {
+                    StrOwner::acquire_word(code.word)
+                }))
+            } else if code.kind == WordKind::new(5)
+                && unsafe {
+                    // SAFETY: the object snapshot is live; this borrow ends before __str__.
+                    object(code.word as *const Object)
+                        .0
+                        .with(|v| matches!(v, Storage::Exception(_)))
+                }
+            {
+                // SAFETY: the snapshot roots the checked exception.
+                let text = unsafe { imre_exception_message(code.word as *const Object) };
+                // SAFETY: a non-null formatter result transfers one string owner.
+                (!text.is_null()).then(|| ExitText::Original(unsafe { StrOwner::from_raw(text) }))
+            } else {
+                super::boxed_values::word_repr(code.kind, code.word)
+                    .ok()
+                    .map(ExitText::Rendered)
+            };
+            (1, Some(message))
+        }
+    });
     let stderr = crate::sys::flush_stderr();
     let stdout = crate::flush_stdout();
     if let Some((status, message)) = exit {
         if let Some(message) = message {
-            let text = message.as_deref().map_or("", Str::as_str);
+            let text = match &message {
+                Some(ExitText::Original(text)) => text.as_str(),
+                Some(ExitText::Rendered(text)) => text.as_str(),
+                None => "",
+            };
             let _ = crate::sys::write_stderr(text, true);
         }
         return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
