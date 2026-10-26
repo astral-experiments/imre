@@ -6,7 +6,7 @@ impl Checker<'_> {
     pub(super) fn list_call(
         &mut self,
         call: &ast::ExprCall,
-        mut element: Option<Type>,
+        element: Option<Type>,
     ) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [source] = call.arguments.args.as_ref() else {
@@ -65,6 +65,17 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::StringIntList, vec![iterable.clone()]),
             });
         }
+        self.collect_list(input, convert, element, call)
+    }
+
+    /// Collect an already-evaluated iterable into a fresh list.
+    pub(super) fn collect_list(
+        &mut self,
+        input: Iteration,
+        convert: bool,
+        mut element: Option<Type>,
+        call: &impl Ranged,
+    ) -> Result<Expr, String> {
         let result = self.hidden(Type::None);
         let mut body = self.expand_items(input, call, |checker, value| {
             let value = checker.consumer_value(value, convert, call)?;
