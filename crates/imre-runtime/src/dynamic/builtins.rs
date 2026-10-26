@@ -63,6 +63,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "reversed"
                 | "ord"
                 | "callable"
                 | "isinstance"
@@ -510,6 +511,27 @@ pub(super) fn call(
                 }
             };
             Ok(ctx.int(i64::from(code)))
+        }
+        "reversed" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let object = args[0];
+            if let Value::List(items) = ctx.heap.get(object) {
+                return Ok(ctx.alloc(Value::Iterator {
+                    sequence: Some(object),
+                    offset: items.len(),
+                    reverse: true,
+                }));
+            }
+            if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
+                && hook != NONE
+            {
+                return ctx.call(hook, Vec::new(), Vec::new());
+            }
+            Err(type_error(format!(
+                "'{}' object is not reversible",
+                ctx.type_name(object)
+            )))
         }
         "len" => {
             positional(name, kwargs)?;
