@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_binascii",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_binascii.py": "82eabf4bb06b2ff0042f28c9d6aade7459112e54"
+  }
+}

@@ -11,6 +11,7 @@ mod annotations;
 mod argparse;
 mod args;
 mod asyncio;
+mod binascii;
 mod boxed_values;
 mod builtins;
 mod bytes;

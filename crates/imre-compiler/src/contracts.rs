@@ -403,6 +403,9 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
+            | Self::BinasciiAsciiInput
+            | Self::BinasciiDecode
+            | Self::BinasciiEncode
             | Self::CodecLookup
             | Self::StrEncodeOptions
             | Self::CodecEncode
@@ -544,6 +547,7 @@ impl Builtin {
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
+            | Self::ExceptionSubclass(_, _)
             | Self::ExceptionMatchesAny
             | Self::StrEnumMember { .. }
             | Self::ForwardRefField(_)
@@ -1130,6 +1134,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
+                | "imre_binascii_ascii_input"
+                | "imre_binascii_decode"
+                | "imre_binascii_encode"
                 | "imre_codec_lookup"
                 | "imre_str_encode_options"
                 | "imre_codec_encode"
