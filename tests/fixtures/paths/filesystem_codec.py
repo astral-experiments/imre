@@ -42,11 +42,17 @@ class Name(StrEnum):
     upload = "upload"
 
 
+class EnumPath:
+    def __fspath__(self) -> Name:
+        return Name.upload
+
+
 text = "café/🧪.txt"
 raw = b"caf\xc3\xa9/\xf0\x9f\xa7\xaa.txt"
 assert fsdecode(filename=text) is text
 assert fsencode(filename=raw) is raw
 assert fsdecode(Name.upload) is Name.upload
+assert fsdecode(EnumPath()) is Name.upload
 assert fsencode(text) == raw
 assert fsdecode(raw) == text
 assert fsdecode(b"x\x00y") == "x\x00y"

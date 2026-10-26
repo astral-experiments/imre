@@ -69,7 +69,8 @@ impl Checker<'_> {
                         self.graph
                             .checked_repeated_keyword(self.module, key.range());
                     } else {
-                        self.graph.checked_keywords(self.module, std::iter::once(key.range()));
+                        self.graph
+                            .checked_keywords(self.module, std::iter::once(key.range()));
                     }
                 }
                 return self.sys_type_error(call, result_type, message);
@@ -104,9 +105,13 @@ impl Checker<'_> {
         })? {
             return Ok(selected);
         }
-        if (path.ty == Type::Bytes) == (result == Type::Bytes) {
-            return Ok(path);
-        }
+        let op = match (path.ty, result) {
+            (Type::Bytes, Type::Str) => Builtin::CodecDecode,
+            (Type::Str | Type::StrLiteral(_) | Type::StrEnum(_), Type::Bytes) => {
+                Builtin::CodecEncode
+            }
+            _ => return Ok(path),
+        };
         let path = Self::string_value(path);
         let slot = self.hidden(path.ty);
         let setting = |query| Expr {
@@ -119,11 +124,6 @@ impl Checker<'_> {
                 Builtin::CodecLookup,
                 vec![setting(ir::SysEncoding::Filesystem)],
             ),
-        };
-        let op = if result == Type::Bytes {
-            Builtin::CodecEncode
-        } else {
-            Builtin::CodecDecode
         };
         Ok(Expr {
             ty: result,
