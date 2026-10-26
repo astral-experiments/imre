@@ -156,6 +156,7 @@ impl Context {
             Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
             Value::Iterator { reverse: true, .. } => "list_reverseiterator",
+            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -164,6 +165,7 @@ impl Context {
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
@@ -300,6 +302,7 @@ pub(super) enum Value {
         frozen: bool,
     },
     Dict(Vec<(Id, Id)>),
+    MappingProxy(Id),
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -338,7 +341,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
-        text: Option<Id>,
+        scalar: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -384,6 +387,12 @@ pub(super) enum Value {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
         pending: Option<Id>,
+    },
+    CallableIterator(Option<[Id; 2]>),
+    // Private to a compiled loop. Python-visible iterators keep their original identity.
+    LoopIterator {
+        source: Id,
+        peeked: Option<Id>,
     },
     Iterator {
         sequence: Option<Id>,
@@ -434,6 +443,11 @@ impl Value {
                 visit.extend(inputs.iter());
                 visit.extend(pending);
             }
+            Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
+            Self::LoopIterator { source, peeked } => {
+                visit.push(*source);
+                visit.extend(peeked);
+            }
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -443,7 +457,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
-            Self::DictView { dict, .. } => visit.push(*dict),
+            Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
@@ -516,13 +530,13 @@ impl Value {
                 class,
                 fields,
                 dictionary,
-                text,
+                scalar,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
-                visit.extend(text);
+                visit.extend(scalar);
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {

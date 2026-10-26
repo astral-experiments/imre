@@ -166,7 +166,7 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => self.iterator(a),
+            "iter" => self.loop_iterator(a),
             "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?
