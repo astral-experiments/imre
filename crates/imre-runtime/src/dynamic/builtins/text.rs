@@ -1,6 +1,4 @@
-use num_bigint::BigInt;
-use num_traits::{Signed, Zero};
-use std::borrow::Cow;
+use num_traits::Signed;
 
 use ruff_python_literal::cformat::{CFormatPart, CFormatString};
 use ruff_python_literal::format::{
@@ -10,66 +8,6 @@ use ruff_python_literal::format::{
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, visit_line_fields as split_lines};
-
-fn integer(source: &str, mut base: u32) -> Result<crate::Int> {
-    let original = source;
-    let original_base = base;
-    let error = || {
-        Error::from(crate::integer_text::invalid_literal_in_base(
-            original,
-            original_base,
-        ))
-    };
-    let source = source.trim();
-    let source = if source.is_ascii() {
-        Cow::Borrowed(source)
-    } else {
-        Cow::Owned(
-            source
-                .chars()
-                .map(|ch| {
-                    crate::integer_text::decimal_digit(ch)
-                        .map_or(ch, |digit| char::from(b'0' + digit))
-                })
-                .collect(),
-        )
-    };
-    let source = source.as_ref();
-    let (negative, digits) = match source.as_bytes().first() {
-        Some(b'-') => (true, &source[1..]),
-        Some(b'+') => (false, &source[1..]),
-        _ => (false, source),
-    };
-    let radix_prefix = digits.as_bytes().get(..2).and_then(|v| match v {
-        b"0b" | b"0B" => Some(2),
-        b"0o" | b"0O" => Some(8),
-        b"0x" | b"0X" => Some(16),
-        _ => None,
-    });
-    let mut digits = digits;
-    let guessed = base == 0;
-    let prefixed = radix_prefix.is_some_and(|r| base == 0 || r == base);
-    if prefixed {
-        base = radix_prefix.unwrap();
-        digits = digits[2..].strip_prefix('_').unwrap_or(&digits[2..]);
-    } else if guessed {
-        base = 10;
-    }
-    if digits.is_empty()
-        || digits.starts_with('_')
-        || digits.ends_with('_')
-        || digits.contains("__")
-        || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
-    {
-        return Err(error());
-    }
-    let normalized = digits.replace('_', "");
-    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(error)?;
-    if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
-        return Err(error());
-    }
-    Ok(crate::Int::new(if negative { -value } else { value }))
-}
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -142,9 +80,9 @@ pub(super) fn construct(
             }
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
-                Some(Value::Str(s)) => integer(s, radix as u32)?,
+                Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
                 Some(Value::Bytes(b)) if b.is_ascii() => {
-                    integer(std::str::from_utf8(b).unwrap(), radix as u32)?
+                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
                 }
                 Some(Value::Bytes(_)) => {
                     return Err(Error::new("ValueError", "invalid byte literal for int()"));
@@ -169,6 +107,17 @@ pub(super) fn construct(
                     encoding,
                     errors,
                 )?
+            } else if let Some(value) = value
+                && let Some(method) = ctx.bound_slot(value, "__str__")?
+            {
+                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                if !matches!(ctx.heap.get(result), Value::Str(_)) {
+                    return Err(type_error(format!(
+                        "__str__ returned non-string (type {})",
+                        ctx.type_name(result)
+                    )));
+                }
+                return Ok(result);
             } else {
                 value.map(|id| ctx.display(id)).unwrap_or_default()
             };
@@ -472,13 +421,24 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
 
 pub(super) fn method(
     ctx: &mut Context,
+    owner: &str,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args
-        .split_first()
-        .ok_or_else(|| type_error("missing string receiver"))?;
+    let (&receiver, args) = args.split_first().ok_or_else(|| {
+        if owner == "str" {
+            type_error(format!("unbound method str.{name}() needs an argument"))
+        } else {
+            type_error("missing string receiver")
+        }
+    })?;
+    if owner == "str" && ctx.str_value(receiver).is_err() {
+        return Err(type_error(format!(
+            "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        )));
+    }
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
@@ -488,6 +448,45 @@ pub(super) fn method(
             let b = encode(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
         };
+    }
+    if name == "find" {
+        if !kwargs.is_empty() {
+            return Err(type_error("str.find() takes no keyword arguments"));
+        }
+        let Some(&needle) = args.first() else {
+            return Err(type_error("find expected at least 1 argument, got 0"));
+        };
+        if args.len() > 3 {
+            return Err(type_error(format!(
+                "find expected at most 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if ctx.str_value(needle).is_err() {
+            let kind = if needle == NONE {
+                "None"
+            } else {
+                ctx.type_name(needle)
+            };
+            return Err(type_error(format!(
+                "find() argument 1 must be str, not {kind}"
+            )));
+        }
+        let mut bound = |arg: Option<&Id>| match arg {
+            None | Some(&NONE) => Ok(None),
+            Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
+                type_error("slice indices must be integers or None or have an __index__ method")
+            }),
+        };
+        let start = bound(args.get(1))?;
+        let end = bound(args.get(2))?;
+        let found = crate::objects::find_text(
+            ctx.str_value(receiver)?,
+            ctx.str_value(needle)?,
+            start.as_ref(),
+            end.as_ref(),
+        );
+        return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
         && let Value::Bytes(data) = ctx.heap.get(receiver)
@@ -516,6 +515,36 @@ pub(super) fn method(
         "format" => {
             let result = format_string(ctx, &source, args, kwargs)?;
             Ok(ctx.text(result))
+        }
+        "partition" | "rpartition" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!(
+                    "str.{name}() takes no keyword arguments"
+                )));
+            }
+            let [separator] = args else {
+                return Err(type_error(format!(
+                    "str.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let sep = ctx.str_value(*separator).map_err(|_| {
+                type_error(format!("must be str, not {}", ctx.type_name(*separator)))
+            })?;
+            let reverse = name == "rpartition";
+            let fields = if let Some((before, after)) =
+                crate::objects::partition_text(&source, sep, reverse)?
+            {
+                vec![ctx.text(before), *separator, ctx.text(after)]
+            } else {
+                let empty = ctx.text("");
+                if reverse {
+                    vec![empty, empty, receiver]
+                } else {
+                    vec![receiver, empty, empty]
+                }
+            };
+            Ok(ctx.alloc(Value::Tuple(fields)))
         }
         "split" | "rsplit" => {
             let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;

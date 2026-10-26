@@ -6473,6 +6473,9 @@ impl Emitter<'_, '_> {
                         small_integer: true,
                     }
                 }
+                Type::Str if args.len() == 2 => {
+                    self.call("imre_int_parse_hex", Type::Int, &[&args[0].value])
+                }
                 Type::Str => self.call("imre_int_parse", Type::Int, &[&args[0].value]),
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
@@ -10008,6 +10011,7 @@ declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
+declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
 declare void @imre_random_seed_none()

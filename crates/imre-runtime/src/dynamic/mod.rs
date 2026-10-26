@@ -214,7 +214,8 @@ impl Context {
             class_body: None,
             class_cell: None,
             first_argument: None,
-            names: HashMap::new(),
+            names: Default::default(),
+            namespace: None,
             globals: Default::default(),
             parent,
             module: module.to_owned(),
@@ -235,8 +236,51 @@ impl Context {
         scope
     }
 
+    fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
+        let scope = self.scope_data(scope);
+        if let Some(namespace) = scope.namespace {
+            return self
+                .dict_entries(namespace)?
+                .iter()
+                .find_map(|&(key, value)| {
+                    matches!(self.heap.get(key), Value::Str(key) if key == name).then_some(value)
+                });
+        }
+        scope.names.get(name).copied()
+    }
+
+    /// Materialize once and keep that exact dict as the module's binding storage.
+    fn module_globals(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled scope handle")
+        };
+        if let Some(dict) = frame.namespace {
+            return dict;
+        }
+        let names = std::mem::take(&mut frame.names);
+        let entries = names
+            .into_iter()
+            .map(|(name, v)| (self.text(name), v))
+            .collect();
+        let dict = self.dict(entries);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        dict
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            let key = self.text(name);
+            self.put_item(namespace, key, value)
+                .expect("string key in module dictionary");
+            return;
+        }
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -251,8 +295,8 @@ impl Context {
         loop {
             scope = self.binding_scope(scope, name);
             let s = self.scope_data(scope);
-            if let Some(id) = s.names.get(name) {
-                return Ok(*id);
+            if let Some(id) = self.scope_name(scope, name) {
+                return Ok(id);
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -278,7 +322,7 @@ impl Context {
         }
         Err(Error::new(
             "NameError",
-            format!("name {name:?} is not defined"),
+            format!("name '{name}' is not defined"),
         ))
     }
     fn builtin(&mut self, name: &str) -> Id {
@@ -287,10 +331,13 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
-        if name == "dict" {
-            for method in builtins::DICT_METHODS {
-                self.builtin(&format!("dict.{method}"));
-            }
+        let methods = match name {
+            "dict" => builtins::DICT_METHODS,
+            "str" => builtins::STR_METHODS,
+            _ => &[],
+        };
+        for method in methods {
+            self.builtin(&format!("{name}.{method}"));
         }
         value
     }
@@ -394,6 +441,9 @@ impl Context {
         let scope = self.scope(name, None);
         let name_id = self.text(name);
         self.bind(scope, "__name__", name_id);
+        if source.is_some() {
+            self.bind(scope, "__doc__", NONE);
+        }
         if !locations.is_empty() {
             let dirs = locations
                 .iter()
@@ -422,7 +472,6 @@ impl Context {
             _ => {}
         }
         if let Some((path, code)) = source {
-            self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {

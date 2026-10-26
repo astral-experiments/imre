@@ -26,6 +26,9 @@ def current():
             raise AttributeError("from descriptor")
 
     class Target:
+        def __str__(self):
+            return "target"
+
         def read(self, x):
             return x + 1
 
@@ -35,6 +38,7 @@ def current():
     class Proxy:
         read = Forward()
         __call__ = Forward()
+        __str__ = Forward()
         write = Store()
         absent = Raising()
 
@@ -53,7 +57,18 @@ def current():
     print(proxy.read(21), proxy(4, extra=3), proxy.absent, proxy.other)
     proxy.read = 9
     proxy.__call__ = lambda x: x
+    proxy.__str__ = lambda: "instance"
+    print(str(proxy), proxy.__str__())
     print(proxy.read, proxy.__call__(7), proxy(7, extra=8))
+
+    class BadString:
+        def __str__(self):
+            return 42
+
+    try:
+        str(BadString())
+    except TypeError as error:
+        print(str(error))
 
     class LateDescriptor:
         pass

@@ -23,6 +23,7 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "NotImplementedError"
             | "TypeError"
             | "ValueError"
+            | "EOFError"
             | "UnicodeError"
             | "UnicodeDecodeError"
             | "UnicodeEncodeError"
@@ -62,12 +63,14 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "ord"
                 | "callable"
                 | "iter"
                 | "next"
                 | "any"
                 | "isinstance"
                 | "getattr"
+                | "globals"
                 | "setattr"
                 | "hasattr"
                 | "open"
@@ -113,31 +116,31 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
+pub(super) const STR_METHODS: &[&str] = &[
+    "encode",
+    "endswith",
+    "find",
+    "format",
+    "join",
+    "lower",
+    "lstrip",
+    "partition",
+    "removeprefix",
+    "removesuffix",
+    "replace",
+    "rpartition",
+    "rsplit",
+    "rstrip",
+    "split",
+    "splitlines",
+    "startswith",
+    "strip",
+    "upper",
+];
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
-        Value::Str(_)
-            if matches!(
-                attr,
-                "format"
-                    | "split"
-                    | "rsplit"
-                    | "splitlines"
-                    | "strip"
-                    | "lstrip"
-                    | "rstrip"
-                    | "startswith"
-                    | "endswith"
-                    | "replace"
-                    | "join"
-                    | "lower"
-                    | "upper"
-                    | "removeprefix"
-                    | "removesuffix"
-                    | "encode"
-            ) =>
-        {
-            "str"
-        }
+        Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
         Value::Bytes(_) if matches!(attr, "decode" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
@@ -403,7 +406,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
-            "str" | "bytes" => text::method(ctx, method, args, kwargs),
+            "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 2)?;
@@ -459,6 +462,18 @@ pub(super) fn call(
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
         }
+        "globals" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("globals() takes no keyword arguments"));
+            }
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "globals() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            Ok(ctx.module_globals(ctx.heap.current_scope()))
+        }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
@@ -496,6 +511,30 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.instance_of(args[0], args[1])))
+        }
+        "ord" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("ord() takes no keyword arguments"));
+            }
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "ord() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let code = match ctx.heap.get(*value) {
+                Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
+                _ => {
+                    let text = ctx.str_value(*value).map_err(|_| {
+                        type_error(format!(
+                            "ord() expected string of length 1, but {} found",
+                            ctx.type_name(*value)
+                        ))
+                    })?;
+                    crate::objects::ord_char(text)?
+                }
+            };
+            Ok(ctx.int(i64::from(code)))
         }
         "len" => {
             positional(name, kwargs)?;

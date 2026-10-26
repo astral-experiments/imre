@@ -286,6 +286,12 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        (helpers / "uuid").mkdir()
+        uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
+        compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
+        (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
+        compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -339,11 +345,14 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_class_attribute.py",
+            "boxed_request_strings.py",
+            "boxed_module_globals.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
             "boxed_item_assignment.py",
+            "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
         ):

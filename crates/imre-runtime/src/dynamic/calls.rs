@@ -13,8 +13,8 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if kind == "dict" => {
-                self.builtins.get(&format!("dict.{name}")).copied()
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
         }
@@ -127,6 +127,9 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__init__"
                     ) || name.starts_with("dict.")
+                        || name
+                            .strip_prefix("str.")
+                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
                 }
                 _ => false,
             };
@@ -459,7 +462,10 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
-            Value::Function { fields, .. } => {
+            Value::Function { scope, fields, .. } => {
+                if name == "__globals__" {
+                    return Ok(self.module_globals(scope));
+                }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
@@ -572,7 +578,9 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
-            Value::Native(class) if class == "dict" => {
+            Value::Native(class)
+                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+            {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
                 }
@@ -587,8 +595,11 @@ impl Context {
                 name: module,
                 scope,
             } => {
-                if let Some(value) = self.scope_data(scope).names.get(name) {
-                    return Ok(*value);
+                if name == "__dict__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.scope_name(scope, name) {
+                    return Ok(value);
                 }
                 if stdlib::is_module(&module) {
                     let value = stdlib::attribute(self, &module, name)?;
@@ -689,6 +700,9 @@ impl Context {
                 name: module,
                 scope,
             } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }

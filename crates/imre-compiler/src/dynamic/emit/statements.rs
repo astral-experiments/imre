@@ -68,6 +68,21 @@ impl Function<'_, '_> {
                         self.assign(t, &value);
                     }
                 }
+                ast::Stmt::Delete(v) => {
+                    for target in &v.targets {
+                        match self.place(target) {
+                            Some(Place::Name(name)) => {
+                                self.op("delname", &[&self.scope.clone(), &name]);
+                            }
+                            Some(Place::Item(obj, key)) => {
+                                self.op("delitem", &[&obj, &key]);
+                            }
+                            _ => {
+                                self.unsupported("deletion target");
+                            }
+                        }
+                    }
+                }
                 ast::Stmt::AnnAssign(v) => {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);
@@ -544,7 +559,7 @@ impl Function<'_, '_> {
                 && let Some(name) = &h.name
             {
                 let name = self.text(name.as_str());
-                self.op("delname", &[&self.scope.clone(), &name]);
+                self.op("clearname", &[&self.scope.clone(), &name]);
             }
             self.jump(&done);
             self.label(&next);
