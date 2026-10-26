@@ -307,6 +307,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         token_missing: NONE,
+        codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
         builtins: HashMap::new(),
@@ -517,6 +518,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
             .values()
             .chain(ctx.classes.values())
             .chain(ctx.builtins.values())
+            .chain(ctx.codec_entries.roots())
             .copied()
             .chain(ctx.contexts.iter().copied())
             .chain(

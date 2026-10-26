@@ -30,6 +30,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     builtins: HashMap<String, Id>,
