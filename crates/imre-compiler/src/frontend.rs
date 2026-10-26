@@ -2206,9 +2206,20 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
-            let left = nested(&union.left)?;
-            let right = nested(&union.right)?;
-            types.union(&[left, right]).ok_or_else(|| {
+            // Check the complete annotation before deciding whether its arms have a layout.
+            // An intermediate str | int alone has no general representation.
+            let mut pending = vec![union.right.as_ref(), union.left.as_ref()];
+            let mut members = Vec::new();
+            while let Some(arm) = pending.pop() {
+                if let ast::Expr::BinOp(part) = arm
+                    && part.op == ast::Operator::BitOr
+                {
+                    pending.extend([part.right.as_ref(), part.left.as_ref()]);
+                } else {
+                    members.push(nested(arm)?);
+                }
+            }
+            types.union(&members).ok_or_else(|| {
                 error(
                     source,
                     expression,
