@@ -484,6 +484,41 @@ pub(crate) fn concat_bytes(left: &[u8], right: &[u8]) -> Result<Bytes> {
     Ok(result)
 }
 
+/// An unchanged immutable sequence keeps its original owner.
+pub(crate) fn repeat_bytes(bytes: &[u8], count: &Int) -> Result<Option<Bytes>> {
+    let count = native_size(count)?.max(0) as usize;
+    if count == 1 || bytes.is_empty() {
+        return Ok(None);
+    }
+    let length = bytes
+        .len()
+        .checked_mul(count)
+        .filter(|length| *length <= isize::MAX as usize)
+        .ok_or_else(|| Error::new(Kind::OverflowError, "repeated bytes are too long"))?;
+    let mut result = allocate(length)?;
+    for _ in 0..count {
+        result.extend_from_slice(bytes);
+    }
+    Ok(Some(result))
+}
+
+pub(crate) fn rstrip_bytes(data: &[u8], chars: &[u8]) -> Result<Option<Bytes>> {
+    let mut remove = [false; 256];
+    for &byte in chars {
+        remove[usize::from(byte)] = true;
+    }
+    let end = data
+        .iter()
+        .rposition(|&byte| !remove[usize::from(byte)])
+        .map_or(0, |last| last + 1);
+    if end == data.len() {
+        return Ok(None);
+    }
+    let mut result = allocate(end)?;
+    result.extend_from_slice(&data[..end]);
+    Ok(Some(result))
+}
+
 /// # Safety
 /// Both immutable byte inputs remain rooted; the caller owns the result.
 #[unsafe(no_mangle)]
@@ -508,24 +543,13 @@ pub unsafe extern "C" fn imre_bytes_concat(
 pub unsafe extern "C" fn imre_bytes_repeat(value: *const Bytes, count: usize) -> *const Bytes {
     // SAFETY: both exact immutable inputs remain rooted throughout repetition.
     let (bytes, count) = unsafe { (&*value, Int::borrow(count)) };
-    let result = (|| {
-        // Conversion precedes the empty-input/negative-count fast path in Python.
-        let count = native_size(&count)?.max(0) as usize;
-        if count == 1 || bytes.is_empty() {
+    let result = repeat_bytes(bytes, &count).map(|repeated| match repeated {
+        None => {
             // SAFETY: repetition preserves this rooted immutable input.
-            return Ok(unsafe { retained(value) });
+            unsafe { retained(value) }
         }
-        let length = bytes
-            .len()
-            .checked_mul(count)
-            .filter(|length| *length <= isize::MAX as usize)
-            .ok_or_else(|| Error::new(Kind::OverflowError, "repeated bytes are too long"))?;
-        let mut result = allocate(length)?;
-        for _ in 0..count {
-            result.extend_from_slice(bytes);
-        }
-        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(result)))
-    })();
+        Some(bytes) => crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)),
+    });
     finish(result, std::ptr::null())
 }
 

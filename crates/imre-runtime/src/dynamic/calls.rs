@@ -372,7 +372,8 @@ impl Context {
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
                     || (name == "RuntimeError" && kind == "RecursionError")
-                    || (name == "ValueError" && kind == "JSONDecodeError")
+                    || (name == "ValueError"
+                        && matches!(kind, "JSONDecodeError" | "binascii.Error"))
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (matches!(name.as_str(), "OSError" | "ConnectionError")
