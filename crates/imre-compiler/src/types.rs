@@ -40,6 +40,7 @@ enum Shape {
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
     RecordConstructor(usize, Vec<Type>),
+    PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
     DispatchCallable(DispatchFunction),
@@ -50,6 +51,14 @@ enum Shape {
     ProcessArgs(Type),
     Optional(Type),
     Union(Vec<Type>),
+}
+
+/// A partial's adapter keeps its original callable and, when representable, its public args tuple.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PartialFunction {
+    pub callable: Type,
+    pub frame: Type,
+    pub func_slot: usize,
 }
 
 /// The callable ABI stays unchanged; the frame owns both the wrappee and its cache.
@@ -224,6 +233,7 @@ impl Types {
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
+                        | Shape::PartialCallable(_)
                 )
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
@@ -349,6 +359,7 @@ impl Types {
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::DeclaredCache(callable, _) => vec![*callable],
+                Shape::PartialCallable(p) => vec![p.callable, p.frame],
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
@@ -1253,14 +1264,15 @@ impl Types {
         }
     }
 
-    /// The public positional ABI of a wrapper, including nested applied caches.
-    pub(crate) fn cache_signature(&self, ty: Type) -> Option<Type> {
+    /// The positional ABI that a partial or cache exposes through a plain Callable.
+    pub(crate) fn wrapper_signature(&self, ty: Type) -> Option<Type> {
         let shapes = self.0.borrow();
         let mut current = ty;
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
                 Shape::DeclaredCache(underlying, _) => *underlying,
                 Shape::CachedCallable(cache) => cache.callable,
+                Shape::PartialCallable(p) => p.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
             };
@@ -1307,6 +1319,18 @@ impl Types {
         }
     }
 
+    pub(crate) fn partial_callable(&self, layout: PartialFunction) -> Type {
+        Type::Callable(self.intern(Shape::PartialCallable(layout)))
+    }
+
+    pub(crate) fn partial_function(&self, ty: Type) -> Option<PartialFunction> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes[id] {
+            Shape::PartialCallable(layout) => Some(layout),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_dispatch_registry(&self, ty: Type) -> bool {
         matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DispatchRegistry(_)))
     }
@@ -1319,6 +1343,7 @@ impl Types {
             Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
+            Shape::PartialCallable(p) => self.signature(p.callable),
             _ => unreachable!("callable type identity has a callable shape"),
         }
     }
@@ -1692,6 +1717,7 @@ impl TypeDescription<'_> {
                 self.write_str("type[")?;
                 self.write_type(Type::Class(*class))?;
             }
+            Shape::PartialCallable(p) => return self.write_type(p.callable),
             Shape::Callable(params, returns) => {
                 self.write_str("Callable[[")?;
                 self.write_types(params, ", ")?;

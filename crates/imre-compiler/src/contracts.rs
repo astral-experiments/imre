@@ -768,6 +768,7 @@ impl Builtin {
             }
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
+                    .or_else(|| types.partial_function(callable.ty).map(|p| p.frame))
                     .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
             }
             Self::EmptyPartial => {

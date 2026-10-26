@@ -49,6 +49,68 @@ fn raised(ty: Type, mut arguments: Vec<Expr>, message: &str) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn is_partial_args(&self, expr: &Expr) -> bool {
+        let ExprKind::Field(frame, slot) = &expr.kind else {
+            return false;
+        };
+        let ExprKind::Builtin(Builtin::CallableContext, values) = &frame.kind else {
+            return false;
+        };
+        matches!(values.as_slice(), [wrapper] if self.types.partial_function(wrapper.ty).is_some_and(|p| p.func_slot + 1 == *slot))
+    }
+
+    /// Read a retained native field, including when an empty wrapper borrows its parent's frame.
+    pub(super) fn partial_attribute(&self, receiver: &Expr, name: &str) -> Option<Expr> {
+        let layout = self.types.partial_function(receiver.ty)?;
+        let slot = match name {
+            "func" => layout.func_slot,
+            "args" => layout.func_slot + 1,
+            _ => return None,
+        };
+        let ty = *self.types.fields(layout.frame)?.get(slot)?;
+        let frame = Expr {
+            ty: layout.frame,
+            kind: ExprKind::Builtin(Builtin::CallableContext, vec![receiver.clone()]),
+        };
+        Some(Expr {
+            ty,
+            kind: ExprKind::Field(Box::new(frame), slot),
+        })
+    }
+
+    /// Fill an inner partial's placeholders before appending outer operands, as the constructor does.
+    fn partial_args_tuple(&self, inner: Option<Expr>, values: &[Expr]) -> Option<Expr> {
+        let marker = Type::Placeholder(PlaceholderKind::Value);
+        let mut supplied = values.iter().cloned();
+        let mut args = Vec::new();
+        if let Some(inner) = inner {
+            for (index, ty) in self.types.fields(inner.ty)?.into_iter().enumerate() {
+                let field = || Expr {
+                    ty,
+                    kind: ExprKind::Field(Box::new(inner.clone()), index),
+                };
+                args.push(if ty == marker {
+                    supplied.next().unwrap_or_else(field)
+                } else {
+                    field()
+                });
+            }
+        }
+        args.extend(supplied);
+        // A partial can capture callbacks in its private frame, even when exposing their
+        // tuple would exceed the native public tuple storage contract.
+        if args
+            .iter()
+            .any(|arg| callables::contains_callable(arg.ty, self.types))
+        {
+            return None;
+        }
+        Some(Expr {
+            ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
+            kind: ExprKind::Tuple(args),
+        })
+    }
+
     /// Retain each element of a tuple display without storing its callable in a public tuple.
     fn partial_spread(
         &mut self,
@@ -188,23 +250,36 @@ impl Checker<'_> {
         // the receiver before any bound arguments; a dynamic target owns the
         // callable itself in position zero of the private, immutable frame.
         let mut captured = Vec::new();
-        let (target, receiver) = match callable.kind {
+        let inner_layout = self.types.partial_function(callable.ty);
+        let (target, receiver, original) = match callable.kind {
+            ExprKind::Builtin(Builtin::StaticFunction(function), _) => {
+                // Use the actual module function object for partial.func.
+                (
+                    Target::Direct(function),
+                    false,
+                    Some(scope.hold(self, callable)),
+                )
+            }
             ExprKind::Callable { function, receiver } => {
                 let has_receiver = receiver.is_some();
                 if let Some(receiver) = receiver {
                     captured.push(scope.hold(self, *receiver));
                 }
-                (Target::Direct(function), has_receiver)
-            }
-            ExprKind::Builtin(Builtin::StaticFunction(function), _) => {
-                // The function object carries metadata, but still calls this exact definition.
-                // Retain it in the partial and construct a distinct forwarding callable.
-                captured.push(scope.hold(self, callable));
-                (Target::Direct(function), false)
+                let retained = scope.hold(
+                    self,
+                    Expr {
+                        ty: callable.ty,
+                        kind: ExprKind::Callable {
+                            function,
+                            receiver: captured.first().cloned().map(Box::new),
+                        },
+                    },
+                );
+                (Target::Direct(function), has_receiver, Some(retained))
             }
             _ => {
                 captured.push(scope.hold(self, callable));
-                (Target::Indirect, false)
+                (Target::Indirect, false, None)
             }
         };
         let marker = Type::Placeholder(PlaceholderKind::Value);
@@ -255,7 +330,11 @@ impl Checker<'_> {
         if evaluated.is_empty() && matches!(target, Target::Indirect) {
             // No arguments change the target's ABI. Keep its identity as the owner
             // of a new partial rather than emitting a recursive forwarding helper.
-            let ty = self.types.callable(parameters, returns);
+            let ty = if inner_layout.is_some() {
+                captured[0].ty
+            } else {
+                self.types.callable(parameters, returns)
+            };
             let original = self.coerce(captured[0].clone(), ty, function)?;
             return Ok(scope.finish(Expr {
                 ty,
@@ -275,6 +354,27 @@ impl Checker<'_> {
                 slots.push((false, remaining.len(), ty));
             }
         }
+        let inherited = inner_layout.map(|_| original.as_ref().unwrap_or(&captured[0]).clone());
+        let func = match &inherited {
+            Some(inner) => self.partial_attribute(inner, "func"),
+            None => original,
+        };
+        let func_slot = func.map(|func| {
+            let slot = captured.len();
+            captured.push(func);
+            // Erased Callable parameters can conceal a partial with a different underlying
+            // signature. Only publish metadata when the root is known at construction.
+            let previous = inherited
+                .as_ref()
+                .and_then(|inner| self.partial_attribute(inner, "args"));
+            if inherited.is_none() || previous.is_some() {
+                let values: Vec<_> = evaluated.iter().map(|(value, _)| value.clone()).collect();
+                if let Some(args) = self.partial_args_tuple(previous, &values) {
+                    captured.push(args);
+                }
+            }
+            slot
+        });
         let frame = self
             .types
             .partial_frame(captured.iter().map(|v| v.ty).collect());
@@ -333,7 +433,14 @@ impl Checker<'_> {
                     .error(function, "recursive calls through partial are unsupported"),
             },
         );
-        let ty = self.types.callable(remaining, returns);
+        let callable = self.types.callable(remaining, returns);
+        let ty = func_slot.map_or(callable, |func_slot| {
+            self.types.partial_callable(crate::types::PartialFunction {
+                callable,
+                frame,
+                func_slot,
+            })
+        });
         let context = Expr {
             ty: frame,
             kind: ExprKind::Tuple(captured),

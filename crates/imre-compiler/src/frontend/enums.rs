@@ -311,7 +311,7 @@ impl Checker<'_> {
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
             && [left.ty, right.ty].iter().all(|&ty| {
-                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                let signature = self.types.wrapper_signature(ty).unwrap_or(ty);
                 self.types
                     .signature(signature)
                     .is_some_and(|(params, result)| {
@@ -368,7 +368,7 @@ impl Checker<'_> {
                 matches!(
                     value.kind,
                     ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
-                )
+                ) || self.is_partial_args(value)
             });
         // Namespace owners and their backing dictionaries are distinct rooted
         // objects. Optional storage preserves their pointer words and None tag.

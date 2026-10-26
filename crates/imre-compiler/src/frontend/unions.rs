@@ -89,6 +89,16 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if self
+            .types
+            .partial_function(ty)
+            .is_some_and(|p| p.callable == value.ty)
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
         if matches!(value.ty, Type::AnnotationValue(_)) {
             let Type::Tuple(layout) = self.types.tuple(vec![ty]) else {
                 unreachable!()
