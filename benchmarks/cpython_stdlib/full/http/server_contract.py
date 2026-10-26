@@ -8,6 +8,7 @@ from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 lookups: list[str] = []
+messages: list[str] = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -36,10 +37,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.run_wsgi
         raise AttributeError(name)
 
+    def log_message(self, format: str, *args: object) -> None:
+        messages.append(format % args)
+
     def run_wsgi(self) -> None:
         command = self.command
         assert command == 'GET' or command == 'CHECK'
         assert lookups[-1] == lookups[-2]
+        self.log_request(HTTPStatus.CREATED, 500000000000)
+        assert messages[-1] == '"' + self.requestline + '" 201 500000000000'
+        self.log_request('ready', '-')
+        assert messages[-1] == '"' + self.requestline + '" ready -'
         headers = self.headers
         if isinstance(headers, dict):
             assert not headers

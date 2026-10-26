@@ -53,6 +53,15 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _log_text(value: str | int | HTTPStatus) -> str:
+    if isinstance(value, HTTPStatus):
+        return str(value.value)
+    elif isinstance(value, str):
+        return value
+    else:
+        return str(value)
+
+
 class HTTPServer(socketserver.TCPServer):
     allow_reuse_address = True
     allow_reuse_port = False
@@ -398,15 +407,8 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         year, month, day, hh, mm, ss, wd, yd, dst = time.localtime(time.time())
         return "%02d/%s/%04d %02d:%02d:%02d" % (day, str(self.monthname[month]), year, hh, mm, ss)
 
-    def log_request(self, code: str | int | HTTPStatus = "-", size: str | int = "-") -> None:
-        if isinstance(code, HTTPStatus):
-            text = str(code.value)
-        elif isinstance(code, str):
-            text = code
-        else:
-            text = str(code)
-        size_text = size if isinstance(size, str) else str(size)
-        self.log_message('"%s" %s %s', self.requestline, text, size_text)
+    def log_request(self, code: str | int | HTTPStatus = "-", size: str | int | HTTPStatus = "-") -> None:
+        self.log_message('"%s" %s %s', self.requestline, _log_text(code), _log_text(size))
 
     def log_error(self, format: str, *args: object) -> None:
         self.log_message(format, *args)
