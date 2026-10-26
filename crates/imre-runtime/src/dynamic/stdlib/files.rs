@@ -2,7 +2,9 @@ use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+use super::{
+    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
+};
 
 /// One buffered cursor serves filesystem input and a socket retained by makefile.
 pub(in crate::dynamic) enum ReadSource {
