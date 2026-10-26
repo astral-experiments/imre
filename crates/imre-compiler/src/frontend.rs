@@ -1131,7 +1131,10 @@ pub(crate) fn lower_with_caller_cache(
                 .command_startup
                 .as_ref()
                 .is_some_and(|(flags, _)| flags.isolated),
-            command_utf8_mode: graph.command_startup.as_ref().map(|(flags, _)| flags.utf8_mode),
+            command_utf8_mode: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.utf8_mode),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,

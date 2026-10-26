@@ -94,7 +94,11 @@ fn error_text(text: &str) -> super::Result<StrOwner> {
     StrOwner::try_new(Str::new(text)).map_err(|_| crate::Error::allocation())
 }
 
-fn stdout_chunk(out: &mut Output, text: &str, error_input: impl FnOnce() -> super::Result<StrOwner>) -> super::Result<()> {
+fn stdout_chunk(
+    out: &mut Output,
+    text: &str,
+    error_input: impl FnOnce() -> super::Result<StrOwner>,
+) -> super::Result<()> {
     let settings = encoding::settings(false, None);
     if !out.captures.is_empty()
         || matches!(settings.codec, Codec::Utf8 { signature: false })
@@ -118,7 +122,11 @@ pub(super) fn write_stdout(text: &str, newline: bool) -> super::Result<()> {
 }
 
 /// Keep the original Python string when a direct stream write fails to encode it.
-pub(super) fn write_stdout_with(text: &str, newline: bool, error_input: impl FnOnce() -> super::Result<StrOwner>) -> super::Result<()> {
+pub(super) fn write_stdout_with(
+    text: &str,
+    newline: bool,
+    error_input: impl FnOnce() -> super::Result<StrOwner>,
+) -> super::Result<()> {
     let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
     stdout_chunk(&mut out, text, error_input)?;
     if newline {
