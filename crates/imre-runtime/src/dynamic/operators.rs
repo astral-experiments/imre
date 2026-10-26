@@ -189,6 +189,9 @@ impl Context {
                 a == b
             }
             (Value::Native(a), Value::Native(b)) => a == b,
+            (Value::GenericAlias(a), Value::GenericAlias(b)) => {
+                a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
+            }
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
@@ -444,6 +447,22 @@ impl Context {
                 format!("{kind}({args})")
             }
             Value::Raised(error) => self.exception_message(error, active),
+            Value::GenericAlias(alias) => alias.repr(self),
+            Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
+                name.clone()
+            }
+            Value::TypeVar(var) => {
+                let variance = if var.covariant {
+                    "+"
+                } else if var.contravariant {
+                    "-"
+                } else if var.infer_variance {
+                    ""
+                } else {
+                    "~"
+                };
+                format!("{variance}{}", self.display(var.name))
+            }
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
@@ -473,6 +492,9 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Some(value) = super::typing::subscribe(self, obj, key) {
+            return value;
+        }
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
             return self.call(getter, vec![key], Vec::new());
         }

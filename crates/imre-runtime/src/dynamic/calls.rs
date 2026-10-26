@@ -81,6 +81,7 @@ impl Context {
         matches!(
             self.heap.get(value),
             Value::Class { .. }
+                | Value::GenericAlias(_)
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
                 | Value::StaticMethod { .. }
@@ -291,6 +292,8 @@ impl Context {
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
             Value::StaticMethod { .. } => "staticmethod",
+            Value::TypeVar(_) => "typing.TypeVar",
+            Value::GenericAlias(alias) => alias.kind.class(),
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -300,6 +303,12 @@ impl Context {
                 _ => return None,
             },
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
+                if name == "typing.Any" {
+                    return Some("typing._AnyMeta");
+                }
+                if name == "typing.Callable" {
+                    return Some("typing._CallableType");
+                }
                 if builtins::is_builtin_type(name)
                     || matches!(
                         name.as_str(),
@@ -321,6 +330,13 @@ impl Context {
                             | "operator.attrgetter"
                             | "traceback"
                             | "frame"
+                            | "typing.TypeVar"
+                            | "typing._GenericAlias"
+                            | "typing._CallableGenericAlias"
+                            | "typing._CallableType"
+                            | "typing._AnyMeta"
+                            | "types.GenericAlias"
+                            | "collections.abc._CallableGenericAlias"
                     )
                 {
                     "type"
@@ -371,6 +387,9 @@ impl Context {
     }
 
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
+        if self.classes.get("collections.abc.Callable") == Some(&class) {
+            return self.callable(value);
+        }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
@@ -538,6 +557,9 @@ impl Context {
         }
         if name == "__class__" {
             return self.exact_type(obj);
+        }
+        if let Some(value) = super::typing::attribute(self, obj, name) {
+            return value;
         }
         match self.heap.get(obj).clone() {
             Value::Raised(error)
@@ -1158,6 +1180,17 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
+            Value::GenericAlias(alias) => {
+                let result = self.call(alias.origin, args, kwargs)?;
+                if matches!(self.heap.get(result), Value::Instance { .. })
+                    && let Err(error) = self.set_attr(result, "__orig_class__", callable)
+                    && !alias.kind.is_typing_alias()
+                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                {
+                    return Err(error);
+                }
+                Ok(result)
+            }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
@@ -1259,6 +1292,18 @@ impl Context {
             } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.classes.get("collections.abc.Callable") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate abstract class Callable without an implementation for abstract method '__call__'",
+                    ));
+                }
+                if self.classes.get("typing.Generic") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate typing.Generic directly",
+                    ));
                 }
                 if ancestors.iter().any(|&base| {
                     matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
@@ -1455,7 +1500,7 @@ impl Context {
 
     pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
         let name = self.str_value(name)?.to_owned();
-        let bases = self.items(bases)?;
+        let (original, bases) = super::typing::resolve_bases(self, bases)?;
         let Value::Function {
             scope: parent,
             code,
@@ -1478,12 +1523,8 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
-        let ancestors = self.linearized_bases(&bases)?;
-        let class = self.alloc(Value::Class {
-            name: name.clone(),
-            scope,
-            ancestors,
-        });
+        super::typing::class_parameters(self, scope, original, &bases)?;
+        let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()

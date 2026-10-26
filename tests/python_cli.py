@@ -396,6 +396,8 @@ def report(text):
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
+        compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")

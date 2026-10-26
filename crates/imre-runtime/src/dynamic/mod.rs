@@ -12,6 +12,7 @@ mod property;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod typing;
 mod value;
 mod zip;
 
@@ -56,6 +57,7 @@ pub(crate) struct Context {
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
+    typing: typing::Registry,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     pending: Option<Error>,
@@ -457,6 +459,7 @@ impl Context {
         self.alloc(Value::Scope(Scope {
             class_body: None,
             class_cell: None,
+            class_lineage: None,
             first_argument: None,
             names: Default::default(),
             namespace: None,

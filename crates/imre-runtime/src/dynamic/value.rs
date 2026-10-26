@@ -170,6 +170,8 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::TypeVar(_) => "TypeVar",
+            Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
@@ -247,6 +249,7 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub class_cell: Option<Id>,
+    pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
@@ -334,6 +337,8 @@ pub(super) enum Value {
         scope: Id,
         ancestors: Vec<Id>,
     },
+    TypeVar(super::typing::TypeVariable),
+    GenericAlias(super::typing::Alias),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
@@ -498,6 +503,9 @@ impl Value {
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
+                if let Some((bases, mro)) = scope.class_lineage {
+                    visit.extend([bases, mro]);
+                }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
@@ -528,6 +536,8 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
+            Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
+            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
             Self::Instance {
                 class,
                 fields,
