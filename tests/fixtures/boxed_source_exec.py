@@ -31,8 +31,25 @@ class GlobalDict(dict):
         raise AssertionError("global deletion called __delitem__")
 
 
+class ComparisonResult:
+    def __bool__(self):
+        raise AssertionError("final comparison coerced")
+
+
+comparison_result = ComparisonResult()
+
+
+class Comparable:
+    def __eq__(self, other):
+        return comparison_result
+
+
 def current():
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
+    namespace["left"] = Comparable()
+    namespace["right"] = object()
+    exec("comparison = left == right", namespace)
+    print(namespace["comparison"] is comparison_result)
     local = {"default": 1}
     text = (
         "def root(value=default):\n"
