@@ -511,8 +511,7 @@ impl Context {
                 return Ok(self.token_missing);
             }
             Value::Native(class)
-                if class == "dict"
-                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
