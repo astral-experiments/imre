@@ -55,7 +55,7 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
-            Self::Bool => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::ObjectValue | Type::List(_) | Type::Optional(_))), PreservesLists),
+            Self::Bool => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_))), PreservesLists),
             Self::Len => Contract::new(
                 args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
                 PreservesLists,

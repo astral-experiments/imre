@@ -14,6 +14,10 @@ def truth(item: object) -> bool:
     return bool(item)
 
 
+def union_truth(value: list[str] | str) -> bool:
+    return bool(value)
+
+
 def check(mode: str, shape: str) -> None:
     left = [argv[3], argv[4]]
     right = [argv[4], argv[3]]
@@ -59,6 +63,11 @@ def check(mode: str, shape: str) -> None:
                 rows.reverse()
             elif mode == "repr":
                 value = repr(rows)
+            elif mode == "union":
+                if union_truth(rows):
+                    number = 1
+            elif mode == "frozen":
+                number = len(frozenset(rows))
             elif mode == "boxed":
                 if truth(boxed):
                     number = 1

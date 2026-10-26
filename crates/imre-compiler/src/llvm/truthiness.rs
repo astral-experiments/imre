@@ -108,10 +108,12 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ne i64 {length}, 1"))
                 }
                 Type::Union(_) => {
-                    let byte = self.instruction(format!(
-                        "call i32 @imre_union_truthy(i64 {})",
-                        value.operand
-                    ));
+                    let call = format!("call i32 @imre_union_truthy(i64 {})", value.operand);
+                    let byte = if self.module.types.truth_may_materialize(value.ty) {
+                        self.checked_instruction(call)
+                    } else {
+                        self.instruction(call)
+                    };
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
                 Type::ChainMap(_) => {

@@ -15,7 +15,7 @@ def check(args, directory):
     if args.lto_linker is not None:
         link += ["--lto-linker", args.lto_linker.resolve()]
     source = fixtures / "retry.py"
-    modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed")
+    modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
     passed = 0
@@ -32,7 +32,7 @@ def check(args, directory):
             count = int(re.fullmatch(rb"observed (\d+)\n", control.stderr)[1])
             assert count > 0, (level, argv, "no allocations observed")
             # repr's output buffer is covered separately; target its first row allocation.
-            if argv[0] == "repr":
+            if argv[0] in ("repr", "frozen"):
                 indices = (1,)
             elif argv[0] in ("pack-project", "restore"):
                 indices = {1, count // 2, count}

@@ -206,10 +206,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            let tested = targets.types.payload(left.ty).unwrap_or(left.ty);
-            tested == Type::ObjectValue
-                || (matches!(tested, Type::List(_))
-                    && targets.types.element(tested) == Some(Type::Str))
+            targets.types.truth_may_materialize(left.ty)
                 || expression(left, functions, targets)
                 || expression(right, functions, targets)
         }
