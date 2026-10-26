@@ -1671,8 +1671,8 @@ share the native `is` operator, including through stored bound assertions.
 They evaluate the receiver and arguments once, and only format operands on failure.
 A source instance whose `__repr__` raises an `Exception` uses its default object
 representation. The assertion honors `longMessage`, `fail` and `failureException`.
-Both operands need a supported native identity; e.g., equal but separately allocated
-lists are distinguishable, while arbitrary object boxes and nonempty fixed tuples
+The operands need supported native identity and failure representations. Equal but
+separately allocated lists are distinguishable, while arbitrary object boxes and nonempty fixed tuples
 cannot generally be compared by identity. See the [unchanged upstream cases](../benchmarks/cpython_stdlib/full/unittest/identity-assertions.md).
 
 `with case.assertRaises(Expected, msg=...) as caught:` catches builtin and

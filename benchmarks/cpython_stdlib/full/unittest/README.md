@@ -66,9 +66,9 @@ compares complete failure messages, including first differing and extra list
 elements, Unicode, truncation, custom messages, and a subclass's failure class.
 It adds no upstream IDs.
 
-At each of O0 and O3: 17 fully native passes, 9 native bodies with host
-fixtures, 12 host-driven native operations (48 calls), 29 compile blockers,
-1,021 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
+At each of O0 and O3: 17 fully native passes, 11 native bodies with host
+fixtures, 12 host-driven native operations (48 calls), 23 compile blockers,
+6 fixture blockers, 1,019 reference-only and 2 reference skips. The [versioned evidence reports](native-linux.json) retain
 all 2,180 records and their [field definitions](../../NATIVE_EVIDENCE.md).
 
 The [native loader example](NATIVE_LOADER.md) exercises the same original

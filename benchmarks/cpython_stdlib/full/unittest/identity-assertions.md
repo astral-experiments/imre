@@ -13,6 +13,8 @@ The pinned CPython 3.14.5 default suites discover 31 occurrences in `test.test_b
 | `test.test_patma.TestPatma.test_patma_006` | `case.py:9:9` | fully native in all four |
 | `test.test_patma.TestPatma.test_patma_007` | `case.py:9:9` | fully native in all four |
 
+The failure locations were reproduced on [Imre `665f80b9`](https://github.com/astral-sh/imre/commit/665f80b94ff4853b343f2065cce6e3e0bf7e71a1). The [measured compiler change](https://github.com/astral-sh/imre/commit/4649faca7189f00c4b8e579a1b7a4233ed555ad1) changes 32 observations across the four configurations; all 1,404 other observations are identical.
+
 The shared [runner](../../suite_native.py) compiles the checksum-verified method with its original imports, then runs `unittest.main()` in a native child and checks the verbose test ID, result and process status. All four roles in these eight observations (body, assertions, operation and fixture) are `imre`. CPython discovery and the independent regrtest reference run do not execute the measured native operations.
 
 ## Reproduce
