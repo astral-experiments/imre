@@ -272,6 +272,8 @@ impl Builtin {
                         | crate::ir::LogOperation::LockExit
                         | crate::ir::LogOperation::LockRelease
                         | crate::ir::LogOperation::InvalidLevel
+                        | crate::ir::LogOperation::NewManager
+                        | crate::ir::LogOperation::Manager
                         | crate::ir::LogOperation::Enabled
                 ),
                 PreservesLists,
@@ -1047,6 +1049,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_lock_exit"
                 | "imre_log_lock_release"
                 | "imre_log_invalid_level"
+                | "imre_log_manager_new"
+                | "imre_log_manager"
                 | "imre_log_is_enabled"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"

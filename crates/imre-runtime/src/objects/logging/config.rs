@@ -80,6 +80,7 @@ pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
             if unsafe {
                 current
                     .handlers
+                    .borrow()
                     .0
                     .with(|s| !s.sequence_storage().values.is_empty())
             } {
@@ -245,6 +246,7 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
         .transpose()?;
     let logger = logger_level(name, threshold);
     if !incremental {
+        super::delivery::remove_configured_handlers(&logger);
         for key in ["handlers", "filters"] {
             if get(&cfg, key).is_some_and(|v| v.truth()) {
                 return Err(unsupported(key));
@@ -266,7 +268,7 @@ fn configure_logger(name: &str, spec: &Value, incremental: bool, root: bool) -> 
     Ok(())
 }
 
-fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool) {
+fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool) -> Result<()> {
     for name in old {
         if configured.contains(name) {
             continue;
@@ -275,11 +277,15 @@ fn previous_loggers(configured: &HashSet<String>, old: &[String], disable: bool)
             .match_indices('.')
             .any(|(end, _)| configured.contains(&name[..end]))
         {
-            logger_level(name, Int::small(0)).propagate.set(true);
+            let logger = logger_level(name, Int::small(0));
+            let replacement = super::delivery::empty_handlers()?;
+            drop(logger.handlers.replace(replacement));
+            logger.propagate.set(true);
         } else {
             logger_level(name, None).disabled.set(disable);
         }
     }
+    Ok(())
 }
 
 fn configure(cfg: Pairs) -> Result<()> {
@@ -340,7 +346,7 @@ fn configure(cfg: Pairs) -> Result<()> {
             &configured,
             &old,
             get(&cfg, "disable_existing_loggers").is_none_or(|v| v.truth()),
-        );
+        )?;
     }
     if let Some(root) = get(&cfg, "root")
         && root.truth()
@@ -602,12 +608,11 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             "list.remove(x): x not in list",
         ));
     }
-    if let Some(level) = section("logger_root")?.get("level") {
-        logger_level(
-            "root",
-            Some(levels::named_level(&Str::from(level.as_str()))?),
-        );
-    }
+    let threshold = section("logger_root")?
+        .get("level")
+        .map(|level| levels::named_level(&Str::from(level.as_str())))
+        .transpose()?;
+    super::delivery::remove_configured_handlers(&logger_level("root", threshold));
     if !option("logger_root", "handlers")?.is_empty() {
         return Err(unsupported("root handlers"));
     }
@@ -632,6 +637,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             .map(|s| levels::named_level(&Str::from(s.as_str())))
             .transpose()?;
         let logger = logger_level(name, threshold);
+        super::delivery::remove_configured_handlers(&logger);
         if !option(&section_name, "handlers")?.is_empty() {
             return Err(unsupported("named handlers"));
         }
@@ -651,8 +657,7 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
         logger.propagate.set(propagate);
         configured.insert(name.to_owned());
     }
-    previous_loggers(&configured, &old, disable);
-    Ok(())
+    previous_loggers(&configured, &old, disable)
 }
 
 /// # Safety

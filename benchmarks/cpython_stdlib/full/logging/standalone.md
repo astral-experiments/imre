@@ -31,3 +31,22 @@ retains its earlier measurement.
   --cpython-source /path/to/pinned/source --imre /path/to/imre \
   --runtime /path/to/libimre_runtime.a --clang /path/to/clang --result /tmp/standalone.json
 ```
+
+The Linux allocation probe links [a small allocator wrapper](manager_allocation.c)
+to a [native Python fixture](manager_allocation.py). It refuses the first
+allocation for the shared manager and for a private manager. Each runtime
+call returns null with an exception pending. Python catches both
+`MemoryError` exceptions across a helper call, retries, and checks shared
+identity and both present and absent roots. This probe has no upstream test ID.
+
+```sh
+suite=benchmarks/cpython_stdlib/full/logging
+for level in 0 3; do
+    "$imre" build "$suite/manager_allocation.py" --runtime "$runtime" --clang "$clang" \
+        --opt-level "$level" --no-cache --emit-llvm "$output/manager.ll" -o "$output/plain"
+    "$clang" -O"$level" "$output/manager.ll" "$suite/manager_allocation.c" "$runtime" \
+        -Wl,--wrap=malloc,--wrap=imre_log_manager,--wrap=imre_log_manager_new \
+        -lm -ldl -lpthread -o "$output/manager-failure"
+    "$output/manager-failure"
+done
+```

@@ -27,6 +27,7 @@ print((urlsplit("http://ÉΣ.example:0042").hostname,))
 inspect_bytes(b"HTTP://a%40b:p@HOST:080/a?x#f")
 inspect_bytes(b"http://[FE80::abc%ZoNE]:42/a")
 inspect_bytes(b"relative")
+print(urlsplit("http://[vA.example]/"))
 parsed = urlsplit("/foo")
 scheme, authority, path, query, fragment = parsed
 print(parsed._fields)
@@ -44,7 +45,7 @@ try:
     print(SplitResultBytes(b"", b"", b"/\xff", b"", b"").decode())
 except UnicodeDecodeError as error:
     print(str(error))
-for invalid in ("//[", "//[127.0.0.1]", "//[a::b::c]", "//[v.h]", "//[::1]junk",
+for invalid in ("//[", "//[127.0.0.1]", "//[a::b::c]", "//[v.h]", "//[V1.example]", "//[::1]junk",
                 "//\uff0f", "//user\u2100example:443"):
     try:
         print(urlsplit(invalid))

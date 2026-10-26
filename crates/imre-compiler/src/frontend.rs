@@ -1804,6 +1804,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
+        Some(Binding::Intrinsic(Intrinsic::LogManager)) => return Ok(Type::LogManager),
         Some(Binding::Intrinsic(Intrinsic::TimedFileHandler)) => return Ok(Type::TimedFileHandler),
         Some(Binding::Intrinsic(Intrinsic::ClockTime)) => return Ok(Type::ClockTime),
         Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => return Ok(Type::Calendar(kind)),
@@ -2200,9 +2201,20 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
-            let left = nested(&union.left)?;
-            let right = nested(&union.right)?;
-            types.union(&[left, right]).ok_or_else(|| {
+            // Check the complete annotation before deciding whether its arms have a layout.
+            // An intermediate str | int alone has no general representation.
+            let mut pending = vec![union.right.as_ref(), union.left.as_ref()];
+            let mut members = Vec::new();
+            while let Some(arm) = pending.pop() {
+                if let ast::Expr::BinOp(part) = arm
+                    && part.op == ast::Operator::BitOr
+                {
+                    pending.extend([part.right.as_ref(), part.left.as_ref()]);
+                } else {
+                    members.push(nested(arm)?);
+                }
+            }
+            types.union(&members).ok_or_else(|| {
                 error(
                     source,
                     expression,
@@ -7422,6 +7434,9 @@ impl<'a> Checker<'a> {
                 if let Type::Patch(kind) = receiver.ty {
                     return self.patch_attribute(kind, receiver, attribute);
                 }
+                if receiver.ty == Type::LogManager {
+                    return self.log_manager_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -8472,6 +8487,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return self.log_record(call),
             Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
             Some(Binding::Intrinsic(Intrinsic::Logger)) => return self.new_logger(call),
+            Some(Binding::Intrinsic(Intrinsic::LogManager)) => return self.new_log_manager(call),
             Some(Binding::Intrinsic(
                 symbol @ (Intrinsic::AddLevelName
                 | Intrinsic::GetLevelName

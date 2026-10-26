@@ -30,13 +30,19 @@ formatters, and ordinary, timed and [size-based rotation](rotation.md). The coun
 
 The [standalone logger comparison](standalone.md) measures the original handler-removal loop.
 
+The [manager cleanup comparison](manager-cleanups-linux.json) exercises both original enablement methods and their deferred restorations.
+CPython runs both test bodies, their assertions and the original unittest cleanup stack.
+Imre reads and writes the logger and manager state, including both deferred restorations.
+The [direct manager comparison](manager_values.py) covers shared identity, private manager roots and thresholds, and cache behavior.
+CPython also accepts assignment to `logger.manager`. Imre rejects that assignment at compile time.
+
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
 | Imre | Imre | Imre | CPython hooks and native child | 22 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| CPython | CPython | Imre | CPython hooks and native child | 1 |
-| Blocked before execution | | | | 203 |
+| CPython | CPython | Imre | CPython hooks and native child | 3 |
+| Blocked before execution | | | | 201 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -50,7 +56,7 @@ The stream replacement method checks sys.stderr, the old stream, and the unchang
 Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
 FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
-CPython output helper. The 40 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 42 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual

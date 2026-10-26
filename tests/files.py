@@ -839,6 +839,10 @@ def main() -> None:
         for name, source, category in cases:
             project = temporary / name
             project.mkdir()
+            if name == "script_search_path" and os.name == "posix":
+                alias = temporary / "linked-script-directory"
+                alias.symlink_to(project.name, target_is_directory=True)
+                project = alias
             path = project / "main.py"
             path.write_text(dedent(source), encoding="utf-8")
             (project / "bridge.py").write_text(BRIDGE, encoding="utf-8")

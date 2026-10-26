@@ -1,0 +1,236 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "levels": {
+    "0": {
+      "test.test_logging.LoggerTest.test_is_enabled_for": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Logger and manager reads, writes, enablement and registered cleanup",
+          "opt_level": 0,
+          "method_sha256": "bf8fc46220f5871bd7f25d083a0125a8739ae51edbdec15f99f6304a8877aeed",
+          "fixture": "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, detached logger, recording handler, manager and cleanup writes",
+          "native_body_blocker": {
+            "source": "Lib/test/test_logging.py:6172",
+            "statement": "self.addCleanup(setattr, self.logger.manager, 'disable', old_disable)",
+            "diagnostic": "unknown class method"
+          },
+          "body_calls": [
+            [
+              "manager"
+            ],
+            [
+              "limit"
+            ],
+            [
+              "manager"
+            ],
+            [
+              "set-limit",
+              23
+            ],
+            [
+              "manager"
+            ],
+            [
+              "enabled",
+              22
+            ]
+          ],
+          "cleanup_calls": [
+            [
+              "set-limit",
+              0
+            ]
+          ],
+          "restored": {
+            "disable": 0,
+            "disabled": false
+          }
+        }
+      },
+      "test.test_logging.LoggerTest.test_is_enabled_for_disabled_logger": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Logger and manager reads, writes, enablement and registered cleanup",
+          "opt_level": 0,
+          "method_sha256": "f7750847ece9090c656cc836c33327887097074d23acc3ae07d01e666fbe2c8e",
+          "fixture": "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, detached logger, recording handler, manager and cleanup writes",
+          "native_body_blocker": {
+            "source": "Lib/test/test_logging.py:6182",
+            "statement": "self.addCleanup(setattr, self.logger, 'disabled', old_disabled)",
+            "diagnostic": "unknown class method"
+          },
+          "body_calls": [
+            [
+              "disabled"
+            ],
+            [
+              "manager"
+            ],
+            [
+              "limit"
+            ],
+            [
+              "set-disabled",
+              true
+            ],
+            [
+              "manager"
+            ],
+            [
+              "set-limit",
+              21
+            ],
+            [
+              "manager"
+            ],
+            [
+              "enabled",
+              22
+            ]
+          ],
+          "cleanup_calls": [
+            [
+              "set-limit",
+              0
+            ],
+            [
+              "set-disabled",
+              false
+            ]
+          ],
+          "restored": {
+            "disable": 0,
+            "disabled": false
+          }
+        }
+      }
+    },
+    "3": {
+      "test.test_logging.LoggerTest.test_is_enabled_for": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Logger and manager reads, writes, enablement and registered cleanup",
+          "opt_level": 3,
+          "method_sha256": "bf8fc46220f5871bd7f25d083a0125a8739ae51edbdec15f99f6304a8877aeed",
+          "fixture": "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, detached logger, recording handler, manager and cleanup writes",
+          "native_body_blocker": {
+            "source": "Lib/test/test_logging.py:6172",
+            "statement": "self.addCleanup(setattr, self.logger.manager, 'disable', old_disable)",
+            "diagnostic": "unknown class method"
+          },
+          "body_calls": [
+            [
+              "manager"
+            ],
+            [
+              "limit"
+            ],
+            [
+              "manager"
+            ],
+            [
+              "set-limit",
+              23
+            ],
+            [
+              "manager"
+            ],
+            [
+              "enabled",
+              22
+            ]
+          ],
+          "cleanup_calls": [
+            [
+              "set-limit",
+              0
+            ]
+          ],
+          "restored": {
+            "disable": 0,
+            "disabled": false
+          }
+        }
+      },
+      "test.test_logging.LoggerTest.test_is_enabled_for_disabled_logger": {
+        "roles": {
+          "body": "cpython",
+          "assertions": "cpython",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Logger and manager reads, writes, enablement and registered cleanup",
+          "opt_level": 3,
+          "method_sha256": "f7750847ece9090c656cc836c33327887097074d23acc3ae07d01e666fbe2c8e",
+          "fixture": "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, detached logger, recording handler, manager and cleanup writes",
+          "native_body_blocker": {
+            "source": "Lib/test/test_logging.py:6182",
+            "statement": "self.addCleanup(setattr, self.logger, 'disabled', old_disabled)",
+            "diagnostic": "unknown class method"
+          },
+          "body_calls": [
+            [
+              "disabled"
+            ],
+            [
+              "manager"
+            ],
+            [
+              "limit"
+            ],
+            [
+              "set-disabled",
+              true
+            ],
+            [
+              "manager"
+            ],
+            [
+              "set-limit",
+              21
+            ],
+            [
+              "manager"
+            ],
+            [
+              "enabled",
+              22
+            ]
+          ],
+          "cleanup_calls": [
+            [
+              "set-limit",
+              0
+            ],
+            [
+              "set-disabled",
+              false
+            ]
+          ],
+          "restored": {
+            "disable": 0,
+            "disabled": false
+          }
+        }
+      }
+    }
+  }
+}
