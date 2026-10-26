@@ -99,7 +99,7 @@ impl Period {
     }
 }
 
-pub(super) fn overflow() -> Error {
+pub(in crate::objects) fn overflow() -> Error {
     Error::new(
         Kind::OverflowError,
         "timestamp out of range for platform time_t",

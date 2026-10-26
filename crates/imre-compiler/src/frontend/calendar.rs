@@ -202,6 +202,61 @@ impl Checker<'_> {
         };
         Ok(self.ordered_builtin(Builtin::Calendar(builtin), Type::Calendar(kind), args))
     }
+    /// Bind the public mail-date functions to the same fixed-offset calendar types as datetime.
+    pub(super) fn email_date(
+        &mut self,
+        which: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let dt = Type::Calendar(C::DateTime);
+        let flag = |name| par(name, Type::Bool, Some(boolean(false)));
+        let (op, ty, args) = match which {
+            Intrinsic::EmailParseDate => (
+                Op::EmailParseDate,
+                dt,
+                self.arguments(call, &[par("data", Type::Str, None)], None)?,
+            ),
+            Intrinsic::EmailFormatDateTime => (
+                Op::EmailFormatDateTime,
+                Type::Str,
+                self.arguments(call, &[par("dt", dt, None), flag("usegmt")], None)?,
+            ),
+            Intrinsic::EmailFormatDate => {
+                let params = [
+                    par(
+                        "timeval",
+                        Type::None,
+                        Some(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                    ),
+                    flag("localtime"),
+                    flag("usegmt"),
+                ];
+                let args = self.arguments_with(call, &params, None, |c, i, node| {
+                    if i != 0 {
+                        return c.expr_expected(node, Type::Bool);
+                    }
+                    let value = powers::integer(c.expr(node)?);
+                    if !matches!(
+                        c.types.payload(value.ty).unwrap_or(value.ty),
+                        Type::None | Type::Int | Type::Float
+                    ) {
+                        return Err(error(
+                            c.source,
+                            node,
+                            "formatdate requires an integer, float, or None timestamp",
+                        ));
+                    }
+                    Ok(value)
+                })?;
+                (Op::EmailFormatDate, Type::Str, args)
+            }
+            _ => unreachable!(),
+        };
+        Ok(self.ordered_builtin(Builtin::Calendar(op), ty, args))
+    }
     pub(super) fn calendar_now(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let args = self.arguments(call, &[par("tz", Type::Calendar(C::Zone), None)], None)?;
         Ok(self.ordered_builtin(
