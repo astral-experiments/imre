@@ -1,5 +1,6 @@
 //! Render native exception objects through Python's traceback.print_exception interface.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
@@ -27,18 +28,15 @@ fn display_width(text: &str) -> usize {
 }
 
 impl FrameLine<'_> {
-    fn format(&self) -> String {
+    fn format(&self, source: Option<&str>) -> String {
         let mut out = format!(
             "  File \"{}\", line {}, in {}\n",
             self.file, self.line, self.name
         );
-        let Ok(contents) = std::fs::read_to_string(self.file) else {
-            return out;
-        };
         let Some(raw) = usize::try_from(self.line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|i| contents.lines().nth(i))
+            .and_then(|i| source?.lines().nth(i))
         else {
             return out;
         };
@@ -68,8 +66,7 @@ impl FrameLine<'_> {
 }
 
 pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if kwargs.iter().any(|(name, _)| name == "colorize")
-        && let Some(colorize) = option(args, 6, kwargs, "colorize")?
+    if let Some(colorize) = option(args, 6, kwargs, "colorize")?
         && ctx.truth(colorize)?
     {
         return Err(Error::new(
@@ -208,6 +205,7 @@ fn format_exception(
     }
     if !stack.is_empty() {
         lines.push("Traceback (most recent call last):\n".to_owned());
+        let mut sources = HashMap::new();
         let mut i = 0;
         while i < stack.len() {
             let same = stack[i..]
@@ -216,7 +214,12 @@ fn format_exception(
                     f.file == stack[i].file && f.name == stack[i].name && f.line == stack[i].line
                 })
                 .count();
-            lines.extend(stack[i..i + same.min(3)].iter().map(FrameLine::format));
+            for frame in &stack[i..i + same.min(3)] {
+                let contents = sources
+                    .entry(frame.file)
+                    .or_insert_with(|| std::fs::read_to_string(frame.file).ok());
+                lines.push(frame.format(contents.as_deref()));
+            }
             if same > 3 {
                 let count = same - 3;
                 lines.push(format!(

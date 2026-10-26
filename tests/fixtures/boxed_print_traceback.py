@@ -27,6 +27,10 @@ def capture(exc, **options):
 try:
     call()
 except KeyError as original:
+    tb = original.__traceback__
+    print(tb.tb_frame.f_code.co_name, tb.tb_frame.f_code.co_filename == __file__)
+    print(tb.tb_next.tb_frame.f_code is call.__code__)
+    print(tb.tb_next.tb_next.tb_frame.f_code is missing.__code__)
     capture(original, limit=-1)
     for cause in (original, None):
         try:
