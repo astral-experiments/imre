@@ -1169,6 +1169,11 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        let iterable = if items {
+            iterable
+        } else {
+            self.json_iteration(iterable)
+        };
         if !reverse && iterable.ty == Type::CsvReader {
             return Ok(self.prepare_csv_reader(iterable));
         }
@@ -1176,10 +1181,7 @@ impl Checker<'_> {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);
         if fields.as_ref().is_some_and(Vec::is_empty) {
             let source = self.hidden(iterable.ty);
@@ -1204,7 +1206,7 @@ impl Checker<'_> {
             let first = fields.first().copied().unwrap_or(Type::None);
             fields.iter().all(|ty| *ty == first).then_some(first)
         });
-        let element = self.types.element(iterable.ty)
+        let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
             .or_else(|| self.types.deque_element(iterable.ty))
             .or((iterable.ty == Type::Str).then_some(Type::Str))
@@ -1233,8 +1235,10 @@ impl Checker<'_> {
         let mut acquire = vec![Statement::Assign(done, boolean(false))];
         let mut clear = vec![source, value, ready, done];
         let mut pull = Vec::new();
-        let indexed =
-            self.types.element(ty).is_some() || fields.is_some() || (reverse && ty == Type::Bytes);
+        let indexed = self.types.element(ty).is_some()
+            || self.types.var_tuple_element(ty).is_some()
+            || fields.is_some()
+            || (reverse && ty == Type::Bytes);
         if indexed {
             let cursor = self.hidden(Type::Int);
             clear.push(cursor);
@@ -1305,8 +1309,12 @@ impl Checker<'_> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        if ty == Type::Bytes {
+                        if matches!(ty, Type::VarTuple(_)) {
+                            Builtin::TupleIndex
+                        } else if ty == Type::Bytes {
                             Builtin::BytesGet
+                        } else if !reverse && self.consumes_list(ty, node.range()) {
+                            Builtin::SequenceTakeInBounds
                         } else if matches!(ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
@@ -1921,20 +1929,19 @@ impl Checker<'_> {
                 cases,
             )];
         }
+        // The leftmost iterator is already acquired. Restore the caller on yield or unwind.
+        let resume = self.generator_frame(Statement::While(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(true, vec![not(self.local(ready)), not(self.local(done))]),
+            },
+            cases,
+            Vec::new(),
+        ));
         let next = vec![
             Statement::Clear(value),
             Statement::Assign(ready, boolean(false)),
-            Statement::While(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Boolean(
-                        true,
-                        vec![not(self.local(ready)), not(self.local(done))],
-                    ),
-                },
-                cases,
-                Vec::new(),
-            ),
+            Statement::If(not(self.local(done)), vec![resume], Vec::new()),
         ];
         Ok(Prepared {
             evaluate,
@@ -1947,6 +1954,30 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// Run one prepared generator step or an equivalent callback-free bulk operation.
+    pub(super) fn generator_frame(&self, step: Statement) -> Statement {
+        let module = if self.module == self.graph.entry {
+            "__main__"
+        } else {
+            &self.graph.modules[self.module].name
+        };
+        let marker = |builtin| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(builtin, Vec::new()),
+            })
+        };
+        Statement::Try {
+            body: vec![
+                marker(Builtin::GeneratorFrameEnter(module.to_owned())),
+                step,
+            ],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![marker(Builtin::GeneratorFrameLeave)],
+        }
     }
 
     /// Convert StopIteration escaping suspended generator code, retaining its cause.
@@ -2003,16 +2034,13 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(callback) {
-            Some(binding.target(self.source, callback)?.callback(
-                self.types,
-                self.source,
-                callback,
-            )?)
+            Some(self.local_callback(binding, callback)?)
         } else {
             Some(self.expr(callback)?)
         };
         let callback_input = checked
             .as_ref()
+            .filter(|value| self.types.index_callable_signature(value.ty).is_none())
             .and_then(|value| self.types.signature(value.ty))
             .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
             .or_else(|| {
@@ -2028,17 +2056,20 @@ impl Checker<'_> {
             });
         // The destination describes surviving values. The truth predicate may
         // still receive None from a generator, list display, or nested pipeline.
-        let input_hint = callback_input.or_else(|| {
-            if filter
-                && checked
-                    .as_ref()
-                    .is_some_and(|callback| callback.ty == Type::None)
-            {
-                element.map(|ty| self.types.optional(ty))
-            } else {
-                filter.then_some(element).flatten()
-            }
-        });
+        // The internal len argument frame belongs to the call, not the source iterable.
+        let input_hint = callback_input
+            .filter(|ty| !self.types.is_len_argument(*ty))
+            .or_else(|| {
+                if filter
+                    && checked
+                        .as_ref()
+                        .is_some_and(|callback| callback.ty == Type::None)
+                {
+                    element.map(|ty| self.types.optional(ty))
+                } else {
+                    filter.then_some(element).flatten()
+                }
+            });
         let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
@@ -2154,11 +2185,7 @@ impl Checker<'_> {
             return self.callable_value(signature, None, None, expression);
         }
         if let Some(binding) = self.local_function_binding(expression) {
-            return binding.target(self.source, expression)?.callback(
-                self.types,
-                self.source,
-                expression,
-            );
+            return self.local_callback(binding, expression);
         }
         self.expr(expression)
     }
@@ -2184,11 +2211,22 @@ impl Checker<'_> {
         let [parameter] = params.as_slice() else {
             return Err(message());
         };
-        let args = ir::CallArgs::positional(vec![self.coerce(
-            self.local(input.value),
-            *parameter,
-            call,
-        )?]);
+        let item = self.local(input.value);
+        let argument = if self.types.is_len_argument(*parameter) {
+            if matches!(item.ty, Type::None | Type::Bool | Type::Int) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "len callback requires items with a length",
+                ));
+            }
+            self.pack_len_value(item, call)?
+        } else if self.types.index_callable_signature(callback.ty).is_some() {
+            self.index_value(item, call)?
+        } else {
+            self.coerce(item, *parameter, call)?
+        };
+        let args = ir::CallArgs::positional(vec![argument]);
         if matches!(returns, Type::Coroutine(_)) {
             let slot = self.hidden(callback.ty);
             input
@@ -2200,11 +2238,15 @@ impl Checker<'_> {
                 Some(slot),
             ));
         }
-        let (kind, captured) = if let ExprKind::Callable {
-            function,
-            receiver: None,
-        } = callback.kind
-        {
+        let direct = match &callback.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(*function),
+            _ => None,
+        };
+        let (kind, captured) = if let Some(function) = direct {
             self.calls.insert(function);
             (ExprKind::Call(function, args), None)
         } else {

@@ -16,6 +16,23 @@ impl ClassInfo {
             .collect()
     }
 
+    /// A generated dataclass repr shadows an inherited override even though the
+    /// generated method has no source signature in the method table.
+    pub(super) fn has_repr_override(&self, id: usize) -> bool {
+        for &owner in std::iter::once(&id).chain(&self.declarations.definitions[id].bases) {
+            let class = &self.declarations.definitions[owner];
+            if class.node.body.iter().any(
+                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__"),
+            ) {
+                return true;
+            }
+            if class.dataclass.is_some_and(|options| options.repr) {
+                return false;
+            }
+        }
+        false
+    }
+
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
         self.declarations
             .definitions
@@ -53,6 +70,15 @@ impl Checker<'_> {
             };
             alternatives.push((class, invoke(self, class, view)?));
         }
+        // An override can return one member of another implementation's declared
+        // union. Find that layout before folding so class declaration order does
+        // not decide whether, for example, None and a record can coexist.
+        let union_result = alternatives.iter().map(|(_, expr)| expr.ty).find(|&ty| {
+            matches!(ty, Type::Optional(_) | Type::Union(_))
+                && alternatives
+                    .iter()
+                    .all(|(_, expr)| self.types.join(expr.ty, ty) == Some(ty))
+        });
         let Some((_, mut value)) = alternatives.pop() else {
             return Err(error(
                 self.source,
@@ -62,18 +88,22 @@ impl Checker<'_> {
         };
         while let Some((class, mut next)) = alternatives.pop() {
             if next.ty != value.ty {
-                if !matches!((next.ty, value.ty), (Type::Class(a), Type::Class(b)) if
+                let ty = if let Some(ty) = union_result {
+                    ty
+                } else if matches!((next.ty, value.ty), (Type::Class(a), Type::Class(b)) if
                     (a == base || self.classes.declarations.definitions[a].bases.contains(&base)) &&
                     (b == base || self.classes.declarations.definitions[b].bases.contains(&base)))
                 {
+                    Type::Class(base)
+                } else {
                     return Err(error(
                         self.source,
                         at,
                         "record overrides must have a common result layout",
                     ));
-                }
-                next = self.coerce(next, Type::Class(base), at)?;
-                value = self.coerce(value, Type::Class(base), at)?;
+                };
+                next = self.coerce(next, ty, at)?;
+                value = self.coerce(value, ty, at)?;
             }
             let test = Expr {
                 ty: Type::Bool,
@@ -128,7 +158,11 @@ impl Checker<'_> {
             .get(name)
             .ok_or_else(|| error(self.source, at, "missing record primitive"))?
             .clone();
-        if method.params.len() != arguments.len() + 1 {
+        if method.params.len() != arguments.len() + 1
+            || (matches!(name, "get" | "__setitem__")
+                && method.method.unwrap().kind(&self.classes.declarations)
+                    != crate::classes::MethodKind::Instance)
+        {
             return Err(error(
                 self.source,
                 at,

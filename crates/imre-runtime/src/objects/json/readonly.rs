@@ -2,6 +2,7 @@
 //! so nested values survive the source array; typed scalar results own only
 //! their native string or integer. No Python object graph or mutable alias is exposed.
 
+use crate::StrOwner;
 mod arrays;
 mod constants;
 mod deep;
@@ -17,7 +18,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use serde::Deserializer;
-use serde::de::{Error as _, MapAccess, Visitor};
+use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
 use smallvec::SmallVec;
 
@@ -35,11 +36,36 @@ pub(super) enum Node {
     Float(f64),
     /// The default decoder reuses a single NaN object, observable in container equality.
     ConstantNan,
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
     Array(Vec<usize>),
     Deferred(Rc<arrays::Deferred>),
     Object(ObjectFields),
+}
+
+fn copy_entries<T, U>(
+    items: &[T],
+    mut copy: impl FnMut(&T) -> Result<U, Error>,
+) -> Result<Vec<U>, Error> {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(items.len())
+        .map_err(|_| Error::allocation())?;
+    for item in items {
+        result.push(copy(item)?);
+    }
+    Ok(result)
+}
+
+fn copy_text(text: &Str) -> Result<Str, Error> {
+    Str::try_new(text.as_str()).map_err(|_| Error::allocation())
+}
+
+fn append_copy(nodes: &mut Vec<Node>, node: Node) -> Result<usize, Error> {
+    nodes.try_reserve(1).map_err(|_| Error::allocation())?;
+    let index = nodes.len();
+    nodes.push(node);
+    Ok(index)
 }
 
 impl Node {
@@ -105,11 +131,13 @@ impl Node {
 #[derive(Clone)]
 pub(super) enum Nodes {
     Document(Rc<Vec<Node>>),
+    /// Nodes copied from a mutable document share a fallibly allocated owner.
+    Snapshot(crate::shared::Shared<Vec<Node>>),
     /// The iterative parser emits every subtree contiguously in postorder.
     Deep(Rc<Vec<Node>>),
     /// Keep aliases of a mutable root array without enlarging every scalar view.
-    Root(Rc<Vec<Node>>, Rc<Object>),
-    DeepRoot(Rc<Vec<Node>>, Rc<Object>),
+    Root(Rc<Vec<Node>>, crate::ObjectOwner),
+    DeepRoot(Rc<Vec<Node>>, crate::ObjectOwner),
     /// Computed scalars and missing defaults do not need a second allocation.
     Single(Node),
 }
@@ -122,13 +150,14 @@ impl std::ops::Deref for Nodes {
             | Self::Deep(nodes)
             | Self::Root(nodes, _)
             | Self::DeepRoot(nodes, _) => nodes,
+            Self::Snapshot(nodes) => nodes,
             Self::Single(node) => std::slice::from_ref(node),
         }
     }
 }
 
 impl Nodes {
-    pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
+    pub(super) fn root_items(&self) -> Option<&crate::ObjectOwner> {
         match self {
             Self::Root(_, items) | Self::DeepRoot(_, items) => Some(items),
             _ => None,
@@ -177,34 +206,40 @@ impl View {
         .into_handle()
     }
 
-    fn into_handle(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(self)))))
+    fn try_handle(storage: Storage) -> Result<*const Object, Error> {
+        crate::ObjectOwner::try_new(Object(StorageCell::new(storage)))
+            .map(crate::ObjectOwner::into_raw)
+            .map_err(|_| Error::allocation())
     }
 
-    fn resolved(&self, index: usize) -> (&Self, usize) {
+    fn into_handle(self) -> *const Object {
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::Json(self),
+        ))))
+    }
+
+    fn try_resolved(&self, index: usize) -> Result<(&Self, usize), Error> {
         match &self.nodes[index] {
             Node::Deferred(array) => {
-                let view = array.view();
-                (view, view.index)
+                let view = array.try_view()?;
+                Ok((view, view.index))
             }
-            _ => (self, index),
+            _ => Ok((self, index)),
         }
-    }
-
-    fn expanded(&self) -> &Self {
-        self.resolved(self.index).0
     }
 
     /// Snapshot the current elements when an array projected to a native list
     /// is used as an immutable value again. Its aliases may have mutated it.
-    fn snapshot_root(&self) -> Option<Self> {
-        self.nodes.root_items()?;
+    fn snapshot_root(&self) -> Result<Option<Self>, Error> {
+        if self.nodes.root_items().is_none() {
+            return Ok(None);
+        }
         let mut nodes = Vec::new();
-        let index = self.copy_to(self.index, &mut nodes);
-        Some(Self {
+        let index = self.copy_to(self.index, &mut nodes)?;
+        Ok(Some(Self {
             nodes: Nodes::copied(nodes, self.nodes.deep()),
             index,
-        })
+        }))
     }
 
     fn get_receiver(&self) -> Result<&Node, Error> {
@@ -225,7 +260,7 @@ impl View {
 
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
-    fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
+    fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> Result<usize, Error> {
         if self.nodes.deep() && !(index == self.index && self.nodes.root_items().is_some()) {
             return deep_values::copy(self, index, destination);
         }
@@ -234,52 +269,40 @@ impl View {
                 // SAFETY: the list roots all immutable JSON views while their children are copied.
                 Node::Array(unsafe {
                     items.0.with(|storage| {
-                        storage
-                            .sequence()
-                            .values
-                            .iter()
-                            .map(|&word| {
-                                with_view(word as *const Object, |child| {
-                                    child.copy_to(child.index, destination)
-                                })
+                        copy_entries(&storage.sequence_storage().values, |&word| {
+                            with_view(word as *const Object, |child| {
+                                child.copy_to(child.index, destination)
                             })
-                            .collect()
+                        })
                     })
-                })
+                }?)
             }
-            (Node::Array(items), _) => Node::Array(
-                items
-                    .iter()
-                    .map(|&i| self.copy_to(i, destination))
-                    .collect(),
-            ),
-            (Node::Object(fields), _) => Node::Object(
-                fields.with_entries(
-                    fields
-                        .iter()
-                        .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
-                        .collect(),
-                ),
-            ),
+            (Node::Array(items), _) => {
+                Node::Array(copy_entries(items, |&i| self.copy_to(i, destination))?)
+            }
+            (Node::Object(fields), _) => {
+                Node::Object(fields.with_entries(copy_entries(fields, |(key, index)| {
+                    Ok((copy_text(key)?, self.copy_to(*index, destination)?))
+                })?))
+            }
+            (Node::Datetime(text), _) => Node::Datetime(copy_text(text)?),
             (scalar, _) => scalar.clone(),
         };
-        let index = destination.len();
-        destination.push(node);
-        index
+        append_copy(destination, node)
     }
 
     fn add(&self, other: &Self) -> Result<Self, Error> {
-        if let Some(root) = self.snapshot_root() {
+        if let Some(root) = self.snapshot_root()? {
             return root.add(other);
         }
-        if let Some(root) = other.snapshot_root() {
+        if let Some(root) = other.snapshot_root()? {
             return self.add(&root);
         }
         if let Node::Deferred(array) = &self.nodes[self.index] {
-            return array.view().add(other);
+            return array.try_view()?.add(other);
         }
         if let Node::Deferred(array) = &other.nodes[other.index] {
-            return self.add(array.view());
+            return self.add(array.try_view()?);
         }
         let left = &self.nodes[self.index];
         let right = &other.nodes[other.index];
@@ -301,14 +324,21 @@ impl View {
         } else if let (Node::String(a), Node::String(b)) = (left, right) {
             let mut s = a.as_ref().clone();
             s.push_str(b);
-            Node::String(Rc::new(s))
+            Node::String(StrOwner::new(s))
         } else if let (Node::Array(a), Node::Array(b)) = (left, right) {
             let mut nodes = Vec::new();
-            let mut items = Vec::with_capacity(a.len() + b.len());
-            items.extend(a.iter().map(|&i| self.copy_to(i, &mut nodes)));
-            items.extend(b.iter().map(|&i| other.copy_to(i, &mut nodes)));
-            let index = nodes.len();
-            nodes.push(Node::Array(items));
+            let len = a.len().checked_add(b.len()).ok_or_else(Error::allocation)?;
+            let mut items = Vec::new();
+            items
+                .try_reserve_exact(len)
+                .map_err(|_| Error::allocation())?;
+            for &index in a {
+                items.push(self.copy_to(index, &mut nodes)?);
+            }
+            for &index in b {
+                items.push(other.copy_to(index, &mut nodes)?);
+            }
+            let index = append_copy(&mut nodes, Node::Array(items))?;
             return Ok(Self {
                 nodes: Nodes::copied(nodes, self.nodes.deep() || other.nodes.deep()),
                 index,
@@ -333,19 +363,31 @@ impl View {
         Ok(Self::single(node))
     }
 
-    fn array(&self, children: &[usize]) -> *const Object {
+    fn array(&self, children: &[usize]) -> Result<*const Object, Error> {
         if let Some(items) = self.nodes.root_items() {
-            return Rc::into_raw(Rc::clone(items));
+            return Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(
+                items,
+            )));
         }
         Self::children(&self.nodes, children)
     }
 
-    fn children(nodes: &Nodes, children: &[usize]) -> *const Object {
+    fn children(nodes: &Nodes, children: &[usize]) -> Result<*const Object, Error> {
         let mut result = Words::new(5);
         result
             .values
-            .extend(children.iter().map(|&i| Self::handle(nodes, i) as usize));
-        Rc::into_raw(result.into_object())
+            .try_reserve_exact(children.len())
+            .map_err(|_| Error::allocation())?;
+        for &index in children {
+            let child = Self {
+                nodes: nodes.child(),
+                index,
+            };
+            result
+                .values
+                .push(Self::try_handle(Storage::Json(child))? as usize);
+        }
+        Self::try_handle(result.into_storage())
     }
 
     fn select(&self, mut path: &[u8], mode: u32, literal: Option<&Str>) -> Result<usize, Error> {
@@ -375,19 +417,23 @@ impl View {
             .into_handle()
                 as usize),
             (0, _) | (1, Node::Object(_)) => Ok(Self::handle(&self.nodes, index) as usize),
-            (2, Node::String(text)) => Ok(Rc::into_raw(Rc::clone(text)) as usize),
+            (2, Node::String(text)) => Ok(StrOwner::into_raw(StrOwner::clone(text)) as usize),
             (3, Node::Integer(integer)) => Ok(integer.clone().into_raw()),
             (4, _) => Ok(usize::from(
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
             )),
             (5 | 6, Node::Deferred(array)) => {
-                array.view().project(array.view().index, mode, literal)
+                let view = array.try_view()?;
+                view.project(view.index, mode, literal)
             }
-            (5 | 6, Node::Array(children)) => Ok(if index == self.index {
-                self.array(children)
-            } else {
-                Self::children(&self.nodes, children)
-            } as usize),
+            (5 | 6, Node::Array(children)) => {
+                let items = if index == self.index {
+                    self.array(children)
+                } else {
+                    Self::children(&self.nodes, children)
+                }?;
+                Ok(items as usize)
+            }
             (7, Node::Bool(value)) => Ok(usize::from(*value) + usize::from(optional)),
             (8, Node::Float(_) | Node::ConstantNan) => {
                 let value = match node {
@@ -421,7 +467,7 @@ struct Source<'a> {
     refused: &'a Cell<bool>,
     text: &'a str,
     original: Option<(&'a str, &'a Rc<String>)>,
-    shared: Option<(&'a Rc<Str>, usize)>,
+    shared: Option<(&'a StrOwner, usize)>,
     keys: &'a KeyMemo,
 }
 
@@ -436,9 +482,68 @@ impl Source<'_> {
     }
 }
 
-fn allocation_error(refused: &Cell<bool>) -> serde_json::Error {
+fn allocation_error<E: serde::de::Error>(refused: &Cell<bool>) -> E {
     refused.set(true);
-    serde_json::Error::custom("JSON storage allocation failed")
+    E::custom("JSON storage allocation failed")
+}
+
+fn push<T, E: serde::de::Error>(
+    items: &mut Vec<T>,
+    item: T,
+    refused: &Cell<bool>,
+) -> Result<(), E> {
+    items
+        .try_reserve(1)
+        .map_err(|_| allocation_error::<E>(refused))?;
+    items.push(item);
+    Ok(())
+}
+
+/// A deferred span has already passed JSON and Unicode validation. Its encoded
+/// byte length bounds the decoded string, including UTF-16 surrogate pairs.
+fn string(raw: &RawValue, source: Source<'_>) -> Result<Str, serde_json::Error> {
+    let token = raw.get();
+    let text = &token[1..token.len() - 1];
+    if !text.as_bytes().contains(&b'\\') {
+        return Str::try_new(text).map_err(|_| allocation_error(source.refused));
+    }
+    if source.shared.is_none() {
+        return serde_json::from_str::<String>(token).map(Str::from);
+    }
+    let mut out = String::new();
+    out.try_reserve_exact(text.len())
+        .map_err(|_| allocation_error::<serde_json::Error>(source.refused))?;
+    let mut rest = text;
+    while let Some((plain, escaped)) = rest.split_once('\\') {
+        out.push_str(plain);
+        let (ch, used) = match escaped.as_bytes()[0] {
+            b'"' => ('"', 1),
+            b'\\' => ('\\', 1),
+            b'/' => ('/', 1),
+            b'b' => ('\x08', 1),
+            b'f' => ('\x0c', 1),
+            b'n' => ('\n', 1),
+            b'r' => ('\r', 1),
+            b't' => ('\t', 1),
+            b'u' => {
+                let first = u16::from_str_radix(&escaped[1..5], 16).unwrap();
+                if (0xd800..=0xdbff).contains(&first) {
+                    let second = u16::from_str_radix(&escaped[7..11], 16).unwrap();
+                    (
+                        char::decode_utf16([first, second]).next().unwrap().unwrap(),
+                        11,
+                    )
+                } else {
+                    (char::from_u32(u32::from(first)).unwrap(), 5)
+                }
+            }
+            _ => unreachable!("validated JSON escape"),
+        };
+        out.push(ch);
+        rest = &escaped[used..];
+    }
+    out.push_str(rest);
+    Ok(Str::from(out))
 }
 
 fn push_node(
@@ -446,7 +551,8 @@ fn push_node(
     raw: &RawValue,
     source: Source<'_>,
 ) -> Result<usize, serde_json::Error> {
-    let raw = raw.get();
+    let token = raw;
+    let raw = token.get();
     let node = match raw.as_bytes()[0] {
         b'{' => Node::Object(source.keys.fields(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
@@ -455,14 +561,17 @@ fn push_node(
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
         },
-        b'"' => Node::String(Rc::new(Str::from(serde_json::from_str::<String>(raw)?))),
+        b'"' => Node::String(
+            StrOwner::try_new(string(token, source)?)
+                .map_err(|_| allocation_error::<serde_json::Error>(source.refused))?,
+        ),
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
         b'n' => Node::Null,
         _ => number(source.token(raw)),
     };
     let index = nodes.len();
-    nodes.push(node);
+    push(nodes, node, source.refused)?;
     Ok(index)
 }
 
@@ -493,13 +602,23 @@ fn push_array(
     raw: &str,
     source: Source<'_>,
 ) -> Result<Node, serde_json::Error> {
-    let items: Vec<&RawValue> = serde_json::from_str(raw)?;
-    Ok(Node::Array(
-        items
-            .into_iter()
-            .map(|item| push_node(nodes, item, source))
-            .collect::<Result<_, _>>()?,
-    ))
+    serde_json::Deserializer::from_str(raw).deserialize_seq(Array(nodes, source))
+}
+
+struct Array<'a, 'b>(&'a mut Vec<Node>, Source<'b>);
+impl<'de> Visitor<'de> for Array<'_, '_> {
+    type Value = Node;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON array")
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Node, A::Error> {
+        let mut indices = Vec::new();
+        while let Some(raw) = seq.next_element::<&RawValue>()? {
+            let index = push_node(self.0, raw, self.1).map_err(A::Error::custom)?;
+            push(&mut indices, index, self.1.refused)?;
+        }
+        Ok(Node::Array(indices))
+    }
 }
 
 struct Fields<'a, 'b>(&'a mut Vec<Node>, Source<'b>);
@@ -510,10 +629,11 @@ impl<'de> Visitor<'de> for Fields<'_, '_> {
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut fields = Vec::new();
-        while let Some(key) = map.next_key_seed(Key)? {
+        while let Some(key) = map.next_key::<&RawValue>()? {
             let raw = map.next_value::<&RawValue>()?;
+            let key = string(key, self.1).map_err(A::Error::custom)?;
             let index = push_node(self.0, raw, self.1).map_err(A::Error::custom)?;
-            fields.push((Str::new(key.as_ref()), index));
+            push(&mut fields, (key, index), self.1.refused)?;
         }
         Ok(fields)
     }
@@ -608,7 +728,7 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
 
 pub(super) fn loads(
     text: &str,
-    owner: impl FnOnce() -> Option<Rc<Str>>,
+    owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Result<*const Object, Error> {
     if check_depth(text).is_err() {
         return deep::loads(text, owner);
@@ -657,7 +777,7 @@ pub unsafe extern "C" fn imre_json_loads(text: *const Str) -> *const Object {
     // The str entry rejects its BOM before scanning. The binary entry already
     // consumed its encoding marker; a second one is ordinary invalid JSON.
     // SAFETY: the caller roots this immutable string while the error takes its own reference.
-    let owner = || unsafe { crate::objects::acquire_rc(text as usize) };
+    let owner = || unsafe { StrOwner::acquire_word(text as usize) };
     let result = if source.starts_with('\u{feff}') {
         Err(super::syntax::at_error(
             owner(),
@@ -712,7 +832,7 @@ pub unsafe extern "C" fn imre_json_truth(value: *const Object) -> u32 {
                 |items| {
                     items
                         .0
-                        .with(|storage| !storage.sequence().values.is_empty())
+                        .with(|storage| !storage.sequence_storage().values.is_empty())
                 },
             ))
         })
@@ -756,7 +876,7 @@ pub unsafe extern "C" fn imre_json_get_receiver(value: *const Object) -> *const 
     let result = unsafe {
         with_view(value, |v| {
             v.get_receiver()?;
-            Rc::increment_strong_count(value);
+            crate::ObjectOwner::increment_strong_count(value);
             Ok(value)
         })
     };
@@ -777,11 +897,8 @@ pub unsafe extern "C" fn imre_json_add(a: *const Object, b: *const Object) -> *c
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_json_equal(left: *const Object, right: *const Object) -> u32 {
     // SAFETY: both views admit simultaneous immutable borrows, including on alias.
-    unsafe {
-        with_view(left, |a| {
-            with_view(right, |b| u32::from(a.equal_operand(b)))
-        })
-    }
+    let result = unsafe { with_view(left, |a| with_view(right, |b| a.equal_operand(b))) };
+    finish(result.map(u32::from), 0)
 }
 
 /// # Safety
@@ -820,8 +937,8 @@ pub unsafe extern "C" fn imre_json_get(
                 2 => Node::Integer((*Int::borrow(word)).clone()),
                 3 => {
                     let text = word as *const Str;
-                    Rc::increment_strong_count(text);
-                    Node::String(Rc::from_raw(text))
+                    StrOwner::increment_strong_count(text);
+                    Node::String(StrOwner::from_raw(text))
                 }
                 4 => Node::Bool(word != 0),
                 5 => Node::Float(f64::from_bits(word as u64)),
@@ -878,6 +995,49 @@ pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
         .filter_map(move |(name, _)| seen.insert(name).then_some(name))
 }
 
+/// Collect the first occurrence of each key in insertion order. Typed
+/// mapping iteration returns strings; unknown JSON containers yield views.
+fn collect_keys<const STRINGS: bool>(fields: &ObjectFields) -> Result<*const Object, Error> {
+    let mut items = Words::new(if STRINGS { 3 } else { 5 });
+    let mut seen = std::collections::HashSet::new();
+    for (name, _) in fields.iter() {
+        if seen.contains(name) {
+            continue;
+        }
+        seen.try_reserve(1).map_err(|_| Error::allocation())?;
+        seen.insert(name);
+        items
+            .values
+            .try_reserve(1)
+            .map_err(|_| Error::allocation())?;
+        let owner = fields.owner(name)?;
+        items.values.push(if STRINGS {
+            crate::StrOwner::into_raw(owner) as usize
+        } else {
+            View::single(Node::String(owner)).into_handle() as usize
+        });
+    }
+    Ok(crate::ObjectOwner::into_raw(items.into_object()))
+}
+
+/// # Safety
+/// The caller roots an immutable JSON object view whose keys are strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_object_keys(value: *const Object) -> *const Object {
+    // SAFETY: the source is a rooted JSON view. Array element types can
+    // be projected lazily, so check the mapping before exposing string keys.
+    let result = unsafe {
+        with_view(value, |view| match &view.nodes[view.index] {
+            Node::Object(fields) => collect_keys::<true>(fields),
+            node => Err(Error::new(
+                Kind::TypeError,
+                format!("expected dict, got {} from JSON", node.kind()),
+            )),
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
 /// # Safety
 /// The caller roots the checked document. Iteration transfers an owned list.
 #[unsafe(no_mangle)]
@@ -885,25 +1045,16 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
     // SAFETY: iteration only borrows the immutable document to construct a rooted sequence.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
+            let view = view.try_resolved(view.index)?.0;
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
-                Node::Array(children) => return Ok(view.array(children)),
-                Node::Object(fields) => {
-                    for name in keys(fields) {
-                        items
-                            .values
-                            .try_reserve(1)
-                            .map_err(|_| Error::allocation())?;
-                        let key = fields.owner(name)?;
-                        items
-                            .values
-                            .push(View::single(Node::String(key)).into_handle() as usize);
-                    }
-                }
+                Node::Array(children) => return view.array(children),
+                Node::Object(fields) => return collect_keys::<false>(fields),
                 Node::String(text) => items.values.extend(text.chars().map(|ch| {
-                    View::single(Node::String(Rc::new(Str::new(ch.encode_utf8(&mut [0; 4])))))
-                        .into_handle() as usize
+                    View::single(Node::String(StrOwner::new(Str::new(
+                        ch.encode_utf8(&mut [0; 4]),
+                    ))))
+                    .into_handle() as usize
                 })),
                 node => {
                     return Err(Error::new(
@@ -912,7 +1063,7 @@ pub unsafe extern "C" fn imre_json_iter(value: *const Object) -> *const Object {
                     ));
                 }
             }
-            Ok(Rc::into_raw(items.into_object()))
+            Ok(crate::ObjectOwner::into_raw(items.into_object()))
         })
     };
     finish(result, std::ptr::null())
@@ -925,11 +1076,15 @@ pub unsafe extern "C" fn imre_json_len(value: *const Object) -> usize {
     // SAFETY: no document borrow escapes the scalar result.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
             let len = match &view.nodes[view.index] {
+                Node::Deferred(array) => array.len(),
                 Node::Array(children) => view.nodes.root_items().map_or_else(
                     || children.len(),
-                    |items| items.0.with(|storage| storage.sequence().values.len()),
+                    |items| {
+                        items
+                            .0
+                            .with(|storage| storage.sequence_storage().values.len())
+                    },
                 ),
                 Node::Object(fields) => keys(fields).count(),
                 Node::String(text) => text.chars().count(),
@@ -953,7 +1108,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
     // SAFETY: child handles are acquired before their parent borrow ends.
     let result = unsafe {
         with_view(value, |view| {
-            let view = view.expanded();
+            let view = view.try_resolved(view.index)?.0;
             let key = Int::borrow(key);
             let at = || {
                 crate::decode_index(&key).map_err(|_| {
@@ -965,7 +1120,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
             };
             if let Some(items) = view.nodes.root_items() {
                 return items.0.with(|storage| {
-                    let items = storage.sequence();
+                    let items = storage.sequence_storage();
                     let index = crate::index(at()?, items.values.len())?;
                     Ok(items.kind.acquire(items.values[index]).into_word() as *const Object)
                 });
@@ -978,7 +1133,7 @@ pub unsafe extern "C" fn imre_json_index(value: *const Object, key: usize) -> *c
                 Node::String(text) => {
                     let index = crate::index(at()?, text.chars().count())
                         .map_err(|_| Error::new(Kind::IndexError, "string index out of range"))?;
-                    Ok(View::single(Node::String(Rc::new(Str::new(
+                    Ok(View::single(Node::String(StrOwner::new(Str::new(
                         text.chars().nth(index).unwrap().encode_utf8(&mut [0; 4]),
                     ))))
                     .into_handle())

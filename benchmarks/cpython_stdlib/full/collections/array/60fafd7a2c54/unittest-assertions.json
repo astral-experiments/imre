@@ -1,0 +1,98 @@
+{
+  "compiler_revision": "60fafd7a2c544aa1f5203d81d3cdec9f4c3ca9ea",
+  "upstream_test_occurrences": 0,
+  "controls": {
+    "assertIsInstance": {
+      "source": "import unittest\nclass Probe(unittest.TestCase):\n    def check(self):\n        self.assertIsInstance(1, int)\n        try:\n            self.assertIsInstance(1, str)\n        except AssertionError:\n            print(\"rejected false assertion\")\n        else:\n            print(\"unexpected success\")\nProbe().check()\n",
+      "sha256": "79b02985c4325f81584bea374bf045c143f01a185492ff998ad5eb4e8d727f04",
+      "reference": "rejected false assertion\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O0-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        }
+      }
+    },
+    "assertNotIsInstance": {
+      "source": "import unittest\nclass Probe(unittest.TestCase):\n    def check(self):\n        self.assertNotIsInstance(1, str)\n        try:\n            self.assertNotIsInstance(1, int)\n        except AssertionError:\n            print(\"rejected false assertion\")\n        else:\n            print(\"unexpected success\")\nProbe().check()\n",
+      "sha256": "5b7a90dd19b73ffcdab6362f45b56253a199c697d9f55812a61d88c036939168",
+      "reference": "rejected false assertion\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O0-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        }
+      }
+    },
+    "assertIsSubclass": {
+      "source": "import unittest\nclass Probe(unittest.TestCase):\n    def check(self):\n        self.assertIsSubclass(bool, int)\n        try:\n            self.assertIsSubclass(int, bool)\n        except AssertionError:\n            print(\"rejected false assertion\")\n        else:\n            print(\"unexpected success\")\nProbe().check()\n",
+      "sha256": "38202e146ababb69aa0ceb611d9887b478a1fc3b9fbfbc00f42ce7f7c7416c19",
+      "reference": "rejected false assertion\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O0-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        }
+      }
+    },
+    "assertNotIsSubclass": {
+      "source": "import unittest\nclass Probe(unittest.TestCase):\n    def check(self):\n        self.assertNotIsSubclass(int, bool)\n        try:\n            self.assertNotIsSubclass(bool, int)\n        except AssertionError:\n            print(\"rejected false assertion\")\n        else:\n            print(\"unexpected success\")\nProbe().check()\n",
+      "sha256": "8ae71c42062e67480201bc6d8fa88e37cd97a9b9119a34ce7632775b165c34ba",
+      "reference": "rejected false assertion\n",
+      "modes": {
+        "O0-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O0-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O0)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-0": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        },
+        "O3-reachable-1": {
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <tmp>/probe.py (-O3)\n<tmp>/probe.py:4:9: Imre: unknown class method\n"
+        }
+      }
+    }
+  }
+}

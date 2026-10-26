@@ -1,15 +1,14 @@
 //! Copy supported container graphs by identity. A source owner stays live until
 //! its entire copy is complete, so addresses in the memo cannot be reused.
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use super::records::{allocate_record, descriptor};
 use super::words::WordKind;
-use super::{Error, List, Object, OwnedWord, Storage, Words, acquire_rc};
+use super::{Error, List, OwnedWord, Storage, Words};
 
 struct Graph {
     memo: HashMap<usize, OwnedWord>,
-    pending: Vec<(Rc<Object>, Rc<Object>)>,
+    pending: Vec<(crate::ObjectOwner, crate::ObjectOwner)>,
 }
 
 fn push<T>(values: &mut Vec<T>, value: T) -> Result<(), Error> {
@@ -95,9 +94,9 @@ impl Graph {
                     // called while the very same container is being traversed.
                     let output = Words::new(0).into_object();
                     // SAFETY: kind 5 roots an Object for the pending traversal.
-                    let input = unsafe { acquire_rc::<Object>(source.word) };
+                    let input = unsafe { crate::ObjectOwner::acquire_word(source.word) };
                     push(&mut self.pending, (input, output.clone()))?;
-                    Rc::into_raw(output) as usize
+                    crate::ObjectOwner::into_raw(output) as usize
                 }
                 6 => {
                     let record = source.word as *const usize;
@@ -153,7 +152,7 @@ impl Graph {
                         if let Some(rows) = words.rows() {
                             return Ok(Storage::Sequence(rows.repeat(1)?));
                         }
-                        let words = words.resolved();
+                        let words = words.resolved()?;
                         let mut out = Words::new(words.kind.raw());
                         out.values
                             .try_reserve_exact(words.values.len())
@@ -209,6 +208,7 @@ pub unsafe extern "C" fn imre_deep_copy(source: usize, kind: u32) -> usize {
 mod tests {
     use super::*;
     use crate::Int;
+    use crate::objects::Object;
     use crate::objects::mappings::{imre_dict_delete, imre_dict_get, imre_dict_new, imre_dict_set};
     use crate::objects::records::{
         RecordDescriptor, imre_record_new, imre_record_release, imre_record_retain,
@@ -221,26 +221,49 @@ mod tests {
         // SAFETY: every edge has the declared object kind. We keep both roots
         // and explicitly break the cycles before their final owners drop.
         unsafe {
-            let input = Rc::from_raw(imre_seq_new(5));
-            let map = Rc::from_raw(imre_dict_new(2, 5));
+            let input = crate::ObjectOwner::from_raw(imre_seq_new(5));
+            let map = crate::ObjectOwner::from_raw(imre_dict_new(2, 5));
             let key = Int::small(1).unwrap().0;
-            imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&map) as usize, 5);
-            imre_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&map) as usize, 5);
-            imre_dict_set(Rc::as_ptr(&map), key, Rc::as_ptr(&input) as usize);
-            let copy =
-                Rc::from_raw(imre_deep_copy(Rc::as_ptr(&input) as usize, 5) as *const Object);
-            let first = Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&copy), 0) as *const Object);
-            let second = Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&copy), 1) as *const Object);
-            let back = Rc::from_raw(imre_dict_get(Rc::as_ptr(&first), key) as *const Object);
-            assert!(!Rc::ptr_eq(&copy, &input));
-            assert!(!Rc::ptr_eq(&first, &map));
-            assert!(Rc::ptr_eq(&first, &second));
-            assert!(Rc::ptr_eq(&copy, &back));
-            imre_dict_delete(Rc::as_ptr(&first), key);
-            imre_dict_delete(Rc::as_ptr(&map), key);
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&input),
+                crate::ObjectOwner::as_ptr(&map) as usize,
+                5,
+            );
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&input),
+                crate::ObjectOwner::as_ptr(&map) as usize,
+                5,
+            );
+            imre_dict_set(
+                crate::ObjectOwner::as_ptr(&map),
+                key,
+                crate::ObjectOwner::as_ptr(&input) as usize,
+            );
+            let copy = crate::ObjectOwner::from_raw(imre_deep_copy(
+                crate::ObjectOwner::as_ptr(&input) as usize,
+                5,
+            ) as *const Object);
+            let first = crate::ObjectOwner::from_raw(imre_seq_get_index(
+                crate::ObjectOwner::as_ptr(&copy),
+                0,
+            ) as *const Object);
+            let second = crate::ObjectOwner::from_raw(imre_seq_get_index(
+                crate::ObjectOwner::as_ptr(&copy),
+                1,
+            ) as *const Object);
+            let back = crate::ObjectOwner::from_raw(imre_dict_get(
+                crate::ObjectOwner::as_ptr(&first),
+                key,
+            ) as *const Object);
+            assert!(!crate::ObjectOwner::ptr_eq(&copy, &input));
+            assert!(!crate::ObjectOwner::ptr_eq(&first, &map));
+            assert!(crate::ObjectOwner::ptr_eq(&first, &second));
+            assert!(crate::ObjectOwner::ptr_eq(&copy, &back));
+            imre_dict_delete(crate::ObjectOwner::as_ptr(&first), key);
+            imre_dict_delete(crate::ObjectOwner::as_ptr(&map), key);
             drop(back);
-            assert_eq!(Rc::strong_count(&copy), 1);
-            assert_eq!(Rc::strong_count(&input), 1);
+            assert_eq!(crate::ObjectOwner::strong_count(&copy), 1);
+            assert_eq!(crate::ObjectOwner::strong_count(&input), 1);
         }
     }
 
@@ -254,23 +277,23 @@ mod tests {
         };
         // SAFETY: the descriptor and roots outlive both explicitly broken cycles.
         unsafe {
-            let list = Rc::from_raw(imre_seq_new(6));
+            let list = crate::ObjectOwner::from_raw(imre_seq_new(6));
             let tuple = imre_record_new(&descriptor);
             tuple
                 .cast::<*const Object>()
-                .write(Rc::into_raw(list.clone()));
-            imre_seq_append(Rc::as_ptr(&list), tuple as usize, 6);
+                .write(crate::ObjectOwner::into_raw(list.clone()));
+            imre_seq_append(crate::ObjectOwner::as_ptr(&list), tuple as usize, 6);
             let copied_tuple = imre_deep_copy(tuple as usize, 6) as *const usize;
             assert_ne!(copied_tuple, tuple);
             let copied_list = copied_tuple.cast::<*const Object>().read();
-            assert_ne!(copied_list, Rc::as_ptr(&list));
+            assert_ne!(copied_list, crate::ObjectOwner::as_ptr(&list));
             let back = imre_seq_pop(copied_list) as *const usize;
             assert_eq!(back, copied_tuple);
             imre_record_release(back);
             imre_record_release(copied_tuple);
-            imre_record_release(imre_seq_pop(Rc::as_ptr(&list)) as *const usize);
+            imre_record_release(imre_seq_pop(crate::ObjectOwner::as_ptr(&list)) as *const usize);
             imre_record_release(tuple);
-            assert_eq!(Rc::strong_count(&list), 1);
+            assert_eq!(crate::ObjectOwner::strong_count(&list), 1);
         }
     }
 

@@ -1,14 +1,12 @@
 # google-crc32c
 
-This wheel rebuilds the original google-crc32c 1.8.0 C extension against
-Imre's `Python.h`. Its `value` and `extend` functions call Google's CRC32C
-1.1.2 library. Both native builds and the direct C benchmark use the same
-position-independent release archive. [Python source](https://github.com/googleapis/python-crc32c/blob/9652503fb296eef101d84b9b631f454cc7c1d538/src/google_crc32c/_crc32c.c) · [Native library](https://github.com/google/crc32c/tree/02e65f4fd3065d27b2e29324800ca6d04df16126)
+Imre builds a wheel from google-crc32c 1.8.0's upstream setuptools project.
+Google's `setup.py` declares the C source, include directories, and `crc32c`
+library used by its `value` and `extend` functions. [Upstream build configuration](https://github.com/googleapis/python-crc32c/blob/9652503fb296eef101d84b9b631f454cc7c1d538/setup.py) · [Native library](https://github.com/google/crc32c/tree/02e65f4fd3065d27b2e29324800ca6d04df16126)
 
-The wheel includes a typed Python facade. It exports the two native functions
-and a checksum object supporting initialization, update, copy, digest, and hex
-digest. The compile-time signatures accept `bytes` and `int` and preserve the
-original methods' positional-only calling convention.
+The overlay supplies the native type declarations, a typed Python facade for
+`Checksum`, and the BSD license for the bundled library. Setuptools supplies
+upstream's distribution metadata and package data. [Wheel overlay](overlay/google_crc32c)
 
 ```python
 from google_crc32c import Checksum, extend, value
@@ -22,37 +20,64 @@ assert state.hexdigest() == b"e3069283"
 
 ## Build and install
 
-The following commands run from the Imre checkout on x86-64 Linux with
-Clang, CMake, a Make or Ninja generator, and a CPython environment containing
-pip, wheel, packaging, and pytest. Set `work` to a fresh directory outside the
-checkout. The published Linux timings used `CMAKE_GENERATOR=Ninja`.
+Run these commands from the Imre checkout with uv, Clang, CMake, and Python
+3.11 or later. Install the native dependency in a temporary prefix. Upstream
+setuptools finds it through `CRC32C_INSTALL_PREFIX`.
 
 ```sh
 work=$(mktemp -d)
 git clone --depth=1 --branch 1.1.2 https://github.com/google/crc32c.git "$work/core"
-python3 benchmarks/google_crc32c_build.py --crc32c-source "$work/core" \
-  --output "$work" --imre-include crates/imre-runtime/include --cc clang-18 --cxx clang++-18
-python3 scripts/pack_extension_wheel.py "$work/wheel" --name google-crc32c \
-  --version 1.8.0 --output "$work/dist"
+git clone --depth=1 --branch v1.8.0 https://github.com/googleapis/python-crc32c.git "$work/python-crc32c"
+export CC=clang CXX=clang++ CRC32C_INSTALL_PREFIX="$work/prefix" CRC32C_PURE_PYTHON=0
+cmake -S "$work/core" -B "$work/core-build" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$CRC32C_INSTALL_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+  -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCRC32C_BUILD_TESTS=OFF \
+  -DCRC32C_BUILD_BENCHMARKS=OFF -DCRC32C_USE_GLOG=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build "$work/core-build" --target install
+```
+
+Build the wheel with stock uv and Google's original `pyproject.toml` and
+`setup.py`. Export the compiler's setuptools adapter and make it available
+to this package through a separate uv configuration. The executable uses the
+C++ standard library supplied by the host toolchain.
+
+```sh
+imre build-target --output-dir "$work/sdk"
+cat > "$work/uv.toml" <<EOF
+[extra-build-dependencies]
+google-crc32c = ["imre-setuptools @ file://$work/sdk/setuptools"]
+EOF
+cxx_lib=stdc++
+if [ "$(uname -s)" = Darwin ]; then cxx_lib=c++; fi
+IMRE_BUILD_TARGET="$work/sdk/target.json" \
+IMRE_WHEEL_OVERLAY="$PWD/examples/google_crc32c/overlay" \
+IMRE_SYSTEM_LIBRARIES="$cxx_lib" \
+  uv build --wheel --config-file "$work/uv.toml" --out-dir "$work/dist" "$work/python-crc32c"
 python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-  --implementation im --python-version 1 --abi imre1 \
+  --implementation imre --python-version 3.14 --abi imre1 \
   --target "$work/site" "$work"/dist/*.whl
 mkdir "$work/consumer"
 cp examples/google_crc32c/driver.py "$work/consumer/main.py"
-imre build "$work/consumer/main.py" --extension-path "$work/site" -o "$work/driver"
+imre build "$work/consumer/main.py" --extension-path "$work/site" --clang "$CC" -o "$work/driver"
 "$work/driver" public
 ```
 
-The builder verifies the vendored C, Python, and test files and the CMake and
-native source inputs against [their pinned hashes](UPSTREAM.json). The wheel
-includes both upstream licenses and records its C++ runtime link dependency.
+The wheel retains upstream's `Requires-Python: >=3.9` metadata. Pip uses
+Imre's Python 3.14 language target and `imre1` native ABI to select it.
+To build from the published source distribution, pass
+`google_crc32c-1.8.0.tar.gz` as the final argument to the same uv command.
 
 ## Validate and benchmark
 
 ```sh
-python3 tests/google_crc32c.py cpython --cpython-package "$work/cpython"
-python3 tests/google_crc32c.py imre --imre-binary "$work/driver"
-python3 tests/google_crc32c.py fallback
+python3 -m pip install pytest
+LDFLAGS="-l$cxx_lib" python3 -m pip wheel --no-deps "$work/python-crc32c" --wheel-dir "$work/cpython-dist"
+python3 -m pip install --no-index --no-deps --no-compile --target "$work/cpython" "$work"/cpython-dist/*.whl
+"$CC" -O3 benchmarks/google_crc32c.c -I"$CRC32C_INSTALL_PREFIX/include" \
+  "$CRC32C_INSTALL_PREFIX/lib/libcrc32c.a" -l"$cxx_lib" -o "$work/direct"
+python3 tests/google_crc32c.py cpython --upstream "$work/python-crc32c" --cpython-package "$work/cpython"
+python3 tests/google_crc32c.py imre --upstream "$work/python-crc32c" --imre-binary "$work/driver"
+python3 tests/google_crc32c.py fallback --upstream "$work/python-crc32c"
 python3 benchmarks/google_crc32c.py --direct "$work/direct" \
   --cpython-package "$work/cpython" --imre "$work/driver" --output "$work/timings.json"
 ```
@@ -63,8 +88,10 @@ the installed-wheel executable and checks its acknowledged call counts. This
 also exercises upstream's lazy `Checksum.consume` method with its mock streams.
 The native Imre executable separately checks the typed facade's methods.
 The fallback mode imports the pure-Python implementation and selects the 26
-cases that can run without a C extension. [Unmodified upstream tests](upstream/test___init__.py)
+cases that can run without a C extension. [Unmodified upstream tests](https://github.com/googleapis/python-crc32c/blob/9652503fb296eef101d84b9b631f454cc7c1d538/tests/test___init__.py)
 
 The benchmark keeps each process alive, creates the payload before timing,
 checks every result, and rotates the engine order between batches. On Linux
 pass `--cpu N` to pin the parent and child processes to one available core.
+The [published Linux timings](../../benchmarks/results/2026-10-23-google-crc32c.md)
+used the [original build commands](https://github.com/astral-sh/imre/blob/d8e268d6885ce77d31bd3dd1c1c8fb223fd2a010/examples/google_crc32c/README.md).

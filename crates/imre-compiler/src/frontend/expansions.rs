@@ -3,6 +3,290 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Capture keyword values before constructing their dictionary. A later
+    /// argument may mutate a previously captured value or raise an exception.
+    fn keyword_dictionary(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        if shape.is_some_and(|(key, _)| key != Type::Str) {
+            return Err(error(
+                self.source,
+                call,
+                "dictionary keyword entries require string keys",
+            ));
+        }
+        let expected = shape.map(|(_, value)| value);
+        let mut scope = calls::ArgumentScope::default();
+        let mut entries = Vec::with_capacity(call.arguments.keywords.len());
+        for kw in &call.arguments.keywords {
+            let name = kw.arg.as_ref().ok_or_else(|| {
+                error(
+                    self.source,
+                    kw,
+                    "dictionary keyword unpacking is unsupported",
+                )
+            })?;
+            let item = match expected {
+                Some(ty) => self.expr_expected(&kw.value, ty)?,
+                None => self.expr(&kw.value)?,
+            };
+            entries.push((unpacking::string(name.as_str()), scope.hold(self, item)));
+        }
+        let value = expected.unwrap_or_else(|| {
+            let first = entries[0].1.ty;
+            if entries.iter().all(|(_, item)| item.ty == first) {
+                first
+            } else {
+                Type::ObjectValue
+            }
+        });
+        let entries = entries
+            .into_iter()
+            .zip(&*call.arguments.keywords)
+            .map(|((key, item), kw)| Ok((key, self.coerce(item, value, &kw.value)?)))
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(scope.finish(Expr {
+            ty: self.types.dict(Type::Str, value),
+            kind: ExprKind::Dict {
+                key: Type::Str,
+                value,
+                entries,
+            },
+        }))
+    }
+
+    /// Only the freshly constructed mapping receives OrderedDict identity.
+    pub(super) fn ordered_dict_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mapping = self.dict_constructor(call, shape)?;
+        let (key, value) = self.types.mapping(mapping.ty).expect("fresh dictionary");
+        Ok(Expr {
+            ty: self.types.ordered_dict(key, value),
+            kind: ExprKind::Builtin(Builtin::OrderedDict, vec![mapping]),
+        })
+    }
+
+    /// Copy stored entries into a fresh plain dictionary. A Counter's zero
+    /// and a defaultdict's factory belong to the source rather than its copy.
+    pub(super) fn dict_constructor(
+        &mut self,
+        call: &ast::ExprCall,
+        mut shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        if let Some(zip) = self.dict_from_zip(call)? {
+            return Ok(zip);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let mut sources = Vec::new();
+        match call.arguments.args.as_ref() {
+            [] => {}
+            [source] => {
+                let input = if matches!(source, ast::Expr::Dict(_)) {
+                    if shape.is_none()
+                        && !call.arguments.keywords.is_empty()
+                        && matches!(source, ast::Expr::Dict(dict) if dict.items.is_empty())
+                    {
+                        let keywords = self.keyword_dictionary(call, None)?;
+                        let empty = self.expr_expected(source, keywords.ty)?;
+                        scope.hold(self, empty);
+                        return Ok(scope.finish(keywords));
+                    }
+                    Iteration::Container {
+                        iterable: self
+                            .boolean_operand(source, shape.map(|(k, v)| self.types.dict(k, v)))?,
+                        items: false,
+                        start: None,
+                    }
+                } else {
+                    let pair = shape.map(|(k, v)| self.types.tuple(vec![k, v]));
+                    self.expansion_input(source, pair)?
+                };
+                let Iteration::Container {
+                    ref iterable,
+                    start: None,
+                    ..
+                } = input
+                else {
+                    return self.dictionary_from_pairs(call, source, input, shape);
+                };
+                let Some(fields) = self.types.mapping(iterable.ty) else {
+                    return self.dictionary_from_pairs(call, source, input, shape);
+                };
+                if let Some((key, value)) = shape {
+                    self.expect(key, fields.0, source)?;
+                    self.expect(value, fields.1, source)?;
+                }
+                shape = Some(fields);
+                sources.push(scope.hold(self, iterable.clone()));
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict expects at most one positional source",
+                ));
+            }
+        }
+        if !call.arguments.keywords.is_empty() {
+            let kw = self.keyword_dictionary(call, shape)?;
+            if sources.is_empty() {
+                return Ok(kw);
+            }
+            sources.push(scope.hold(self, kw));
+        }
+        let (key, value) = shape.ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "an empty dictionary requires a concrete dict[K, V] context",
+            )
+        })?;
+        let empty = Expr {
+            ty: self.types.dict(key, value),
+            kind: ExprKind::Dict {
+                key,
+                value,
+                entries: Vec::new(),
+            },
+        };
+        if sources.is_empty() {
+            return Ok(empty);
+        }
+        let target = scope.hold(self, empty);
+        sources.insert(0, target.clone());
+        scope.hold(
+            self,
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::DictUpdate, sources),
+            },
+        );
+        Ok(scope.finish(target))
+    }
+
+    /// A generator acquires its outer iterator on creation. Its first item,
+    /// like the first item of an ordinary iterable, is pulled after keywords.
+    fn dictionary_from_pairs(
+        &mut self,
+        call: &ast::ExprCall,
+        source: &ast::Expr,
+        input: Iteration,
+        shape: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mut input = self.prepare_iteration(input, source, false)?;
+        self.hint_empty_iteration(&input, shape.map(|(k, v)| self.types.tuple(vec![k, v])));
+        let pair = self.types.fields(self.locals[input.value]);
+        let Some(&[key, value]) = pair.as_deref() else {
+            return Err(error(
+                self.source,
+                source,
+                "dict requires an iterable of key/value pairs",
+            ));
+        };
+        let (key_type, value_type) = shape.unwrap_or((key, value));
+        if !self.types.hashable_key(key_type) {
+            return Err(error(
+                self.source,
+                source,
+                "dict requires supported immutable keys",
+            ));
+        }
+        let ty = self.types.dict(key_type, value_type);
+        let target = self.hidden(ty);
+        let mut clear = vec![target];
+        let keywords = if call.arguments.keywords.is_empty() {
+            None
+        } else {
+            let owner = self.hidden(ty);
+            let entries = self.keyword_dictionary(call, Some((key_type, value_type)))?;
+            input.evaluate.push(Statement::Assign(owner, entries));
+            clear.push(owner);
+            Some(owner)
+        };
+        input.evaluate.push(Statement::Assign(
+            target,
+            Expr {
+                ty,
+                kind: ExprKind::Dict {
+                    key: key_type,
+                    value: value_type,
+                    entries: Vec::new(),
+                },
+            },
+        ));
+        let mut body = self.expand_items(Iteration::Prepared(input), source, |c, item| {
+            let key = c.coerce(
+                Expr {
+                    ty: key,
+                    kind: ExprKind::Field(Box::new(item.clone()), 0),
+                },
+                key_type,
+                source,
+            )?;
+            let value = c.coerce(
+                Expr {
+                    ty: value,
+                    kind: ExprKind::Field(Box::new(item), 1),
+                },
+                value_type,
+                source,
+            )?;
+            Ok(vec![Statement::SetItem(c.local(target), key, value)])
+        })?;
+        if let Some(owner) = keywords {
+            body.push(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::DictUpdate,
+                    vec![self.local(target), self.local(owner)],
+                ),
+            }));
+        }
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(target)),
+                clear,
+            },
+        })
+    }
+
+    /// Evaluate the receiver, source, and keyword arguments before updating any entry.
+    pub(super) fn dict_update(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        let mapping = self.types.dict(key, value);
+        let mut args = vec![receiver];
+        match call.arguments.args.as_ref() {
+            [] => {}
+            [source] => args.push(self.expr_expected(source, mapping)?),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "dict.update expects at most one positional mapping",
+                ));
+            }
+        }
+        if !call.arguments.keywords.is_empty() {
+            args.push(self.keyword_dictionary(call, Some((key, value)))?);
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::DictUpdate, args),
+        })
+    }
+
     /// Capture ordinary fields and expanded elements in source order. Keeping
     /// each reference also preserves identity if a later field mutates it.
     pub(super) fn expanded_tuple(
@@ -10,6 +294,25 @@ impl Checker<'_> {
         tuple: &ast::ExprTuple,
         expected: Option<&[Type]>,
     ) -> Result<Expr, String> {
+        let runtime_width = tuple.elts.iter().any(|entry| {
+            let ast::Expr::Starred(star) = entry else {
+                return false;
+            };
+            self.graph
+                .session
+                .tuple_spread_width(self.module, star.start())
+                .is_none()
+        });
+        if runtime_width {
+            if expected.is_some() {
+                return Err(error(
+                    self.source,
+                    tuple,
+                    "a tuple display with runtime width cannot guarantee a fixed layout",
+                ));
+            }
+            return self.runtime_tuple_display(tuple);
+        }
         let mut scope = calls::ArgumentScope::default();
         let mut values = Vec::new();
         for entry in &tuple.elts {
@@ -96,6 +399,84 @@ impl Checker<'_> {
         }))
     }
 
+    /// Capture each spread completely before evaluating the next expression.
+    fn runtime_tuple_display(&mut self, tuple: &ast::ExprTuple) -> Result<Expr, String> {
+        let buffer = self.hidden(Type::TupleBuffer);
+        let mut body = vec![Statement::Assign(
+            buffer,
+            Expr {
+                ty: Type::TupleBuffer,
+                kind: ExprKind::Builtin(Builtin::TupleBufferNew, vec![]),
+            },
+        )];
+        let mut parts = Vec::new();
+        let push = |checker: &Self, value: Expr| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::TupleBufferPush,
+                    vec![checker.local(buffer), value],
+                ),
+            })
+        };
+        for entry in &tuple.elts {
+            if let ast::Expr::Starred(star) = entry {
+                let input = self.expansion_input(&star.value, None)?;
+                if let Iteration::Container { iterable, .. } = &input {
+                    let scalar = match iterable.ty {
+                        Type::Int => Some("int"),
+                        Type::Bool => Some("bool"),
+                        Type::None => Some("NoneType"),
+                        Type::Float => Some("float"),
+                        _ => None,
+                    };
+                    if let Some(name) = scalar {
+                        self.graph
+                            .checked_non_iterable_spread(self.module, star.value.range());
+                        let exception = Expr {
+                            ty: Type::Exception,
+                            kind: ExprKind::Exception {
+                                kind: exception_kind("TypeError").unwrap(),
+                                message: Some(Box::new(unpacking::string(format!(
+                                    "Value after * must be an iterable, not {name}"
+                                )))),
+                            },
+                        };
+                        body.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::RaiseException,
+                                vec![iterable.clone(), exception],
+                            ),
+                        }));
+                        continue;
+                    }
+                }
+                let fixed = matches!(&input, Iteration::Container { iterable, items: false, start: None } if self.types.fields(iterable.ty).is_some());
+                body.extend(self.expand_items(input, entry, |checker, value| {
+                    parts.push((value.ty, !fixed));
+                    Ok(vec![push(checker, value)])
+                })?);
+            } else {
+                let value = self.expr(entry)?;
+                parts.push((value.ty, false));
+                body.push(push(self, value));
+            }
+        }
+        let ty = self.types.display_tuple(parts);
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::TupleBufferFinish, vec![self.local(buffer)]),
+                }),
+                clear: vec![buffer],
+            },
+        })
+    }
+
     /// The right operand may mutate or rebind the left before either list is copied.
     pub(super) fn concat_lists(
         &mut self,
@@ -146,6 +527,7 @@ impl Checker<'_> {
         receiver: Expr,
         source: &ast::Expr,
         node: &impl Ranged,
+        append: Builtin,
     ) -> Result<Expr, String> {
         let element = self.types.element(receiver.ty).unwrap();
         let destination = self.hidden(receiver.ty);
@@ -167,6 +549,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
         });
         let before = match &input {
+            _ if !matches!(append, Builtin::Append) => Vec::new(),
             Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
                 let mut eager = Vec::new();
                 if self.locals[list.value] == self.locals[destination] {
@@ -202,7 +585,7 @@ impl Checker<'_> {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
-                        Builtin::Append,
+                        append.clone(),
                         vec![
                             checker.local(destination),
                             checker.coerce(value, element, node)?,

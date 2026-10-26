@@ -3,6 +3,18 @@
 Each observation uses the [shared per-occurrence contract](../../SUITE_RUNNER.md)
 and includes every upstream ID at both optimization levels.
 
+## Latest complete Linux measurement
+
+[Compiler and binary hashes](observations/d1b6486/source.json) identify the exact
+source used for both optimization levels. Formatted `singledispatch` callbacks preserve every measured role relative to this parent. The canonical parent already runs the original C and Python `test_obj_field` and `test_sort_int` bodies under host fixtures, plus `test_wrapping_attributes` and both live `builtins.len` reentrancy bodies. CPython runs the module, class,
+and instance hooks; the compiled child creates its own native test instance.
+Compare the [parent measurement](observations/bd3514a/evidence-linux.json) to check which individual occurrences changed.
+
+| Unchanged suite | Occurrences | Fully native | Native body, host fixture | Host-driven native operation | Mixed | Failed | Blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Primary](observations/d1b6486/evidence-linux.json) | 325 | 0 | 18 | 17 | 7 | 0 | 283 |
+| [Free-threading](observations/d1b6486/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 0 | 4 |
+
 ## Canonical main at `56731b6`
 
 The [Linux job](https://github.com/astral-sh/imre/actions/runs/40179400348/job/121127002553)

@@ -6,6 +6,7 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
@@ -13,8 +14,14 @@ mod asyncio;
 mod boxed_values;
 mod builtins;
 mod bytes;
+mod cache_paths;
+mod calendar;
 mod chainmap;
+mod charmaps;
+mod codecs;
+pub(crate) use codecs::Codec;
 mod contexts;
+mod contextvars;
 mod copying;
 mod csv;
 mod deferred_diff;
@@ -25,28 +32,42 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod format_cursors;
+mod functools;
 mod hashlib;
 mod inspect;
+pub(crate) mod interpreter_stdlib;
 mod itertools;
+mod join_buffer;
+mod joined_lines;
 mod json;
+pub(crate) use json::write_string as write_json_string;
 mod linecache;
 mod logging;
 mod mappings;
+mod module_specs;
 mod namespaces;
 mod os;
+mod patchset;
 mod paths;
 pub(crate) mod posixpath;
 mod processes;
+mod random;
+mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
+mod socket;
+mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
 mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::split_parts;
+mod typing;
+pub(crate) use text::short_string;
 mod unions;
 mod values;
 mod warnings;
@@ -63,7 +84,7 @@ use num_traits::ToPrimitive;
 use std::rc::Rc;
 
 /// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
-pub(crate) fn literal_string(text: &str) -> Rc<Str> {
+pub(crate) fn literal_string(text: &str) -> StrOwner {
     self::text::owned_string(text)
 }
 use words::{OwnedWord, Words};
@@ -87,12 +108,21 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    FunctoolsPlaceholder {
+        class: bool,
+    },
+    Context(Rc<contextvars::State>),
+    ContextVar(Rc<contextvars::Variable>),
+    ContextToken(Rc<contextvars::Token>),
+    TokenMissing,
+    Socket(socket::Socket),
     StrDescriptor(u32),
     Sequence(Words),
+    JoinBuffer(allocator_api2::boxed::Box<join_buffer::JoinBuffer>),
     Deque(Box<deque::Deque>),
     DequeIterator(deque::DequeIterator),
     Dictionary(mappings::TableOwner<mappings::Mapping>),
-    ChainMap(Rc<Object>),
+    ChainMap(crate::ObjectOwner),
     FunctionCache(Box<mappings::FunctionCache>),
     Set(mappings::TableOwner<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
@@ -103,19 +133,30 @@ enum Storage {
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     ByteOutput(bytes::ByteOutput),
-    SimpleNamespace(Rc<Object>),
+    TupleBuffer(Vec<OwnedWord>),
+    SimpleNamespace(crate::ObjectOwner),
+    SourceModule {
+        name: crate::StrOwner,
+        filename: crate::StrOwner,
+    },
     Sha256(Box<sha2::Sha256>),
+    Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
+    CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::writer::WriterClass),
+    CodecWriter(allocator_api2::boxed::Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),
-    ZipFile(Box<zipfile::Archive>),
-    ZipInfo(Rc<zipfile::Info>),
+    ZipFile(allocator_api2::boxed::Box<zipfile::Archive>),
+    ZipInfo(crate::Shared<zipfile::Info>),
     Popen(Box<processes::Popen>),
+    ProcessSelectorClass(bool),
     AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncCoroutine(Rc<asyncio::Task>),
     AsyncTask(Rc<asyncio::Task>),
     GeneratorContext(Rc<contexts::Manager>),
     DirectoryContext(tempdirs::DirectoryContext),
@@ -125,23 +166,29 @@ enum Storage {
     Semaphore(Rc<asyncio::Semaphore>),
     Path {
         text: paths::PathText,
-        name: std::cell::OnceCell<Rc<Str>>,
+        name: std::cell::OnceCell<StrOwner>,
     },
     PathInfo(Box<paths::Info>),
     PurePath(Box<paths::PurePath>),
     PathIterator(Box<paths::PathIterator>),
+    PatchSet(patchset::PatchSet),
+    PatchedFile(patchset::PatchedFile),
+    Hunk(patchset::Hunk),
     RegexPattern(Box<regexes::Pattern>),
-    Logger(Rc<Str>),
+    Logger(StrOwner),
+    HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
     ClockTime(logging::timed::Clock),
+    Calendar(Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
-    JsonDecoder(Rc<Object>),
+    JsonDecoder(crate::ObjectOwner),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
+#[cfg(test)]
 unsafe fn acquire_rc<T>(word: usize) -> Rc<T> {
     if word == 0 {
         fail("TypeError", "unexpected null runtime handle");
@@ -170,14 +217,23 @@ impl Storage {
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
-    fn sequence(&self) -> &Words {
+    fn sequence(&self) -> Result<&Words, Error> {
         self.sequence_storage().resolved()
     }
-    fn sequence_mut(&mut self) -> &mut Words {
+    // The caller owns a concrete sequence whose construction excludes a deferred plan.
+    fn concrete_sequence_mut(&mut self) -> &mut Words {
+        let Self::Sequence(words) = self else {
+            fail("SystemError", "expected a sequence object")
+        };
+        debug_assert!(words.plan().is_none());
+        words.forget_order();
+        words
+    }
+    fn sequence_mut(&mut self) -> Result<&mut Words, Error> {
         let values = self.sequence_storage_mut();
-        values.resolve_mut();
+        values.resolve_mut()?;
         values.forget_order();
-        values
+        Ok(values)
     }
     fn sequence_storage_mut(&mut self) -> &mut Words {
         match self {
@@ -193,7 +249,7 @@ impl Storage {
 pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller roots this allocation.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { crate::ObjectOwner::increment_strong_count(value) };
     }
 }
 
@@ -203,13 +259,21 @@ pub unsafe extern "C" fn imre_object_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_object_release(value: *const Object) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live strong reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        release_object_owner(unsafe { crate::ObjectOwner::from_raw(value) });
+    }
+}
+
+/// Give a live Popen's final language owner to subprocess._active before its
+/// allocation is destroyed. All other object owners follow the usual Rc drop.
+fn release_object_owner(owner: crate::ObjectOwner) {
+    if crate::ObjectOwner::strong_count(&owner) == 1 {
+        processes::retain_live_owner(&owner);
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_seq_new(kind: u32) -> *const Object {
-    Rc::into_raw(Words::new(kind).into_object())
+    crate::ObjectOwner::into_raw(Words::new(kind).into_object())
 }
 
 /// Remember a mock history's `_CallList` identity across aliases and resets.
@@ -240,9 +304,14 @@ pub unsafe extern "C" fn imre_str_list_contains(needle: *const Str, list: *const
     // SAFETY: the storage borrow prevents mutation and none of the compared
     // strings can invoke user code or release its live owner during equality.
     unsafe {
-        object(list)
-            .0
-            .with(|storage| u32::from(storage.sequence().contains_string(&*needle)))
+        object(list).0.with(|storage| {
+            finish(
+                storage
+                    .sequence()
+                    .map(|words| u32::from(words.contains_string(&*needle))),
+                0,
+            )
+        })
     }
 }
 
@@ -263,7 +332,7 @@ pub unsafe extern "C" fn imre_seq_get(value: *const Object, at: usize) -> usize 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.get(index(at, rows.len())?);
             }
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             Ok(values
                 .kind
                 .acquire(values.values[index(at, values.values.len())?])
@@ -284,12 +353,28 @@ pub unsafe extern "C" fn imre_seq_get_index(value: *const Object, at: usize) -> 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.get(at);
             }
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let word = *values.values.get(at).ok_or_else(Error::index)?;
             Ok(values.kind.acquire(word).into_word())
         })
     };
     finish(owned, 0)
+}
+
+/// Transfers a private list slot to its single forward iterator. Unvisited
+/// elements are still owned by the normal list destructor on every loop exit.
+///
+/// # Safety
+/// `value` is a rooted, ordinary typed list. No alias may observe a consumed
+/// slot and `at` must be a fresh in-bounds native index for this iterator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_take_index_proven(value: *const Object, at: usize) -> usize {
+    // SAFETY: the list owns each stored word; zero is the empty destructor state.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| std::mem::take(&mut storage.concrete_sequence_mut().values[at]))
+    }
 }
 
 /// Borrows one concrete sequence word after its current bounds were proved.
@@ -313,7 +398,10 @@ pub unsafe extern "C" fn imre_seq_borrow_index_proven(value: *const Object, at: 
                 // Exact kind is part of the same caller proof as the index.
                 std::hint::unreachable_unchecked()
             };
-            *values.resolved().values.get_unchecked(at)
+            finish(
+                values.resolved().map(|rows| *rows.values.get_unchecked(at)),
+                0,
+            )
         })
     }
 }
@@ -337,22 +425,25 @@ pub unsafe extern "C" fn imre_seq_data_readonly(value: *const Object) -> *const 
         let Storage::Sequence(values) = &*(*value).0.0.get() else {
             std::hint::unreachable_unchecked()
         };
-        values.resolved().values.as_ptr()
+        finish(
+            values.resolved().map(|rows| rows.values.as_ptr()),
+            std::ptr::null(),
+        )
     }
 }
 
 /// Acquires the replacement before any existing container owner can be displaced.
-unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> OwnedWord {
+unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> Result<OwnedWord, Error> {
     // SAFETY: only copied descriptor metadata escapes this rooted storage read.
     let actual = unsafe {
         object(value).0.with(|storage| {
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             values.check_kind(kind);
-            values.kind
+            Ok(values.kind)
         })
-    };
+    }?;
     // SAFETY: the compiler supplies a borrowed word of the exact element type.
-    unsafe { actual.acquire(word) }
+    Ok(unsafe { actual.acquire(word) })
 }
 
 /// # Safety
@@ -371,11 +462,14 @@ pub unsafe extern "C" fn imre_seq_set(value: *const Object, at: usize, word: usi
         return;
     }
     // SAFETY: the caller roots the checked replacement through acquisition.
-    let mut new = Some(unsafe { replacement(value, word, kind) });
+    let mut new = Some(match unsafe { replacement(value, word, kind) } {
+        Ok(owner) => owner,
+        Err(error) => return error.raise(),
+    });
     // SAFETY: ownership leaves mutable storage before any displaced value drops.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let at = index(at, values.values.len())?;
             Ok(OwnedWord::from_owned(
                 std::mem::replace(&mut values.values[at], new.take().unwrap().into_word()),
@@ -401,11 +495,14 @@ pub unsafe extern "C" fn imre_seq_set_index(
         return;
     }
     // SAFETY: the checked replacement is acquired before replacing its last owner.
-    let mut new = Some(unsafe { replacement(value, word, kind) });
+    let mut new = Some(match unsafe { replacement(value, word, kind) } {
+        Ok(word) => word,
+        Err(err) => return err.raise(),
+    });
     // SAFETY: no reference escapes; the displaced owner is dropped afterward.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let slot = values.values.get_mut(at).ok_or_else(Error::index)?;
             Ok(OwnedWord::from_owned(
                 std::mem::replace(slot, new.take().unwrap().into_word()),
@@ -433,26 +530,24 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
                 }
             }
             if let Some(rows) = words.rows_mut() {
-                let ok = rows.append(rows.payload(word as *const usize)).is_ok();
+                let result = rows.append(rows.payload(word as *const usize));
                 words.update_header();
-                return ok;
+                return result;
             }
-            let sequence = storage.sequence_mut();
+            let sequence = storage.sequence_mut()?;
             sequence.check_kind(kind);
-            if sequence.values.try_reserve(1).is_err() {
-                return false;
-            }
+            sequence
+                .values
+                .try_reserve(1)
+                .map_err(|_| Error::allocation())?;
             sequence
                 .values
                 .push(sequence.kind.acquire(word).into_word());
             sequence.update_header();
-            true
+            Ok(())
         })
     };
-    if !appended {
-        exceptions::sequence_allocation_failed();
-    }
-    i32::from(appended)
+    finish(appended.map(|()| 1), 0)
 }
 
 /// Publish an empty typed list before releasing the elements of the old buffer.
@@ -488,6 +583,23 @@ pub unsafe extern "C" fn imre_seq_clear(value: *const Object) {
     drop(previous);
 }
 
+/// Reverse the owned slots in place without acquiring or releasing them.
+///
+/// # Safety
+/// The caller roots the mutable list for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_reverse(value: *const Object) {
+    // SAFETY: resolving the native sequence and swapping slots cannot invoke Python.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            finish(
+                storage.sequence_mut().map(|words| words.values.reverse()),
+                (),
+            )
+        })
+    };
+}
+
 /// # Safety
 /// The sequence is rooted. Success transfers its removed owner's exact word;
 /// check pending before interpreting zero, which may also be a valid element.
@@ -503,7 +615,7 @@ pub unsafe extern "C" fn imre_seq_pop(value: *const Object) -> usize {
                 words.update_header();
                 return result;
             }
-            let values = storage.sequence_mut();
+            let values = storage.sequence_mut()?;
             let word = values
                 .values
                 .pop()
@@ -522,11 +634,18 @@ pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     // SAFETY: only the copied length leaves storage.
     let length = unsafe {
         object(value).0.with(|storage| {
-            storage
-                .sequence_storage()
-                .rows()
-                .map_or_else(|| storage.sequence().values.len(), structs::Rows::len)
+            let words = storage.sequence_storage();
+            if let Some(rows) = words.rows() {
+                return Ok(rows.len());
+            }
+            words
+                .plan()
+                .map_or_else(|| Ok(words.values.len()), deferred_diff::Deferred::len)
         })
+    };
+    let length = match length {
+        Ok(n) => n,
+        Err(error) => return error.returning(0),
     };
     debug_assert!(length <= MAX_LIST_LEN);
     (length << 1) | 1
@@ -555,7 +674,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.repeat(count);
             }
-            let values = storage.sequence();
+            let values = storage.sequence()?;
             let length = values
                 .values
                 .len()
@@ -578,9 +697,27 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
         })
     };
     finish(
-        result.map(|values| Rc::into_raw(values.into_object())),
+        result.map(|values| crate::ObjectOwner::into_raw(values.into_object())),
         std::ptr::null(),
     )
+}
+
+/// Concatenate two Python strings after both optional operands have been evaluated.
+///
+/// # Safety
+/// Nonzero words are rooted, immutable strings. Zero represents Python None.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_optional_str_concat(left: usize, right: usize) -> *const Str {
+    let reason = match (left == 0, right == 0) {
+        (true, true) => "unsupported operand type(s) for +: 'NoneType' and 'NoneType'",
+        (true, false) => "unsupported operand type(s) for +: 'NoneType' and 'str'",
+        (false, true) => "can only concatenate str (not \"NoneType\") to str",
+        (false, false) => {
+            // SAFETY: both non-null string owners are retained by the caller.
+            return unsafe { imre_str_concat(left as *const Str, right as *const Str) };
+        }
+    };
+    Error::new(Kind::TypeError, reason).returning(std::ptr::null())
 }
 
 /// # Safety
@@ -593,7 +730,7 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
     if left.is_empty() || right.is_empty() {
         let retained = if left.is_empty() { b } else { a };
         // SAFETY: the caller roots the original immutable string handle.
-        return Rc::into_raw(unsafe { acquire_rc::<Str>(retained as usize) });
+        return StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(retained as usize) });
     }
     let Some(mut result) = concatenated_length(left.len(), [right.len()])
         .and_then(|length| Str::try_with_capacity(length).ok())
@@ -602,7 +739,12 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
     };
     result.push_str(left);
     result.push_str(right);
-    Rc::into_raw(Rc::new(result))
+    finish(
+        StrOwner::try_new(result)
+            .map(StrOwner::into_raw)
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -614,7 +756,7 @@ pub unsafe extern "C" fn imre_str_repeat(value: *const Str, count: usize) -> *co
     let result = (|| {
         let count = bytes::native_size(&count)?.max(0) as usize;
         if text.is_empty() || count == 0 {
-            return Ok(Rc::into_raw(Rc::new(Str::default())));
+            return Ok(StrOwner::into_raw(StrOwner::new(Str::default())));
         }
         let length = text
             .len()
@@ -626,7 +768,7 @@ pub unsafe extern "C" fn imre_str_repeat(value: *const Str, count: usize) -> *co
         for _ in 0..count {
             result.push_str(text);
         }
-        Ok(Rc::into_raw(Rc::new(result)))
+        Ok(StrOwner::into_raw(StrOwner::new(result)))
     })();
     finish(result, std::ptr::null())
 }
@@ -701,7 +843,8 @@ pub unsafe extern "C" fn imre_str_get_part(
 
 /// Formats one integer at its expression position without allocating for small
 /// values. Null means the fragment borrows `buffer`; otherwise the result owns
-/// the fallback string referenced by `part`. Neither outcome consumes `value`.
+/// the fallback string referenced by `part`. A pending digit-limit error means `part`
+/// is uninitialized. No outcome consumes `value`.
 ///
 /// # Safety
 /// `value` is a rooted canonical integer for this call. `buffer` points to 20
@@ -734,6 +877,9 @@ pub unsafe extern "C" fn imre_int_str_part(
         // SAFETY: the input is still rooted; this conversion returns an independent
         // string owner and performs arbitrary-precision formatting exactly once.
         let result = unsafe { super::imre_int_str(value) };
+        if result.is_null() {
+            return result;
+        }
         // SAFETY: the caller provides a writable descriptor, and the returned
         // owner keeps its immutable Str allocation alive for concatenation.
         unsafe {
@@ -761,7 +907,7 @@ pub unsafe extern "C" fn imre_str_concat_parts(
 ) -> *const Str {
     // SAFETY: this entry point has the builder's same fragment-lifetime contract.
     finish(
-        unsafe { concat_parts(parts, count) }.map(Rc::into_raw),
+        unsafe { concat_parts(parts, count) }.map(StrOwner::into_raw),
         std::ptr::null(),
     )
 }
@@ -772,7 +918,7 @@ pub unsafe extern "C" fn imre_str_concat_parts(
 /// CompactString's reservation grows geometrically across repeated appends.
 ///
 /// # Safety
-/// `left` transfers exactly one live, non-null Rc<Str> owner. `parts` obeys the
+/// `left` transfers exactly one live, non-null StrOwner owner. `parts` obeys the
 /// borrowing builder's descriptor and UTF-8 requirements, and its array is
 /// disjoint from `left` and its storage. A suffix may borrow `left` directly,
 /// through its handle or initialized bytes in its character storage, without
@@ -787,7 +933,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
     count: usize,
 ) -> *const Str {
     // SAFETY: the caller transfers this exact, live Rc owner once.
-    let mut owner = unsafe { Rc::from_raw(left) };
+    let mut owner = unsafe { StrOwner::from_raw(left) };
     let parts = if count == 0 {
         &[]
     } else {
@@ -799,10 +945,10 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         return failed_append(owner);
     };
     if let Some(shared) = shared {
-        return Rc::into_raw(shared);
+        return StrOwner::into_raw(shared);
     }
     if length == owner.len() {
-        return Rc::into_raw(owner);
+        return StrOwner::into_raw(owner);
     }
 
     // Raw byte fragments need not acquire an Rc, so strong uniqueness alone is
@@ -818,7 +964,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
             part.length != 0 && part_start < end && start < part_start.saturating_add(part.length)
         }
     });
-    if !borrows_left && let Some(value) = Rc::get_mut(&mut owner) {
+    if !borrows_left && let Some(value) = StrOwner::get_mut(&mut owner) {
         if value.try_reserve(length - value.len()).is_err() {
             return failed_append(owner);
         }
@@ -846,7 +992,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         // SAFETY: the original prefix and complete UTF-8 suffix are initialized
         // within the reserved allocation, including a completely full inline one.
         unsafe { value.set_len(length) };
-        return Rc::into_raw(owner);
+        return StrOwner::into_raw(owner);
     }
 
     let Ok(mut result) = Str::try_with_capacity(length) else {
@@ -857,7 +1003,7 @@ pub unsafe extern "C" fn imre_str_concat_parts_owned(
         // SAFETY: all inputs, including self-borrows, remain rooted and unchanged.
         result.push_str(unsafe { part.as_str() });
     }
-    Rc::into_raw(Rc::new(result))
+    finish_shared_append(owner, StrOwner::try_new(result))
 }
 
 /// Appends a compiler-pooled literal, retaining its root for an empty prefix.
@@ -878,10 +1024,10 @@ pub unsafe extern "C" fn imre_str_append_literal_owned(
     }
     // SAFETY: the caller transfers this exact owner. Static bytes cannot
     // overlap a writable heap buffer.
-    let mut owner = unsafe { Rc::from_raw(left) };
+    let mut owner = unsafe { StrOwner::from_raw(left) };
     // SAFETY: the nonempty static span is disjoint from writable heap storage.
     if unsafe { append_reserved(&mut owner, data, length) } {
-        return Rc::into_raw(owner);
+        return StrOwner::into_raw(owner);
     }
     // SAFETY: the program owns the literal root throughout the call.
     let literal = unsafe { root.read() };
@@ -890,14 +1036,14 @@ pub unsafe extern "C" fn imre_str_append_literal_owned(
         length: usize::MAX,
     };
     // SAFETY: the descriptor stays live and the left owner transfers.
-    unsafe { imre_str_concat_parts_owned(Rc::into_raw(owner), &part, 1) }
+    unsafe { imre_str_concat_parts_owned(StrOwner::into_raw(owner), &part, 1) }
 }
 
 /// Appends one disjoint UTF-8 span, retaining unique string storage and growing
 /// it geometrically only when the existing capacity cannot hold the suffix.
 ///
 /// # Safety
-/// `left` transfers exactly one live, non-null Rc<Str> owner. `data` points to
+/// `left` transfers exactly one live, non-null StrOwner owner. `data` points to
 /// `length` immutable valid UTF-8 bytes disjoint from both the Str object and
 /// its character allocation, including spare capacity. The span obeys Rust
 /// slice size limits and remains readable until return; it may be null only
@@ -913,10 +1059,10 @@ pub unsafe extern "C" fn imre_str_append_utf8_owned(
         return left;
     }
     // SAFETY: the caller transfers this exact live owner, including on copying.
-    let mut owner = unsafe { Rc::from_raw(left) };
+    let mut owner = unsafe { StrOwner::from_raw(left) };
     // SAFETY: the caller supplies a disjoint nonempty span.
     if unsafe { append_reserved(&mut owner, data, length) } {
-        return Rc::into_raw(owner);
+        return StrOwner::into_raw(owner);
     }
     // SAFETY: the unchanged owner and nonempty disjoint UTF-8 span are transferred.
     unsafe { append_utf8_slow(owner, data, length) }
@@ -925,8 +1071,8 @@ pub unsafe extern "C" fn imre_str_append_utf8_owned(
 /// # Safety
 /// The readable nonempty UTF-8 span must be disjoint from a writable heap buffer.
 #[inline]
-unsafe fn append_reserved(owner: &mut Rc<Str>, data: *const u8, length: usize) -> bool {
-    if let Some(value) = Rc::get_mut(owner)
+unsafe fn append_reserved(owner: &mut StrOwner, data: *const u8, length: usize) -> bool {
+    if let Some(value) = StrOwner::get_mut(owner)
         && value.is_heap_allocated()
     {
         let initial = value.len();
@@ -952,11 +1098,11 @@ unsafe fn append_reserved(owner: &mut Rc<Str>, data: *const u8, length: usize) -
 /// `length` is nonzero and the span obeys `imre_str_append_utf8_owned`'s contract.
 #[cold]
 #[inline(never)]
-unsafe fn append_utf8_slow(mut owner: Rc<Str>, data: *const u8, length: usize) -> *const Str {
+unsafe fn append_utf8_slow(mut owner: StrOwner, data: *const u8, length: usize) -> *const Str {
     let Some(total) = concatenated_length(owner.len(), [length]) else {
         return failed_append(owner);
     };
-    if let Some(value) = Rc::get_mut(&mut owner) {
+    if let Some(value) = StrOwner::get_mut(&mut owner) {
         if value.capacity() < total && value.try_reserve(length).is_err() {
             return failed_append(owner);
         }
@@ -968,7 +1114,7 @@ unsafe fn append_utf8_slow(mut owner: Rc<Str>, data: *const u8, length: usize) -
             std::ptr::copy_nonoverlapping(data, output, length);
             value.set_len(total);
         }
-        Rc::into_raw(owner)
+        StrOwner::into_raw(owner)
     } else {
         // SAFETY: the validated nonempty UTF-8 span remains readable and disjoint.
         let suffix =
@@ -978,14 +1124,24 @@ unsafe fn append_utf8_slow(mut owner: Rc<Str>, data: *const u8, length: usize) -
         };
         result.push_str(&owner);
         result.push_str(suffix);
-        Rc::into_raw(Rc::new(result))
+        finish_shared_append(owner, StrOwner::try_new(result))
+    }
+}
+
+fn finish_shared_append(
+    owner: StrOwner,
+    result: Result<StrOwner, allocator_api2::alloc::AllocError>,
+) -> *const Str {
+    match result {
+        Ok(result) => StrOwner::into_raw(result),
+        Err(_) => failed_append(owner),
     }
 }
 
 /// Give the unmodified reference back to the caller's existing slot.
 #[cold]
-fn failed_append(owner: Rc<Str>) -> *const Str {
-    let _ = Rc::into_raw(owner);
+fn failed_append(owner: StrOwner) -> *const Str {
+    let _ = StrOwner::into_raw(owner);
     Error::allocation().returning(std::ptr::null())
 }
 
@@ -1001,7 +1157,7 @@ fn concatenated_length(initial: usize, lengths: impl IntoIterator<Item = usize>)
 ///
 /// # Safety
 /// All fragments obey the rooted handle and borrowed UTF-8 span contracts.
-unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Option<Rc<Str>>)> {
+unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Option<StrOwner>)> {
     let mut handle = None;
     let length = concatenated_length(
         initial,
@@ -1016,7 +1172,7 @@ unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Op
     )?;
     let shared = handle.filter(|&(_, size)| size == length).map(|(data, _)| {
         // SAFETY: the sentinel selected a live Str handle which the caller roots.
-        unsafe { acquire_rc::<Str>(data as usize) }
+        unsafe { crate::StrOwner::acquire_word(data as usize) }
     });
     Some((length, shared))
 }
@@ -1025,7 +1181,7 @@ unsafe fn concat_size(initial: usize, parts: &[StringPart]) -> Option<(usize, Op
 ///
 /// # Safety
 /// The descriptors, handles, and spans obey `imre_str_concat_parts`'s contract.
-unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<Rc<Str>, Error> {
+unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwner, Error> {
     let parts = if count == 0 {
         &[]
     } else {
@@ -1038,7 +1194,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<Rc<Str>
         return Ok(shared);
     }
     if length == 0 {
-        return Ok(text::owned_string(""));
+        return text::try_owned_string("");
     }
     let mut result = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     {
@@ -1064,11 +1220,11 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<Rc<Str>
     // SAFETY: exactly `length` bytes were initialized within capacity; joining
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
-    Ok(Rc::new(result))
+    StrOwner::try_new(result).map_err(|_| Error::allocation())
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
-fn python_whitespace(value: char) -> bool {
+pub(crate) fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
 }
 
@@ -1089,10 +1245,10 @@ pub unsafe extern "C" fn imre_str_rstrip(value: *const Str, chars: *const Str) -
     });
     if stripped.len() == source.len() {
         // SAFETY: acquiring an independent reference preserves the caller's owner.
-        unsafe { Rc::increment_strong_count(value) };
+        unsafe { StrOwner::increment_strong_count(value) };
         value
     } else {
-        Rc::into_raw(Rc::new(Str::new(stripped)))
+        StrOwner::into_raw(StrOwner::new(Str::new(stripped)))
     }
 }
 
@@ -1104,7 +1260,7 @@ pub unsafe extern "C" fn imre_str_rstrip(value: *const Str, chars: *const Str) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
+    let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
     let mut result = Words::new(3);
     for part in value
         .split(python_whitespace)
@@ -1112,7 +1268,7 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     {
         text::push_part(&mut result, &value, part);
     }
-    Rc::into_raw(result.into_object())
+    crate::ObjectOwner::into_raw(result.into_object())
 }
 
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
@@ -1213,26 +1369,29 @@ impl LineOffsets {
 }
 
 struct LineIterator {
-    owner: Rc<Str>,
+    owner: StrOwner,
     offsets: LineOffsets,
 }
 
-fn owned_line(source: &Rc<Str>, range: std::ops::Range<usize>) -> Rc<Str> {
+fn owned_line(source: &StrOwner, range: std::ops::Range<usize>) -> Result<StrOwner, Error> {
     if range == (0..source.len()) {
-        Rc::clone(source)
+        Ok(StrOwner::clone(source))
     } else {
-        text::owned_string(&source[range])
+        text::try_owned_string(&source[range])
     }
 }
 
 impl LineIterator {
-    fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
-        let range = self.offsets.next(&self.owner)?;
-        let line = owned_line(&self.owner, range);
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, Error> {
+        let Some(range) = self.offsets.next(&self.owner) else {
+            return Ok(None);
+        };
+        let line = owned_line(&self.owner, range)?;
         // SAFETY: the new string transfers one owner of the exact element kind.
-        let line =
-            unsafe { OwnedWord::from_owned(Rc::into_raw(line) as usize, words::WordKind::new(3)) };
-        Some((line, None))
+        let line = unsafe {
+            OwnedWord::from_owned(StrOwner::into_raw(line) as usize, words::WordKind::new(3))
+        };
+        Ok(Some((line, None)))
     }
 }
 
@@ -1244,11 +1403,11 @@ impl LineIterator {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const Object {
     // SAFETY: acquire a strong reference while the caller still roots the input.
-    let owner: Rc<Str> = unsafe { acquire_rc(value as usize) };
+    let owner: StrOwner = unsafe { crate::StrOwner::acquire_word(value as usize) };
     let offsets = LineOffsets::new(&owner);
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LineIterator(
-        LineIterator { owner, offsets },
-    )))))
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+        Storage::LineIterator(LineIterator { owner, offsets }),
+    ))))
 }
 
 /// Splits Python line boundaries without retaining separators. CRLF is one
@@ -1286,7 +1445,14 @@ pub unsafe extern "C" fn imre_str_splitlines_options(
 /// The caller roots `value` until the list owns every returned slice.
 unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
+    let value = unsafe { std::mem::ManuallyDrop::new(StrOwner::from_raw(value)) };
+    if !KEEP {
+        match deferred_diff::Deferred::split_lines(&value) {
+            Ok(Some(lines)) => return lines,
+            Ok(None) => {}
+            Err(error) => return finish(Err(error), std::ptr::null()),
+        }
+    }
     finish(
         split_lines(&value, |mut range| {
             // The shared scanner has already found the boundary. Its first
@@ -1304,9 +1470,24 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
     )
 }
 
+/// Visit line fields using the same scanner as native str.splitlines.
+pub(crate) fn visit_line_fields<'a>(
+    value: &'a str,
+    keep_ends: bool,
+    mut visit: impl FnMut(&'a str),
+) {
+    let mut offsets = LineOffsets::new(value);
+    while let Some(mut range) = offsets.next(value) {
+        if keep_ends {
+            range.end = offsets.start;
+        }
+        visit(&value[range]);
+    }
+}
+
 fn split_lines(
     value: &str,
-    own: impl Fn(std::ops::Range<usize>) -> Rc<Str>,
+    own: impl Fn(std::ops::Range<usize>) -> Result<StrOwner, Error>,
 ) -> Result<*const Object, Error> {
     let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
@@ -1315,9 +1496,9 @@ fn split_lines(
             .values
             .try_reserve(1)
             .map_err(|_| Error::allocation())?;
-        result.values.push(Rc::into_raw(own(range)) as usize);
+        result.values.push(StrOwner::into_raw(own(range)?) as usize);
     }
-    Ok(Rc::into_raw(result.into_object()))
+    Ok(crate::ObjectOwner::into_raw(result.into_object()))
 }
 
 #[cfg(test)]
@@ -1325,34 +1506,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn partial_split_releases_earlier_string_owners() {
+        let first = StrOwner::new(Str::new("first"));
+        let result = split_lines("first\nsecond", |range| {
+            if range.start == 0 {
+                Ok(first.clone())
+            } else {
+                Err(Error::allocation())
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(StrOwner::strong_count(&first), 1);
+    }
+
+    #[test]
     fn concatenation_retains_the_only_nonempty_string_handle() {
-        let text = Rc::new(Str::new("a heap-backed concatenation operand"));
-        let empty = Rc::new(Str::new(""));
+        let text = StrOwner::new(Str::new("a heap-backed concatenation operand"));
+        let empty = StrOwner::new(Str::new(""));
         let parts = [
             StringPart {
-                data: Rc::as_ptr(&empty).cast(),
+                data: StrOwner::as_ptr(&empty).cast(),
                 length: usize::MAX,
             },
             StringPart {
-                data: Rc::as_ptr(&text).cast(),
+                data: StrOwner::as_ptr(&text).cast(),
                 length: usize::MAX,
             },
             StringPart {
-                data: Rc::as_ptr(&empty).cast(),
+                data: StrOwner::as_ptr(&empty).cast(),
                 length: usize::MAX,
             },
         ];
         // SAFETY: both input owners root all three descriptors through each call.
         unsafe {
             for result in [
-                imre_str_concat(Rc::as_ptr(&text), Rc::as_ptr(&empty)),
-                imre_str_concat(Rc::as_ptr(&empty), Rc::as_ptr(&text)),
+                imre_str_concat(StrOwner::as_ptr(&text), StrOwner::as_ptr(&empty)),
+                imre_str_concat(StrOwner::as_ptr(&empty), StrOwner::as_ptr(&text)),
                 imre_str_concat_parts(parts.as_ptr(), parts.len()),
             ] {
-                assert!(Rc::ptr_eq(&Rc::from_raw(result), &text));
+                assert!(StrOwner::ptr_eq(&StrOwner::from_raw(result), &text));
             }
         }
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(StrOwner::strong_count(&text), 1);
 
         let literal = "static bytes that exceed inline capacity";
         // SAFETY: the literal has static storage. Each call transfers one owner.
@@ -1361,12 +1556,12 @@ mod tests {
             data: handle.cast(),
             length: usize::MAX,
         };
-        let empty = Rc::into_raw(Rc::new(Str::default()));
+        let empty = StrOwner::into_raw(StrOwner::new(Str::default()));
         // SAFETY: the descriptor and its source remain live, and the empty owner transfers.
-        let result = unsafe { Rc::from_raw(imre_str_concat_parts_owned(empty, &part, 1)) };
+        let result = unsafe { StrOwner::from_raw(imre_str_concat_parts_owned(empty, &part, 1)) };
         // SAFETY: recover the constructor's original owner exactly once.
-        let original = unsafe { Rc::from_raw(handle) };
-        assert!(Rc::ptr_eq(&result, &original));
+        let original = unsafe { StrOwner::from_raw(handle) };
+        assert!(StrOwner::ptr_eq(&result, &original));
         assert_eq!(result.as_static_str(), Some(literal));
     }
 
@@ -1383,7 +1578,7 @@ mod tests {
         ] {
             let padding = "a".repeat(length - ending.len());
             let split = padding.len() / 2;
-            let owned = Rc::new(Str::new(&padding[split..]));
+            let owned = StrOwner::new(Str::new(&padding[split..]));
             let parts = [
                 StringPart {
                     data: padding.as_ptr(),
@@ -1394,7 +1589,7 @@ mod tests {
                     length: 0,
                 },
                 StringPart {
-                    data: Rc::as_ptr(&owned).cast(),
+                    data: StrOwner::as_ptr(&owned).cast(),
                     length: usize::MAX,
                 },
                 StringPart {
@@ -1411,19 +1606,19 @@ mod tests {
             let Ok(mut result) = (unsafe { concat_parts(parts.as_ptr(), parts.len()) }) else {
                 panic!("test fragments must fit");
             };
-            let source = Rc::into_raw(Rc::new(Str::new(&padding[..split])));
+            let source = StrOwner::into_raw(StrOwner::new(Str::new(&padding[..split])));
             let suffix = &parts[1..];
             // SAFETY: source transfers its only owner, and the remaining suffix
             // fragments are disjoint. Empty trailing parts also exercise reading
             // descriptors after the last full-inline byte overwrites its tag.
             let mut reused = unsafe {
-                Rc::from_raw(imre_str_concat_parts_owned(
+                StrOwner::from_raw(imre_str_concat_parts_owned(
                     source,
                     suffix.as_ptr(),
                     suffix.len(),
                 ))
             };
-            assert_eq!(Rc::as_ptr(&reused), source);
+            assert_eq!(StrOwner::as_ptr(&reused), source);
             drop(owned);
             let expected = format!("{padding}{ending}");
             assert_eq!(result.len(), length);
@@ -1431,8 +1626,8 @@ mod tests {
             assert_eq!(result.is_heap_allocated(), length > 24);
             assert_eq!(reused.as_str(), expected);
             assert_eq!(reused.is_heap_allocated(), length > 24);
-            Rc::make_mut(&mut result).push_str("!");
-            Rc::get_mut(&mut reused).unwrap().push_str("!");
+            StrOwner::make_mut(&mut result).push_str("!");
+            StrOwner::get_mut(&mut reused).unwrap().push_str("!");
             assert_eq!(result.as_str(), format!("{expected}!"));
             assert_eq!(reused.as_str(), result.as_str());
         }
@@ -1491,9 +1686,9 @@ mod tests {
                 assert!(buffer.iter().all(|byte| *byte == 0xcc));
                 assert_eq!(weak_integer.as_ref().unwrap().strong_count(), 1);
                 // SAFETY: the helper transfers exactly one non-null Str owner.
-                Some(unsafe { Rc::from_raw(owner) })
+                Some(unsafe { StrOwner::from_raw(owner) })
             };
-            let weak_string = owner.as_ref().map(Rc::downgrade);
+            let weak_string = owner.as_ref().map(StrOwner::downgrade);
             drop(integer);
             if let Some(weak) = weak_integer {
                 assert!(weak.upgrade().is_none());
@@ -1514,7 +1709,7 @@ mod tests {
             // SAFETY: caller scratch, literals, and the optional fallback owner
             // remain immutable and live; the original integer is already gone.
             let result =
-                unsafe { Rc::from_raw(imre_str_concat_parts(parts.as_ptr(), parts.len())) };
+                unsafe { StrOwner::from_raw(imre_str_concat_parts(parts.as_ptr(), parts.len())) };
             drop(owner);
             if let Some(weak) = weak_string {
                 assert!(weak.upgrade().is_none());
@@ -1532,8 +1727,8 @@ mod tests {
             .enumerate()
         {
             for at in [position as i64, position as i64 - 6] {
-                let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
-                let weak = Rc::downgrade(&source);
+                let source = StrOwner::new(Str::new("aé\0e\u{301}🦀"));
+                let weak = StrOwner::downgrade(&source);
                 let at = Int::small(at).unwrap();
                 let mut buffer = [0xcc_u8; 6];
                 let scratch = buffer[1..5].as_mut_ptr();
@@ -1541,7 +1736,7 @@ mod tests {
                 // SAFETY: rooted inputs and disjoint outputs provide a four-byte
                 // scratch span and one descriptor; status precedes all output reads.
                 let status = unsafe {
-                    imre_str_get_part(Rc::as_ptr(&source), at.0, scratch, part.as_mut_ptr())
+                    imre_str_get_part(StrOwner::as_ptr(&source), at.0, scratch, part.as_mut_ptr())
                 };
                 assert_eq!(status, 1);
                 assert_eq!(exceptions::imre_error_pending(), 0);
@@ -1559,7 +1754,7 @@ mod tests {
                 assert!(weak.upgrade().is_none());
                 // SAFETY: the descriptor borrows caller scratch, so neither
                 // released input is needed to concatenate its initialized bytes.
-                let result = unsafe { Rc::from_raw(imre_str_concat_parts(&part, 1)) };
+                let result = unsafe { StrOwner::from_raw(imre_str_concat_parts(&part, 1)) };
                 assert_eq!(result.as_str(), expected);
             }
         }
@@ -1581,7 +1776,7 @@ mod tests {
             ("a", BigInt::from(1) << 400_u32, overflow),
             ("a", -(BigInt::from(1) << 400_u32), overflow),
         ] {
-            let source = Rc::new(Str::new(text));
+            let source = StrOwner::new(Str::new(text));
             let at = Int::new(at);
             let mut buffer = [0xcc_u8; 6];
             let mut part = StringPart {
@@ -1592,7 +1787,7 @@ mod tests {
             // despite the language-level index being outside the accepted range.
             let status = unsafe {
                 imre_str_get_part(
-                    Rc::as_ptr(&source),
+                    StrOwner::as_ptr(&source),
                     at.0,
                     buffer[1..5].as_mut_ptr(),
                     &mut part,
@@ -1602,17 +1797,22 @@ mod tests {
             assert_eq!(buffer, [0xcc; 6]);
             assert_eq!(part.data, "unchanged".as_ptr());
             assert_eq!(part.length, "unchanged".len());
-            assert_eq!(Rc::strong_count(&source), 1);
+            assert_eq!(StrOwner::strong_count(&source), 1);
             assert_eq!(exceptions::imre_error_pending(), 1);
             // SAFETY: taking pending transfers one exception owner; retrieving
             // its message returns one independent string owner, both adopted once.
             unsafe {
-                let error = Rc::from_raw(exceptions::imre_error_take());
+                let error = crate::ObjectOwner::from_raw(exceptions::imre_error_take());
                 assert_eq!(
-                    exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                    exceptions::imre_exception_matches(
+                        crate::ObjectOwner::as_ptr(&error),
+                        Kind::IndexError as u32
+                    ),
                     1,
                 );
-                let message = Rc::from_raw(exceptions::imre_exception_message(Rc::as_ptr(&error)));
+                let message = StrOwner::from_raw(exceptions::imre_exception_message(
+                    crate::ObjectOwner::as_ptr(&error),
+                ));
                 assert_eq!(message.as_str(), expected);
             }
             assert_eq!(exceptions::imre_error_pending(), 0);
@@ -1621,9 +1821,9 @@ mod tests {
 
     #[test]
     fn concatenation_parts_borrow_aliases_and_preserve_utf8_and_nuls() {
-        let source = Rc::new(Str::new("α\0🦀"));
+        let source = StrOwner::new(Str::new("α\0🦀"));
         let alias = source.clone();
-        let weak = Rc::downgrade(&source);
+        let weak = StrOwner::downgrade(&source);
         let prefix = "literalé\0:";
         let suffix = ":a suffix exceeding inline string capacity";
         let parts = [
@@ -1632,7 +1832,7 @@ mod tests {
                 length: prefix.len(),
             },
             StringPart {
-                data: Rc::as_ptr(&source).cast(),
+                data: StrOwner::as_ptr(&source).cast(),
                 length: usize::MAX,
             },
             StringPart {
@@ -1640,7 +1840,7 @@ mod tests {
                 length: 0,
             },
             StringPart {
-                data: Rc::as_ptr(&alias).cast(),
+                data: StrOwner::as_ptr(&alias).cast(),
                 length: usize::MAX,
             },
             StringPart {
@@ -1650,8 +1850,9 @@ mod tests {
         ];
         // SAFETY: both aliases and all literal spans outlive the descriptor array's
         // use; the call returns one independently owned concatenated string.
-        let result = unsafe { Rc::from_raw(imre_str_concat_parts(parts.as_ptr(), parts.len())) };
-        assert_eq!(Rc::strong_count(&source), 2);
+        let result =
+            unsafe { StrOwner::from_raw(imre_str_concat_parts(parts.as_ptr(), parts.len())) };
+        assert_eq!(StrOwner::strong_count(&source), 2);
         assert_eq!(source.as_str(), "α\0🦀");
         drop((source, alias));
         assert!(weak.upgrade().is_none());
@@ -1662,8 +1863,8 @@ mod tests {
         // SAFETY: zero count permits a null array, and empty literal spans permit
         // null data; each returned reference is adopted and released once.
         unsafe {
-            assert!(Rc::from_raw(imre_str_concat_parts(std::ptr::null(), 0)).is_empty());
-            assert!(Rc::from_raw(imre_str_concat_parts(&parts[2], 1)).is_empty());
+            assert!(StrOwner::from_raw(imre_str_concat_parts(std::ptr::null(), 0)).is_empty());
+            assert!(StrOwner::from_raw(imre_str_concat_parts(&parts[2], 1)).is_empty());
         }
     }
 
@@ -1671,10 +1872,10 @@ mod tests {
     fn owned_concatenation_reuses_unique_owner_and_reserved_heap_storage() {
         let mut text = Str::with_capacity(256);
         text.push_str("a prefix exceeding inline string capacity");
-        let source = Rc::new(text);
+        let source = StrOwner::new(text);
         let storage = source.as_ptr();
         let capacity = source.capacity();
-        let suffix = Rc::new(Str::new("🦀"));
+        let suffix = StrOwner::new(Str::new("🦀"));
         let literal = "é\0";
         let parts = [
             StringPart {
@@ -1682,25 +1883,25 @@ mod tests {
                 length: literal.len(),
             },
             StringPart {
-                data: Rc::as_ptr(&suffix).cast(),
+                data: StrOwner::as_ptr(&suffix).cast(),
                 length: usize::MAX,
             },
         ];
-        let source = Rc::into_raw(source);
+        let source = StrOwner::into_raw(source);
         // SAFETY: source transfers its only owner; suffix and literal are disjoint
         // rooted inputs, and the returned owner is adopted exactly once.
         let result = unsafe {
-            Rc::from_raw(imre_str_concat_parts_owned(
+            StrOwner::from_raw(imre_str_concat_parts_owned(
                 source,
                 parts.as_ptr(),
                 parts.len(),
             ))
         };
-        assert_eq!(Rc::as_ptr(&result), source);
+        assert_eq!(StrOwner::as_ptr(&result), source);
         assert_eq!(result.as_ptr(), storage);
         assert_eq!(result.capacity(), capacity);
-        assert_eq!(Rc::strong_count(&result), 1);
-        assert_eq!(Rc::strong_count(&suffix), 1);
+        assert_eq!(StrOwner::strong_count(&result), 1);
+        assert_eq!(StrOwner::strong_count(&suffix), 1);
         assert_eq!(
             result.as_str(),
             "a prefix exceeding inline string capacityé\0🦀"
@@ -1709,8 +1910,8 @@ mod tests {
 
     #[test]
     fn owned_concatenation_grows_geometrically_across_inline_and_heap_storage() {
-        let mut source = Rc::new(Str::new(""));
-        let original = Rc::as_ptr(&source);
+        let mut source = StrOwner::new(Str::new(""));
+        let original = StrOwner::as_ptr(&source);
         let literal = "é\0";
         let part = StringPart {
             data: literal.as_ptr(),
@@ -1722,9 +1923,13 @@ mod tests {
             // SAFETY: this disjoint literal outlives every call, which consumes
             // the sole owner and returns exactly one replacement owner.
             source = unsafe {
-                Rc::from_raw(imre_str_concat_parts_owned(Rc::into_raw(source), &part, 1))
+                StrOwner::from_raw(imre_str_concat_parts_owned(
+                    StrOwner::into_raw(source),
+                    &part,
+                    1,
+                ))
             };
-            assert_eq!(Rc::as_ptr(&source), original);
+            assert_eq!(StrOwner::as_ptr(&source), original);
             assert_eq!(source.len(), length);
             assert_eq!(source.is_heap_allocated(), length > 24);
             growths += usize::from(source.capacity() != capacity);
@@ -1737,22 +1942,45 @@ mod tests {
     }
 
     #[test]
+    fn refused_shared_append_owner_restores_the_original_handle() {
+        let alias = StrOwner::new(Str::new("shared"));
+        let original = StrOwner::into_raw(alias.clone());
+        // SAFETY: the call consumes the slot's owner and restores it on failure.
+        let result = finish_shared_append(
+            unsafe { StrOwner::from_raw(original) },
+            Err(allocator_api2::alloc::AllocError),
+        );
+        assert!(result.is_null());
+        assert_eq!(exceptions::imre_error_pending(), 1);
+        // SAFETY: the slot still owns one reference and take transfers the exception.
+        unsafe {
+            let restored = StrOwner::from_raw(original);
+            assert!(StrOwner::ptr_eq(&restored, &alias));
+            imre_object_release(exceptions::imre_error_take());
+        }
+        assert_eq!(StrOwner::strong_count(&alias), 1);
+    }
+
+    #[test]
     fn failed_append_restores_the_callers_reference() {
-        let original = Rc::new(Str::from("preserved"));
-        let alias = Rc::clone(&original);
-        let pointer = Rc::as_ptr(&original);
+        let original = StrOwner::new(Str::from("preserved"));
+        let alias = StrOwner::clone(&original);
+        let pointer = StrOwner::as_ptr(&original);
         assert!(failed_append(original).is_null());
-        assert_eq!(Rc::strong_count(&alias), 2);
+        assert_eq!(StrOwner::strong_count(&alias), 2);
 
         // SAFETY: failure returned the transferred reference to its original
         // pointer, and taking the pending exception transfers one owner.
         unsafe {
-            let restored = Rc::from_raw(pointer);
-            assert!(Rc::ptr_eq(&restored, &alias));
+            let restored = StrOwner::from_raw(pointer);
+            assert!(StrOwner::ptr_eq(&restored, &alias));
             assert_eq!(restored.as_str(), "preserved");
-            let error = Rc::from_raw(exceptions::imre_error_take());
+            let error = crate::ObjectOwner::from_raw(exceptions::imre_error_take());
             assert_eq!(
-                exceptions::imre_exception_matches(Rc::as_ptr(&error), Kind::MemoryError as u32),
+                exceptions::imre_exception_matches(
+                    crate::ObjectOwner::as_ptr(&error),
+                    Kind::MemoryError as u32
+                ),
                 1
             );
         }
@@ -1761,9 +1989,9 @@ mod tests {
     #[test]
     fn owned_concatenation_preserves_shared_alias_and_consumes_one_owner() {
         for count in [1, 2] {
-            let alias = Rc::new(Str::new("α\0🦀"));
-            let weak = Rc::downgrade(&alias);
-            let source = Rc::into_raw(alias.clone());
+            let alias = StrOwner::new(Str::new("α\0🦀"));
+            let weak = StrOwner::downgrade(&alias);
+            let source = StrOwner::into_raw(alias.clone());
             let parts = [
                 StringPart {
                     data: ":".as_ptr(),
@@ -1776,10 +2004,11 @@ mod tests {
             ];
             // SAFETY: source transfers one of the two references, and alias roots
             // any self-borrowed suffix. Disjoint-only suffixes must also copy.
-            let result =
-                unsafe { Rc::from_raw(imre_str_concat_parts_owned(source, parts.as_ptr(), count)) };
-            assert_ne!(Rc::as_ptr(&result), source);
-            assert_eq!(Rc::strong_count(&alias), 1);
+            let result = unsafe {
+                StrOwner::from_raw(imre_str_concat_parts_owned(source, parts.as_ptr(), count))
+            };
+            assert_ne!(StrOwner::as_ptr(&result), source);
+            assert_eq!(StrOwner::strong_count(&alias), 1);
             assert_eq!(alias.as_str(), "α\0🦀");
             drop(alias);
             assert!(weak.upgrade().is_none());
@@ -1798,10 +2027,10 @@ mod tests {
     fn owned_concatenation_roots_unowned_self_handles_and_byte_spans() {
         for text in ["α\0🦀", "α\0🦀 with a suffix exceeding inline capacity"] {
             for handle in [false, true] {
-                let source = Rc::new(Str::new(text));
+                let source = StrOwner::new(Str::new(text));
                 let part = if handle {
                     StringPart {
-                        data: Rc::as_ptr(&source).cast(),
+                        data: StrOwner::as_ptr(&source).cast(),
                         length: usize::MAX,
                     }
                 } else {
@@ -1810,11 +2039,12 @@ mod tests {
                         length: source.len(),
                     }
                 };
-                let source = Rc::into_raw(source);
+                let source = StrOwner::into_raw(source);
                 // SAFETY: the consumed sole owner roots its directly borrowed
                 // handle/span. No extra Rc or Weak masks the aliasing case.
-                let result = unsafe { Rc::from_raw(imre_str_concat_parts_owned(source, &part, 1)) };
-                assert_ne!(Rc::as_ptr(&result), source);
+                let result =
+                    unsafe { StrOwner::from_raw(imre_str_concat_parts_owned(source, &part, 1)) };
+                assert_ne!(StrOwner::as_ptr(&result), source);
                 assert_eq!(result.as_str(), text.repeat(2));
             }
         }
@@ -1823,59 +2053,60 @@ mod tests {
         let storage = text.as_ptr();
         text.truncate(8);
         assert_eq!(text.as_ptr(), storage);
-        let source = Rc::into_raw(Rc::new(text));
+        let source = StrOwner::into_raw(StrOwner::new(text));
         let part = StringPart {
             // SAFETY: truncation leaves this initialized heap allocation in place.
             data: unsafe { storage.add(32) },
             length: 16,
         };
         // SAFETY: the source owner roots initialized UTF-8 bytes in spare capacity.
-        let result = unsafe { Rc::from_raw(imre_str_concat_parts_owned(source, &part, 1)) };
-        assert_ne!(Rc::as_ptr(&result), source);
+        let result = unsafe { StrOwner::from_raw(imre_str_concat_parts_owned(source, &part, 1)) };
+        assert_ne!(StrOwner::as_ptr(&result), source);
         assert_eq!(result.as_str(), "a".repeat(24));
     }
 
     #[test]
     fn owned_empty_suffix_preserves_handle_and_shared_ownership() {
-        let alias = Rc::new(Str::new("unchanged"));
+        let alias = StrOwner::new(Str::new("unchanged"));
         for count in [0, 1] {
             let empty = StringPart {
                 data: std::ptr::null(),
                 length: 0,
             };
             let parts = if count == 0 { std::ptr::null() } else { &empty };
-            let source = Rc::into_raw(alias.clone());
+            let source = StrOwner::into_raw(alias.clone());
             // SAFETY: a null array is allowed only for zero count; a zero-length
             // byte span may be null. Exactly one source owner is transferred.
-            let result = unsafe { Rc::from_raw(imre_str_concat_parts_owned(source, parts, count)) };
-            assert_eq!(Rc::as_ptr(&result), source);
-            assert_eq!(Rc::strong_count(&alias), 2);
+            let result =
+                unsafe { StrOwner::from_raw(imre_str_concat_parts_owned(source, parts, count)) };
+            assert_eq!(StrOwner::as_ptr(&result), source);
+            assert_eq!(StrOwner::strong_count(&alias), 2);
             assert_eq!(result.as_str(), "unchanged");
         }
-        assert_eq!(Rc::strong_count(&alias), 1);
+        assert_eq!(StrOwner::strong_count(&alias), 1);
     }
 
     #[test]
     fn owned_utf8_append_reuses_unique_owner_and_reserved_heap_storage() {
         let mut text = Str::with_capacity(256);
         text.push_str("a prefix exceeding inline string capacity");
-        let source = Rc::new(text);
+        let source = StrOwner::new(text);
         let storage = source.as_ptr();
         let capacity = source.capacity();
-        let source = Rc::into_raw(source);
+        let source = StrOwner::into_raw(source);
         let suffix = "é\0🦀";
         // SAFETY: the literal is disjoint, and the only source owner is consumed.
         let result = unsafe {
-            Rc::from_raw(imre_str_append_utf8_owned(
+            StrOwner::from_raw(imre_str_append_utf8_owned(
                 source,
                 suffix.as_ptr(),
                 suffix.len(),
             ))
         };
-        assert_eq!(Rc::as_ptr(&result), source);
+        assert_eq!(StrOwner::as_ptr(&result), source);
         assert_eq!(result.as_ptr(), storage);
         assert_eq!(result.capacity(), capacity);
-        assert_eq!(Rc::strong_count(&result), 1);
+        assert_eq!(StrOwner::strong_count(&result), 1);
         assert_eq!(
             result.as_str(),
             "a prefix exceeding inline string capacityé\0🦀"
@@ -1891,23 +2122,23 @@ mod tests {
             (heap_prefix, false),
             (heap_prefix, true),
         ] {
-            let source = Rc::new(Str::new(text));
+            let source = StrOwner::new(Str::new(text));
             let alias = shared.then(|| source.clone());
-            let weak = Rc::downgrade(&source);
-            let source = Rc::into_raw(source);
+            let weak = StrOwner::downgrade(&source);
+            let source = StrOwner::into_raw(source);
             let suffix = "é!";
             // SAFETY: the literal is disjoint and exactly one owner is transferred.
             let result = unsafe {
-                Rc::from_raw(imre_str_append_utf8_owned(
+                StrOwner::from_raw(imre_str_append_utf8_owned(
                     source,
                     suffix.as_ptr(),
                     suffix.len(),
                 ))
             };
-            assert_ne!(Rc::as_ptr(&result), source);
-            assert_eq!(Rc::strong_count(&result), 1);
+            assert_ne!(StrOwner::as_ptr(&result), source);
+            assert_eq!(StrOwner::strong_count(&result), 1);
             if let Some(alias) = alias {
-                assert_eq!(Rc::strong_count(&alias), 1);
+                assert_eq!(StrOwner::strong_count(&alias), 1);
                 assert_eq!(alias.as_str(), text);
                 drop(alias);
             }
@@ -1929,40 +2160,40 @@ mod tests {
             (25, "🦀"),
         ] {
             let padding = "a".repeat(length - ending.len());
-            let source = Rc::into_raw(Rc::new(Str::new(&padding)));
+            let source = StrOwner::into_raw(StrOwner::new(Str::new(&padding)));
             // SAFETY: the complete literal suffix is disjoint, including when it
             // fills the final inline tag byte. Exactly one source owner moves.
             let mut result = unsafe {
-                Rc::from_raw(imre_str_append_utf8_owned(
+                StrOwner::from_raw(imre_str_append_utf8_owned(
                     source,
                     ending.as_ptr(),
                     ending.len(),
                 ))
             };
-            assert_eq!(Rc::as_ptr(&result), source);
+            assert_eq!(StrOwner::as_ptr(&result), source);
             assert_eq!(result.as_str(), format!("{padding}{ending}"));
             assert_eq!(result.len(), length);
             assert_eq!(result.is_heap_allocated(), length > 24);
-            Rc::get_mut(&mut result).unwrap().push_str("!");
+            StrOwner::get_mut(&mut result).unwrap().push_str("!");
             assert_eq!(result.as_str(), format!("{padding}{ending}!"));
         }
 
         let literal = "a static prefix exceeding inline string capacity";
-        let source = Rc::new(Str::const_new(literal));
+        let source = StrOwner::new(Str::const_new(literal));
         assert_eq!(source.as_ptr(), literal.as_ptr());
         assert!(!source.is_heap_allocated());
-        let source = Rc::into_raw(source);
+        let source = StrOwner::into_raw(source);
         let suffix = "é\0🦀";
         // SAFETY: both static spans are disjoint, and the only source owner is
         // transferred. Mutation must first copy the read-only static storage.
         let result = unsafe {
-            Rc::from_raw(imre_str_append_utf8_owned(
+            StrOwner::from_raw(imre_str_append_utf8_owned(
                 source,
                 suffix.as_ptr(),
                 suffix.len(),
             ))
         };
-        assert_eq!(Rc::as_ptr(&result), source);
+        assert_eq!(StrOwner::as_ptr(&result), source);
         assert_ne!(result.as_ptr(), literal.as_ptr());
         assert!(result.is_heap_allocated());
         assert_eq!(result.as_str(), format!("{literal}{suffix}"));
@@ -1970,16 +2201,16 @@ mod tests {
 
     #[test]
     fn owned_utf8_empty_append_preserves_shared_owner_without_reading_null() {
-        let alias = Rc::new(Str::new("unchanged α\0🦀"));
-        let source = Rc::into_raw(alias.clone());
+        let alias = StrOwner::new(Str::new("unchanged α\0🦀"));
+        let source = StrOwner::into_raw(alias.clone());
         // SAFETY: an empty suffix may be null; one of two owners is transferred.
         let result =
-            unsafe { Rc::from_raw(imre_str_append_utf8_owned(source, std::ptr::null(), 0)) };
-        assert_eq!(Rc::as_ptr(&result), source);
-        assert_eq!(Rc::strong_count(&alias), 2);
+            unsafe { StrOwner::from_raw(imre_str_append_utf8_owned(source, std::ptr::null(), 0)) };
+        assert_eq!(StrOwner::as_ptr(&result), source);
+        assert_eq!(StrOwner::strong_count(&alias), 2);
         assert_eq!(result.as_str(), "unchanged α\0🦀");
         drop(result);
-        assert_eq!(Rc::strong_count(&alias), 1);
+        assert_eq!(StrOwner::strong_count(&alias), 1);
     }
 
     #[test]
@@ -1997,9 +2228,9 @@ mod tests {
 
     #[test]
     fn sequence_words_preserve_niches_and_owned_snapshots() {
-        let text = Rc::new(Str::from("optional payload"));
-        let weak = Rc::downgrade(&text);
-        let word = Rc::as_ptr(&text) as usize;
+        let text = StrOwner::new(Str::from("optional payload"));
+        let weak = StrOwner::downgrade(&text);
+        let word = StrOwner::as_ptr(&text) as usize;
         // SAFETY: exact sequence kinds describe every scalar or pointer word;
         // nullable strings use null directly without any wrapper allocation.
         unsafe {
@@ -2008,7 +2239,7 @@ mod tests {
             imre_seq_append(optional, word, 259);
             drop(text);
             imre_seq_set_index(optional, 1, word, 259);
-            let saved = Rc::from_raw(imre_seq_get_index(optional, 1) as *const Str);
+            let saved = StrOwner::from_raw(imre_seq_get_index(optional, 1) as *const Str);
             imre_seq_set_index(optional, 1, 0, 259);
             assert_eq!(imre_seq_pop(optional), 0);
             assert_eq!(imre_seq_get_index(optional, 0), 0);
@@ -2026,7 +2257,15 @@ mod tests {
                 }
                 let empty = imre_seq_repeat(sequence, Int::small(-1).unwrap().0);
                 assert_eq!(Int(imre_seq_len(empty)).as_small(), Some(0));
-                assert_eq!(object(empty).0.with(|s| s.sequence().kind.raw()), kind);
+                assert_eq!(
+                    object(empty).0.with(|s| s
+                        .sequence()
+                        .ok()
+                        .expect("fixture sequence")
+                        .kind
+                        .raw()),
+                    kind
+                );
                 imre_object_release(empty);
                 for (index, &value) in values.iter().enumerate() {
                     assert_eq!(imre_seq_get_index(sequence, index), value);
@@ -2041,10 +2280,10 @@ mod tests {
     fn proven_sequence_reads_borrow_exact_scalar_and_optional_words() {
         use num_bigint::BigInt;
 
-        let text = Rc::new(Str::from("borrowed sequence word"));
+        let text = StrOwner::new(Str::from("borrowed sequence word"));
         let big = Rc::new(BigInt::from(1_u128 << 100));
         let float = Rc::new(-0.0_f64);
-        let text_weak = Rc::downgrade(&text);
+        let text_weak = StrOwner::downgrade(&text);
         let big_weak = Rc::downgrade(&big);
         let float_weak = Rc::downgrade(&float);
         let cases = [
@@ -2052,7 +2291,7 @@ mod tests {
             (1, vec![0, 1]),
             (257, vec![0, 1, 2]),
             (258, vec![0, 1, Rc::as_ptr(&big) as usize]),
-            (259, vec![0, Rc::as_ptr(&text) as usize]),
+            (259, vec![0, StrOwner::as_ptr(&text) as usize]),
             (263, vec![0, Rc::as_ptr(&float) as usize]),
             (
                 7,
@@ -2079,7 +2318,7 @@ mod tests {
                 imre_object_release(sequence);
             }
         }
-        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(StrOwner::strong_count(&text), 1);
         assert_eq!(Rc::strong_count(&big), 1);
         assert_eq!(Rc::strong_count(&float), 1);
         drop((text, big, float));
@@ -2091,8 +2330,8 @@ mod tests {
 
     #[test]
     fn readonly_sequence_views_keep_empty_and_owned_element_lifetimes() {
-        let text = Rc::new(Str::from("rooted until the loop finishes"));
-        let weak = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("rooted until the loop finishes"));
+        let weak = StrOwner::downgrade(&text);
         // SAFETY: views are never read out of bounds and their last uses precede
         // any storage mutation or owner release. Acquired words outlive the view.
         unsafe {
@@ -2101,12 +2340,12 @@ mod tests {
             assert!(!empty.is_null());
             assert_eq!(empty as usize % std::mem::align_of::<usize>(), 0);
             assert_eq!(imre_seq_len(sequence), 1); // Tagged zero; no load.
-            imre_seq_append(sequence, Rc::as_ptr(&text) as usize, 3);
+            imre_seq_append(sequence, StrOwner::as_ptr(&text) as usize, 3);
             let view = imre_seq_data_readonly(sequence);
-            assert_eq!(Rc::strong_count(&text), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
             let word = view.read();
-            let saved = acquire_rc::<Str>(word);
-            assert_eq!(Rc::strong_count(&text), 3);
+            let saved = crate::StrOwner::acquire_word(word);
+            assert_eq!(StrOwner::strong_count(&text), 3);
             imre_object_release(sequence);
             drop(text);
             assert_eq!(saved.as_str(), "rooted until the loop finishes");
@@ -2126,14 +2365,14 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("retained before mutation"));
-        let weak = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("retained before mutation"));
+        let weak = StrOwner::downgrade(&text);
         // SAFETY: immutable metadata outlives the record. The borrowed read is
         // immediately acquired, matching compiler lowering, before removing
         // the source owner. Every independent record owner is released once.
         unsafe {
             let record = imre_record_new(&descriptor);
-            record.cast::<*const Str>().write(Rc::into_raw(text));
+            record.cast::<*const Str>().write(StrOwner::into_raw(text));
             let sequence = imre_seq_new(6);
             imre_seq_append(sequence, record as usize, 6);
             imre_record_release(record);
@@ -2160,14 +2399,17 @@ mod tests {
             kinds: kinds.as_ptr(),
             semantics: std::ptr::null(),
         };
-        let text = Rc::new(Str::from("nested record root"));
-        let weak = Rc::downgrade(&text);
+        let text = StrOwner::new(Str::from("nested record root"));
+        let weak = StrOwner::downgrade(&text);
         // SAFETY: metadata outlives all records and each copied record reference
         // is independently rooted until released; field writes transfer ownership.
         unsafe {
             let child = imre_record_new(&descriptor);
             child.write(Int::small(4).unwrap().into_raw());
-            child.add(1).cast::<*const Str>().write(Rc::into_raw(text));
+            child
+                .add(1)
+                .cast::<*const Str>()
+                .write(StrOwner::into_raw(text));
             let original = imre_seq_new(6);
             imre_seq_append(original, child as usize, 6);
             imre_record_release(child);
@@ -2208,20 +2450,23 @@ mod tests {
     }
     #[test]
     fn one_complete_line_retains_the_input_in_both_split_paths() {
-        let source = Rc::new(Str::from("line".repeat(1024)));
+        let source = StrOwner::new(Str::from("line".repeat(1024)));
         let mut cursor = LineIterator {
             offsets: LineOffsets::new(&source),
-            owner: Rc::clone(&source),
+            owner: StrOwner::clone(&source),
         };
-        let (word, _) = cursor.next().unwrap();
+        let Ok(Some((word, _))) = cursor.next() else {
+            panic!("expected an owned line");
+        };
         // SAFETY: the iterator transfers a Str owner, and source roots the eager split.
         unsafe {
-            let streamed = Rc::from_raw(word.into_word() as *const Str);
-            let parts = imre_str_splitlines(Rc::as_ptr(&source));
-            let listed = Rc::from_raw(imre_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
+            let streamed = StrOwner::from_raw(word.into_word() as *const Str);
+            let parts = imre_str_splitlines(StrOwner::as_ptr(&source));
+            let listed =
+                StrOwner::from_raw(imre_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
             imre_object_release(parts);
-            assert!(Rc::ptr_eq(&source, &listed));
-            assert!(Rc::ptr_eq(&source, &streamed));
+            assert!(StrOwner::ptr_eq(&source, &listed));
+            assert!(StrOwner::ptr_eq(&source, &streamed));
         }
     }
 
@@ -2237,14 +2482,17 @@ mod tests {
             ),
             ("é\x1f🦀\nlast", vec!["é\x1f🦀", "last"]),
         ] {
-            let source = Rc::new(Str::new(source));
+            let source = StrOwner::new(Str::new(source));
             // SAFETY: the source is rooted; the returned sequence transfers one
             // owner, and inspection copies strings without retaining storage refs.
             let actual = unsafe {
-                let result = Rc::from_raw(imre_str_splitlines(Rc::as_ptr(&source)));
+                let result =
+                    crate::ObjectOwner::from_raw(imre_str_splitlines(StrOwner::as_ptr(&source)));
                 result.0.with(|storage| {
                     storage
                         .sequence()
+                        .ok()
+                        .expect("fixture sequence")
                         .values
                         .iter()
                         .map(|&word| (&*(word as *const Str)).to_string())
@@ -2255,13 +2503,13 @@ mod tests {
             // SAFETY: the cursor retains its input; output strings are owned
             // even after advancing the cursor, releasing it and dropping the input.
             let lines = unsafe {
-                let cursor = imre_str_splitlines_iter(Rc::as_ptr(&source));
+                let cursor = imre_str_splitlines_iter(StrOwner::as_ptr(&source));
                 drop(source);
                 let mut result = Vec::new();
                 let mut word = 0;
                 while mappings::imre_mapping_iter_next(cursor, &mut word, std::ptr::null_mut()) != 0
                 {
-                    result.push(Rc::from_raw(word as *const Str));
+                    result.push(StrOwner::from_raw(word as *const Str));
                 }
                 imre_object_release(cursor);
                 result
@@ -2278,12 +2526,12 @@ mod tests {
         for value in ["", "a", "\0", "\u{80}", "ÿ"] {
             let left = text::owned_string(value);
             let right = text::owned_string(value);
-            assert!(Rc::ptr_eq(&left, &right));
+            assert!(StrOwner::ptr_eq(&left, &right));
             drop(left);
             assert_eq!(right.as_str(), value);
         }
         for value in ["aa", "Ā"] {
-            assert!(!Rc::ptr_eq(
+            assert!(!StrOwner::ptr_eq(
                 &text::owned_string(value),
                 &text::owned_string(value)
             ));
@@ -2292,13 +2540,14 @@ mod tests {
 
     #[test]
     fn whitespace_split_retains_a_complete_field() {
-        let source = Rc::new(Str::from("word".repeat(1024)));
+        let source = StrOwner::new(Str::from("word".repeat(1024)));
         // SAFETY: source roots the call, and both ABI results transfer one owner.
         unsafe {
-            let parts = imre_str_split_whitespace(Rc::as_ptr(&source));
-            let word = Rc::from_raw(imre_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
+            let parts = imre_str_split_whitespace(StrOwner::as_ptr(&source));
+            let word =
+                StrOwner::from_raw(imre_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
             imre_object_release(parts);
-            assert!(Rc::ptr_eq(&word, &source));
+            assert!(StrOwner::ptr_eq(&word, &source));
             drop(source);
             assert_eq!(word.len(), 4096);
         }
@@ -2308,22 +2557,25 @@ mod tests {
     fn splitting_owns_strings_and_matches_python_whitespace_boundaries() {
         // The complete whitespace set in CPython 3.14's _PyUnicode_IsWhitespace.
         let whitespace = "\u{9}\u{a}\u{b}\u{c}\u{d}\u{1c}\u{1d}\u{1e}\u{1f}\u{20}\u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
-        let text = Rc::new(Str::from(format!(
+        let text = StrOwner::new(Str::from(format!(
             "{whitespace}α{whitespace}β\u{200b}γ{whitespace}"
         )));
         let zero = Int::small(0).unwrap();
         let one = Int::small(1).unwrap();
         // SAFETY: the input is rooted; split returns an owned sequence of string references.
         unsafe {
-            let parts = imre_str_split_whitespace(Rc::as_ptr(&text));
+            let parts = imre_str_split_whitespace(StrOwner::as_ptr(&text));
             drop(text);
             assert_eq!(Int(imre_seq_len(parts)).as_small(), Some(2));
-            let first = Rc::from_raw(imre_seq_get(parts, zero.0) as *const Str);
-            let second = Rc::from_raw(imre_seq_get(parts, one.0) as *const Str);
+            let first = StrOwner::from_raw(imre_seq_get(parts, zero.0) as *const Str);
+            let second = StrOwner::from_raw(imre_seq_get(parts, one.0) as *const Str);
             imre_object_release(parts);
             assert_eq!(first.as_str(), "α");
             assert_eq!(second.as_str(), "β\u{200b}γ");
-            let joined = Rc::from_raw(imre_str_concat(Rc::as_ptr(&first), Rc::as_ptr(&second)));
+            let joined = StrOwner::from_raw(imre_str_concat(
+                StrOwner::as_ptr(&first),
+                StrOwner::as_ptr(&second),
+            ));
             drop((first, second));
             assert_eq!(joined.as_str(), "αβ\u{200b}γ");
         }

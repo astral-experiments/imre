@@ -1,0 +1,14 @@
+{
+  "tree": "4f41a3b67cf0e009f186242eaabfb17e560ef3ef",
+  "base": "2cfe073c27898522fffc3208f503b079f9846b5e",
+  "head": "07387aa0db9634d93571c9257398b6e95f25ece5",
+  "binary_sha256": {
+    "imre": "e79bc979eb382176dea9ca0a601e903292830556467ef2642986ae66b2a9c341",
+    "libimre_runtime.a": "3e6c9e9f95a980a945958bc4daeede23c72a969264e69598298e47e96c29d9fa"
+  },
+  "compiler_revision": "f2e1d4e95c08a436fdc15cf2db111e2b056e8425",
+  "merged_commit": "bcd231186b34e1bf21ddadb9a0b844b55d77bab6",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "pr": 1025
+}

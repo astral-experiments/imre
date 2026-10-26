@@ -40,31 +40,167 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "12671c09b2ae0da29212cad51371d22c9fe2bbfb8e25d6505e8f4adb5d8964a2"
     },
-    "test.test_sys.SysModuleTest.test_getdefaultencoding": {
+    "test.test_sys.SysModuleTest.test_executable": {
       "status": "pass",
       "execution": "host-driven-native",
-      "body": "CPython",
+      "body": "CPython; original child: Imre",
       "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
+      "fixture_execution": "CPython decorators and SysModuleTest hooks",
       "calls": [
-        "default-argument",
-        "default"
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable"
       ]
+    },
+    "test.test_sys.SysModuleTest.test_getdefaultencoding": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b41ff7224ca4fe5cf266aa3439044a27a07e0c7a03680061baf2c50a7557e80b"
     },
     "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
       "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "43b2b8ce0a812ea74e8efaf4b3ff2d51a127ae1970df98129709ba749f41ba7b",
+      "helper_sha256": "0236da157e45125162e664212c10446c30716b272ff48cee63a6a790ec2391a3"
+    },
+    "test.test_sys.SysModuleTest.test_getrecursionlimit": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "3d8664bb71e753cdf68f9889cd02173e0f710634dce4965a6a2c5cf5101d6cad"
+    },
+    "test.test_sys.SysModuleTest.test_implementation": {
+      "status": "pass",
       "execution": "host-driven-native",
       "body": "CPython",
       "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
+      "fixture_execution": "original CPython module/class/instance hooks",
       "calls": [
-        "filesystem",
-        "platform"
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "version"
+        ],
+        [
+          "version"
+        ],
+        [
+          "has",
+          "hexversion"
+        ],
+        [
+          "hexversion"
+        ],
+        [
+          "has",
+          "cache_tag"
+        ],
+        [
+          "cache_tag"
+        ],
+        [
+          "has",
+          "supports_isolated_interpreters"
+        ],
+        [
+          "supports_isolated_interpreters"
+        ],
+        [
+          "has",
+          "version"
+        ],
+        [
+          "version"
+        ],
+        [
+          "prefix"
+        ],
+        [
+          "major"
+        ],
+        [
+          "minor"
+        ],
+        [
+          "major"
+        ],
+        [
+          "minor"
+        ],
+        [
+          "micro"
+        ],
+        [
+          "releaselevel"
+        ],
+        [
+          "serial"
+        ],
+        [
+          "has",
+          "hexversion"
+        ],
+        [
+          "hexversion"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ],
+        [
+          "has",
+          "supports_isolated_interpreters"
+        ],
+        [
+          "supports_isolated_interpreters"
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "name"
+        ]
       ]
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
       "reason": "requires FS encoding to match locale"
+    },
+    "test.test_sys.SysModuleTest.test_module_names": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0f75871bf270a07022d0128057feba227c9345257f0496fd45922758dea29279"
     },
     "test.test_sys.SysModuleTest.test_orig_argv": {
       "status": "pass",
@@ -75,6 +211,29 @@
       "calls": [
         "sys.argv",
         "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_setrecursionlimit": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0dc1bfce12f3ad7c3edbd4ba833ea5b01757e67dacead767693c1cccad33ee6a"
+    },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
       ]
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {
@@ -136,6 +295,20 @@
           "launch": "compile the original -c source directly"
         }
       ]
+    }
+  },
+  "stream_controls": {
+    "stdout_binding": {
+      "matches_pinned_cpython": true,
+      "stdout_hex": "310a547275650a6f726967696e616c0a274e6f6e655479706527206f626a65637420686173206e6f2061747472696275746520277772697465270a6c6f7374207379732e7374646f75740a276d6f64756c6527206f626a65637420686173206e6f2061747472696275746520277374646f7574270a492f4f206f7065726174696f6e206f6e20636c6f7365642066696c650a22e99baa5c6e302e355c6e62275c5c786666275c6e27c3a9275c6e656e64220a726573746f7265640a",
+      "stderr_hex": "",
+      "redirected_hex": "726564697265637465640a27c3a9270a7265636569766572206576616c7561746564206265666f726520617267756d656e740a"
+    },
+    "stdout_metadata": {
+      "matches_pinned_cpython": true,
+      "stdout_hex": "7574662d380a547275650a547275650a4e6f6e650a4e6f6e650a7574662d380a547275650a547275650a547275650a7574662d380a7574662d380a547275650a5554462d380a6d697373696e67206578706c696369742d656e636f64696e672066696c650a274e6f6e655479706527206f626a65637420686173206e6f206174747269627574652027656e636f64696e67270a6d6f64756c6520277379732720686173206e6f2061747472696275746520277374646f7574270a547275650a",
+      "stderr_hex": "",
+      "redirected_hex": "7772697474656e20746f206469736b0a"
     }
   }
 }

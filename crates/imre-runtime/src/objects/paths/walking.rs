@@ -1,10 +1,10 @@
 //! A walk suspends with no open directories. Top-down callers retain the live
 //! list that decides which directories the next pull visits.
 
+use crate::StrOwner;
 use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
 
 use super::{
     Error, Kind, Object, PathText, Result, Str, check_directory_path, directory_entries, object,
@@ -14,14 +14,14 @@ use crate::objects::{OwnedWord, Words, itertools, records, words::WordKind};
 
 enum Work {
     Scan(Str),
-    Descend(Str, Rc<Object>),
+    Descend(Str, crate::ObjectOwner),
     Yield(Row),
 }
 
 struct Row {
     path: Str,
-    dirs: Rc<Object>,
-    files: Rc<Object>,
+    dirs: crate::ObjectOwner,
+    files: crate::ObjectOwner,
 }
 
 pub(in crate::objects) struct Walker {
@@ -56,7 +56,7 @@ impl Walker {
                     // mutation of the list occurs while reading its names.
                     unsafe {
                         dirs.0.with(|storage| {
-                            let names = storage.sequence();
+                            let names = storage.sequence_storage();
                             stack
                                 .try_reserve(names.values.len())
                                 .map_err(|_| Error::allocation())?;
@@ -98,7 +98,7 @@ impl Walker {
                             .map_err(|_| Error::allocation())?;
                         names
                             .values
-                            .push(Rc::into_raw(Rc::new(Str::from(name))) as usize);
+                            .push(StrOwner::into_raw(StrOwner::new(Str::from(name))) as usize);
                     }
                     let dirs = dirs.into_object();
                     let visit = Work::Descend(path.clone(), dirs.clone());
@@ -142,8 +142,12 @@ impl Walker {
                 return Err(Error::allocation());
             }
             fields.write(path_with_text(PathText::from_parsed_string(path)) as usize);
-            fields.add(1).write(Rc::into_raw(row.dirs) as usize);
-            fields.add(2).write(Rc::into_raw(row.files) as usize);
+            fields
+                .add(1)
+                .write(crate::ObjectOwner::into_raw(row.dirs) as usize);
+            fields
+                .add(2)
+                .write(crate::ObjectOwner::into_raw(row.files) as usize);
             Ok(OwnedWord::from_owned(fields as usize, WordKind::new(6)))
         }
     }
@@ -162,7 +166,7 @@ pub unsafe extern "C" fn imre_path_walk(
     // SAFETY: the borrowed spelling is copied while its owner is rooted.
     let path = unsafe { object(path).0.with(|storage| Str::from(storage.path())) };
     let dot_root = path == ".";
-    Rc::into_raw(itertools::adapter(itertools::Adapter::PathWalk(Walker {
+    crate::ObjectOwner::into_raw(itertools::adapter(itertools::Adapter::PathWalk(Walker {
         stack: RefCell::new(vec![Work::Scan(path)]),
         top_down: top_down != 0,
         follow: follow != 0,

@@ -5,7 +5,7 @@
 //! is always nonzero and lets compiler range proofs imply representation;
 //! extension adapters must normalize incoming integers before exposing them to
 //! generated code.
-//! String and list handles are live `Rc` pointers of
+//! String and list handles are live reference-counted pointers of
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
@@ -32,10 +32,18 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod dynamic;
 mod extensions;
 mod floats;
+mod shared;
+mod string_owner;
+use shared::Shared;
+type ObjectOwner = Shared<objects::Object>;
+type WeakObject = shared::Weak<objects::Object>;
+use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;
+mod nominal_classes;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
@@ -106,6 +114,18 @@ impl Int {
         }
     }
 
+    fn to_i64(&self) -> Option<i64> {
+        self.as_small().or_else(|| self.big().to_i64())
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if let (Some(x), Some(y)) = (self.as_small(), other.as_small()) {
+            x.cmp(&y)
+        } else {
+            self.big().cmp(&other.big())
+        }
+    }
+
     fn into_raw(self) -> usize {
         ManuallyDrop::new(self).0
     }
@@ -113,6 +133,22 @@ impl Int {
     /// Borrows an ABI argument without acquiring or consuming its reference.
     unsafe fn borrow(raw: usize) -> ManuallyDrop<Self> {
         ManuallyDrop::new(Self(raw))
+    }
+}
+
+impl From<i64> for Int {
+    fn from(value: i64) -> Self {
+        Self::small(value).unwrap_or_else(|| Self::new(BigInt::from(value)))
+    }
+}
+
+impl std::fmt::Display for Int {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(small) = self.as_small() {
+            small.fmt(f)
+        } else {
+            self.big().fmt(f)
+        }
     }
 }
 
@@ -340,30 +376,51 @@ impl Drop for List {
     }
 }
 
-/// Immutable UTF-8 storage behind an opaque `Rc` handle. Short strings fit inside
+/// Immutable UTF-8 storage behind an opaque shared handle. Short strings fit inside
 /// that allocation; longer strings own a separate buffer. LLVM never reads this
 /// representation directly.
 pub type Str = compact_str::CompactString;
 
-/// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
+/// Immutable byte storage; native handles share ownership and expose no mutable view.
 pub type Bytes = Vec<u8>;
+/// All byte handles crossing the native ABI point into this strong owner.
+pub(crate) type BytesOwner = triomphe::Arc<Bytes>;
 
-/// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
-/// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
-/// closed runtime has no signal API or callbacks that could change this policy.
+/// The caller roots a byte handle for the duration of this ownership increment.
+unsafe fn acquire_bytes(word: usize) -> BytesOwner {
+    if word == 0 {
+        fail("TypeError", "unexpected null runtime handle");
+    }
+    // SAFETY: the caller supplies the data pointer of a live BytesOwner.
+    unsafe { triomphe::ArcBorrow::from_ptr(word as *const Bytes) }.clone_arc()
+}
+
+unsafe fn retain_bytes(value: *const Bytes) {
+    // SAFETY: the caller roots this exact bytes handle.
+    let _ = BytesOwner::into_raw(unsafe { acquire_bytes(value as usize) });
+}
+
+unsafe fn release_bytes(value: *const Bytes) {
+    // SAFETY: the caller transfers one strong reference.
+    drop(unsafe { BytesOwner::from_raw(value) });
+}
+
+/// Generated main installs Python's I/O signal dispositions before user code.
+/// Native callers that enter through a writer use the same initialization.
 fn initialize_io() {
     static INITIALIZED: Once = Once::new();
     INITIALIZED.call_once(|| {
-        // SAFETY: SIG_IGN is a valid process-wide disposition, not a Rust callback.
-        if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
-            // This fixed startup operation cannot be induced by source code.
-            // Avoid fail(), which would recursively initialize OUTPUT here.
-            let error = io::Error::last_os_error();
-            let _ = writeln!(
-                io::stderr().lock(),
-                "OSError: could not initialize I/O signals: {error}"
-            );
-            std::process::exit(1);
+        for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
+            // SAFETY: SIG_IGN is a valid disposition for both fixed signals.
+            if unsafe { libc::signal(signal, libc::SIG_IGN) } == libc::SIG_ERR {
+                // Avoid fail(), which would recursively initialize OUTPUT here.
+                let error = io::Error::last_os_error();
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "OSError: could not initialize I/O signals: {error}"
+                );
+                std::process::exit(1);
+            }
         }
     });
 }
@@ -376,6 +433,7 @@ struct Output<W = RawStdout> {
     text: text_output::PendingText,
     line_buffered: bool,
     captures: Vec<Vec<u8>>,
+    signature_emitted: bool,
 }
 
 struct BinaryOutput<W> {
@@ -383,6 +441,38 @@ struct BinaryOutput<W> {
     buffer: Vec<u8>,
     written: usize,
 }
+
+/// A buffered write can accept bytes into the kernel and its own buffer before it stalls.
+#[derive(Debug)]
+struct BlockedWrite {
+    errno: i32,
+    accepted: usize,
+}
+
+impl BlockedWrite {
+    const DESCRIPTION: &'static str = "write could not complete without blocking";
+
+    fn error(error: io::Error, accepted: usize) -> io::Error {
+        if error.kind() != io::ErrorKind::WouldBlock {
+            return error;
+        }
+        io::Error::new(
+            io::ErrorKind::WouldBlock,
+            Self {
+                errno: error.raw_os_error().unwrap_or(libc::EAGAIN),
+                accepted,
+            },
+        )
+    }
+}
+
+impl std::fmt::Display for BlockedWrite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::DESCRIPTION)
+    }
+}
+
+impl std::error::Error for BlockedWrite {}
 
 /// Writes directly to fd 1 so the native binary buffer observes descriptor errors.
 struct RawStdout;
@@ -419,11 +509,34 @@ static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
 /// Capture buffering from the startup descriptors before user code can replace them.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_stdio_init() {
+    prepare_stdio(false, None);
+}
+
+/// Ignore Python environment settings for an isolated command without changing os.environ.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_isolated_init() {
+    prepare_stdio(true, None);
+}
+
+/// Initialize streams with the effective flags of a native Python command.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
+    prepare_stdio(isolated != 0, Some(utf8 != 0));
+}
+
+fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
     initialize_io();
+    sys::initialize_encoding(isolated, utf8);
     LazyLock::force(&STDIO_SETTINGS);
 }
 
 impl<W: Write> Output<W> {
+    /// Line buffering inspects the input characters before the codec maps them to bytes.
+    fn write_encoded(&mut self, encoded: &[u8], original: &[u8]) -> io::Result<()> {
+        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', original).is_some();
+        self.text.write(&mut self.raw, encoded, flush_line)
+    }
+
     fn with_stream(stream: W, capacity: usize, line_buffered: bool) -> Self {
         // With zero capacity every write goes directly to the stream.
         let mut buffer = Vec::new();
@@ -437,6 +550,7 @@ impl<W: Write> Output<W> {
             text: text_output::PendingText::default(),
             line_buffered,
             captures: Vec::new(),
+            signature_emitted: false,
         }
     }
 }
@@ -456,8 +570,7 @@ impl<W: Write> Write for Output<W> {
             captured.extend_from_slice(bytes);
             return Ok(());
         }
-        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', bytes).is_some();
-        self.text.write(&mut self.raw, bytes, flush_line)
+        self.write_encoded(bytes, bytes)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -470,25 +583,26 @@ impl<W: Write> Write for Output<W> {
 
 impl<W: Write> BinaryOutput<W> {
     /// Buffer writes to a file or pipe up to its configured binary capacity.
-    fn with_capacity(capacity: usize, inner: W) -> Self {
+    fn with_buffer(buffer: Vec<u8>, inner: W) -> Self {
         Self {
             inner,
-            buffer: Vec::with_capacity(capacity),
+            buffer,
             written: 0,
         }
     }
 
     #[cold]
     fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        let supplied = bytes.len();
         if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, error);
+            return self.buffer_after_error(bytes, 0, error);
         }
         while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
             match self.inner.write(bytes) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(count) => bytes = &bytes[count..],
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, error),
+                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
             }
         }
         self.buffer.extend_from_slice(bytes);
@@ -497,7 +611,12 @@ impl<W: Write> BinaryOutput<W> {
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
     /// behind the unwritten portion of the previous buffer.
-    fn buffer_after_error(&mut self, bytes: &[u8], error: io::Error) -> io::Result<()> {
+    fn buffer_after_error(
+        &mut self,
+        bytes: &[u8],
+        sent: usize,
+        error: io::Error,
+    ) -> io::Result<()> {
         if error.kind() != io::ErrorKind::WouldBlock {
             return Err(error);
         }
@@ -506,7 +625,7 @@ impl<W: Write> BinaryOutput<W> {
         let count = bytes.len().min(self.buffer.capacity() - self.buffer.len());
         self.buffer.extend_from_slice(&bytes[..count]);
         if count < bytes.len() {
-            return Err(error);
+            return Err(BlockedWrite::error(error, sent + count));
         }
         Ok(())
     }
@@ -528,13 +647,7 @@ impl<W: Write> BinaryOutput<W> {
 
 impl<W: Write> Write for BinaryOutput<W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.buffer.capacity() - self.buffer.len() {
-            self.flush_buffer()?;
-        }
-        if bytes.len() >= self.buffer.capacity() {
-            return self.inner.write(bytes);
-        }
-        self.buffer.extend_from_slice(bytes);
+        self.write_all(bytes)?;
         Ok(bytes.len())
     }
 
@@ -550,8 +663,9 @@ impl<W: Write> Write for BinaryOutput<W> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.flush_buffer()?;
-        self.inner.flush()
+        self.flush_buffer()
+            .and_then(|()| self.inner.flush())
+            .map_err(|error| BlockedWrite::error(error, 0))
     }
 }
 
@@ -568,21 +682,6 @@ mod doctest;
 mod sys;
 mod text_output;
 
-/// Prints one value and a newline, returning with the writer lock released.
-/// Only primitive formatters run here; they cannot call user code.
-fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result<()> {
-    let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    write(&mut output)?;
-    output.write_all(b"\n")
-}
-
-/// Handles write failures only after releasing the writer lock.
-fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
-    if write_output(write).is_err() {
-        Error::new(Kind::OSError, "could not write standard output").raise();
-    }
-}
-
 /// Writes a UTF-8 line through the native standard-error handle.
 ///
 /// # Safety
@@ -591,19 +690,15 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    if sys::write_stderr(text, true).is_err() {
-        Error::new(Kind::OSError, "could not write standard error").raise();
+    if let Err(error) = sys::write_stderr(text, true) {
+        objects::errno_error(error).raise();
     }
 }
 
-/// Write one Python text line to the current stdout.
-fn print_text(value: &str) {
-    if let Some(result) = objects::stdio::write_line(value, false) {
-        if let Err(error) = result {
-            error.raise();
-        }
-    } else {
-        output(|writer| writer.write_all(value.as_bytes()));
+/// Raise encoding and descriptor errors after releasing the stdout lock.
+fn output_text(value: &str) {
+    if let Err(error) = objects::stdio::write_line(value, || sys::error_text(value)) {
+        error.raise();
     }
 }
 
@@ -698,8 +793,13 @@ fn parse_integer_literal(literal: &str) -> Option<BigInt> {
 pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
     // SAFETY: both handles are borrowed by the ABI call.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
+    finish(integer_binary(&a, &b, op).map(Int::into_raw), 1)
+}
+
+/// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
+fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     if matches!(op, 8 | 9) {
-        return finish(integer_shift(&a, &b, op == 8).map(Int::into_raw), 1);
+        return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
@@ -711,11 +811,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
-                    return Error::new(
-                        Kind::ZeroDivisionError,
-                        "integer division or modulo by zero",
-                    )
-                    .returning(1);
+                    return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -730,7 +826,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             _ => fail("SystemError", "invalid integer operation"),
         };
         if let Some(value) = result.and_then(Int::small) {
-            return value.into_raw();
+            return Ok(value);
         }
     }
     let (a, b) = (a.big(), b.big());
@@ -743,11 +839,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                return Error::new(
-                    Kind::ZeroDivisionError,
-                    "integer division or modulo by zero",
-                )
-                .returning(1);
+                return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -761,7 +853,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         }
         _ => fail("SystemError", "invalid integer operation"),
     };
-    Int::new(result).into_raw()
+    Ok(Int::new(result))
 }
 
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
@@ -827,12 +919,7 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
 pub unsafe extern "C" fn imre_int_compare(a: usize, b: usize) -> i32 {
     // SAFETY: the ABI caller keeps both handles alive.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
-    let order = if let (Some(a), Some(b)) = (a.as_small(), b.as_small()) {
-        a.cmp(&b)
-    } else {
-        a.big().cmp(&b.big())
-    };
-    match order {
+    match a.cmp(&b) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -847,22 +934,20 @@ pub unsafe extern "C" fn imre_print_int(value: usize) {
     let value = unsafe { Int::borrow(value) };
     if let Some(value) = value.as_small() {
         let mut digits = itoa::Buffer::new();
-        print_text(digits.format(value));
-    } else if objects::stdio::has_target() {
-        print_text(&value.big().to_string());
+        output_text(digits.format(value));
     } else {
-        output(|writer| write!(writer, "{}", value.big()));
+        output_text(&value.big().to_string());
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_bool(value: u32) {
-    print_text(if value == 0 { "False" } else { "True" });
+    output_text(if value == 0 { "False" } else { "True" });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_none() {
-    print_text("None");
+    output_text("None");
 }
 
 /// Formats an integer without changing its ownership or arbitrary precision.
@@ -873,24 +958,33 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_int_str(value: usize) -> *const Str {
     // SAFETY: the caller keeps the integer alive through formatting.
     let value = unsafe { Int::borrow(value) };
-    let text = if let Some(value) = value.as_small() {
-        Str::new(itoa::Buffer::new().format(value))
-    } else {
-        Str::from(value.big().to_string())
-    };
-    Rc::into_raw(Rc::new(text))
+    match integer_text::decimal_string(&value).and_then(checked_owned_str) {
+        Ok(text) => text,
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+/// Transfer a freshly formatted string to generated code, preserving allocation failure.
+fn checked_owned_str(text: Str) -> Result<*const Str> {
+    StrOwner::try_new(text)
+        .map(StrOwner::into_raw)
+        .map_err(|_| Error::allocation())
 }
 
 /// Returns an owned Python spelling for a compiler-validated boolean.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_bool_str(value: u32) -> *const Str {
-    Rc::into_raw(Rc::new(Str::new(if value == 0 { "False" } else { "True" })))
+    StrOwner::into_raw(StrOwner::new(Str::new(if value == 0 {
+        "False"
+    } else {
+        "True"
+    })))
 }
 
 /// Returns an owned string containing Python's None spelling.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_none_str() -> *const Str {
-    Rc::into_raw(Rc::new(Str::new("None")))
+    StrOwner::into_raw(StrOwner::new(Str::new("None")))
 }
 
 /// # Safety
@@ -899,7 +993,7 @@ pub extern "C" fn imre_none_str() -> *const Str {
 pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
     let literal = unsafe { text(data, length) };
-    Rc::into_raw(objects::literal_string(literal))
+    StrOwner::into_raw(objects::literal_string(literal))
 }
 
 /// # Safety
@@ -909,10 +1003,10 @@ pub unsafe extern "C" fn imre_str_literal(data: *const u8, length: usize) -> *co
 pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler's string globals have static storage duration.
     let literal: &'static str = unsafe { text(data, length) };
-    Rc::into_raw(if literal.len() <= 2 {
+    StrOwner::into_raw(if literal.len() <= 2 {
         objects::literal_string(literal)
     } else {
-        Rc::new(Str::const_new(literal))
+        StrOwner::new(Str::const_new(literal))
     })
 }
 
@@ -921,8 +1015,8 @@ pub unsafe extern "C" fn imre_str_static_literal(data: *const u8, length: usize)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_retain(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<Str> reference.
-        unsafe { Rc::increment_strong_count(value) };
+        // SAFETY: the caller owns a live StrOwner reference.
+        unsafe { StrOwner::increment_strong_count(value) };
     }
 }
 
@@ -931,8 +1025,8 @@ pub unsafe extern "C" fn imre_str_retain(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_release(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<Str> reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        // SAFETY: the caller transfers one live StrOwner reference.
+        unsafe { StrOwner::decrement_strong_count(value) };
     }
 }
 
@@ -941,7 +1035,13 @@ pub unsafe extern "C" fn imre_str_release(value: *const Str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    print_text(unsafe { &*value });
+    let text = unsafe { &*value };
+    if let Err(error) = objects::stdio::write_line(text, || {
+        // SAFETY: the caller roots this same string until the write returns.
+        Ok(unsafe { StrOwner::acquire_word(value as usize) })
+    }) {
+        error.raise();
+    }
 }
 
 /// # Safety
@@ -1054,31 +1154,42 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_input() -> *const Str {
     // A preceding print must be visible before waiting for the next input line.
-    if flush_stdout().is_err() {
-        return Error::new(Kind::OSError, "could not write standard output")
-            .returning(std::ptr::null());
+    if let Err(error) = flush_stdout() {
+        return objects::errno_error(error).returning(std::ptr::null());
     }
-    let mut line = String::new();
-    match io::stdin().read_line(&mut line) {
-        Ok(0) => {
-            return Error::new(Kind::EOFError, "EOF when reading a line")
-                .returning(std::ptr::null());
-        }
-        Ok(_) => {}
-        Err(_) => {
-            return Error::new(Kind::OSError, "could not read standard input")
-                .returning(std::ptr::null());
-        }
-    }
-    if line.ends_with('\n') {
-        line.pop();
-    }
-    Rc::into_raw(Rc::new(Str::from(line)))
+    finish(
+        sys::read_input_line().and_then(|line| {
+            StrOwner::try_new(Str::from(line))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
+        std::ptr::null(),
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_list_new() -> *const List {
     new_list(Vec::new())
+}
+
+/// Test an optional integer against a homogeneous integer list. Small integers
+/// are canonical words; only two distinct heap integers need a value comparison.
+///
+/// # Safety
+/// The caller roots the list and its optional integer (zero represents None).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List) -> u32 {
+    if needle == 0 {
+        return 0;
+    }
+    // SAFETY: neither the list scan nor integer equality can reenter or mutate it.
+    unsafe {
+        u32::from((&*list).0.with(|values| {
+            values.iter().any(|v| {
+                v.0 == needle || ((v.0 | needle) & 1 == 0 && imre_int_compare(v.0, needle) == 0)
+            })
+        }))
+    }
 }
 
 /// # Safety
@@ -1177,6 +1288,16 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
             drop(value);
         }
     }
+}
+
+/// Reverse the tagged integer words in place without changing any owner.
+///
+/// # Safety
+/// The caller keeps this list rooted for the duration of the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
+    // SAFETY: only swaps within the buffer occur under the exclusive borrow.
+    unsafe { (&*list).0.with_mut(|values| values.reverse()) };
 }
 
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
@@ -1703,7 +1824,7 @@ mod tests {
     #[test]
     fn output_works_with_and_without_a_reserved_buffer() {
         for capacity in [0, 8] {
-            let mut output = BinaryOutput::with_capacity(capacity, Vec::new());
+            let mut output = BinaryOutput::with_buffer(Vec::with_capacity(capacity), Vec::new());
             output.write_all(b"abc").unwrap();
             assert_eq!(output.inner.is_empty(), capacity != 0);
             output.write_all(b"0123456789").unwrap();
@@ -1754,7 +1875,7 @@ mod tests {
             }
         }
 
-        let mut output = BinaryOutput::with_capacity(16, Sink::default());
+        let mut output = BinaryOutput::with_buffer(Vec::with_capacity(16), Sink::default());
         output.write_all(b"partial").unwrap();
         assert_eq!(
             output.flush().unwrap_err().kind(),
@@ -1789,7 +1910,7 @@ mod tests {
         ] {
             let mut pipe = [0; 2];
             let mut restored = [0; 4];
-            let mut output = BinaryOutput::with_capacity(4, Pipe(&mut pipe));
+            let mut output = BinaryOutput::with_buffer(Vec::with_capacity(4), Pipe(&mut pipe));
             output.write_all(prefix.as_bytes()).unwrap();
             let result = output.write_all(next.as_bytes()).map_err(|e| e.kind());
             assert_eq!(
@@ -2224,15 +2345,15 @@ mod tests {
             let expected = value.to_string();
             let value = Int::new(value);
             // SAFETY: the integer stays rooted and the returned string transfers ownership.
-            let formatted = unsafe { Rc::from_raw(imre_int_str(value.0)) };
+            let formatted = unsafe { StrOwner::from_raw(imre_int_str(value.0)) };
             drop(value);
             assert_eq!(formatted.as_str(), expected);
         }
         // SAFETY: each conversion returns one fresh owned string handle.
         unsafe {
-            assert_eq!(Rc::from_raw(imre_bool_str(0)).as_str(), "False");
-            assert_eq!(Rc::from_raw(imre_bool_str(1)).as_str(), "True");
-            assert_eq!(Rc::from_raw(imre_none_str()).as_str(), "None");
+            assert_eq!(StrOwner::from_raw(imre_bool_str(0)).as_str(), "False");
+            assert_eq!(StrOwner::from_raw(imre_bool_str(1)).as_str(), "True");
+            assert_eq!(StrOwner::from_raw(imre_none_str()).as_str(), "None");
         }
     }
 
@@ -2326,7 +2447,7 @@ mod tests {
                 let error = imre_error_take();
                 assert!(!error.is_null());
                 assert_eq!(imre_exception_matches(error, Kind::ValueError as u32), 1);
-                let message = Rc::from_raw(imre_exception_message(error));
+                let message = StrOwner::from_raw(imre_exception_message(error));
                 assert_eq!(
                     message.as_str(),
                     format!("invalid literal for int() with base 10: {literal}")
@@ -2341,7 +2462,7 @@ mod tests {
             assert_eq!(imre_int_parse(&source), 1);
             let error = imre_error_take();
             assert!(!error.is_null());
-            let message = Rc::from_raw(imre_exception_message(error));
+            let message = StrOwner::from_raw(imre_exception_message(error));
             assert_eq!(
                 message.as_str(),
                 format!(
@@ -2376,6 +2497,27 @@ mod tests {
             let remainder = Int(unsafe { imre_int_binary(a.0, b.0, 4) });
             assert_eq!(quotient.as_small(), Some(q));
             assert_eq!(remainder.as_small(), Some(r));
+        }
+    }
+
+    #[test]
+    fn zero_integer_divisors_report_the_python_message() {
+        let zero = Int::small(0).unwrap();
+        for numerator in [Int::small(7).unwrap(), Int::new(BigInt::from(1) << 130_u32)] {
+            for op in [3, 4] {
+                // SAFETY: both integer handles remain live. Take the owned error and message.
+                unsafe {
+                    assert_eq!(imre_int_binary(numerator.0, zero.0, op), 1);
+                    let error = imre_error_take();
+                    assert_eq!(
+                        imre_exception_matches(error, Kind::ZeroDivisionError as u32),
+                        1
+                    );
+                    let message = StrOwner::from_raw(imre_exception_message(error));
+                    assert_eq!(message.as_str(), "division by zero");
+                    objects::imre_object_release(error);
+                }
+            }
         }
     }
 

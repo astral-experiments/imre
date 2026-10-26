@@ -66,6 +66,7 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
             // SAFETY: every projected field is an initialized JSON/document object.
             let field = unsafe { object(*record.add(index) as *const Object) };
             if index != 0 {
+                text.try_reserve(1).map_err(|_| Error::allocation())?;
                 text.push('\n');
             }
             // SAFETY: the rooted immutable JSON view cannot mutate while rendering.

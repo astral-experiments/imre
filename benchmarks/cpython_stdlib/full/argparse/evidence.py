@@ -15,6 +15,7 @@ from help_cases import measure as help_routines
 from direct_cases import measure as direct_routines
 from registration_cases import measure as registration_routines
 from subparser_cases import measure as subparser_routines
+from mutex_cases import measure as mutex_routines
 from suite_evidence import build_report, occurrence_keys, write_reports
 from suite_inventory import cases, load_suite, verify_files
 from suite_native import Toolchain
@@ -32,6 +33,7 @@ def measure(toolchain, manifest, reference, source, revision):
     direct_routines(toolchain, module, reference["reference"], source, per_adapter[0])
     registration_routines(toolchain, module, reference["reference"], source, per_adapter[0])
     subparser_routines(toolchain, module, reference["reference"], per_adapter[0])
+    mutex_routines(toolchain, module, reference["reference"], per_adapter[0])
     help_routines(toolchain, module, reference["reference"], per_adapter[1])
     parse_routines(toolchain, module, reference["reference"], per_adapter[2])
     observations = {}

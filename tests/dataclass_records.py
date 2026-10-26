@@ -1,6 +1,9 @@
 """Compare compiled dataclasses and statically bound descriptors with CPython."""
 
 import argparse
+import ast
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -26,8 +29,16 @@ METHOD = ITEM + "    @classmethod\n    def make(cls, value: int) -> \"Item\":\n 
 PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return self.value * 2\n"
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
+SLOTS = ITEM.replace("@dataclass\n", "@dataclass(slots=True)\n")
+ERASE = "\ndef hold(value: object) -> object:\n    return value\n"
 STRUCT = "from imre import struct\n@struct\nclass Point:\n    x: float\n"
 REJECTED = {
+    "boxed_unslotted": ITEM + ERASE + "hold(Item(2))\n",
+    "boxed_mutable_list_field": SLOTS.replace("value: int", "value: list[int]") + ERASE + "hold(Item([2]))\n",
+    "boxed_special_method": SLOTS + "    def __bool__(self) -> bool:\n        return False\n" + ERASE + "hold(Item(2))\n",
+    "boxed_disabled_equality": SLOTS.replace("slots=True", "slots=True, eq=False") + ERASE + "hold(Item(2))\n",
+    "boxed_unchecked_attribute": SLOTS + "def observe(value: object) -> int:\n    return value.other\nobserve(Item(2))\n",
+    "boxed_bad_index": SLOTS + ERASE + "def observe(value: object) -> object:\n    return value['invalid']\nobserve(hold(Item(2)))\n",
     "struct_identity": STRUCT + "p = Point(1.0)\nprint(p is p)\n",
     "struct_id": STRUCT + "print(id(Point(1.0)))\n",
     "struct_field_write": STRUCT + "p = Point(1.0)\np.x = 2.0\n",
@@ -39,6 +50,7 @@ REJECTED = {
     "struct_wrong_argument": STRUCT + "Point(True)\n",
     "struct_custom_eq": STRUCT + "    def __eq__(self, other: object) -> bool:\n        return True\n",
     "struct_post_init": STRUCT + "    def __post_init__(self) -> None:\n        print(self.x)\n",
+    "struct_erased_identity": STRUCT + ERASE + "p = Point(1.0)\nprint(hold(p) is hold(p))\n",
     "unproven_post_init_conversion": """from dataclasses import dataclass
 @dataclass(frozen=True)
 class Wrapper:
@@ -152,6 +164,53 @@ ERRORS = {
 }
 
 
+def write_upstream_teststats(fixtures: Path) -> None:
+    """Exercise the unchanged dataclass and its three methods from pinned libregrtest."""
+    suite = ROOT / "benchmarks/cpython_stdlib/full/shared"
+    key = "Lib/test/libregrtest/result.py"
+    source = (suite / "upstream" / key).read_bytes()
+    git_blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\0" + source).hexdigest()
+    assert git_blob == json.loads((suite / "UPSTREAM.json").read_text())["files"][key]
+    cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "TestStats")
+    start = min(d.lineno for d in cls.decorator_list) - 1
+    original = b"".join(source.splitlines(keepends=True)[start:cls.end_lineno])
+    driver = """
+@dataclasses.dataclass(slots=True)
+class UnittestResult:
+    testsRun: int
+    failures: list[str]
+    skipped: list[str]
+
+@dataclasses.dataclass(slots=True)
+class DoctestResult:
+    attempted: int
+    failed: int
+    skipped: int
+
+def retain(value: object) -> object:
+    return value
+
+def display(value: object, original: TestStats) -> None:
+    print(repr(value))
+    print(str(value))
+    print(value is original)
+    print(value == original)
+    print(isinstance(value, tuple))
+    if isinstance(value, TestStats):
+        print(value.tests_run)
+        print(value.failures)
+        print(value.skipped)
+
+stats = TestStats.from_unittest(UnittestResult(3, ["failed"], []))
+stored = retain(stats)
+display(stored, stats)
+stats.accumulate(TestStats.from_doctest(DoctestResult(5, 0, 2)))
+display(stored, stats)
+display((8, 1, 2), stats)
+"""
+    (fixtures / "upstream_teststats.py").write_bytes(b"import dataclasses\n\n" + original + driver.encode())
+
+
 def run_suite(fixtures: Path) -> None:
     assignments.main(
         fixtures=fixtures,
@@ -174,12 +233,11 @@ if __name__ == "__main__":
         [selected.python, "-I", "-c", "import sys; print(sys.version_info >= (3, 13))"],
         text=True, capture_output=True, check=True, timeout=30,
     ).stdout.strip()
-    if version == "True":
-        run_suite(FIXTURES)
-    else:
-        with tempfile.TemporaryDirectory(prefix="imre-dataclass-oracle-") as directory:
-            fixtures = Path(directory) / "dataclasses"
-            shutil.copytree(FIXTURES, fixtures, ignore=shutil.ignore_patterns("__pycache__"))
+    with tempfile.TemporaryDirectory(prefix="imre-dataclass-oracle-") as directory:
+        fixtures = Path(directory) / "dataclasses"
+        shutil.copytree(FIXTURES, fixtures, ignore=shutil.ignore_patterns("__pycache__"))
+        write_upstream_teststats(fixtures)
+        if version != "True":
             (fixtures / "nan_alias.py").unlink()
             print("Shared-NaN differential requires CPython >=3.13; other dataclass checks remain enabled")
-            run_suite(fixtures)
+        run_suite(fixtures)

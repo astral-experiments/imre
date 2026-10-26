@@ -1,0 +1,7 @@
+Inplace intersection is the minimum of corresponding counts.
+
+>>> c = Counter('abbb')
+>>> c &= Counter('bcc')
+>>> c
+Counter({'b': 1})
+

@@ -3,6 +3,58 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Bind Python's positional or named key and default in source order. An
+    /// exact default gives an exact result; None and optional defaults stay nullable.
+    pub(super) fn chainmap_get(
+        &mut self,
+        call: &ast::ExprCall,
+        owner: Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        let optional = self.types.optional(value);
+        let none = self.coerce(
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            },
+            optional,
+            call,
+        )?;
+        let parameter = |name: &str, ty, default| Parameter {
+            name: name.to_owned(),
+            ty,
+            kind: ParameterKind::PositionalOrKeyword,
+            default,
+            sign_only: false,
+        };
+        let parameters = [
+            parameter("key", key, None),
+            parameter("default", optional, Some(none)),
+        ];
+        let mut returns = optional;
+        let args = self.arguments_with(
+            call,
+            &parameters,
+            Some(owner),
+            |checker, index, argument| {
+                if index == 0 {
+                    return checker.expr_expected(argument, key);
+                }
+                let default = checker.expr_expected(argument, optional)?;
+                if value != optional
+                    && let ExprKind::Present(inner) = default.kind
+                {
+                    returns = value;
+                    Ok(*inner)
+                } else {
+                    Ok(default)
+                }
+            },
+        )?;
+        Ok(self.ordered_builtin(Builtin::ChainMapGet(value), returns, args))
+    }
+
     /// Infer one concrete dictionary shape across the input mappings. An empty
     /// literal can get its type from a later argument without evaluating that
     /// argument early: the generated list retains the original argument order.

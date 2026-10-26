@@ -1,6 +1,7 @@
 //! Walk held directory descriptors. Snapshot names, unlink leaves, then visit
 //! subdirectories in reverse enumeration order and remove their parents last.
 
+use crate::StrOwner;
 use std::ffi::{CString, OsStr};
 use std::fs::File;
 use std::io;
@@ -12,7 +13,7 @@ use std::rc::Rc;
 use super::super::exceptions::{Error, Filename, Kind, replace_pending, swap_active, take_pending};
 use super::super::files::{close_file, errno_with_filenames};
 use super::super::tempdirs::scan_names;
-use super::super::{Object, Str, acquire_rc, paths};
+use super::super::{Object, Str, paths};
 use super::Int;
 use num_traits::ToPrimitive;
 use rustix::fs::{
@@ -66,7 +67,7 @@ struct Walk<'a, F> {
     stack: Vec<Step>,
     onexc: F,
     root: &'a Path,
-    root_object: Option<Rc<Object>>,
+    root_object: Option<crate::ObjectOwner>,
     default_handler: bool,
 }
 
@@ -85,7 +86,7 @@ where
         if path.as_os_str() == self.root.as_os_str()
             && let Some(original) = &self.root_object
         {
-            return Filename::Path(Rc::clone(original));
+            return Filename::Path(crate::ObjectOwner::clone(original));
         }
         filename(path)
     }
@@ -241,14 +242,14 @@ fn checked_name(bytes: &[u8]) -> Result<CString, Error> {
 }
 
 /// Remove the copied source of a move using rmtree's default error handler.
-pub(super) fn remove_root(path: &Path, original: Option<Rc<Object>>) -> Result<(), Error> {
+pub(super) fn remove_root(path: &Path, original: Option<crate::ObjectOwner>) -> Result<(), Error> {
     let name = checked_name(path.as_os_str().as_bytes())?;
     remove_with(path, original, name, None, true, |_, _, error| Err(error))
 }
 
 fn remove_with<E: From<Error>>(
     path: &Path,
-    root_object: Option<Rc<Object>>,
+    root_object: Option<crate::ObjectOwner>,
     name: CString,
     dirfd: Option<i32>,
     default_handler: bool,
@@ -287,7 +288,7 @@ fn remove_with<E: From<Error>>(
 
 enum WalkError {
     Os(Error),
-    Raised(Rc<Object>),
+    Raised(crate::ObjectOwner),
 }
 
 impl From<Error> for WalkError {
@@ -324,11 +325,14 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
             .into());
         }
         // SAFETY: tag 3 identifies a live path object that an exception can retain.
-        let original = (tag == 3).then(|| unsafe { acquire_rc::<Object>(path as usize) });
+        let original =
+            (tag == 3).then(|| unsafe { crate::ObjectOwner::acquire_word(path as usize) });
         let spelling;
         let bytes = if let Some(original) = &original {
             // SAFETY: original roots the path, and imre_path_text transfers one owner.
-            spelling = unsafe { Rc::from_raw(paths::imre_path_text(Rc::as_ptr(original))) };
+            spelling = unsafe {
+                StrOwner::from_raw(paths::imre_path_text(crate::ObjectOwner::as_ptr(original)))
+            };
             spelling.as_bytes()
         } else {
             // SAFETY: the remaining tags name a rooted str or bytes.
@@ -372,14 +376,21 @@ pub unsafe extern "C" fn imre_shutil_rmtree(
                     Ok(())
                 };
             };
-            let path = Rc::new(paths::path_utf8(path.as_os_str().to_owned())?);
+            let path = StrOwner::new(paths::path_utf8(path.as_os_str().to_owned())?);
             error.raise();
             let exc = take_pending().expect("the walk just raised this error");
-            let mut previous = Some(Rc::clone(&exc));
+            let mut previous = Some(crate::ObjectOwner::clone(&exc));
             swap_active(&mut previous);
             // SAFETY: this synchronous call borrows its three owners. The active
             // exception lets a native handler inspect it or use a bare raise.
-            unsafe { handler(context, op as u32, Rc::as_ptr(&path), Rc::as_ptr(&exc)) };
+            unsafe {
+                handler(
+                    context,
+                    op as u32,
+                    StrOwner::as_ptr(&path),
+                    crate::ObjectOwner::as_ptr(&exc),
+                )
+            };
             swap_active(&mut previous);
             match take_pending() {
                 Some(raised) => Err(WalkError::Raised(raised)),

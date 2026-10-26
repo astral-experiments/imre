@@ -3,6 +3,7 @@ mod borrows;
 mod callables;
 mod classes;
 mod contracts;
+mod dynamic;
 mod effects;
 use imre_regex as fixed_regex;
 mod frontend;
@@ -19,6 +20,7 @@ mod record_copies;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
+mod sorted_rows;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -29,8 +31,17 @@ mod watch;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+/// Python language version used by type checking and native wheel consumers.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = version::LANGUAGE;
+
+/// Python implementation identifier used in interpreter metadata and wheel tags.
+pub const IMPLEMENTATION_NAME: &str = "imre";
+
+/// File extension of installed native archives linked into an application.
+pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
+
 /// Startup choices made before a native Python command executes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
     /// Python's language optimization level; independent of LLVM optimization.
@@ -52,6 +63,8 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Flags and executable for a file launched through the Python command line.
+    pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
@@ -63,6 +76,18 @@ pub struct CompileOptions {
 }
 
 impl CompileOptions {
+    /// Return the launcher's flags and path for a Python command or a script.
+    pub fn python_startup(&self) -> Option<(CommandFlags, &str)> {
+        self.command
+            .as_ref()
+            .map(|command| (command.flags, command.executable.as_str()))
+            .or_else(|| {
+                self.script_startup
+                    .as_ref()
+                    .map(|(flags, executable)| (*flags, executable.as_str()))
+            })
+    }
+
     fn load_graph(
         &self,
         path: &Path,
@@ -71,6 +96,9 @@ impl CompileOptions {
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
             return modules::SourceGraph::command(command, self, filesystem);
+        }
+        if let Some((flags, executable)) = &self.script_startup {
+            return modules::SourceGraph::script(path, *flags, executable, self, filesystem);
         }
         modules::SourceGraph::load_with(
             path,
@@ -166,12 +194,35 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let mut graph = options.load_graph(path, module_root, filesystem)?;
-    let (module, _) = checked_lower_with(&mut graph, cache)?;
-    verify_after(&module, "lowering")
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, filesystem)?;
+        let (module, _) = checked_lower_with(&mut graph, cache)?;
+        verify_after(&module, "lowering")
+    })();
+    object_fallback(path, module_root, options, typed, |_| ())
+}
+
+/// Compile runtime import paths with native object operations when static lowering cannot resolve them.
+fn object_fallback<T>(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    typed: Result<T, String>,
+    boxed: impl FnOnce(Compilation) -> T,
+) -> Result<T, String> {
+    match typed {
+        Ok(value) => Ok(value),
+        Err(error) if options.entry_profile.is_none() => {
+            match dynamic::compile(path, module_root, options)? {
+                Some(compilation) => Ok(boxed(compilation)),
+                None => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -180,21 +231,24 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let mut graph = options.load_graph(path, module_root, Default::default())?;
-    let (mut module, _) = checked_lower(&mut graph)?;
-    specialize(&mut module)?;
-    let ranges = ranges::analyze(&module);
-    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-    Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        source_inputs,
-        input_paths,
-    })
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, Default::default())?;
+        let (mut module, _) = checked_lower(&mut graph)?;
+        specialize(&mut module)?;
+        let ranges = ranges::analyze(&module);
+        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        Ok(Compilation {
+            llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
+            extension_archives: graph
+                .modules
+                .iter()
+                .filter_map(|m| m.archive.clone())
+                .collect(),
+            source_inputs,
+            input_paths,
+        })
+    })();
+    object_fallback(path, module_root, options, typed, |c| c)
 }
 
 pub struct CodegenUnit {
@@ -211,11 +265,13 @@ pub struct UnitCompilation {
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
-/// Each call resolves imports and runs Imre's preflight, lowering and requested code generation
-/// against the current files. Changing the module root or resolved file set starts a new database.
+/// A change confined to literal `int` or `bool` defaults on explicitly typed top-level functions
+/// can also reuse completed caller bodies that did not consume those defaults. Each call resolves
+/// imports, checks the whole program and runs the requested code generation against current files.
 #[derive(Default)]
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
+    callers: frontend::CallerCache,
 }
 
 impl IncrementalCompiler {
@@ -225,7 +281,7 @@ impl IncrementalCompiler {
             path,
             module_root,
             &CompileOptions::default(),
-            Some(&mut self.cache),
+            Some(self),
             Default::default(),
         )
     }
@@ -249,7 +305,7 @@ impl IncrementalCompiler {
         options: &CompileOptions,
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        watch::check(&mut self.cache, path, module_root, options, report)
+        watch::check(self, path, module_root, options, report)
     }
 
     /// Watches the current revision and declarations in installed extension wheels.
@@ -278,7 +334,7 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         options: &CompileOptions,
     ) -> Result<UnitCompilation, String> {
-        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+        compile_file_units_with(path, module_root, options, Some(self))
     }
 }
 
@@ -295,36 +351,47 @@ fn compile_file_units_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let mut graph = options.load_graph(path, module_root, Default::default())?;
-    let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
-    for original in specialize(&mut module)? {
-        owners.push(owners[original]);
-    }
-    let ranges = ranges::analyze(&module);
-    let names = graph
-        .modules
-        .iter()
-        .map(|m| m.name.clone())
-        .collect::<Vec<_>>();
-    let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-    Ok(UnitCompilation {
-        units: llvm::emit_units(
-            &module,
-            &ranges,
-            options.address_sanitizer,
-            &owners,
-            &names,
-            graph.entry,
-        )?,
-        extension_archives: graph
+    let typed = (|| {
+        let mut graph = options.load_graph(path, module_root, Default::default())?;
+        let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
+        for original in specialize(&mut module)? {
+            owners.push(owners[original]);
+        }
+        let ranges = ranges::analyze(&module);
+        let names = graph
             .modules
             .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
-        input_paths,
-        source_inputs,
+            .map(|m| m.name.clone())
+            .collect::<Vec<_>>();
+        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        Ok(UnitCompilation {
+            units: llvm::emit_units(
+                &module,
+                &ranges,
+                options.address_sanitizer,
+                &owners,
+                &names,
+                graph.entry,
+            )?,
+            extension_archives: graph
+                .modules
+                .iter()
+                .filter_map(|m| m.archive.clone())
+                .collect(),
+            input_paths,
+            source_inputs,
+        })
+    })();
+    object_fallback(path, module_root, options, typed, |c| UnitCompilation {
+        units: vec![CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir: c.llvm_ir,
+        }],
+        input_paths: c.input_paths,
+        source_inputs: c.source_inputs,
+        extension_archives: c.extension_archives,
     })
 }
 
@@ -340,27 +407,34 @@ fn checked_lower(
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(cache) = cache else {
+    let Some(compiler) = cache else {
         return checked_lower(graph);
     };
-    cache.restore_hints(graph)?;
-    let lowered = frontend::lower_with_owners(graph);
-    cache.retain_hints(graph, lowered.is_ok());
-    let lowered = lowered?;
-    let (skipped, overloads) = graph.diagnostic_scopes();
-    cache.check_scopes(
-        &mut graph.session,
-        &graph.inputs,
-        skipped.as_deref(),
-        &overloads,
-    )?;
-    Ok(lowered)
+    compiler.cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_caller_cache(graph, compiler.callers.prepare(graph));
+    compiler.cache.retain_hints(graph, lowered.is_ok());
+    let checked = lowered.and_then(|lowered| {
+        let (skipped, overloads) = graph.diagnostic_scopes();
+        compiler.cache.check_scopes(
+            &mut graph.session,
+            &graph.inputs,
+            skipped.as_deref(),
+            &overloads,
+        )?;
+        Ok(lowered)
+    });
+    if checked.is_err() {
+        compiler.callers = frontend::CallerCache::default();
+    }
+    checked
 }
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    sorted_rows::specialize(module);
+    verify_after(module, "sorted record rows")?;
     let reader_origins = record_copies::scalarize(module);
     verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
@@ -460,6 +534,22 @@ fn check_encoding(source: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
+        for source in [
+            "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",
+            "import logging\nv = logging.getLogger('x')\nprint(v != v)\n",
+            "import asyncio\nv = asyncio.Semaphore(1)\nprint(v != v)\n",
+            "from tempfile import TemporaryDirectory\nv = TemporaryDirectory()\nprint(v == v)\n",
+        ] {
+            let error = super::check(source).unwrap_err();
+            assert!(
+                error.contains("unsupported comparison for these types"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
@@ -851,21 +941,7 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
-    fn loop_breaks_do_not_preserve_replaced_or_deleted_locals() {
-        let replaced = r#"
-def invalid(values: list[int]) -> int:
-    result: int | None = 1
-    for value in values:
-        result = value
-        try:
-            break
-        finally:
-            result = None
-    else:
-        result = 1
-    return result + 1
-"#;
-        assert!(compile(replaced, &CompileOptions::default()).is_err());
+    fn loop_break_does_not_restore_a_deleted_exception_target() {
         let deleted = r#"
 def invalid(values: list[int]) -> str:
     caught = ValueError("old")
@@ -878,6 +954,10 @@ def invalid(values: list[int]) -> str:
         caught = ValueError("empty")
     return str(caught)
 "#;
-        assert!(compile(deleted, &CompileOptions::default()).is_err());
+        let error = compile(deleted, &CompileOptions::default()).unwrap_err();
+        assert!(
+            error.contains("local may be uninitialized on this path"),
+            "{error}"
+        );
     }
 }

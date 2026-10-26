@@ -58,6 +58,13 @@ whether the owner's runner received its own `--reachable-only` switch.
 A record whose declared mode disagrees with the compiler, or a missing build
 at either optimization level, appears in `mode_errors` and fails the run.
 
+## Discover methods on a known class
+
+To discover method names in native code, pass a statically known class to
+`unittest.defaultTestLoader.getTestCaseNames`. The [verified loader example](full/unittest/NATIVE_LOADER.md)
+uses CPython's original `bar.test_bar.PassingTest` and documents which module
+and suite runner calls still fail.
+
 ## A verified upstream example
 
 This is the `test_stop` case used by [the unittest gate](full/unittest/run.py).
@@ -90,7 +97,7 @@ for level in (0, 3):
                       Path("/path/to/clang"), level)
     with TemporaryDirectory() as work:
         execute = native_method(tools, Path(work), source, "Test_TestResult", test_id,
-                                testcase_fixture("bool"), operation=("imre", "unittest.TestResult.stop"))
+                                testcase_fixture(), operation=("imre", "unittest.TestResult.stop"))
         report = run_evidence(load_suite("test.test_unittest"), {test_id: execute}, reference,
                               level, exceptions=reference_skips(level))
     row, = [r for r in report["records"] if r["id"] == test_id]
@@ -107,9 +114,8 @@ legitimate repeated IDs.
 
 `native_method` copies the pinned definition as bytes and records its SHA-256.
 The fixture is an Imre source prefix ending inside a class named `NativeCase`.
-Use the default fixture for the supported `TestCase` methods; the boolean
-equality fixture is shared here while the compiler requires a single parameter
-type per method. Module owners may provide their actual typed instance fixture.
+The default fixture inherits the native `TestCase`, including its boolean and
+integer equality checks. Module owners may provide their actual typed instance fixture.
 A decorated method requires a dedicated adapter; class and module fixtures
 execute on CPython. If the test requires populated instance state, reproduce or
 transfer that state into the native fixture before crediting its body.

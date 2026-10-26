@@ -1,0 +1,141 @@
+[
+  {
+    "compiler_commit": "5853ebca0eaceb170250e6eeff361a731363d556",
+    "tree": "a76043e17ffa1c9a8c713fedc804753828552f4f",
+    "parents": [
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9",
+      "abe82df8434b09db44c2a5a06c5fac2bdf8543be"
+    ],
+    "binary_sha256": {
+      "imre": "026bd35d08486b729800d63adddace5519f84ed18dfcd938a5ae1546f54bc209",
+      "libimre_runtime.a": "72915c1878fb5ec6c57ffbda605cc2c4fe0132e282d3fb1e16a372d144d1b255"
+    },
+    "description": "Deferred annotations with canonical sys and record comparisons"
+  },
+  {
+    "compiler_commit": "211b698c2f1d78d0a8b96ea1bca6f0af8cfa3d3c",
+    "tree": "273034257e111e7f8202d8bb1a59e351ec8f0ccf",
+    "parents": [
+      "2a3115a0479151ef07f59d1abaf34cd73e12b0ef",
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9"
+    ],
+    "binary_sha256": {
+      "imre": "e64c8fdf2ef2e89f1a7fb99bde7e1f5645cc0b18201fd866336fe4216d35a60c",
+      "libimre_runtime.a": "3be6934bf4e80f76f6709f1a9f7974aa756d2aab1630d80f4b859589f7f7cce1"
+    },
+    "description": "Native dispatch registry, #871"
+  },
+  {
+    "compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008",
+    "tree": "8c21e75c15fca7ed282187d6713c664feefaedba",
+    "parents": [
+      "019960d316afc0dd67146201929bd544f2973b16",
+      "abe82df8434b09db44c2a5a06c5fac2bdf8543be"
+    ],
+    "binary_sha256": {
+      "imre": "01ee0d81e0afe1cb61cf7e814ce10affad86c15b81e1bf97c2959ba9306acbaf",
+      "libimre_runtime.a": "1412bd1f7c5f615215dd84328898280c37b1dced168bbc5ad27e4fd7e2b77cee"
+    },
+    "description": "Live builtin length, #949"
+  },
+  {
+    "compiler_commit": "0c43b71964f21d9fa016f949022b4e95248dc28d",
+    "tree": "46fa76cc823e74c26b9a9e18da0c41095f302bd5",
+    "parents": [
+      "88944a5283648e183ef4a06320f8459dbfdf867b"
+    ],
+    "binary_sha256": {
+      "imre": "3f435611642feb5e4012d47eaa3a265102ea676cdb51d8227f46564640ba0f2b",
+      "libimre_runtime.a": "59d6da2277c2f241e43c2714b45bfc9e81b3c5bb45fa0076bc7f5b661ce68c48"
+    },
+    "description": "Fixed argument tuple expansion in partial, #1175"
+  },
+  {
+    "compiler_commit": "9d9b4edd4d61ec1d5d30bce692ca2a447fe96233",
+    "tree": "00ec88ba2fc045413a9ccd7d7b3cca64042d2073",
+    "parents": [
+      "0c43b71964f21d9fa016f949022b4e95248dc28d"
+    ],
+    "binary_sha256": {
+      "imre": "649be0e083bf10a1a917e0b9f48a45f3e569a886017994b6219669d3891cbf7b",
+      "libimre_runtime.a": "59d6da2277c2f241e43c2714b45bfc9e81b3c5bb45fa0076bc7f5b661ce68c48"
+    },
+    "description": "Identity of an empty partial, #1183"
+  },
+  {
+    "compiler_commit": "6bb9b6eff0da53cc87fd9879a0e7b1b107d1c753",
+    "tree": "d0417cbb23a9e6db6d936de5c1f9e32ab685a168",
+    "parents": [
+      "d49fe404a5554d50bf5178ca384d62791bbbbbc6",
+      "bb188911d7fa2fcabc2817fda9dd384423f3a008"
+    ],
+    "binary_sha256": {
+      "imre": "0d9e142c24549ebcc7115781408c09564f7141f4c31de1dd9e8315ea620a652d",
+      "libimre_runtime.a": "26a50de74fece4a9cd78b041ca0b94a5614719e44f6741de7f2f3d4e8389aaa2"
+    },
+    "description": "Live builtin length with canonical groupby"
+  },
+  {
+    "compiler_commit": "78c9efc1357b88b3a4547d993e33022b4716b8c2",
+    "tree": "c3142dded8fdf777a6c7201a5851587f5a629416",
+    "parents": [
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9",
+      "547c55bf58deb475c4f208c9734c19b7d3889228"
+    ],
+    "binary_sha256": {
+      "imre": "73d093c8a540642468472a41e343cd26f37557945253952b0d1e70ea4a8fc686",
+      "libimre_runtime.a": "3eb7375114ad3076beb8194d51bfa18654035c47c3001bb7b9304f03736e797b"
+    },
+    "description": "Deferred annotations with ChainMap, #650"
+  },
+  {
+    "compiler_commit": "4a142b750a3e0f1fdc2d3efa29a6de4291183ddb",
+    "tree": "e5f8b6ea8601f4c2eeb7496687870fabbc2f3b0f",
+    "parents": [
+      "73aa81754dfbb26b0d2707deabc4a539ef9f19ba",
+      "bb188911d7fa2fcabc2817fda9dd384423f3a008"
+    ],
+    "binary_sha256": {
+      "imre": "16d879973e487939cfcfcd7cd2aacc8e2a436bb20e7b1f995e94e4f1069ac85d",
+      "libimre_runtime.a": "cd5e396d6ce537a2b72ef08644e4cc8e0380315a88b9c4f9848c6e016f15a5b5"
+    },
+    "description": "Live builtin length with percent formatting and generators"
+  },
+  {
+    "compiler_commit": "e1dff5fafaf64558f2dd35ceba8f59216003a209",
+    "tree": "a11a401f74ce340506614221ed39c42e9dac45d3",
+    "parents": [
+      "cb631862d1a79b0f83591fff22a7e9e2628e6060"
+    ],
+    "binary_sha256": {
+      "imre": "4a40ce576eed774ea52d6b17ddf05f47100c89ff0777a915b9a533f82804d2eb",
+      "libimre_runtime.a": "0bab331746d1c84546eb31c360272bf0b92c2e27c971cd804d57dd364c123921"
+    },
+    "description": "Canonical control before CacheInfo"
+  },
+  {
+    "compiler_commit": "3b7a9fd34d468b4f2ee8dd3e671aa2b6c943140f",
+    "tree": "516f5d0b7a22dc972a15d3310c186badc2f3a8d8",
+    "parents": [
+      "e1dff5fafaf64558f2dd35ceba8f59216003a209"
+    ],
+    "binary_sha256": {
+      "imre": "2f723198ba377521ba74d8b87dab6850b6cb24982b139192e289d2d2af1328b3",
+      "libimre_runtime.a": "0bab331746d1c84546eb31c360272bf0b92c2e27c971cd804d57dd364c123921"
+    },
+    "description": "Native CacheInfo, #1201"
+  },
+  {
+    "compiler_commit": "2cd94ee34fd6dba49c2409f034ec2823bb34c291",
+    "tree": "5e88544b20cf95afeb8cd5887a9b2c44eade3f38",
+    "parents": [
+      "519c9003a144decc4eafc9720e9934b26b170a95",
+      "78c9efc1357b88b3a4547d993e33022b4716b8c2"
+    ],
+    "binary_sha256": {
+      "imre": "716c7d1546d300bc1d259d01efb7e59695bb01452da800b70d9eacbcf4a93b50",
+      "libimre_runtime.a": "cf243dfd88d1b22b46e579052a8425887d022eecfd619ba94ebe9ef64bc8d674"
+    },
+    "description": "Deferred annotations with canonical generator and unittest changes"
+  }
+]

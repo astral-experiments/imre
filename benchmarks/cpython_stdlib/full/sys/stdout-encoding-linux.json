@@ -1,0 +1,564 @@
+{
+  "upstream_id": "test.test_sys.SysModuleTest.test_ioencoding",
+  "whole_methods_added": 0,
+  "files": {
+    "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044"
+  },
+  "levels": {
+    "0": {
+      "controls": [
+        {
+          "case": "metadata",
+          "setting": null,
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": ":",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": ":ignore",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c69676e6f72650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "utf-8",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "ascii:",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "latin1",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "69736f383835392d317c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "ascii:no-such",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c6e6f2d737563680a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "utf-8-sig",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "efbbbf7574662d382d7369677c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": null,
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c636166c3a920c2a2e282acf09fa680380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:replace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c6361663f203f3f3f380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "2761736369692720636f6465632063616e277420656e636f64652063686172616374657220275c7865392720696e20706f736974696f6e20333a206f7264696e616c206e6f7420696e2072616e676528313238290a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "latin1",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "276c6174696e2d312720636f6465632063616e277420656e636f6465206368617261637465727320696e20706f736974696f6e20362d373a206f7264696e616c206e6f7420696e2072616e676528323536290a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:unknown-policy",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "756e6b6e6f776e206572726f722068616e646c6572206e616d652027756e6b6e6f776e2d706f6c696379270a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:backslashreplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c6361665c786539205c7861325c75323061635c553030303166393830380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "utf-8-sig",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "efbbbf6265666f72657c636166c3a920c2a2e282acf09fa680380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "legacy POSIX locale",
+          "setting": null,
+          "flags": [
+            "-X",
+            "utf8=0"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "force UTF-8 mode",
+          "setting": null,
+          "flags": [
+            "-X",
+            "utf8"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "isolated command",
+          "setting": "no-such-codec",
+          "flags": [
+            "-I"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "policy without codec",
+          "setting": ":ignore",
+          "flags": [
+            "-X",
+            "utf8=0"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c69676e6f72650a547275650a",
+          "stderr": ""
+        }
+      ],
+      "original_children": [
+        {
+          "setting": "cp424",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": false,
+          "cpython": {
+            "status": 0,
+            "stdout": "4a25",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "LookupError: unknown encoding: cp424"
+          }
+        },
+        {
+          "setting": "ascii:replace",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 0,
+            "stdout": "3f0a",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 0,
+            "stdout": "3f0a",
+            "last_stderr_line": ""
+          }
+        },
+        {
+          "setting": "ascii",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          }
+        },
+        {
+          "setting": "ascii:",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          }
+        },
+        {
+          "setting": ":surrogateescape",
+          "source": "print(chr(0xdcbd))",
+          "source_sha256": "af96184be6d0cf3cdbe08b1fb47534b005602b3f4ac41d6fbe4cfd5c89028846",
+          "same_status_stdout_and_last_diagnostic_line": false,
+          "cpython": {
+            "status": 0,
+            "stdout": "bd0a",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "ValueError: surrogates are outside the native string domain"
+          }
+        }
+      ]
+    },
+    "3": {
+      "controls": [
+        {
+          "case": "metadata",
+          "setting": null,
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": ":",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": ":ignore",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c69676e6f72650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "utf-8",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "ascii:",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "latin1",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "69736f383835392d317c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "ascii:no-such",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c6e6f2d737563680a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "metadata",
+          "setting": "utf-8-sig",
+          "flags": [],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "efbbbf7574662d382d7369677c7374726963740a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": null,
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c636166c3a920c2a2e282acf09fa680380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:replace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c6361663f203f3f3f380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "2761736369692720636f6465632063616e277420656e636f64652063686172616374657220275c7865392720696e20706f736974696f6e20333a206f7264696e616c206e6f7420696e2072616e676528313238290a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "latin1",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "276c6174696e2d312720636f6465632063616e277420656e636f6465206368617261637465727320696e20706f736974696f6e20362d373a206f7264696e616c206e6f7420696e2072616e676528323536290a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:unknown-policy",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": "756e6b6e6f776e206572726f722068616e646c6572206e616d652027756e6b6e6f776e2d706f6c696379270a"
+        },
+        {
+          "case": "writes and failures",
+          "setting": "ascii:backslashreplace",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "6265666f72657c6361665c786539205c7861325c75323061635c553030303166393830380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "writes and failures",
+          "setting": "utf-8-sig",
+          "flags": [],
+          "source_sha256": "93f128fb7446f8ccfc66a5a92b87dbc2ef22eac74664b705882a0197b0d26092",
+          "status": 0,
+          "stdout": "efbbbf6265666f72657c636166c3a920c2a2e282acf09fa680380a61667465727c343833353730333237383435383531363639383832343730340a46616c73650a312e350a62276f6b270a",
+          "stderr": ""
+        },
+        {
+          "case": "legacy POSIX locale",
+          "setting": null,
+          "flags": [
+            "-X",
+            "utf8=0"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "force UTF-8 mode",
+          "setting": null,
+          "flags": [
+            "-X",
+            "utf8"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "isolated command",
+          "setting": "no-such-codec",
+          "flags": [
+            "-I"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "7574662d387c737572726f676174656573636170650a547275650a",
+          "stderr": ""
+        },
+        {
+          "case": "policy without codec",
+          "setting": ":ignore",
+          "flags": [
+            "-X",
+            "utf8=0"
+          ],
+          "source_sha256": "5bb11806812bfea066ca401dae3a7735ae357a800325c24c996fbccd95e00a21",
+          "status": 0,
+          "stdout": "61736369697c69676e6f72650a547275650a",
+          "stderr": ""
+        }
+      ],
+      "original_children": [
+        {
+          "setting": "cp424",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": false,
+          "cpython": {
+            "status": 0,
+            "stdout": "4a25",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "LookupError: unknown encoding: cp424"
+          }
+        },
+        {
+          "setting": "ascii:replace",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 0,
+            "stdout": "3f0a",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 0,
+            "stdout": "3f0a",
+            "last_stderr_line": ""
+          }
+        },
+        {
+          "setting": "ascii",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          }
+        },
+        {
+          "setting": "ascii:",
+          "source": "print(chr(0xa2))",
+          "source_sha256": "af64db6f9f229c31cbe397f1b47a83dc0ad2efe103070f922314f2111f3f81fc",
+          "same_status_stdout_and_last_diagnostic_line": true,
+          "cpython": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "UnicodeEncodeError: 'ascii' codec can't encode character '\\xa2' in position 0: ordinal not in range(128)"
+          }
+        },
+        {
+          "setting": ":surrogateescape",
+          "source": "print(chr(0xdcbd))",
+          "source_sha256": "af96184be6d0cf3cdbe08b1fb47534b005602b3f4ac41d6fbe4cfd5c89028846",
+          "same_status_stdout_and_last_diagnostic_line": false,
+          "cpython": {
+            "status": 0,
+            "stdout": "bd0a",
+            "last_stderr_line": ""
+          },
+          "imre": {
+            "status": 1,
+            "stdout": "",
+            "last_stderr_line": "ValueError: surrogates are outside the native string domain"
+          }
+        }
+      ]
+    }
+  }
+}

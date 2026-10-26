@@ -3,6 +3,7 @@
 use super::*;
 
 mod descriptor;
+pub(super) use descriptor::protocol_call;
 
 impl Checker<'_> {
     /// POSIX normcase(s) returns exactly os.fspath(s), with its own keyword signature.
@@ -52,11 +53,16 @@ impl Checker<'_> {
             }
         };
         let value = self.expr(path)?;
-        let result = self.fspath_protocol(value, path, None, None)?;
+        let result = self.fspath(value, path)?;
         // The stubs omit invalid descriptors. The native operation above checks
         // their binding and return type, so its own outer overload is accounted for.
         self.graph.checked_overload(self.module, call.range());
         Ok(result)
+    }
+
+    /// Resolve one path-like value, preserving its return type and any user exception.
+    pub(super) fn fspath(&mut self, value: Expr, at: &ast::Expr) -> Result<Expr, String> {
+        self.fspath_protocol(value, at, None, None)
     }
 
     /// OS path converters name the operation and parameter if the protocol is missing.
@@ -72,7 +78,7 @@ impl Checker<'_> {
 
     /// A path protocol result must be a string or bytes; do not recursively call
     /// another object's protocol. Nullable and tagged inputs are evaluated once.
-    fn fspath_protocol(
+    pub(super) fn fspath_protocol(
         &mut self,
         value: Expr,
         at: &ast::Expr,
@@ -97,7 +103,7 @@ impl Checker<'_> {
         if returned_by.is_none() && matches!(value.ty, Type::Path | Type::PurePath(_)) {
             return self.fspath_value(value, at);
         }
-        if let Some(selected) = self.map_fspath_arms(&value, at, |checker, arm| {
+        if let Some(selected) = self.map_path_protocol_arms(&value, at, |checker, arm| {
             checker.fspath_protocol(arm, at, returned_by, syscall)
         })? {
             return Ok(selected);
@@ -116,7 +122,7 @@ impl Checker<'_> {
     }
 
     /// Check one actual protocol operand or descriptor result, including None.
-    fn map_fspath_arms(
+    pub(super) fn map_path_protocol_arms(
         &mut self,
         value: &Expr,
         at: &ast::Expr,
@@ -137,7 +143,7 @@ impl Checker<'_> {
             error(
                 self.source,
                 at,
-                "path protocol results require a common str or bytes representation",
+                "path protocol branches require compatible native return types",
             )
         })?;
         Ok(Some(Expr {
@@ -188,6 +194,11 @@ impl Checker<'_> {
             ),
             (None, None) => format!("expected str, bytes or os.PathLike object, not {actual}"),
         };
+        Self::path_operand_type_error(evaluated, Type::Str, message)
+    }
+
+    /// Evaluate the operand before raising an error about its actual Python type.
+    fn path_operand_type_error(evaluated: Expr, result: Type, message: String) -> Expr {
         let exception = Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
@@ -196,7 +207,7 @@ impl Checker<'_> {
             },
         };
         Expr {
-            ty: Type::Str,
+            ty: result,
             kind: ExprKind::Builtin(Builtin::RaiseException, vec![evaluated, exception]),
         }
     }

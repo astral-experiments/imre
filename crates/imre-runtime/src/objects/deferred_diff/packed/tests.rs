@@ -1,4 +1,5 @@
 use super::*;
+use crate::StrOwner;
 
 #[test]
 fn prefix_handles_mismatches_in_every_word_and_tail_byte() {
@@ -26,7 +27,7 @@ fn words(rows: &[String]) -> Words {
     for row in rows {
         result
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(row))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::new(row))) as usize);
     }
     result.update_header();
     result
@@ -54,7 +55,8 @@ fn compressed_and_raw_blocks_preserve_cross_block_prefixes_and_duplicates() {
     right.extend([first.clone(), next.clone()]);
     left.extend([first.clone(), first, next]);
 
-    let packed = Packed::new(&words(&left), &words(&right));
+    let packed =
+        Packed::new(&words(&left), &words(&right)).unwrap_or_else(|_| panic!("pack test rows"));
     assert!(
         packed
             .blocks
@@ -76,7 +78,9 @@ fn compressed_and_raw_blocks_preserve_cross_block_prefixes_and_duplicates() {
             .any(|b| matches!(b, Block::Raw(s) if s.len() > BLOCK_BYTES))
     );
 
-    let (a, b) = packed.unpack();
+    let (a, b) = packed
+        .unpack()
+        .unwrap_or_else(|_| panic!("restore packed rows"));
     assert!(
         a.strings()
             .map(|(_, s)| s.as_str())

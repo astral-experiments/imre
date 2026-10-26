@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import warnings
@@ -31,8 +32,10 @@ assert not marker.exists()
 warnings.filterwarnings("ignore", "PASS_FDS", RuntimeWarning, "subprocess$", 862)
 print(subprocess.call(command, pass_fds={1}, close_fds=False))
 assert marker.exists()
-print(subprocess.call(["/bin/true"], pass_fds=(), close_fds=False))
-print(subprocess.call(["/bin/true"], pass_fds=(1,), close_fds=True))
+true_path = shutil.which("true")
+assert true_path is not None
+print(subprocess.call([true_path], pass_fds=(), close_fds=False))
+print(subprocess.call([true_path], pass_fds=(1,), close_fds=True))
 
 warnings.simplefilter("error", Warning)
 warnings.filterwarnings("ignore", "pass_fds", RuntimeWarning, "subprocess$", 863)

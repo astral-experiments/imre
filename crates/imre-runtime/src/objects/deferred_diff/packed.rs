@@ -1,4 +1,5 @@
-use super::{Rc, Str, Words};
+use super::{Error, Str, Words};
+use crate::StrOwner;
 use std::cmp::Ordering;
 
 /// Each UTF-8 row stores its common byte prefix with the previous row and its
@@ -13,45 +14,61 @@ const BLOCK_BYTES: usize = 64 * 1024;
 const MAX_ROW_HEADER_BYTES: usize = 1 + 2 * usize::BITS.div_ceil(7) as usize;
 
 enum Block {
-    Raw(Box<[u8]>),
-    Lz4 {
-        bytes: Box<[u8]>,
-        decoded_len: usize,
-    },
+    Raw(Vec<u8>),
+    Lz4 { bytes: Vec<u8>, decoded_len: usize },
 }
 
 impl Block {
-    fn bytes<'a>(&'a self, scratch: &'a mut Vec<u8>) -> &'a [u8] {
+    fn bytes<'a>(&'a self, scratch: &'a mut Vec<u8>) -> Result<&'a [u8], Error> {
         match self {
-            Self::Raw(bytes) => bytes,
+            Self::Raw(bytes) => Ok(bytes),
             Self::Lz4 { bytes, decoded_len } => {
+                reserve(scratch, decoded_len.saturating_sub(scratch.len()))?;
                 scratch.resize(*decoded_len, 0);
                 let len = lz4_flex::block::decompress_into(bytes, scratch)
                     .expect("valid internal snapshot block");
                 assert_eq!(len, *decoded_len);
-                scratch
+                Ok(scratch)
             }
         }
     }
 }
 
-fn flush(blocks: &mut Vec<Block>, data: &mut Vec<u8>) {
+fn reserve<T>(values: &mut Vec<T>, additional: usize) -> Result<(), Error> {
+    values
+        .try_reserve(additional)
+        .map_err(|_| Error::memory_error())
+}
+
+fn flush(blocks: &mut Vec<Block>, data: &mut Vec<u8>) -> Result<(), Error> {
     if data.is_empty() {
-        return;
+        return Ok(());
     }
+    reserve(blocks, 1)?;
     if data.len() <= BLOCK_BYTES {
-        let bytes = lz4_flex::block::compress(data);
-        if bytes.len() < data.len() {
+        let capacity = lz4_flex::block::get_maximum_output_size(data.len());
+        let mut scratch = Vec::new();
+        reserve(&mut scratch, capacity)?;
+        scratch.resize(capacity, 0);
+        let len = lz4_flex::block::compress_into(data, &mut scratch)
+            .expect("maximum LZ4 output size fits");
+        if len < data.len() {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(len)
+                .map_err(|_| Error::memory_error())?;
+            bytes.extend_from_slice(&scratch[..len]);
             blocks.push(Block::Lz4 {
-                bytes: bytes.into_boxed_slice(),
+                bytes,
                 decoded_len: data.len(),
             });
             data.clear();
-            return;
+            return Ok(());
         }
     }
     // A single very large row stays in its own uncompressed block.
-    blocks.push(Block::Raw(std::mem::take(data).into_boxed_slice()));
+    blocks.push(Block::Raw(std::mem::take(data)));
+    Ok(())
 }
 
 /// Finds the first differing byte with unaligned, endian-independent word reads.
@@ -95,7 +112,7 @@ fn take(bytes: &mut &[u8]) -> usize {
 }
 
 impl Packed {
-    pub(super) fn new(left: &Words, right: &Words) -> Self {
+    pub(super) fn new(left: &Words, right: &Words) -> Result<Self, Error> {
         let counts = (left.values.len(), right.values.len());
         let mut left = left.strings().map(|(_, s)| s.as_bytes()).peekable();
         let mut right = right.strings().map(|(_, s)| s.as_bytes()).peekable();
@@ -125,28 +142,38 @@ impl Packed {
             // A whole row fits in the decode scratch, or occupies one raw block.
             // Its prefix can refer to the last row of the preceding block.
             let suffix = &row[prefix..];
-            if BLOCK_BYTES.saturating_sub(data.len()) < MAX_ROW_HEADER_BYTES + suffix.len() {
-                flush(&mut blocks, &mut data);
+            let needed = MAX_ROW_HEADER_BYTES
+                .checked_add(suffix.len())
+                .ok_or_else(Error::allocation)?;
+            if BLOCK_BYTES.saturating_sub(data.len()) < needed {
+                flush(&mut blocks, &mut data)?;
             }
+            reserve(&mut data, needed)?;
             data.push(side);
             put(prefix, &mut data);
             put(row.len() - prefix, &mut data);
             data.extend_from_slice(suffix);
             previous = row;
         }
-        flush(&mut blocks, &mut data);
-        Self { blocks, counts }
+        flush(&mut blocks, &mut data)?;
+        Ok(Self { blocks, counts })
     }
 
-    pub(super) fn unpack(&self) -> (Words, Words) {
+    pub(super) fn unpack(&self) -> Result<(Words, Words), Error> {
         let (mut left, mut right) = (Words::new(3), Words::new(3));
-        left.values.reserve(self.counts.0);
-        right.values.reserve(self.counts.1);
+        left.values
+            .try_reserve(self.counts.0)
+            .map_err(|_| Error::memory_error())?;
+        right
+            .values
+            .try_reserve(self.counts.1)
+            .map_err(|_| Error::memory_error())?;
         let mut decoded = Vec::new();
         let mut row = Vec::new();
-        let mut string = Rc::new(Str::new(""));
+        let mut string =
+            StrOwner::try_new(Str::const_new("")).map_err(|_| Error::memory_error())?;
         for block in &self.blocks {
-            let mut data = block.bytes(&mut decoded);
+            let mut data = block.bytes(&mut decoded)?;
             while let Some((&side, rest)) = data.split_first() {
                 data = rest;
                 let prefix = take(&mut data);
@@ -156,22 +183,28 @@ impl Packed {
                 // A repeated large string must not gain one allocation per occurrence.
                 if prefix != row.len() || len != 0 {
                     row.truncate(prefix);
+                    reserve(&mut row, len)?;
                     row.extend_from_slice(suffix);
-                    string = Rc::new(Str::new(
-                        std::str::from_utf8(&row).expect("complete UTF-8 row"),
-                    ));
+                    string = StrOwner::try_new(
+                        Str::try_new(std::str::from_utf8(&row).expect("complete UTF-8 row"))
+                            .map_err(|_| Error::memory_error())?,
+                    )
+                    .map_err(|_| Error::memory_error())?;
                 }
                 if side & 1 != 0 {
-                    left.values.push(Rc::into_raw(Rc::clone(&string)) as usize);
+                    left.values
+                        .push(StrOwner::into_raw(StrOwner::clone(&string)) as usize);
                 }
                 if side & 2 != 0 {
-                    right.values.push(Rc::into_raw(Rc::clone(&string)) as usize);
+                    right
+                        .values
+                        .push(StrOwner::into_raw(StrOwner::clone(&string)) as usize);
                 }
             }
         }
         left.update_header();
         right.update_header();
-        (left, right)
+        Ok((left, right))
     }
 }
 

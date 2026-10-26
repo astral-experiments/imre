@@ -1,18 +1,18 @@
 //! Per-reader logical positions for one archive. Path inputs transfer the file
 //! descriptor; caller-supplied streams are retained without taking close ownership.
 
+use crate::ObjectOwner;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
-use std::rc::Rc;
 
 use super::{Error, Info, Object, Result, directory, files};
 use crate::objects::exceptions::Kind;
 
 #[derive(Clone)]
 pub(super) enum Source {
-    Owned(Rc<File>),
-    Borrowed(Rc<Object>),
+    Owned(crate::Shared<File>),
+    Borrowed(ObjectOwner),
 }
 
 impl Source {

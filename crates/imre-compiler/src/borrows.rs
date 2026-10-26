@@ -56,7 +56,7 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> Vec<FunctionBorrows
                 targets,
                 private,
             ) {
-                facts.length_roots = length_roots(function, &facts);
+                facts.length_roots = length_roots(function, &facts, &module.types);
             }
             facts
         })
@@ -274,7 +274,7 @@ pub(crate) fn projection_root(
     types: &Types,
     functions: &[Function],
 ) -> Option<usize> {
-    if types.payload(expression.ty) == Some(Type::Float) {
+    if types.payload(expression.ty) == Some(Type::Float) || expression.ty == Type::ActivePopen {
         return None;
     }
     match &expression.kind {
@@ -417,10 +417,15 @@ fn local_roots(function: &Function, types: &Types, functions: &[Function]) -> Fu
 
 /// Keeps only exact list identities. A field projection or a new allocation
 /// cannot reuse its enclosing parameter's length. Resets remain guarded at use.
-fn length_roots(function: &Function, facts: &FunctionBorrows) -> Vec<Option<usize>> {
+fn length_roots(function: &Function, facts: &FunctionBorrows, types: &Types) -> Vec<Option<usize>> {
     let mut roots = vec![None; function.locals.len()];
     for &slot in &function.params {
-        if facts.rooted[slot] && matches!(function.locals[slot], Type::ListInt | Type::List(_)) {
+        // A Popen finalizer can append to the shared _active list even in a
+        // function that contains no Python list mutation.
+        if facts.rooted[slot]
+            && matches!(function.locals[slot], Type::ListInt | Type::List(_))
+            && types.element(function.locals[slot]) != Some(Type::ActivePopen)
+        {
             roots[slot] = Some(slot);
         }
     }
@@ -491,11 +496,15 @@ mod tests {
 
     fn module(functions: Vec<Function>) -> Module {
         Module {
+            ignore_python_environment: false,
             types: Types::default(),
             class_fields: vec![vec![Type::Class(0)]],
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),
         }

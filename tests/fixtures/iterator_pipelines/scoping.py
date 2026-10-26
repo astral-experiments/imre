@@ -64,6 +64,14 @@ def scopes() -> None:
     print(sum((saved := inner) for outer in [1, 2] for inner in range(outer)))
     print(saved)
 
+    nullable: int | None = 1
+    try:
+        for result in (nullable + item for outer in [0] if nullable is not None for item in range(2)):
+            print(result)
+            nullable = None
+    except TypeError:
+        print("TypeError")
+
     # Nested generators capture the active outer target, not an enclosing name.
     inner = 77
     show(

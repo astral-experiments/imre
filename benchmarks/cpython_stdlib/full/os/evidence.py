@@ -51,6 +51,8 @@ BODY_OPERATIONS = {
     "PosixTester.test_getresgid": "posix.getresgid",
     "PosixTester.test_setresuid": "posix.getresuid and posix.setresuid",
     "PosixTester.test_setresgid": "posix.getresgid and posix.setresgid",
+    "PosixTester.test_pipe2": "os.pipe2; descriptor checks",
+    "PosixTester.test_pipe2_c_limits": "os.pipe2",
 }
 PRIVATE = {"test_argument_required", "test_bad_pathlike", "test_garbage_in_exception_out",
            "test_return_bytes", "test_return_string"}
@@ -66,11 +68,15 @@ def proof_for(name, row, path, sources, level):
     proof = {"fixture": "; ".join(hooks), "artifact": path.name, "opt_level": level}
     short_name = ".".join(name.split(".")[-2:])
     if "method_sha256" in row:
+        digest = row["method_sha256"]
+        if digest not in sources.get(short_name, {}):
+            raise ValueError(f"{name}: method hash does not match the complete release definition")
+    if row.get("status") in {"native_body_host_operation", "native_body_host_fixture"}:
         child = row.get("child_operation")
         host_child = child and child["interpreter"] == "cpython"
         if row.get("status") != ("native_body_host_operation" if host_child else "native_body_host_fixture"):
             raise ValueError(f"{name}: inconsistent location for this native method")
-        if row["method_sha256"] not in sources.get(short_name, {}):
+        if "method_sha256" not in row:
             raise ValueError(f"{name}: native body is not a complete release method")
         if short_name not in BODY_OPERATIONS:
             raise ValueError(f"{name}: identify the compiled product operation")
@@ -100,6 +106,8 @@ def proof_for(name, row, path, sources, level):
         if row.get("status") != mode:
             raise ValueError(f"{name}: operation locations do not match the call trace")
         proof.update(operation="POSIX operations: " + ", ".join(sorted(calls)), native_calls=dict(calls))
+        if "method_sha256" in row:
+            proof.update(method_sha256=digest, source=sources[short_name][digest])
         if host:
             proof["observed_host_operations"] = host
         if row.get("host_operations"):
@@ -193,7 +201,8 @@ def generate(suite, output, runs, probes):
         if name.startswith(manifest["module"] + ".") and multiplicity[name] != 1:
             raise ValueError(f"method preflight is not an original, unambiguous occurrence: {name}")
     evidence = {}
-    for artifact in ("values-linux.json", "descriptors-linux.json", "paired-paths-linux.json", "device-encoding-linux.json", "credential-children-linux.json"):
+    for artifact in ("values-linux.json", "descriptors-linux.json", "paired-paths-linux.json", "device-encoding-linux.json",
+                     "credential-children-linux.json", "pipe2-linux.json"):
         path = HERE / artifact
         if artifact not in runs and not path.exists():
             continue
@@ -252,6 +261,8 @@ def main():
                         help="fold both descriptor adapters at both optimization levels")
     parser.add_argument("--credential-results", type=Path, nargs=2, metavar=("O0", "O3"),
                         help="fold both runs of the isolated credential child methods")
+    parser.add_argument("--pipe2-results", type=Path, nargs=2, metavar=("O0", "O3"),
+                        help="fold both runs of the unchanged POSIX pipe2 methods")
     parser.add_argument("--method-results", type=Path, nargs=2, metavar=("O0", "O3"),
                         help="refresh the individual method diagnostics from two independent compiler runs")
     parser.add_argument("--compiler-commit", help="exact Imre revision for --method-results")
@@ -263,6 +274,7 @@ def main():
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     runs = {name: paired_runs(paths) for name, paths in [
         ("values-linux.json", args.values_results), ("descriptors-linux.json", args.descriptor_results),
+        ("pipe2-linux.json", args.pipe2_results),
     ] if paths}
     if args.credential_results:
         runs["credential-children-linux.json"] = paired_credentials(args.credential_results)

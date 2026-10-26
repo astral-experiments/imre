@@ -76,6 +76,7 @@ impl Checker<'_> {
         clauses: &[ast::Comprehension],
         elt: &ast::Expr,
         element: Option<Type>,
+        generator: bool,
     ) -> Result<Option<Expr>, String> {
         let [clause] = clauses else { return Ok(None) };
         let [condition] = clause.ifs.as_slice() else {
@@ -177,12 +178,22 @@ impl Checker<'_> {
                 ),
             }
         };
+        let mut body = vec![Statement::Assign(source, list)];
+        let mut clear = vec![source];
+        let value = if generator {
+            let result = self.hidden(ty);
+            body.push(self.generator_frame(Statement::Assign(result, value)));
+            clear.push(result);
+            self.local(result)
+        } else {
+            value
+        };
         Ok(Some(Expr {
             ty,
             kind: ExprKind::Scope {
-                body: vec![Statement::Assign(source, list)],
+                body,
                 value: Box::new(value),
-                clear: vec![source],
+                clear,
             },
         }))
     }

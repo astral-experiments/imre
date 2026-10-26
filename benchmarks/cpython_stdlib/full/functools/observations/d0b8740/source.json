@@ -1,0 +1,13 @@
+{
+  "compiler_commit": "d0b874002792dc9eb89eb0e10f7dacfedec34bf5",
+  "tree": "67e65437707b57a61b18729821b054a693fac9a0",
+  "parents": [
+    "4c74a4e4ad4e943863840293259bc2418c875a95",
+    "a3f6d0b037d9715fcb5b4cfb9c85fc1373bff3f5"
+  ],
+  "binary_sha256": {
+    "imre": "19ffd0d9612c1fe4baab783d58f67c224e885c249277086ecc822434d3b71bd7",
+    "libimre_runtime.a": "1c9614ff3f4ab155e6f78441463e25ad3fa13dfcf91d8f550d63aefbcf808751"
+  },
+  "description": "Partial fields retain module function identity; differently bound str.join local still rejected"
+}

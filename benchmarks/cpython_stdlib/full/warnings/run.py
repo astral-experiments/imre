@@ -15,10 +15,12 @@ import textwrap
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
+import display
 from suite_evidence import roles, write_reports
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
-from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
+from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence, run_in_fixtures
 
 MODULE = "test.test_warnings"
 PACKAGE = "Lib/test/test_warnings/__init__.py"
@@ -176,6 +178,19 @@ def main():
             rejected_patterns(tools, work)
             exercise = validation(tools, work)
             observations = {f"{MODULE}.{implementation}FilterTests.{METHOD}": exercise for implementation in ("C", "Py")}
+            display.operation_cases(tools, work)
+            worker = work / "display-worker"
+            worker.mkdir()
+            exe = tools.build((HERE / "display_worker.py").read_bytes(), worker)
+            for method in display.METHODS:
+                for variant in ("C", "Py"):
+                    name = f"{MODULE}.{variant}WarningsDisplayTests.{method}"
+                    observations[name] = display.observe(exe, method, level)
+                name = f"{MODULE}.CWarningsDisplayTests.{method}"
+                _, failures, skipped = run_in_fixtures(
+                    load_suite(MODULE), {name: display.observe(exe, method, level, fault=True)})
+                if skipped or "incorrect native result" not in str(failures):
+                    raise AssertionError(("the original assertion accepted a corrupt result", method, failures))
             report = run_evidence(load_suite(MODULE), observations, reference, level, exceptions=skips(level))
             for record in report["records"]:
                 if record["id"] in observations and record["outcome"] != "pass":

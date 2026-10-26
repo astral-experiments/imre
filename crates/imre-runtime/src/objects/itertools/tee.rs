@@ -6,17 +6,19 @@ use std::cell::OnceCell;
 
 const BLOCK_SIZE: usize = 57;
 
+type BlockOwner = crate::shared::Shared<Block>;
+
 struct Block {
     items: RefCell<Vec<OwnedWord>>,
-    next: OnceCell<Rc<Block>>,
+    next: OnceCell<BlockOwner>,
 }
 
 impl Block {
-    fn new() -> Rc<Self> {
-        Rc::new(Self {
+    fn new() -> Self {
+        Self {
             items: RefCell::default(),
             next: OnceCell::new(),
-        })
+        }
     }
 }
 
@@ -26,7 +28,7 @@ impl Drop for Block {
         // Unlink them iteratively and stop at the first block another fork roots.
         self.items.get_mut().clear();
         let mut next = self.next.take();
-        while let Some(block) = next.and_then(|block| Rc::try_unwrap(block).ok()) {
+        while let Some(block) = next.and_then(|block| BlockOwner::try_unwrap(block).ok()) {
             let mut block = block;
             next = block.next.take();
         }
@@ -34,18 +36,18 @@ impl Drop for Block {
 }
 
 struct Shared {
-    source: Option<Rc<Object>>,
+    source: Option<crate::ObjectOwner>,
     pulling: Cell<bool>,
 }
 
 pub(in crate::objects) struct Fork {
     shared: Rc<Shared>,
-    block: RefCell<Rc<Block>>,
+    block: RefCell<BlockOwner>,
     index: Cell<usize>,
 }
 
 impl Fork {
-    pub(super) fn take_source(&mut self) -> Option<Rc<Object>> {
+    pub(super) fn take_source(&mut self) -> Option<crate::ObjectOwner> {
         Rc::get_mut(&mut self.shared)?.source.take()
     }
 
@@ -57,7 +59,7 @@ impl Fork {
         }
     }
 
-    fn from_source(source: Rc<Object>) -> Self {
+    fn from_source(source: crate::ObjectOwner) -> Self {
         // SAFETY: snapshot an existing fork without pulling from or changing it.
         let fork = unsafe {
             source.0.with(|storage| {
@@ -75,7 +77,7 @@ impl Fork {
                 source: Some(source),
                 pulling: Cell::new(false),
             }),
-            block: RefCell::new(Block::new()),
+            block: RefCell::new(BlockOwner::new(Block::new())),
             index: Cell::new(0),
         })
     }
@@ -84,7 +86,14 @@ impl Fork {
         let mut block = self.block.borrow().clone();
         let mut index = self.index.get();
         if index == BLOCK_SIZE {
-            let next = block.next.get_or_init(Block::new).clone();
+            let next = if let Some(next) = block.next.get() {
+                next.clone()
+            } else {
+                let Ok(next) = BlockOwner::try_new(Block::new()) else {
+                    return Advance::Return(Err(Error::memory_error()));
+                };
+                block.next.get_or_init(|| next).clone()
+            };
             self.block.replace(next.clone());
             block = next;
             index = 0;
@@ -115,10 +124,10 @@ impl Fork {
                     .try_reserve_exact(BLOCK_SIZE)
                     .is_err()
             {
-                return Advance::Return(Err(Error::allocation()));
+                return Advance::Return(Err(Error::memory_error()));
             }
             self.shared.pulling.set(true);
-            return Advance::Pull(Rc::clone(
+            return Advance::Pull(crate::ObjectOwner::clone(
                 self.shared.source.as_ref().expect("live tee source"),
             ));
         };
@@ -148,7 +157,7 @@ pub unsafe extern "C" fn imre_tee(
             tuple
                 .cast::<*const Object>()
                 .add(i)
-                .write(Rc::into_raw(fork));
+                .write(crate::ObjectOwner::into_raw(fork));
         }
         tuple
     }

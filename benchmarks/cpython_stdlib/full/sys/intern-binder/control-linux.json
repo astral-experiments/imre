@@ -1,0 +1,52 @@
+{
+  "product_commit": "72850640d4be1991794e23b99486b8baa9872bf3",
+  "product_tree": "cf4abbfea660a44e1a2abadd58e29d46cf8b4407",
+  "published_binder": "6573f5088d1f94e1ab01133726766f7c88f89944",
+  "upstream_occurrences": 0,
+  "controls": {
+    "minimal": {
+      "source_sha256": "a24ddda210b0693de9ccb991765ee907d482f79bca42ca069dc2d8a72858f73b",
+      "stdout_sha256": "f238df2ae16f95a3461bb262b8db52df5808bb03a6f2d85471442835bb31c65b",
+      "observations": 1,
+      "runs": {
+        "whole-O0": true,
+        "whole-O3": true,
+        "reachable-O0": true,
+        "reachable-O3": true
+      }
+    },
+    "raw": {
+      "source_sha256": "6cac221aff4219ba5cd0190f905396339285f22ccd3eb85701c4aaa90fc8c847",
+      "stdout_sha256": "c6e35b9b32876bfb2ef9b08e32ffce4d168615d3772a136808e594da64687cf8",
+      "observations": 292,
+      "runs": {
+        "whole-O0": true,
+        "whole-O3": true,
+        "reachable-O0": true,
+        "reachable-O3": true
+      }
+    },
+    "sys-controls": {
+      "source_sha256": "840a53ef33efdadf01db8e3c54b1ee7a8a53f9ab6355e2be04cda9197b5306da",
+      "stdout_sha256": "3256878d6213639cdfcd41cc9e15dcca74346f7e941535f9b3a455361745fc26",
+      "observations": 29,
+      "runs": {
+        "whole-O0": true,
+        "whole-O3": true,
+        "reachable-O0": true,
+        "reachable-O3": true
+      }
+    },
+    "nested_invalid": {
+      "source_sha256": "a3dc9154f1922d2d733186bd074a358f5b7a87fd1bf06f1603dffc4a16af7ac2",
+      "stderr_sha256": "755545d1fdf111b3d2d9a0f4e534adfb0a1421a77c836772b9f868d2671dcd26",
+      "location": "6:23",
+      "runs": {
+        "whole-O0": 1,
+        "whole-O3": 1,
+        "reachable-O0": 1,
+        "reachable-O3": 1
+      }
+    }
+  }
+}

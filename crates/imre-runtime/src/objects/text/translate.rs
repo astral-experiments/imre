@@ -1,9 +1,10 @@
 //! Ordinal lookup for exact built-in dictionaries: a miss copies and None deletes.
 
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 
 use super::super::{mappings::Mapping, object, unions, words::NULLABLE};
-use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, owned_string};
+use super::{Error, Int, Kind, Object, Result, Str, finish, owned_string};
 
 #[derive(Clone, Copy)]
 enum Piece<'a> {
@@ -87,9 +88,9 @@ fn translate(source: &str, table: &Mapping) -> Result<*const Str> {
     let owner = if result.len() <= 2 {
         owned_string(&result)
     } else {
-        Rc::new(result)
+        StrOwner::new(result)
     };
-    Ok(Rc::into_raw(owner))
+    Ok(StrOwner::into_raw(owner))
 }
 
 /// # Safety

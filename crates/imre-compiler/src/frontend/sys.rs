@@ -15,6 +15,72 @@ pub(super) fn displayable(ty: Type) -> bool {
     )
 }
 impl Checker<'_> {
+    /// Return the callable currently bound in the native builtins namespace.
+    pub(super) fn builtin_len(&self) -> Expr {
+        Expr {
+            ty: self
+                .types
+                .callable(vec![self.types.len_argument()], Type::Int),
+            kind: ExprKind::Builtin(Builtin::BuiltinsLen, vec![]),
+        }
+    }
+
+    pub(super) fn unshadowed_len(&self, expr: &ast::Expr) -> bool {
+        matches!(expr, ast::Expr::Name(name) if name.id == "len" && !self.names.contains_key("len"))
+            && self.resolve(expr).is_none()
+    }
+
+    /// Pack and retain the actual argument for a direct, cached or iterator call to len.
+    pub(super) fn pack_len_value(
+        &mut self,
+        value: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let ty = self.types.len_argument();
+        if value.ty == ty {
+            return Ok(value);
+        }
+        let (class, unhashable) = len_argument_class(self.types, value.ty).ok_or_else(|| {
+            error(
+                self.source,
+                node,
+                "this live len call requires a supported builtin argument layout",
+            )
+        })?;
+        let diagnostic = unhashable
+            .map(|name| format!("unhashable type: '{name}'"))
+            .unwrap_or_default();
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, value);
+        let mut key_fields = vec![unpacking::string(class)];
+        if unhashable.is_none() {
+            key_fields.push(normalize_len_key(self.types, value.clone()));
+        }
+        let key = Expr {
+            ty: self.types.tuple(key_fields.iter().map(|f| f.ty).collect()),
+            kind: ExprKind::Tuple(key_fields),
+        };
+        let key = Expr {
+            ty: self.types.len_key(),
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![key]),
+        };
+        let frame = Expr {
+            ty: self
+                .types
+                .tuple(vec![Type::Str, Type::Str, key.ty, value.ty]),
+            kind: ExprKind::Tuple(vec![
+                unpacking::string(class),
+                unpacking::string(diagnostic),
+                key,
+                value,
+            ]),
+        };
+        Ok(scope.finish(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RecordView, vec![frame]),
+        }))
+    }
+
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
         if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
@@ -139,6 +205,7 @@ impl Checker<'_> {
                     | "read"
                     | "readline"
                     | "encoding"
+                    | "errors"
                     | "closed"
                     | "fileno"
             )
@@ -193,6 +260,11 @@ impl Checker<'_> {
             }
             args.push(self.expr(&keyword.value)?);
         }
+        Ok(Self::type_error_after(args, ty, message))
+    }
+
+    /// Evaluate the supplied operands before raising a native argument error.
+    pub(super) fn type_error_after(mut args: Vec<Expr>, ty: Type, message: String) -> Expr {
         args.push(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
@@ -200,10 +272,128 @@ impl Checker<'_> {
                 message: Some(Box::new(unpacking::string(message))),
             },
         });
-        Ok(Expr {
+        Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::RaiseException, args),
-        })
+        }
+    }
+
+    fn intern_call(&mut self, call: &ast::ExprCall, query: bool) -> Result<Expr, String> {
+        let (name, result, op) = if query {
+            ("_is_interned", Type::Bool, Builtin::SysIsInterned)
+        } else {
+            ("intern", Type::Str, Builtin::SysIntern)
+        };
+        let count = call.arguments.args.len();
+        if !query && (count != 1 || !call.arguments.keywords.is_empty()) {
+            // Typeshed overloads intern() for LiteralString. This binder
+            // raises the real argument-count or keyword error at runtime.
+            self.graph.checked_overload(self.module, call.range());
+        }
+        if count == 0 {
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+        } else if let Some(extra) = call.arguments.args.get(1) {
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
+        }
+        if !call.arguments.keywords.is_empty() {
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes no keyword arguments"),
+            );
+        }
+        let [argument] = call.arguments.args.as_slice() else {
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes exactly one argument ({count} given)"),
+            );
+        };
+        let value = self.expr(argument)?;
+        if !query {
+            self.graph.checked_overload(self.module, call.range());
+        }
+        if value.ty == Type::Str {
+            return Ok(Expr {
+                ty: result,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
+        if let Type::StrEnum(class) = value.ty {
+            if query {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(value)],
+                        value: Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(false),
+                        }),
+                        clear: vec![],
+                    },
+                });
+            }
+            let class = &self.classes.declarations.definitions[class].name;
+            return Ok(Self::type_error_after(
+                vec![value],
+                result,
+                format!("can't intern {class}"),
+            ));
+        }
+        let ty = match value.ty {
+            Type::None => "None",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::ListInt | Type::List(_) => "list",
+            Type::Tuple(_) => "tuple",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Class(class) => &self.classes.declarations.definitions[class].name,
+            _ => {
+                return Err(error(
+                    self.source,
+                    argument,
+                    "interning requires a concrete native argument type",
+                ));
+            }
+        };
+        Ok(Self::type_error_after(
+            vec![value],
+            result,
+            format!("{name}() argument must be str, not {ty}"),
+        ))
+    }
+
+    /// Evaluate the metadata receiver before looking up its field name.
+    pub(super) fn implementation_hasattr(&mut self, receiver: Expr, name: Expr) -> Expr {
+        let names = Expr {
+            ty: self.types.list(Type::Str),
+            kind: ExprKind::List(
+                crate::version::IMPLEMENTATION
+                    .iter()
+                    .map(|s| unpacking::string(*s))
+                    .collect(),
+            ),
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Expr(receiver)],
+                clear: vec![],
+                value: Box::new(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::StringListContains, vec![name, names]),
+                }),
+            },
+        }
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
@@ -220,6 +410,27 @@ impl Checker<'_> {
             return Ok(Some(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::BuiltinsHasLast, vec![]),
+            }));
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [module, ast::Expr::StringLiteral(attr)] = call.arguments.args.as_slice()
+            && let Some(Binding::IntrinsicModule(namespace @ crate::modules::IntrinsicModule::Sys)) =
+                self.resolve(module)
+            && matches!(
+                namespace.symbol(attr.value.to_str()),
+                Some(Binding::Intrinsic(
+                    Intrinsic::SysIntern { .. }
+                        | Intrinsic::SysEncoding(_)
+                        | Intrinsic::SysException
+                        | Intrinsic::SysExit
+                ))
+            )
+        {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(true),
             }));
         }
         match self.resolve(&call.func) {
@@ -261,10 +472,47 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
                 return self.system_exit(call, true).map(Some);
             }
-            Some(Binding::Intrinsic(Intrinsic::SysEncoding(name))) => {
+            Some(Binding::Intrinsic(Intrinsic::SysGetRecursionLimit)) => {
+                calls::reject_unpacking(call, self.source)?;
+                for arg in &call.arguments.args {
+                    self.graph.checked_excess_argument(self.module, arg.range());
+                }
+                self.graph.checked_keywords(
+                    self.module,
+                    call.arguments.keywords.iter().map(Ranged::range),
+                );
+                let result = Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::SysGetRecursionLimit, vec![]),
+                };
                 return self
-                    .sys_no_args(call, name, unpacking::string("utf-8"))
+                    .sys_no_args(call, "getrecursionlimit", result)
                     .map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysSetRecursionLimit)) => {
+                return self.set_recursion_limit(call).map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysGetFrameModuleName)) => {
+                return self.frame_module_name(call).map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysEncoding(query))) => {
+                calls::reject_unpacking(call, self.source)?;
+                let result = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::SysEncoding(query), vec![]),
+                };
+                let result = self.sys_no_args(call, query.method(), result)?;
+                for arg in &call.arguments.args {
+                    self.graph.checked_excess_argument(self.module, arg.range());
+                }
+                self.graph.checked_keywords(
+                    self.module,
+                    call.arguments.keywords.iter().map(Ranged::range),
+                );
+                return Ok(Some(result));
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysIntern { query })) => {
+                return self.intern_call(call, query).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysException)) => {
                 let result = Expr {
@@ -317,6 +565,113 @@ impl Checker<'_> {
         }))
     }
 
+    fn set_recursion_limit(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if !args.keywords.is_empty() {
+            self.graph
+                .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+            for keyword in &args.keywords {
+                if keyword.arg.as_deref() == Some("limit") {
+                    self.graph
+                        .checked_positional_keyword(self.module, keyword.range());
+                }
+            }
+            if args.args.is_empty() {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
+            return self.sys_type_error(
+                call,
+                Type::None,
+                "sys.setrecursionlimit() takes no keyword arguments".to_owned(),
+            );
+        }
+        let [arg] = args.args.as_ref() else {
+            if args.args.is_empty() {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+            }
+            for arg in args.args.iter().skip(1) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            return self.sys_type_error(
+                call,
+                Type::None,
+                format!(
+                    "sys.setrecursionlimit() takes exactly one argument ({} given)",
+                    args.args.len()
+                ),
+            );
+        };
+        let value = self.expr(arg)?;
+        let index = self.index_word(value, arg, false)?;
+        self.graph.checked_argument_type(self.module, arg.range());
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::SysSetRecursionLimit, vec![index]),
+        })
+    }
+
+    /// Bind the optional index to the current native stack. CPython accepts `depth=` here.
+    fn frame_module_name(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let ty = self.types.optional(Type::Str);
+        let count = args.args.len() + args.keywords.len();
+        if count > 1 {
+            for arg in args.args.iter().skip(1) {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            if !args.args.is_empty() {
+                for keyword in &args.keywords {
+                    if keyword.arg.as_deref() == Some("depth") {
+                        self.graph
+                            .checked_repeated_keyword(self.module, keyword.range());
+                    }
+                }
+            }
+            self.graph
+                .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+            let kind = if args.args.is_empty() {
+                "keyword argument"
+            } else {
+                "argument"
+            };
+            return self.sys_type_error(
+                call,
+                ty,
+                format!("_getframemodulename() takes at most 1 {kind} ({count} given)"),
+            );
+        }
+        let arg = if let Some(keyword) = args.keywords.first() {
+            let name = keyword.arg.as_ref().expect("unpacking rejected above");
+            if name != "depth" {
+                self.graph
+                    .checked_keywords(self.module, std::iter::once(keyword.range()));
+                return self.sys_type_error(
+                    call,
+                    ty,
+                    format!("_getframemodulename() got an unexpected keyword argument '{name}'"),
+                );
+            }
+            Some(&keyword.value)
+        } else {
+            args.args.first()
+        };
+        let depth = if let Some(arg) = arg {
+            let value = self.expr(arg)?;
+            self.graph.checked_argument_type(self.module, arg.range());
+            self.index_word(value, arg, false)?
+        } else {
+            pipelines::integer(0)
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::SysGetFrameModuleName, vec![depth]),
+        })
+    }
+
     pub(super) fn system_exit(
         &mut self,
         call: &ast::ExprCall,
@@ -353,7 +708,8 @@ impl Checker<'_> {
         // SystemExit(a, b) stores the tuple of constructor arguments. sys.exit
         // passes a tuple as the argument vector to SystemExit, so only the
         // latter unwraps a singleton or omits an empty tuple.
-        if args.len() > 1 {
+        let mut from_tuple = args.len() > 1;
+        if from_tuple {
             args = vec![Expr {
                 ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
                 kind: ExprKind::Tuple(args),
@@ -376,12 +732,19 @@ impl Checker<'_> {
                     });
                     omit_none = false;
                 }
-                _ => {}
+                _ => from_tuple = true,
             }
         }
         let mut exception = Expr {
             ty: Type::Exception,
-            kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none }, args),
+            kind: ExprKind::Builtin(
+                if from_tuple {
+                    Builtin::SystemExitFromTuple
+                } else {
+                    Builtin::SystemExitNew { omit_none }
+                },
+                args,
+            ),
         };
         if !evaluate.is_empty() {
             exception = Expr {
@@ -404,6 +767,65 @@ impl Checker<'_> {
     }
 }
 
+/// Ordinary tuple equality equates bool with int. Only the private cache key is widened.
+fn normalize_len_key(types: &Types, value: Expr) -> Expr {
+    match value.ty {
+        Type::Bool => Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+        },
+        Type::StrLiteral(_) => literals::view(value, Type::Str),
+        Type::Tuple(_) => {
+            let fields: Vec<_> = types
+                .len_tuple_fields(value.ty)
+                .unwrap()
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| {
+                    normalize_len_key(
+                        types,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(value.clone()), i),
+                        },
+                    )
+                })
+                .collect();
+            Expr {
+                ty: types.tuple(fields.iter().map(|field| field.ty).collect()),
+                kind: ExprKind::Tuple(fields),
+            }
+        }
+        _ => value,
+    }
+}
+
+/// The first mutable tuple element supplies the class name in a hashing error.
+fn len_argument_class(types: &Types, ty: Type) -> Option<(&'static str, Option<&'static str>)> {
+    let pair = match ty {
+        Type::Str | Type::StrLiteral(_) => ("str", None),
+        Type::Bytes => ("bytes", None),
+        Type::Int => ("int", None),
+        Type::Bool => ("bool", None),
+        Type::None => ("NoneType", None),
+        // The container supplies its own length and is itself unhashable;
+        // neither operation visits its elements.
+        Type::ListInt | Type::List(_) => ("list", Some("list")),
+        Type::Dict(_) => ("dict", Some("dict")),
+        Type::Set(_) => ("set", Some("set")),
+        Type::Tuple(_) => {
+            let mut invalid = None;
+            for child in types.len_tuple_fields(ty)? {
+                let (_, child_error) = len_argument_class(types, child)?;
+                invalid = invalid.or(child_error);
+            }
+            ("tuple", invalid)
+        }
+        _ => return None,
+    };
+    Some(pair)
+}
+
 /// Exit payloads that the runtime can retain, compare, and format without boxing away their type.
 pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
     match ty {
@@ -418,13 +840,22 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
 }
 
 impl Checker<'_> {
-    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+    /// Expose the thread provider and its optional library version as a native struct sequence.
+    pub(super) fn sys_thread_info(&self) -> Expr {
+        let text = self.types.optional(Type::Str);
         Expr {
             ty: self.types.struct_sequence(
-                "sys.version_info",
-                crate::version::FIELDS,
-                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
+                "sys.thread_info",
+                &["name", "lock", "version"],
+                vec![text, Type::None, text],
             ),
+            kind: ExprKind::Builtin(Builtin::SysThreadInfo, vec![]),
+        }
+    }
+
+    pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
+        Expr {
+            ty: crate::version::info_type(self.types),
             kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
         }
     }

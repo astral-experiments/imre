@@ -28,6 +28,13 @@ print(st.st_mtime == st[8] + 1e-9 * (st.st_mtime_ns % 1_000_000_000))
 print(st.st_ctime == st[9] + 1e-9 * (st.st_ctime_ns % 1_000_000_000))
 print(st.st_blksize > 0 and st.st_blocks >= 0 and st.st_rdev == 0)
 clock = Path('stat-clock').stat()
+stats = [st, clock]
+copied = stats[:]
+stats.clear()
+print(copied[0].st_ino == st.st_ino)
+print(copied[0].st_ctime_ns == st.st_ctime_ns)
+print(copied[1].st_mtime_ns == clock.st_mtime_ns)
+print(copied[1].st_atime_ns == clock.st_atime_ns)
 print(clock[7])
 print(clock.st_atime_ns)
 print(clock.st_atime == clock[7] + 1e-9 * (clock.st_atime_ns % 1_000_000_000))

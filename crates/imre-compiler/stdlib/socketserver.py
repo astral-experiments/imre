@@ -1,0 +1,247 @@
+"""Synchronous IPv4 TCP servers using native socket objects."""
+from __future__ import annotations
+
+import socket
+import sys
+
+
+class BaseRequestHandler:
+    request: socket.socket
+    client_address: tuple[str, int]
+    server: TCPServer
+
+    def __init__(self, request: socket.socket, client_address: tuple[str, int], server: TCPServer) -> None:
+        self.request = request
+        self.client_address = client_address
+        self.server = server
+        _run_handler(self)
+
+    def setup(self) -> None:
+        pass
+
+    def handle(self) -> None:
+        pass
+
+    def finish(self) -> None:
+        pass
+
+
+def _run_handler(handler: BaseRequestHandler) -> None:
+    handler.setup()
+    try:
+        handler.handle()
+    finally:
+        handler.finish()
+
+
+class _SocketReader:
+    _socket: socket.socket
+    _pending: bytes
+    closed: bool
+
+    def __init__(self, sock: socket.socket) -> None:
+        self._socket = sock
+        self._pending = b""
+        self.closed = False
+
+    def readline(self, size: int = -1) -> bytes:
+        if self.closed:
+            raise ValueError("readline of closed file")
+        n = 0
+        done = False
+        while True:
+            while n < len(self._pending) and (size < 0 or n < size):
+                n += 1
+                if self._pending[n - 1] == 10:
+                    done = True
+                    break
+            if done or n == size:
+                break
+            chunk = self._socket.recv(8192)
+            if not chunk:
+                break
+            self._pending = self._pending + chunk
+        line = self._pending[:n]
+        self._pending = self._pending[n:]
+        return line
+
+    def close(self) -> None:
+        self.closed = True
+        self._pending = b""
+
+
+class _SocketWriter:
+    _socket: socket.socket
+    closed: bool
+
+    def __init__(self, sock: socket.socket) -> None:
+        self._socket = sock
+        self.closed = False
+
+    def write(self, data: bytes) -> int:
+        self._socket.sendall(data)
+        return len(data)
+
+    def writable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return self._socket.fileno()
+
+    def flush(self) -> None:
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class StreamRequestHandler(BaseRequestHandler):
+    timeout = None
+    rbufsize = -1
+    wbufsize = 0
+    disable_nagle_algorithm = False
+    _reader: _SocketReader | None
+    _writer: _SocketWriter | None
+
+    def __init__(self, request: socket.socket, client_address: tuple[str, int], server: TCPServer) -> None:
+        self._reader = None
+        self._writer = None
+        super().__init__(request, client_address, server)
+
+    def setup(self) -> None:
+        if self.timeout is not None:
+            raise NotImplementedError("socketserver stream timeout only supports None")
+        if self.rbufsize != -1 or self.wbufsize != 0:
+            raise NotImplementedError("custom socketserver stream buffer sizes are unsupported")
+        if self.disable_nagle_algorithm:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._reader = _SocketReader(self.request)
+        self._writer = _SocketWriter(self.request)
+
+    @property
+    def rfile(self) -> _SocketReader:
+        reader = self._reader
+        if reader is None:
+            raise AttributeError("rfile")
+        return reader
+
+    @property
+    def wfile(self) -> _SocketWriter:
+        writer = self._writer
+        if writer is None:
+            raise AttributeError("wfile")
+        return writer
+
+    def finish(self) -> None:
+        self.wfile.close()
+        self.rfile.close()
+
+
+class TCPServer:
+    server_address: tuple[str, int]
+    RequestHandlerClass: type[BaseRequestHandler]
+    socket: socket.socket
+    address_family = socket.AF_INET
+    socket_type = socket.SOCK_STREAM
+    allow_reuse_address = False
+    allow_reuse_port = False
+    timeout = None
+    request_queue_size = 5
+
+    def __init__(self, server_address: tuple[str, int], RequestHandlerClass: type[BaseRequestHandler], bind_and_activate: bool = True) -> None:
+        self.server_address = server_address
+        self.RequestHandlerClass = RequestHandlerClass
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _activate(self, bind_and_activate)
+
+    def server_bind(self) -> None:
+        if self.allow_reuse_port:
+            raise NotImplementedError("socketserver allow_reuse_port is unsupported")
+        if self.allow_reuse_address:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(self.server_address)
+        self.server_address = self.socket.getsockname()
+
+    def server_activate(self) -> None:
+        self.socket.listen(self.request_queue_size)
+
+    def fileno(self) -> int:
+        return self.socket.fileno()
+
+    def server_close(self) -> None:
+        self.socket.close()
+
+    def __enter__(self) -> TCPServer:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.server_close()
+
+    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
+        return self.socket.accept()
+
+    def verify_request(self, request: socket.socket, client_address: tuple[str, int]) -> bool:
+        return True
+
+    def finish_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        handler = self.RequestHandlerClass
+        handler(request, client_address, self)
+
+    def close_request(self, request: socket.socket) -> None:
+        request.close()
+
+    def shutdown_request(self, request: socket.socket) -> None:
+        try:
+            request.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        self.close_request(request)
+
+    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        self.finish_request(request, client_address)
+        self.shutdown_request(request)
+
+    def handle_error(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        sys.stderr.write("----------------------------------------\n")
+        sys.stderr.write("Exception occurred during processing of request from " + repr(client_address) + "\n")
+        exc = sys.exception()
+        if exc is not None:
+            sys.stderr.write(str(exc) + "\n")
+        sys.stderr.write("----------------------------------------\n")
+
+    def handle_request(self) -> None:
+        if self.fileno() < 0:
+            raise ValueError("Invalid file descriptor: -1")
+        if self.timeout is not None:
+            raise NotImplementedError("socketserver listener timeout only supports None")
+        if not self.socket.getblocking():
+            raise NotImplementedError("nonblocking listener requires selector integration")
+        try:
+            request, client_address = self.get_request()
+        except OSError:
+            return
+        if self.verify_request(request, client_address):
+            try:
+                self.process_request(request, client_address)
+            except Exception:
+                self.handle_error(request, client_address)
+                self.shutdown_request(request)
+            except:
+                self.shutdown_request(request)
+                raise
+        else:
+            self.shutdown_request(request)
+
+
+def _activate(server: TCPServer, bind_and_activate: bool) -> None:
+    if server.address_family != socket.AF_INET or server.socket_type != socket.SOCK_STREAM:
+        server.server_close()
+        raise NotImplementedError("TCPServer requires AF_INET and SOCK_STREAM")
+    if bind_and_activate:
+        try:
+            server.server_bind()
+            server.server_activate()
+        except:
+            server.server_close()
+            raise

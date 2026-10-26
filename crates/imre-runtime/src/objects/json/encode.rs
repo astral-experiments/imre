@@ -1,5 +1,6 @@
 //! Writes typed storage directly, without constructing a dynamic JSON tree.
 
+use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::cmp::Ordering;
 
@@ -14,8 +15,42 @@ const PATH: u32 = 14;
 const JSON_VIEW: u32 = 15;
 const DOCUMENT: u32 = 16;
 
-type Separator<T> = Result<T, &'static str>;
-type Separators<T> = (Separator<T>, Separator<T>);
+#[derive(Clone, Copy)]
+struct InvalidSeparator<'a> {
+    kind: u32,
+    name: &'a str,
+}
+
+impl InvalidSeparator<'_> {
+    fn concatenate(self) -> Error {
+        let message = match self.kind {
+            LIST => "can only concatenate list (not \"str\") to list".to_owned(),
+            TUPLE => "can only concatenate tuple (not \"str\") to tuple".to_owned(),
+            BYTES => "can't concat str to bytes".to_owned(),
+            _ => {
+                let name = &self.name[..self.name.floor_char_boundary(100)];
+                format!("unsupported operand type(s) for +: '{name}' and 'str'")
+            }
+        };
+        Error::new(Kind::TypeError, message)
+    }
+
+    fn argument_name(&self) -> &str {
+        if self.kind == NONE { "None" } else { self.name }
+    }
+
+    fn write(self) -> Error {
+        let name = self.argument_name();
+        let name = &name[..name.floor_char_boundary(50)];
+        Error::new(
+            Kind::TypeError,
+            format!("write() argument must be str, not {name}"),
+        )
+    }
+}
+
+type Separator<'a, T> = Result<T, InvalidSeparator<'a>>;
+type Separators<'a, T> = (Separator<'a, T>, Separator<'a, T>);
 
 #[derive(Clone, Copy)]
 enum Indent<'a> {
@@ -24,10 +59,10 @@ enum Indent<'a> {
 }
 
 #[derive(Default)]
-struct StandardOptions {
+struct StandardOptions<'a> {
     allow_nan: bool,
     sort_keys: bool,
-    separators: Option<Separators<Rc<Str>>>,
+    separators: Option<Separators<'a, StrOwner>>,
 }
 
 fn length(size: usize) -> Result<(), Error> {
@@ -46,7 +81,10 @@ fn length(size: usize) -> Result<(), Error> {
 
 /// Read both separators once. Taking string references here keeps a caller's
 /// list alive only long enough to snapshot its entries.
-unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<Rc<Str>>>, Error> {
+unsafe fn separators(
+    word: usize,
+    schema: &Schema,
+) -> Result<Option<Separators<'_, StrOwner>>, Error> {
     fn typename(kind: u32) -> &'static str {
         match kind {
             NONE => "NoneType",
@@ -62,23 +100,54 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<R
             _ => "object",
         }
     }
-    fn field(word: usize, schema: &Schema) -> (usize, u32) {
-        let kind = if schema.kind == OPTIONAL {
-            if word == 0 { NONE } else { schema.child().kind }
-        } else {
-            schema.kind
-        };
-        (word, kind)
+    fn name(schema: &Schema) -> &str {
+        if schema.kind == RECORD {
+            // SAFETY: a record schema references immutable compiler metadata. Internal
+            // records may omit the class name.
+            unsafe {
+                if let Some(info) = schema.record.as_ref().and_then(|r| r.semantics.as_ref())
+                    && info.name_len != 0
+                {
+                    return std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        info.name,
+                        info.name_len,
+                    ));
+                }
+            }
+        }
+        typename(schema.kind)
     }
-    let part = |(word, kind)| {
+    fn part(word: usize, kind: u32) -> Separator<'static, crate::StrOwner> {
         if kind == STRING {
             // SAFETY: the descriptor identifies a string rooted by the container.
-            Ok(unsafe { crate::objects::acquire_rc(word) })
+            Ok(unsafe { StrOwner::acquire_word(word) })
         } else {
-            Err(typename(kind))
+            Err(InvalidSeparator {
+                kind,
+                name: typename(kind),
+            })
         }
-    };
-    let pair = |first, second| Ok(Some((part(first), part(second))));
+    }
+    fn field(word: usize, schema: &Schema) -> Separator<'_, crate::StrOwner> {
+        if schema.kind == OPTIONAL {
+            if word == 0 {
+                return Err(InvalidSeparator {
+                    kind: NONE,
+                    name: "NoneType",
+                });
+            }
+            return field(word, schema.child());
+        }
+        if schema.kind == RECORD {
+            Err(InvalidSeparator {
+                kind: RECORD,
+                name: name(schema),
+            })
+        } else {
+            part(word, schema.kind)
+        }
+    }
+    let pair = |first, second| Ok(Some((first, second)));
     // SAFETY: the caller supplies an initialized word with this exact immutable schema.
     unsafe {
         match schema.kind {
@@ -89,17 +158,17 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<R
                 let mut chars = (&*(word as *const Str)).chars();
                 length(chars.clone().count())?;
                 Ok(Some((
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
-                    Ok(Rc::new(Str::new(
+                    Ok(StrOwner::new(Str::new(
                         chars.next().unwrap().encode_utf8(&mut [0; 4]),
                     ))),
                 )))
             }
             BYTES => {
                 length((&*(word as *const crate::Bytes)).len())?;
-                pair((0, INTEGER), (0, INTEGER))
+                pair(part(0, INTEGER), part(0, INTEGER))
             }
             DICTIONARY | INTEGER_DICTIONARY | SET => object(word as *const Object).0.with(|s| {
                 let (size, kind, [a, b]) = s.first_two_keys();
@@ -112,7 +181,7 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<R
                     8 => BYTES,
                     _ => unreachable!("checked key storage"),
                 };
-                pair((a, kind), (b, kind))
+                pair(part(a, kind), part(b, kind))
             }),
             TUPLE => {
                 let fields = schema.fields();
@@ -135,20 +204,29 @@ unsafe fn separators(word: usize, schema: &Schema) -> Result<Option<Separators<R
                 )
             }),
             LIST => object(word as *const Object).0.with(|s| {
-                let words = &s.sequence().values;
+                if let Some(rows) = s.sequence_storage().rows() {
+                    length(rows.len())?;
+                    // The rows stay rooted while we classify the two separators.
+                    let child = schema.child();
+                    debug_assert_eq!(child.kind, RECORD);
+                    let item = |i| field(rows.row(i).as_ptr() as usize, child);
+                    return pair(item(0), item(1));
+                }
+                let words = &s.sequence()?.values;
                 length(words.len())?;
                 pair(
                     field(words[0], schema.child()),
                     field(words[1], schema.child()),
                 )
             }),
-            _ => Err(Error::new(
-                Kind::TypeError,
-                format!(
-                    "cannot unpack non-iterable {} object",
-                    typename(schema.kind)
-                ),
-            )),
+            _ => {
+                let ty = name(schema);
+                let ty = &ty[..ty.floor_char_boundary(200)];
+                Err(Error::new(
+                    Kind::TypeError,
+                    format!("cannot unpack non-iterable {ty} object"),
+                ))
+            }
         }
     }
 }
@@ -159,9 +237,9 @@ struct Encoder<'a> {
     indent: Option<Indent<'a>>,
     ensure_ascii: bool,
     sort_keys: bool,
-    separators: Option<Separators<&'a str>>,
+    separators: Option<Separators<'a, &'a str>>,
     /// A compact list combines the separator with a primitive only after rendering it.
-    pending_item_error: Option<&'static str>,
+    pending_item_error: Option<InvalidSeparator<'a>>,
     /// The first-party schema encoder rejects all non-finite numbers.
     allow_nan: Option<bool>,
     stream: Option<&'a mut FileState>,
@@ -193,7 +271,7 @@ fn plain_ascii(bytes: &[u8]) -> bool {
 impl Encoder<'_> {
     fn emit(&mut self) -> Result<(), Error> {
         if let Some(ty) = self.pending_item_error {
-            return Err(Self::separator_error(ty));
+            return Err(ty.concatenate());
         }
         if let Some(stream) = &mut self.stream
             && !self.output.is_empty()
@@ -206,21 +284,7 @@ impl Encoder<'_> {
 
     #[inline]
     fn reserve(&mut self, additional: usize) -> Result<(), Error> {
-        if additional <= self.output.capacity() - self.output.len() {
-            return Ok(());
-        }
-        self.grow(additional)
-    }
-
-    #[cold]
-    fn grow(&mut self, additional: usize) -> Result<(), Error> {
-        // A geometrically larger buffer can exceed the process limit while the
-        // result still fits. Grow in smaller chunks under memory pressure.
-        self.output
-            .try_reserve(additional)
-            .or_else(|_| self.output.try_reserve_exact(additional.max(1 << 20)))
-            .or_else(|_| self.output.try_reserve_exact(additional))
-            .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
+        reserve_output(&mut self.output, additional)
     }
 
     #[inline]
@@ -238,72 +302,8 @@ impl Encoder<'_> {
         }
     }
 
-    /// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
-    /// for non-BMP characters when ensure_ascii is requested.
     fn string(&mut self, value: &str) -> Result<(), Error> {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        if plain_ascii(value.as_bytes()) {
-            self.reserve(value.len().saturating_add(2))?;
-            self.output.push('"');
-            self.output.push_str(value);
-            self.output.push('"');
-            return Ok(());
-        }
-        self.reserve(1)?;
-        self.output.push('"');
-        let mut rest = value;
-        while !rest.is_empty() {
-            // At most six output bytes per input byte. Checking one UTF-8 chunk
-            // at a time bounds spare capacity outside the per-character loop.
-            let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
-            if 6 * chunk.len() > self.output.capacity() - self.output.len() {
-                // A worst-case reservation can fail even when the escaped chunk fits.
-                let needed = chunk
-                    .chars()
-                    .map(|character| match character {
-                        '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
-                        '\0'..='\u{1f}' => 6,
-                        _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                            6 * character.len_utf16()
-                        }
-                        _ => character.len_utf8(),
-                    })
-                    .sum();
-                self.reserve(needed)?;
-            }
-            for character in chunk.chars() {
-                match character {
-                    '"' => self.output.push_str("\\\""),
-                    '\\' => self.output.push_str("\\\\"),
-                    '\u{8}' => self.output.push_str("\\b"),
-                    '\u{c}' => self.output.push_str("\\f"),
-                    '\n' => self.output.push_str("\\n"),
-                    '\r' => self.output.push_str("\\r"),
-                    '\t' => self.output.push_str("\\t"),
-                    '\0'..='\u{1f}' => {
-                        let value = character as usize;
-                        self.output.push_str("\\u00");
-                        self.output.push(char::from(HEX[value >> 4]));
-                        self.output.push(char::from(HEX[value & 15]));
-                    }
-                    _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                        let mut buffer = [0; 2];
-                        for &unit in character.encode_utf16(&mut buffer).iter() {
-                            self.output.push_str("\\u");
-                            for shift in [12, 8, 4, 0] {
-                                self.output
-                                    .push(char::from(HEX[usize::from((unit >> shift) & 15)]));
-                            }
-                        }
-                    }
-                    _ => self.output.push(character),
-                }
-            }
-            rest = tail;
-        }
-        self.reserve(1)?;
-        self.output.push('"');
-        Ok(())
+        write_string(&mut self.output, value, self.ensure_ascii)
     }
 
     fn float(&mut self, value: f64) -> Result<(), Error> {
@@ -371,12 +371,13 @@ impl Encoder<'_> {
         Ok(())
     }
 
-    /// Report a non-text separator once a streaming chunk actually needs it.
-    fn separator_error(ty: &str) -> Error {
-        Error::new(
-            Kind::TypeError,
-            format!("JSON separator must be str, not {ty}"),
-        )
+    /// Iterencode yields a separator by itself before entering a container
+    /// or calling the default handler. A text stream rejects that chunk.
+    fn emit_prefix(&mut self) -> Result<(), Error> {
+        if let Some(invalid) = self.pending_item_error {
+            return Err(invalid.write());
+        }
+        self.emit()
     }
 
     fn separator(&mut self, index: usize, depth: usize, object: bool) -> Result<(), Error> {
@@ -388,9 +389,9 @@ impl Encoder<'_> {
                 if object && index == 0 {
                     self.emit()?;
                 }
-                return Err(Self::separator_error(ty));
+                return Err(ty.concatenate());
             }
-            Err(ty) if index != 0 && object => return Err(Self::separator_error(ty)),
+            Err(ty) if index != 0 && object => return Err(ty.write()),
             Err(ty) if index != 0 => self.pending_item_error = Some(ty),
             _ => {}
         }
@@ -405,7 +406,7 @@ impl Encoder<'_> {
             Ok(key) => self.append(key),
             Err(ty) => {
                 self.emit()?;
-                Err(Self::separator_error(ty))
+                Err(ty.write())
             }
         }
     }
@@ -499,21 +500,24 @@ impl Encoder<'_> {
         let node = &view.nodes[index];
         match node {
             Node::Null => self.append("null"),
-            Node::Datetime(_) => Err(Error::new(
-                Kind::TypeError,
-                "Object of type datetime is not JSON serializable",
-            )),
+            Node::Datetime(_) => {
+                self.emit_prefix()?;
+                Err(Error::new(
+                    Kind::TypeError,
+                    "Object of type datetime is not JSON serializable",
+                ))
+            }
             Node::Bool(value) => self.append(if *value { "true" } else { "false" }),
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
             Node::Float(value) => self.float(*value),
             Node::ConstantNan => self.float(f64::NAN),
             Node::Deferred(array) => {
-                let v = array.view();
+                let v = array.try_view()?;
                 self.document(v, v.index, depth)
             }
             Node::Array(children) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('[', depth)?;
                 let nonempty = if index == view.index
                     && let Some(items) = view.nodes.root_items()
@@ -521,7 +525,7 @@ impl Encoder<'_> {
                     // SAFETY: the rooted list cannot mutate during the callback-free encoding.
                     unsafe {
                         items.0.with(|storage| {
-                            let children = &storage.sequence().values;
+                            let children = &storage.sequence_storage().values;
                             for (i, &value) in children.iter().enumerate() {
                                 self.separator(i, depth, false)?;
                                 // SAFETY: the root list owns each checked immutable child handle.
@@ -547,7 +551,7 @@ impl Encoder<'_> {
                 self.end(']', nonempty, depth)
             }
             Node::Object(fields) => {
-                self.emit()?;
+                self.emit_prefix()?;
                 self.begin('{', depth)?;
                 let nonempty = self.ordered(
                     readonly::keys(fields),
@@ -579,7 +583,7 @@ impl Encoder<'_> {
                 NONE | BOOLEAN | INTEGER | FLOAT | STRING | OPTIONAL | JSON_VIEW
             )
         {
-            self.emit()?;
+            self.emit_prefix()?;
         }
         // SAFETY: each branch reads only the schema's exact rooted representation.
         unsafe {
@@ -617,7 +621,7 @@ impl Encoder<'_> {
                         }
                         self.array(
                             storage
-                                .sequence()
+                                .sequence()?
                                 .values
                                 .iter()
                                 .map(|&value| (value, schema.child())),
@@ -720,21 +724,21 @@ impl Encoder<'_> {
 ///
 /// # Safety
 /// The caller roots the value described by the schema for this lookup.
-unsafe fn root_string(word: usize, schema: &Schema) -> Option<Rc<Str>> {
+unsafe fn root_string(word: usize, schema: &Schema) -> Option<StrOwner> {
     // SAFETY: the concrete schema identifies the rooted string, optional, or document.
     unsafe {
         match schema.kind {
-            STRING => Some(crate::objects::acquire_rc(word)),
+            STRING => Some(StrOwner::acquire_word(word)),
             OPTIONAL if word != 0 => root_string(word, schema.child()),
             JSON_VIEW | DOCUMENT => object(word as *const Object)
                 .0
                 .with(|storage| match storage {
                     Storage::Json(view) => match &view.nodes[view.index] {
-                        readonly::Node::String(text) => Some(Rc::clone(text)),
+                        readonly::Node::String(text) => Some(StrOwner::clone(text)),
                         _ => None,
                     },
                     Storage::Document(readonly::document::Value::String(text)) => {
-                        Some(Rc::clone(text))
+                        Some(StrOwner::clone(text))
                     }
                     _ => None,
                 }),
@@ -751,7 +755,7 @@ unsafe fn encode(
     indent: usize,
     indent_text: bool,
     ensure_ascii: u32,
-    options: Option<StandardOptions>,
+    options: Option<StandardOptions<'_>>,
     stream: Option<&mut FileState>,
 ) -> Result<String, Error> {
     if options.is_some() && stream.is_none()
@@ -793,7 +797,7 @@ unsafe fn encode(
         .as_ref()
         .and_then(|o| o.separators.as_ref())
         .map(|(item, key)| {
-            fn text(value: &Separator<Rc<Str>>) -> Separator<&str> {
+            fn text<'a>(value: &'a Separator<'_, StrOwner>) -> Separator<'a, &'a str> {
                 value.as_ref().map(|s| s.as_str()).map_err(|&ty| ty)
             }
             (text(item), text(key))
@@ -804,10 +808,18 @@ unsafe fn encode(
         // The in-memory encoder checks the key separator first, after converting indent.
         for (field, separator) in [(5, key), (6, item)] {
             if let Err(ty) = separator {
-                return Err(Error::new(
-                    Kind::TypeError,
-                    format!("make_encoder() argument {field} must be str, not {ty}"),
-                ));
+                // The C argument parser formats at most 50 bytes of the type name
+                // and decodes the complete diagnostic as UTF-8.
+                let mut message =
+                    format!("make_encoder() argument {field} must be str, not ").into_bytes();
+                let name = ty.argument_name();
+                message.extend_from_slice(&name.as_bytes()[..name.len().min(50)]);
+                return Err(match String::from_utf8(message) {
+                    Ok(text) => Error::new(Kind::TypeError, text),
+                    Err(error) => {
+                        crate::objects::bytes::decode_error(error.as_bytes(), error.utf8_error())
+                    }
+                });
             }
         }
     }
@@ -839,7 +851,7 @@ pub unsafe extern "C" fn imre_json_encode(
     // SAFETY: the compiler supplies the exact rooted schema and indentation.
     let result = unsafe { encode(word, schema, indent, false, ensure_ascii, None, None) };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }
@@ -877,7 +889,7 @@ pub unsafe extern "C" fn imre_json_dumps(
         })
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(Str::from(text)))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
         std::ptr::null(),
     )
 }
@@ -918,6 +930,96 @@ pub unsafe extern "C" fn imre_json_dump(
         })
     };
     finish(result.map(|_| 1), 0)
+}
+
+#[inline]
+fn reserve_output(output: &mut String, additional: usize) -> Result<(), Error> {
+    if additional <= output.capacity() - output.len() {
+        return Ok(());
+    }
+    grow_output(output, additional)
+}
+
+#[cold]
+fn grow_output(output: &mut String, additional: usize) -> Result<(), Error> {
+    // A geometrically larger buffer can exceed the process limit while the
+    // result still fits. Grow in smaller chunks under memory pressure.
+    output
+        .try_reserve(additional)
+        .or_else(|_| output.try_reserve_exact(additional.max(1 << 20)))
+        .or_else(|_| output.try_reserve_exact(additional))
+        .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
+}
+
+/// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
+/// for non-BMP characters when ensure_ascii is requested.
+pub(crate) fn write_string(
+    output: &mut String,
+    value: &str,
+    ensure_ascii: bool,
+) -> Result<(), Error> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    if plain_ascii(value.as_bytes()) {
+        reserve_output(output, value.len().saturating_add(2))?;
+        output.push('"');
+        output.push_str(value);
+        output.push('"');
+        return Ok(());
+    }
+    reserve_output(output, 1)?;
+    output.push('"');
+    let mut rest = value;
+    while !rest.is_empty() {
+        // At most six output bytes per input byte. Checking one UTF-8 chunk
+        // at a time bounds spare capacity outside the per-character loop.
+        let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
+        if 6 * chunk.len() > output.capacity() - output.len() {
+            // A worst-case reservation can fail even when the escaped chunk fits.
+            let needed = chunk
+                .chars()
+                .map(|character| match character {
+                    '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
+                    '\0'..='\u{1f}' => 6,
+                    _ if ensure_ascii && !(' '..='~').contains(&character) => {
+                        6 * character.len_utf16()
+                    }
+                    _ => character.len_utf8(),
+                })
+                .sum();
+            reserve_output(output, needed)?;
+        }
+        for character in chunk.chars() {
+            match character {
+                '"' => output.push_str("\\\""),
+                '\\' => output.push_str("\\\\"),
+                '\u{8}' => output.push_str("\\b"),
+                '\u{c}' => output.push_str("\\f"),
+                '\n' => output.push_str("\\n"),
+                '\r' => output.push_str("\\r"),
+                '\t' => output.push_str("\\t"),
+                '\0'..='\u{1f}' => {
+                    let value = character as usize;
+                    output.push_str("\\u00");
+                    output.push(char::from(HEX[value >> 4]));
+                    output.push(char::from(HEX[value & 15]));
+                }
+                _ if ensure_ascii && !(' '..='~').contains(&character) => {
+                    let mut buffer = [0; 2];
+                    for &unit in character.encode_utf16(&mut buffer).iter() {
+                        output.push_str("\\u");
+                        for shift in [12, 8, 4, 0] {
+                            output.push(char::from(HEX[usize::from((unit >> shift) & 15)]));
+                        }
+                    }
+                }
+                _ => output.push(character),
+            }
+        }
+        rest = tail;
+    }
+    reserve_output(output, 1)?;
+    output.push('"');
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1027,9 +1129,12 @@ mod tests {
                 result.err().unwrap().raise();
                 // SAFETY: raising publishes one owned native exception.
                 unsafe {
-                    let error = Rc::from_raw(imre_error_take());
+                    let error = crate::ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
-                        imre_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                        imre_exception_matches(
+                            crate::ObjectOwner::as_ptr(&error),
+                            Kind::ValueError as u32
+                        ),
                         1
                     );
                 }
@@ -1039,7 +1144,7 @@ mod tests {
                 let child = unsafe {
                     object(value.word as *const Object)
                         .0
-                        .with(|storage| storage.sequence().values[0])
+                        .with(|storage| storage.sequence_storage().values[0])
                 };
                 let mut retry = encoder();
                 // SAFETY: `value` still roots the child and all its descendants.

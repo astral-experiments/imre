@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_socketserver",
+  "resources": ["network"],
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/socketserver.py": "35b2723de3babe41b72e53bb2c56584628b6ce39",
+    "Lib/test/support/socket_helper.py": "a41e487f3e4bc52012425e30eab9b430a3b3a7ab",
+    "Lib/test/support/threading_helper.py": "cf87233f0e2e938a9f2e7d7906844ca009416432",
+    "Lib/test/test_socketserver.py": "2ca356606b260cbc6fa2ed7e39a3f4624f346eb1"
+  }
+}

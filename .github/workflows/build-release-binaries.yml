@@ -71,6 +71,9 @@ jobs:
         run: |
           tar -xzf "imre-$TARGET.tar.gz" -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
+          "./imre-$TARGET/imre" build-target --output-dir sdk > reported-target.json
+          cmp reported-target.json sdk/target.json
+          test -s sdk/include/Python.h && test -s sdk/setuptools/pyproject.toml && test -s sdk/scikit/Imre.cmake
           echo 'print(40 + 2)' > smoke.py
           test "$("./imre-$TARGET/imre" run smoke.py)" = 42
           if [[ "$TARGET" == *-linux-gnu ]]; then

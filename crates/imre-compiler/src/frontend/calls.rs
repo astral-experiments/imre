@@ -22,6 +22,7 @@ pub(super) enum ParameterKind {
     PositionalOnly,
     PositionalOrKeyword,
     KeywordOnly,
+    Variadic,
     KeywordRest,
 }
 
@@ -46,6 +47,12 @@ pub(super) fn scalar_default(
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
+    if expected == Type::ObjectValue && ty == Type::None {
+        return Ok(Expr {
+            ty: expected,
+            kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
+        });
+    }
     if literals::accepts(types, concrete, &value) {
         value = literals::view(value, concrete);
     }
@@ -81,7 +88,7 @@ pub(super) fn scalar_default(
 }
 
 /// A scalar default also supplies an exact type for an unannotated parameter.
-pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
+pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -326,6 +333,17 @@ impl Checker<'_> {
         })
     }
 
+    /// Empty containers still have to be evaluated when a call rejects their type.
+    pub(super) fn evaluated_argument(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        match arg {
+            ast::Expr::List(list) if list.elts.is_empty() => self.expr_expected(arg, Type::ListInt),
+            ast::Expr::Dict(dict) if dict.items.is_empty() => {
+                self.expr_expected(arg, self.types.dict(Type::Int, Type::Int))
+            }
+            _ => self.expr(arg),
+        }
+    }
+
     /// The receiver and supplied expressions stay in source order. The separate
     /// permutation binds each parameter only after every supplied value exists.
     /// Literal defaults follow supplied expressions and cannot run user code.
@@ -361,6 +379,7 @@ impl Checker<'_> {
             params,
             receiver,
             Some(scope),
+            None,
             |checker, index, argument| {
                 argument.checked(checker, params[index].ty, params[index].sign_only)
             },
@@ -376,12 +395,19 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
-        self.bind_supplied(call, params, receiver, None, |checker, index, argument| {
-            let Supplied::Source(node) = argument else {
-                unreachable!("only source calls expand tuples")
-            };
-            check(checker, index, node)
-        })
+        self.bind_supplied(
+            call,
+            params,
+            receiver,
+            None,
+            None,
+            |checker, index, argument| {
+                let Supplied::Source(node) = argument else {
+                    unreachable!("only source calls expand tuples")
+                };
+                check(checker, index, node)
+            },
+        )
     }
 
     pub(super) fn bind_supplied(
@@ -390,6 +416,7 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
         mut scope: Option<&mut ArgumentScope>,
+        default_owner: Option<(usize, usize)>,
         mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
@@ -406,22 +433,39 @@ impl Checker<'_> {
         let rest = params
             .iter()
             .position(|p| p.kind == ParameterKind::KeywordRest);
+        let pack = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::Variadic);
+        let mut packed = Vec::new();
         let mut extra = Vec::new();
         let mut positional = 0;
         for arg in &call.arguments.args {
             let mut bind = |checker: &mut Self,
-                            input,
+                            input: Supplied<'_>,
                             scope: Option<&mut ArgumentScope>|
              -> Result<(), String> {
-                params
-                    .get(positional)
-                    .filter(|parameter| {
-                        matches!(
-                            parameter.kind,
-                            ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
-                        )
-                    })
-                    .ok_or_else(|| error(checker.source, arg, "too many positional arguments"))?;
+                let ordinary = params.get(positional).is_some_and(|parameter| {
+                    matches!(
+                        parameter.kind,
+                        ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+                    )
+                });
+                if !ordinary {
+                    let index = pack.ok_or_else(|| {
+                        error(checker.source, arg, "too many positional arguments")
+                    })?;
+                    let element = checker
+                        .types
+                        .element(params[index].ty)
+                        .expect("typed positional rest");
+                    let value = input.checked(checker, element, false)?;
+                    packed.push(if let Some(scope) = scope {
+                        scope.hold(checker, value)
+                    } else {
+                        value
+                    });
+                    return Ok(());
+                }
                 order[positional + offset] = values.len();
                 let value = check(checker, positional, input)?;
                 values.push(if let Some(scope) = scope {
@@ -443,6 +487,13 @@ impl Checker<'_> {
                 bind(self, Supplied::Source(arg), scope.as_deref_mut())?;
             }
         }
+        if let Some(index) = pack {
+            order[index + offset] = values.len();
+            values.push(Expr {
+                ty: params[index].ty,
+                kind: ExprKind::List(packed),
+            });
+        }
         for keyword in &call.arguments.keywords {
             let name = keyword
                 .arg
@@ -455,9 +506,10 @@ impl Checker<'_> {
                     )
                 })?
                 .as_str();
-            let fixed = params
-                .iter()
-                .position(|p| p.name == name && p.kind != ParameterKind::KeywordRest);
+            let fixed = params.iter().position(|p| {
+                p.name == name
+                    && !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+            });
             if let Some(index) = rest
                 && fixed.is_none_or(|i| params[i].kind == ParameterKind::PositionalOnly)
             {
@@ -541,6 +593,22 @@ impl Checker<'_> {
                 };
                 if let ExprKind::Call(id, _) = &value.kind {
                     self.calls.insert(*id);
+                }
+                // A starred tuple can supply several parameters and keyword-rest has its
+                // own operand. Record the actual omission at the point that copies it.
+                if let Some(reads) = &mut self.default_reads {
+                    if let Some((id, skip)) = default_owner
+                        && matches!(default.kind, ExprKind::Int(_) | ExprKind::Bool(_))
+                    {
+                        reads.push((id, skip + index));
+                    } else if !matches!(
+                        &default.kind,
+                        ExprKind::None | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::Float(_)
+                    ) && !matches!(&default.kind, ExprKind::Absent(value) if matches!(value.kind, ExprKind::None))
+                    {
+                        // A composite default can embed a changed int or bool.
+                        self.default_reads = None;
+                    }
                 }
                 values.push(default.clone());
             }

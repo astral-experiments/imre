@@ -88,3 +88,13 @@ try:
         print("invalid context entered")
 except TypeError as failure:
     print(str(failure))
+
+# Argument expressions run before binding; the first duplicate names the error.
+for regex_first in (False, True):
+    try:
+        if regex_first:
+            case.assertRaisesRegex(ValueError, "x", expected_regex=mark("keyword", "y"), expected_exception=TypeError)
+        else:
+            case.assertRaisesRegex(ValueError, "x", expected_exception=TypeError, expected_regex=mark("keyword", "y"))
+    except TypeError as failure:
+        print(str(failure))

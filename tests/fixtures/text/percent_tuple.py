@@ -21,6 +21,13 @@ def operand(n: int) -> int:
     return n
 
 
+def render_values(fmt: str, values: tuple[None, bytes, bool, float]) -> None:
+    try:
+        print(fmt % values)
+    except TypeError as exc:
+        print("TypeError: " + str(exc))
+
+
 for pattern in ["%d: %r", "%#x/%a", "%*s", "%.*r", "%c:%s", "%s", "%%", "%s-%s-%s",
                 "π%界", "%(item)s", "%s %.", "%r%%", "%g %s", "%d %i"]:
     for number, word in [(-3, "π"), (0, ""), (65, "x'\n"), (2**100, "word")]:
@@ -47,3 +54,16 @@ for last in [2, 3]:
         print("ValueError: " + str(exc))
     except LookupError as exc:
         print("LookupError: " + str(exc))
+
+
+for pattern in ["%s | %r | %s | %.2f", "%a %s %d %r", "%d %s %s %s", "%s %d %s %s",
+                "%s %s %s %x", "%c %s %s %s", "%s %c %s %s", "%s %s %s %c", "%s %f %s %s"]:
+    render_values(pattern, (None, b"x\xff", True, -0.0))
+print("[%*.*f]" % (8, 2, 1.25))
+for value in [1.25, -2.5, float("nan"), float("inf"), float("-inf")]:
+    try:
+        print("%d" % (value,))
+    except ValueError as exc:
+        print("ValueError: " + str(exc))
+    except OverflowError as exc:
+        print("OverflowError: " + str(exc))

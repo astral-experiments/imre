@@ -2,14 +2,18 @@
 
 This is a deliberately restricted Python dialect for closed, statically typed source graphs, including selected unchanged pure-Python libraries. Imre targets 64-bit Linux with Clang 18 and Apple Silicon macOS with Apple Clang. Compilation uses Rust, Ruff, and ty; the executable links only the independent Rust runtime and system libraries. It does not import CPython or interpret unsupported operations.
 
+See the [standard library support table](stdlib.md) for module examples and native CPython test counts.
+
 ## Accepted source
 
 Module functions with annotated results can use `functools.cache` or
 `functools.lru_cache` with a literal capacity. The native cache accepts fixed
 positional arguments with immutable key types. Bounded caches evict the least
 recently used key; zero disables storage, and `None` keeps all results.
-`cache_clear()` resets entries and counters. `cache_info()` supports unpacking
-and indexing the four snapshot fields. `cache_parameters()` returns a fresh
+`cache_clear()` resets entries and counters. `cache_info()` returns a fresh
+immutable `CacheInfo` tuple with named fields `hits`, `misses`, `maxsize`,
+and `currsize`. An earlier snapshot keeps its values after another lookup or
+clear. `cache_parameters()` returns a fresh
 dictionary containing `maxsize` and `typed`. Applying a second cache to a
 cached callable copies its public parameters; the outer wrapper still uses
 its own capacity for eviction and for `cache_info()`.
@@ -18,15 +22,17 @@ its own capacity for eviction and for `cache_info()`.
 a fixed signature. Calls fill positional `functools.Placeholder` slots first.
 The partial can be returned, called repeatedly, or passed as a callback. Bound
 methods retain their receiver; captured mutable arguments keep their identity.
-Passing a placeholder last or as a keyword raises `TypeError`. Binding keyword
-defaults and inspecting a partial's attributes are not yet supported.
+Passing a placeholder last or as a keyword raises `TypeError`. A partial with a
+known original target retains its `func` and positional `args`; nested partials
+fill earlier placeholders in the public tuple. Public tuples containing callbacks
+and binding keyword defaults remain unsupported.
 
 | Area | Supported behavior |
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
 | Copying | Shallow copies of mutable containers share their children. Plain fixed class instances copy their stored fields without rerunning the initializer; a class may override this through an inherited or explicit `__copy__(self)` method. Deep copy preserves aliases in closed builtin container graphs with immutable keys, using the implicit memo or literal `None`. |
-| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only and keyword-only parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
+| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only, keyword-only, and read-only variadic positional parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, properties with optional setters, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin file/workspace `with` |
@@ -34,10 +40,10 @@ defaults and inspecting a partial's attributes are not yet supported.
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`, `&`, `\|`, `^`, `<<`, `>>`, and `divmod`; `/` returns a correctly rounded float; unary `+`/`-`/`~` and `abs`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs and `abs`; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
 | Lists | One exact element type, including nested containers and classes; literals and starred displays, `list()` and `list(iterable)`, stable `sorted` with scalar or fixed-tuple keys, shallow concatenation, repetition, and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `extend(source)`, `pop()`, `len(...)`; alias-visible mutation |
-| Dictionaries | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type; literals and `**` displays, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
+| Dictionaries | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type; literals and `**` displays, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `setdefault(key[, value])`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int`, `str`, string enum, `bytes`, `Path`, or immutable fixed-tuple elements; literals and `*` displays, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; immediately consumed generator expressions; nested `for` clauses and truth-tested filters; isolated target bindings |
-| Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots; value equality for immutable field shapes and lexicographic ordering for ordered scalar shapes |
+| Tuples | Fixed tuples have one type per position; starred displays in function bodies can produce runtime-sized tuples. Literals, checked indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots; value equality for immutable field shapes and lexicographic ordering for ordered scalar shapes |
 | Strings | Immutable UTF-8 text, literals, scalar, record, and list f-strings and `!r`, named `str.format` fields, signed decimal integer and bounded fixed/percent formats, `textwrap.dedent`, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, bounded `split`/`rsplit`, `splitlines()`, stripping, prefix/suffix checks, `find`, `partition`, `isspace`, `join(iterable)`, `replace(old, new)`, input and output |
 | Regular expressions | Fixed text patterns in `re.compile` and `re.search`, named and numbered groups, character offsets, and `re.VERBOSE` / `re.UNICODE` |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
@@ -53,7 +59,7 @@ Indentation must use spaces; tabs and form feeds remain valid inside string data
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, dynamic call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, open-ended call argument expansion, untyped variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -73,6 +79,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `left + right` evaluates both lists before copying their elements into a fresh list. Both inputs have the same element type. If an element is a nested list or a record, the result shares that object with the input lists.
 
+`in` and `not in` support integer and string lists. An integer needle may be optional: a subprocess return code of `None` is absent from `[0, 1]`. Integer membership uses value equality, including for integers too large to fit in a machine word.
+
 `sorted(source, key=callback, reverse=condition)` returns a fresh list. Both keywords are optional. `key=None` compares the elements themselves, and `reverse` defaults to false and requires an exact `bool`. Keys may be exact integers, booleans, strings, string enums, bytes, or fixed tuples recursively containing those scalar types. Tuple fields whose exact type is `None` are also allowed; nullable fields, floats, mutable containers, and records are not. Every key has the same concrete shape, and tuples compare lexicographically. Input and keyword expressions evaluate in source order, then the source is fully materialized before any key callback runs. Each key is evaluated once in input order. Sorting is stable in both directions, so equal keys retain their input order even with `reverse=True`. A callback may mutate the original source or its elements and may raise. The copy already contains all input elements when the first callback runs.
 
 `values.sort(key=callback, reverse=condition)` accepts the same keys and updates the list in place. It returns `None`. Aliases observe the new order. During key evaluation the list appears empty until a callback adds elements. If a key raises, the list regains its original membership and order and the exception propagates. If keys succeed after a callback appends to the list, the sorted original elements are restored and the sort raises `ValueError`.
@@ -80,6 +88,8 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 `functools.reduce(function, iterable[, initial])` folds a native iterable from left to right. The optional seed can also be passed as `initial=`. Without it, the first item becomes the accumulator and an empty input raises `TypeError`. The binary callback can be an exact function, bound method, or noncapturing lambda. Its return value must fit the accumulator's layout on every step.
 
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. An immediate generator may also yield exact booleans. For example, `sum(file.passes for file in files)` counts the true values. The generator acquires its outer iterator before `start` runs, then evaluates each projection once. The start and the result are exact, arbitrary-precision integers, including for an empty generator.
+
+`math.prod(source, *, start=1)` consumes an integer iterable in order and multiplies using arbitrary-precision integers. An empty iterable returns the integer start unchanged. A zero factor does not stop iteration or mask an exception from a later element.
 
 `map(str, source)` supports scalar values, paths, and records with a checked string conversion. Conversion happens as each item is pulled.
 
@@ -121,6 +131,15 @@ The list snapshots both inputs. Changing an input or a shallow copy afterward
 preserves ordinary list semantics. A program that selects added or removed rows
 and sorts by the text after the two-character tag can skip intraline comparisons.
 Reading the raw rows yields the original ordering and `? ` guides.
+
+`unidiff.PatchSet(text)` reads unified text patches, including Git file metadata.
+Iterating a patch set yields files; iterating a file yields hunks. The supported
+projections are `patch_set.modified_files` (a fresh list), `file.path`,
+`hunk.source_start`, and `str(hunk)`. The hunk string includes its canonical
+header and preserves the line endings and no-newline markers in the patch.
+Invalid hunk boundaries raise `unidiff.UnidiffParseError`. These patch objects
+are read-only; mutation, per-line objects, byte inputs, and metadata-only parsing
+are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
@@ -223,7 +242,10 @@ Its `decode(s)` method accepts Unicode text; `memo` returns the same dictionary
 on each read from that instance. Keys repeated within one document share the
 same string object. Separate decodes have independent key namespaces. Like
 CPython's default decoder, scanning does not consult or clear entries that a
-caller inserts into the public `memo` dictionary.
+caller inserts into the public `memo` dictionary. A saved `json.loads` function or bound
+`decoder.decode` method can be passed as a callable. Iterating a decoded value
+checked as `dict[str, Any]` yields its actual string keys in insertion order;
+sorting those keys preserves their owners.
 
 `json.dumps(value)` returns a string and `json.dump(value, stream)` writes to
 a text stream. Both accept scalar values, typed lists, tuples, dictionaries
@@ -339,6 +361,19 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## Datetime and fixed UTC offsets
+
+`datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable
+values. A datetime can be naive or use a fixed offset. `datetime.now(tz)` reads the system
+clock and requires a native `timezone`; there is no local or DST lookup. Civil construction,
+field reads, default ISO formatting, datetime comparisons, shifting a datetime by a
+timedelta, and fixed-zone names and offsets are supported. Timedelta construction accepts
+int, bool, and float units, normalizes negative durations, and checks overflow.
+
+The [datetime test inventory](../benchmarks/cpython_stdlib/full/datetime/README.md)
+lists the operations and original CPython cases checked. This does not change the typed
+TOML date boundary.
 
 ## CSV reader
 
@@ -476,7 +511,9 @@ keys = {*{"one": 1, "two": 2}}
 merged = {**{"one": 1}, "one": 2, "three": 3}
 ```
 
-Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. A direct call to a source function, ordinary method, classmethod, or staticmethod can expand an exact fixed tuple at any positional argument. Receivers, each starred tuple (including an empty tuple), and keywords evaluate once in Python order. Dynamic iterables and keyword mapping expansion in calls, tuple result display expansion, variadic parameters, and user-defined iteration protocols remain outside this subset.
+Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. A direct call to a source function, ordinary method, classmethod, or staticmethod can expand an exact fixed tuple at any positional argument. Receivers, each starred tuple (including an empty tuple), and keywords evaluate once in Python order. Dynamic iterables and keyword mapping expansion in calls, variadic parameters, and arbitrary user-defined iteration protocols remain outside this subset.
+
+In a function body, a tuple display consumes each `*source` completely before the next expression runs. A later mutation cannot change which elements an earlier spread captured, though mutable elements retain their identity. An iteration error stops the display before the following expression. A homogeneous result can be annotated `tuple[T, ...]` and accepts computed integer indexes. For mixed displays such as `(func, *args)`, a literal index is supported when every possible length gives that position the same type. Starred tuple displays in module initializers, class fields, and parameter defaults remain unsupported.
 
 ## Assignment expressions
 
@@ -594,13 +631,18 @@ Defaults must be `int`, `float`, `bool`, `str`, `bytes`, or `None` literals. A n
 
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
 
-Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
+Calls can expand a fixed tuple literal or local with `*args`, and a dictionary with distinct literal string keys with `**options`. A local dictionary must be assigned once and used only for expansion. Its values are evaluated when the dictionary is created. Rebinding the original variables does not change those values. When a packed value has type `T | None` and the parameter requires `T`, the call checks for `None` and raises `TypeError` before entering the callee. Ordinary nullable parameters still receive `None`.
+
+A function or method can declare homogeneous positional arguments such as `*args: str`. The body can iterate, check the length or expand the values into a fresh list. Indexing and slicing the pack are outside this subset. Returning the pack, mutating it, or observing its concrete storage is unsupported. `**kwargs` parameters, dynamically computed keyword shapes and variable-length spreading into an ordinary fixed call remain unsupported.
+
+Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
 ## String percent formatting
 
 String `%` formatting accepts an exact integer, a string, or a fixed tuple of
-integers and strings as positional operands. The entire tuple is evaluated before
-formatting begins. Width and precision arguments (`*`) consume tuple items in order.
+positional operands. Tuple items may be `None`, `bool`, `int`, `float`, `str`,
+or `bytes`. The entire tuple is evaluated before formatting begins. Width and
+precision arguments (`*`) consume tuple items in order.
 
 ## F-strings and repr
 
@@ -655,7 +697,9 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
 
-`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
+`text.encode(encoding="utf-8", errors="strict")` accepts positional and named string arguments. UTF-8, UTF-8 with a signature, ASCII and Latin-1 use the native codec registry's implementations. For example, `"¢".encode("ascii", "backslashreplace")` yields `b"\\xa2"`. ASCII and Latin-1 also support `strict`, `ignore`, `replace` and `xmlcharrefreplace`. Native strings contain Unicode scalar values.
+
+`data.decode()` performs strict UTF-8 decoding. Its optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` supports strict ASCII and reports the first non-ASCII byte and its position. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Mutable `bytearray`, memory views, implicit text/byte conversions and other byte methods are outside this subset.
 
 ## Native paths and directory traversal
 
@@ -690,6 +734,12 @@ named time attributes include fractions, and their `_ns` counterparts retain
 nanoseconds. Linux and macOS also expose block size, blocks and device type.
 macOS exposes birth time, file flags and generation. OS failures retain the
 original path spelling in `OSError.filename`.
+
+`Path.samefile(other_path)` follows symlinks and compares inode and device
+numbers. It reads the receiver's metadata first. For a typed operand with a
+`stat` method, it calls that method; a missing attribute or an `AttributeError`
+during the call triggers path conversion and a filesystem query. A different
+inode returns false without reading the operand's device number.
 
 `Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
 
@@ -801,7 +851,7 @@ Set `prefix_chars` to declare alternate option prefixes. The help flags follow t
 
 Call `format_help()` or `format_usage()` to obtain a string, including its final newline. `print_help()` and `print_usage()` write to stdout by default and also accept stderr or a native text file. A declared parser can be used for more than one of these operations or parse calls.
 
-Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser.
+Use `group = parser.add_argument_group(title, description)` to place arguments in a separate help section. Arguments added to a group bind in the same order and populate the same namespace as arguments added directly to the parser. A parser or titled group may create a mutually exclusive group. Repeating one member is allowed; selecting a different member reports both actions in the error. A required group needs an explicitly supplied member, even when another member has a default.
 
 A subcommand is optional by default. With `add_subparsers(dest="command")`, the namespace contains `command=None` when omitted. Without `dest`, no command field is added. Use `required=True` or set the group's `required` attribute to require a selection. Each literal `add_parser("name", aliases=["alias"], help="...")` introduces a child parser with its own options. The destination retains the spelling the caller used; child help uses its canonical name. A `match args.command` case or `if args.command == "alias"` branch selects the child's concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
@@ -828,6 +878,12 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 `logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
 ## Synchronous subprocesses
+
+`subprocess.getstatusoutput(cmd, *, encoding=None, errors=None)` runs the command
+in the native shell and returns its signed exit status and combined stdout and
+stderr. `getoutput` returns the same text alone. Both normalize CRLF and CR to
+LF and remove one final newline. The default decoder is UTF-8; UTF-8 with BOM,
+ASCII, and Latin-1 use the same codecs as native path text reads.
 
 On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
 
@@ -859,6 +915,30 @@ The result exposes read-only `args: list[str]`, `returncode: int`, and the two s
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
 On POSIX, `os.open(path, flags, mode=0o777, *, dir_fd=None)` accepts text, bytes, or a native `Path`. It and `os.dup` and `os.pipe` return non-inheritable descriptors. `os.dup2` accepts an optional `inheritable` flag (true by default). Use `os.close`, `os.isatty`, `os.get_inheritable` / `os.set_inheritable`, and `os.get_blocking` / `os.set_blocking` directly on integer descriptors. `os.lseek(fd, position, whence)` reads or moves the shared offset. The runtime supplies the platform's open flags and `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `SEEK_DATA`, and `SEEK_HOLE` constants.
+
+On POSIX, `select.poll()` creates an independent poller. Its positional methods are
+`register(fd[, mask])`, `modify(fd, mask)`, `unregister(fd)`, and `poll([timeout])`.
+Descriptors are integers; the poller never owns or closes them. A repeated registration replaces the mask.
+Timeouts are milliseconds: zero checks immediately, and a negative number or `None` waits indefinitely.
+Results are fresh `(fd, mask)` tuples. The kernel can report `POLLERR`, `POLLHUP`, or `POLLNVAL`
+without those flags being requested. Unregister a descriptor before closing or reusing its number.
+An event loop can register several clients for `POLLIN` and enable `POLLOUT` only while bytes remain to send.
+
+`select.select(read, write, exceptional[, timeout])` accepts three integer lists and an optional timeout
+in seconds. It returns three fresh lists in input order, including duplicate ready descriptors.
+Closed descriptors raise `OSError(EBADF)`; descriptors outside the target's `FD_SETSIZE` raise `ValueError`.
+The native poller is not subject to the select fd-set limit. Objects with a dynamic `fileno()` and Python signal
+callbacks are outside this integer-fd interface.
+
+`selectors.DefaultSelector` uses `selectors.PollSelector`, the most capable backend
+exposed by this build. Both support integer descriptors, `register`, `modify`,
+`unregister`, `select`, `get_key`, `close`, and `with`. The key is an immutable
+`SelectorKey(fileobj, fd, events, data)` namedtuple. Ready results pair that same
+key with `EVENT_READ` and/or `EVENT_WRITE` restricted to its registered interests.
+Timeouts are seconds; a nonpositive timeout checks immediately. Opaque data can
+use the compiler's boxed values (`None`, booleans, integers, strings, bytes and
+supported tuples). `get_map`, arbitrary data objects and automatic `fileno()`
+conversion are outside this selector subset. Pass a socket's integer `fileno()`.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
@@ -968,6 +1048,17 @@ Use `typing.assert_never(member)` as a statement to check that every alternative
 
 ## Fixed classes
 
+An instance of a sealed `@dataclass(slots=True)` can be passed to an
+`object` parameter or returned as `object` when the class has generated
+initialization, equality and repr, no user-defined special methods or special
+fields, and only scalar or fixed-tuple fields. The object keeps the original
+instance alive: mutation through another reference is visible. Equality,
+identity with a typed instance, truth, repr, and `isinstance` consult its
+class. Guard a local with `isinstance(value, MyDataclass)` to read its fields.
+A dataclass has neither tuple length nor indexing; both operations raise its
+ordinary Python `TypeError`. Inheritance, mutable container fields, and
+unguarded access on a general `object` are outside this subset.
+
 Class bodies may bind a string literal or a fixed tuple of up to 1024 string
 literals. A tuple may alias an earlier tuple in the same class or concatenate
 it with a literal suffix. Reads through the class, an instance, and an
@@ -1030,7 +1121,9 @@ Fixed classes and dataclasses can define `__str__(self) -> str`. `str(record)`, 
 
 Generated dataclass repr includes field names and values in declaration order, omitting `field(repr=False)`. `repr(record)`, `f"{record!r}"`, and representations of records inside containers use this repr even when the record defines `__str__`. With `repr=False`, the class uses the ordinary object repr, which includes its address. Resource fields require `repr=False` on the field or class.
 
-Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses, class variables and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+
+Plain fixed classes may initialize unannotated scalar, list, set or dictionary attributes in their bodies. A class executes these assignments in order, once, at its definition. An initializer can call a typed helper and refer to an earlier assignment in the same class; an unqualified name does not search base classes. Instances inherit the same value, so mutating a shared container affects every unshadowed reader. Assigning to an instance creates an override; deleting it reveals the current class value. Assigning through a subclass name creates a subclass binding. Assignments retain the inferred data type. Literal strings and fixed tuples of strings keep their existing read-only class binding rules. These rules cover ordinary data attributes; arbitrary descriptors, class-body control flow, and deletion of class bindings are unsupported.
 
 ### Immutable value structs
 
@@ -1089,10 +1182,18 @@ An empty tuple or a fixed tuple of homogeneous `str`, `bytes`, `int`, or `bool` 
 `collections.deque[T]` stores one concrete element type in a native ring. Its
 constructor accepts an iterable and an optional nonnegative `maxlen`. It supports
 append, pop, and extend at either end, clear, shallow copy, equality, length,
-truth testing, and forward or reverse iteration. A saved append or pop method
-keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+truth testing, and forward or reverse iteration. In-place reversal preserves
+the bound and the positions of active iterators. A saved append, pop, or reverse
+method keeps its receiver alive. An unannotated empty deque defaults to integer elements.
+Calling `d.__init__(iterable, maxlen)` validates the new bound, clears the
+same deque, and consumes the iterable. If iteration raises, items already
+appended remain visible through aliases. Omitting `maxlen` removes the old bound.
+Integer and boolean indices support reads, replacement, deletion and numeric
+augmented assignment, including negative positions. Replacement keeps an
+iterator valid; deletion invalidates it. Membership supports homogeneous
+integers, strings and booleans.
 
-`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots.
+`list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition preserves element values and shares reference-type elements across positions. Lists of immutable value structs store scalar payloads inline; `list[int]` uses specialized tagged-integer storage. Other lists use owned runtime slots. Calling `reverse()` reverses either list in place and returns `None`; aliases and active iterators see the new order.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
 an exact `list[T]` or an omitted `()` default. Its body may iterate the
@@ -1109,10 +1210,34 @@ A function returning `Sequence[T]` can return an exact `list[T]`.
 
 Counter equality and multiset inclusion (`<`, `<=`, `>`, `>=`) compare the counts for every key of either counter. An absent key contributes zero.
 
+`Counter.elements()` returns an iterator over the stored keys in insertion
+order. Each positive integer count repeats its key; a change to a later entry
+is visible when the iterator reaches it.
+
+`_collections._count_elements(mapping, iterable)`, also exported by
+`collections`, adds one per yielded key. It accepts dictionaries with integer
+counts and concrete classes with `get` and `__setitem__` methods. It updates
+the receiver before requesting another key, so mutations survive later errors.
+
 `mapping.clear()` removes every entry in place and returns `None`. Aliases see
 the empty dictionary; a `Counter` still returns zero for a missing key, and a
 `defaultdict` keeps its factory. `dict.clear(mapping)` and the inherited class
 methods `Counter.clear(mapping)` and `defaultdict.clear(mapping)` do the same.
+
+`Counter.copy()` preserves its zero for missing keys, and `defaultdict.copy()`
+preserves the original factory. Each copy holds the original keys and values.
+
+`mapping.update(other, key=value)`
+evaluates its arguments first, replaces existing values without moving their
+keys, then appends new keys in order. The positional source can be any supported
+dictionary of the same key and value types; keyword entries require string
+keys. A Counter retains its additive update behavior through a dict annotation.
+
+`dict(source, key=value)` constructs a plain dictionary from a typed mapping
+or an iterable of two-field tuples. Entries from the source precede the keyword
+entries; replacing a key keeps its original position. The new dictionary shares
+stored values with its input. A missing key raises `KeyError` even when the
+source was a Counter or defaultdict.
 
 Unary `+` and `-` select positive counts and negated negative counts. Binary `+`, `-`, `|` and `&` return a fresh Counter with positive counts, preserving the surviving left keys followed by new right keys in insertion order. Augmented assignment to a Counter local mutates the existing object, including when the right operand aliases it.
 
@@ -1120,20 +1245,41 @@ Unary `+` and `-` select positive counts and negated negative counts. Binary `+`
 insertion order. Each key and value is shared with the source; inserting or
 deleting an entry in the copy leaves the source dictionary unchanged.
 
+`array.array` is available as a class value: it retains its module, name,
+representation and identity. `issubclass` recognizes its virtual registration
+with `collections.abc.MutableSequence` and `collections.abc.Sequence`, and
+distinguishes both from `collections.abc.MutableMapping`.
+
 `dict.fromkeys(iterable, value)` builds a fresh dictionary in first-key order.
 It evaluates the value once, defaults it to `None`, and shares that object
 among all keys. A bound call uses the receiver's class without copying its
 entries. A native defaultdict produces a new mapping with no default factory;
 a native Counter raises `NotImplementedError`.
 
+`collections.OrderedDict[K, V]` accepts the same typed mappings, pairs and
+keyword entries as `dict`. Replacing a value preserves its position; deleting
+and reinserting the key moves it to the end. Two ordered dictionaries compare
+both their keys' order and their values. When one operand is a plain dictionary
+of the same key and value types, equality ignores order. The bound `copy()`
+retains the concrete mapping type and shares its values. Changing keys during
+iteration raises `RuntimeError` if another key remained to be yielded.
+
 `collections.defaultdict[K, list[T]]` accepts `defaultdict(list)` in a typed context. A missing subscription inserts a fresh list and returns it. Further subscriptions return that same list through every alias, including a `dict[K, list[T]]` parameter. Membership, `get`, and key unions leave missing keys absent.
+
+Its `default_factory` can be read and set to `list` or `None` through a typed
+defaultdict. An explicit `__missing__(key)` call runs the list factory, then
+returns the stored object if the key already exists. With no factory it raises
+`KeyError` for any key of the declared type, even one present in the mapping.
 
 `collections.ChainMap[K, V]` accepts dictionaries with matching key and value
 types and exposes them in its mutable `maps` list. A no-argument constructor
 starts with a fresh dictionary. Replacing `maps` affects all aliases of the
 ChainMap; callers that saved the previous list still hold that list. Truth
 testing checks whether any underlying dictionary is nonempty. `repr` uses the
-current mappings in order.
+current mappings in order. Subscription searches the layers in order, including
+the missing-key behavior of a Counter or defaultdict. Membership never inserts a
+key. `get(key, default=None)` tests membership before subscribing, and indexed
+assignment writes through to the first dictionary.
 
 Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
 
@@ -1143,7 +1289,7 @@ Direct `mapping.keys()` operands and sets of the same key type support `|`, incl
 
 Sets with the same checked element type support equality, inequality and f-string display. Union (`|`), intersection (`&`) and difference (`-`) on sets or dictionary key views return a fresh set. Symmetric difference, subset/superset comparisons, `remove`, `pop`, and `clear` are unsupported.
 
-After a terminating guard such as `if len(row) != 3: raise ValueError(...)`, `tuple(row)` can materialize a fixed tuple from a scalar list. A checked replacement of a list element preserves the length; a resize, rebinding, or unknown call invalidates it. Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
+After a terminating guard such as `if len(row) != 3: raise ValueError(...)`, `tuple(row)` can materialize a fixed tuple from a scalar list. A checked replacement of a list element preserves the length; a resize, rebinding, or unknown call invalidates it. Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes into a fixed positional layout must be in-range integer literals, optionally negative. Homogeneous runtime-sized tuples accept integer expressions and raise `IndexError` at runtime. Tuple concatenation and repetition are not supported. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
 
 Fixed tuples, lists, strings, and bytes support the nested and starred assignment patterns described in [assignment and container expansion](#assignment-and-container-expansion). Concrete list lengths are checked at runtime; fixed-tuple shapes are checked during compilation.
 
@@ -1207,7 +1353,7 @@ A proved nonnegative small index may use a decoded native-index ABI. Ordinary re
 
 Element reads otherwise acquire ownership before later evaluation can remove them. A direct integer-list read in a two-operand integer comparison can also borrow when both complete operand trees are proved nonmutating; the local keeps the list rooted until the comparison consumes the handle. Chained comparisons and potentially mutating evaluation retain owned reads. A same-list copy with simple, proved indices can combine its get and set, checking and acquiring the source before checking and replacing the destination.
 
-Heap objects are nonmoving reference-counted allocations. Classes and tuples use concrete fixed layouts, and homogeneous containers store their representation metadata once per container rather than in each element. Optionals occupy one nullable word: zero means absent, present integers and pointers keep their payload word, and optional booleans encode False/True as one/two. Present optional floats own a separate immutable binary64 allocation so every float bit pattern remains available; ordinary floats remain unboxed. These representations do not change the supported Python values or shared mutation behavior.
+Heap objects are nonmoving reference-counted allocations. Classes and fixed tuples use concrete fixed layouts. A tuple made from runtime-sized spreads owns its field layout. Homogeneous lists, sets and dictionaries store representation metadata once per container rather than in each element. Optionals occupy one nullable word: zero means absent, present integers and pointers keep their payload word, and optional booleans encode False/True as one/two. Present optional floats own a separate immutable binary64 allocation so every float bit pattern remains available; ordinary floats remain unboxed. These representations do not change the supported Python values or shared mutation behavior.
 
 Writes acquire the replacement before releasing the displaced value, and reads acquire ownership before the receiver can be released, apart from the explicitly proved rooted integer borrows above. Fixed records start with zeroed fields and use a static destruction descriptor, so failed construction safely releases every initialized owner. Generated field accesses are direct; their receiver remains rooted and the checker proves complete initialization before a read. Container storage uses scoped `UnsafeCell` closures on one execution thread: mutable access is exclusive, operations cannot reenter through aliases, and no storage reference or resizable-buffer address may escape. Independently owned values and explicitly constrained borrowed integer handles may escape; displaced owners are dropped after access ends.
 
@@ -1219,6 +1365,23 @@ Exceptions contain an immutable category, message, optional explicit cause, and 
 
 ## Exceptions and cleanup
 
+A caught `Exception` or `BaseException`, including `cm.exception` from
+`unittest.TestCase.assertRaises`, exposes its original positional arguments in
+`error.args`. The tuple can outlive the handler. Its mutable contents still
+refer to the original objects. Read its length, index it, or format it with
+`repr`. An integer subscript on a retained dictionary looks up that key,
+and a missing key raises `KeyError`. A retained exception from a task group
+keeps its class and its own `str` and `repr` methods. An identity comparison with a known tuple (including another
+`error.args` getter) compares the underlying tuple. Assigning a new `.args`
+tuple and identity comparisons between arbitrary erased scalar values are
+outside the native subset.
+
+The args preserve how an error was raised. For example, a failed
+`subprocess.run(check=True)` has `(returncode, cmd)`; a failed
+`CompletedProcess.check_returncode()` also includes stdout and stderr.
+`SystemExit(1, 2).args` is the same tuple as its code, while
+`SystemExit((1, 2)).args` contains that tuple as one argument.
+
 An explicitly typed local assigned in a `try` body may be read after a handled exception. When a simple assignment did not complete on that path and no earlier value exists, the read raises `UnboundLocalError` (a `NameError`). A successfully assigned `None` remains an ordinary value.
 
 `ImportError` and its subclass `ModuleNotFoundError` retain their positional
@@ -1228,8 +1391,13 @@ can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
 values. On a constructed or narrowed import exception, these fields support
 `str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
 support length and integer indexing. Reinitializing an instance resets omitted
-fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
-and pickling remain outside this subset.
+fields. A fresh keyword dictionary display can supply the three fields. A
+repeated key inside one display uses its last value; supplying the same key in
+two call arguments raises `TypeError` before initialization. If a keyword is an
+unknown name or an integer, the initializer updates `.args` and raises
+`TypeError` at the first invalid key, preserving the import-specific fields. Arbitrary objects,
+unpacking a separately stored dictionary, direct field writes, and pickling
+remain outside this subset.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent
@@ -1241,10 +1409,21 @@ including `None`, booleans, integers, strings, bytes, and fixed tuples of those
 values. The `super().__init__` form accepts zero arguments, one string, or
 multiple supported values. Constructor keyword arguments, typed fields, and custom `__str__` and
 `__repr__` methods use the same object after a raise. A class attribute can name
-such a constructor. Inheriting a user payload layout, dynamic constructors, and
-reinitializing an exception are outside this subset.
+such a constructor. A subclass can extend one inherited payload or inherit its
+constructor unchanged. A base handler sees its original fields, argument tuple
+and formatter; a sibling exception remains distinct. Two independent payload
+layouts, dynamic constructor selection and reinitializing a payload are unsupported.
 
-The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` and `UnicodeDecodeError` are supported as handler categories, but not as constructors or storage annotations.
+An unannotated variadic exception initializer can store named parameters in
+fields and call `super().__init__` once, forwarding parameters or its positional
+tail. A subclass can do the same with fixed or variadic parameters. Supported
+values include None, bool, int, float, str, bytes, fixed tuples and typed lists
+of these values. Lists preserve identity and mutations in stored fields and
+in `.args`. A list whose elements contain `object` cannot be stored this way: a later mutation could create a reference cycle. Scalar literal defaults and keyword-only parameters are supported;
+computed or mutable defaults, positional-only parameters, `**kwargs`, arbitrary
+objects, and arbitrary code inside these unannotated initializers are unsupported.
+
+The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `StopIteration`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, `SystemError`, `UnicodeError`, `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`, plus the imported `io.UnsupportedOperation`. A constructor takes zero arguments or one supported argument (a string, number, bytes, container, or `None`). Mutable arguments remain live through `.args` and formatting. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` also works as an annotation for this family. Both `BaseException` and `UnicodeDecodeError` are supported as handler categories; directly constructing them is outside the subset.
 
 Handlers select the first matching fixed builtin category or nonempty tuple of categories, using the builtin hierarchy. A bare handler catches any supported exception. `except Category as name` binds an owned exception and deletes that name on every handler exit, even if it previously existed or was rebound inside the handler. Save it under another name to retain it. Bare `raise` uses the dynamically active exception, including from a called function or a `finally` block unwinding an exception; without an active exception it raises `RuntimeError`.
 
@@ -1458,6 +1637,20 @@ python3 tests/bytes.py --compiler target/release/imre --runtime target/release/l
 ```
 
 A profile can select a named arm of a simple `match`, or exclude the true arm of a named Boolean condition. The executable evaluates the original test. Entering an excluded arm raises a `ValueError` with the required value. A missing function or unmatched selector is a build error.
+
+### Context variables
+
+`contextvars.ContextVar[T]` stores bindings by variable identity. The native
+scheduler copies the current context when scheduling a task and restores it at
+every resume; directly awaiting a cold coroutine shares the caller's context.
+`ContextVar.get`, `set`, `reset`, token context managers, `copy_context`,
+and `Context.run` support nested and exceptional execution.
+
+Contexts support shallow copies, lookup, membership and size. Callback arguments
+in `Context.run` currently need an exact positional signature. Thread startup,
+explicit task `context=`, context iteration and mapping equality remain outside
+the subset. See the [contextvars scope and CPython evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md)
+for value layouts and test roles.
 
 ### Native asyncio subprocesses
 

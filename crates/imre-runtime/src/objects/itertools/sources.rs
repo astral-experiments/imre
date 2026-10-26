@@ -38,7 +38,7 @@ impl Sequence {
                                 .then(|| rows.owned_row(index))
                                 .transpose();
                         }
-                        let values = values.resolved();
+                        let values = values.resolved()?;
                         Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
                     })?,
                     6 => {
@@ -63,12 +63,12 @@ impl Sequence {
 }
 
 /// The compiler supplies a rooted value of the exact selected source form.
-pub(super) unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
+pub(super) unsafe fn acquire(mode: u32, source: usize) -> crate::ObjectOwner {
     // SAFETY: all leaf constructors return one independent owner. A cursor
     // input is already an iterator, so its position and identity are shared.
     unsafe {
         let pointer = match mode {
-            0 => return acquire_rc(source),
+            0 => return crate::ObjectOwner::acquire_word(source),
             1 => sequences::imre_str_iter(source as *const Str),
             2 => bytes::imre_bytes_iter(source as *const Bytes),
             3..=5 => {
@@ -79,7 +79,7 @@ pub(super) unsafe fn acquire(mode: u32, source: usize) -> Rc<Object> {
             7 => mappings::imre_set_iter(source as *const Object),
             _ => fail("SystemError", "invalid iterable representation"),
         };
-        Rc::from_raw(pointer)
+        crate::ObjectOwner::from_raw(pointer)
     }
 }
 
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn imre_progression(start: usize, stop: usize, step: usize
         return Error::new(Kind::ValueError, "range() arg 3 must not be zero")
             .returning(std::ptr::null());
     }
-    Rc::into_raw(adapter(Adapter::Progression(Progression {
+    crate::ObjectOwner::into_raw(adapter(Adapter::Progression(Progression {
         current: RefCell::new(start),
         step,
         stop,

@@ -3,6 +3,7 @@
 use super::*;
 use crate::ir::PathOperation;
 
+mod samefile;
 mod segments;
 mod stat;
 
@@ -277,6 +278,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && name == "samefile" {
+            return self.path_samefile(receiver, call);
+        }
         if receiver.ty == Type::Path && matches!(name, "stat" | "lstat") {
             return self.path_stat(receiver, name, call);
         }

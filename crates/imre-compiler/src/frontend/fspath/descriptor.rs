@@ -4,7 +4,7 @@ use super::*;
 use crate::classes::MethodKind;
 
 /// The receiver is already evaluated; this AST supplies the normal binder's call site.
-fn protocol_call(at: &ast::Expr) -> ast::ExprCall {
+pub(in crate::frontend) fn protocol_call(at: &ast::Expr, name: &str) -> ast::ExprCall {
     let range = at.range();
     ast::ExprCall {
         node_index: ast::AtomicNodeIndex::NONE,
@@ -13,7 +13,7 @@ fn protocol_call(at: &ast::Expr) -> ast::ExprCall {
             node_index: ast::AtomicNodeIndex::NONE,
             range,
             value: Box::new(at.clone()),
-            attr: ast::Identifier::new("__fspath__", range),
+            attr: ast::Identifier::new(name, range),
             ctx: ast::ExprContext::Load,
         })),
         arguments: ast::Arguments {
@@ -35,13 +35,24 @@ impl Checker<'_> {
         at: &ast::Expr,
         syscall: Option<(&str, &str)>,
     ) -> Result<Expr, String> {
+        let call = protocol_call(at, "__fspath__");
+        if signature.method.unwrap().kind(&self.classes.declarations) == MethodKind::Property {
+            return self.call_fspath_property(class, receiver, &call, syscall);
+        }
+        self.call_path_method(&call, receiver, signature, Type::Str)
+    }
+
+    /// Bind an ordinary native method called by a path protocol, including defaults.
+    pub(in crate::frontend) fn call_path_method(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        signature: &Signature,
+        on_error: Type,
+    ) -> Result<Expr, String> {
         let method = signature.method.unwrap();
         let classes = &self.classes.declarations;
         let kind = method.kind(classes);
-        let call = protocol_call(at);
-        if kind == MethodKind::Property {
-            return self.call_fspath_property(class, receiver, &call, syscall);
-        }
         let record = &classes.definitions[method.class];
         let owner = &classes.definitions[classes.ids[&record.method_origins[method.index]]].name;
         let declared = &record.methods[method.index];
@@ -53,7 +64,7 @@ impl Checker<'_> {
             &[],
         ) {
             scope.hold(self, receiver);
-            return Ok(scope.finish(self.sys_type_error(&call, Type::Str, message)?));
+            return Ok(scope.finish(self.sys_type_error(call, on_error, message)?));
         }
         let bound = if kind == MethodKind::Instance {
             Some(receiver)
@@ -62,7 +73,7 @@ impl Checker<'_> {
             None
         };
         let skip = usize::from(bound.is_some());
-        Ok(scope.finish(self.source_call(&call, signature, bound, skip)?))
+        Ok(scope.finish(self.source_call(call, signature, bound, skip)?))
     }
 
     /// CPython reports a missing protocol if descriptor lookup fails. Exceptions
@@ -81,7 +92,7 @@ impl Checker<'_> {
         let slot = self.hidden(getter.ty);
         let failed = self.hidden(Type::Bool);
         let missing = self.fspath_type_error(receiver, None, syscall);
-        let result = self.invoke_fspath_value(call, self.local(slot), &missing)?;
+        let result = self.invoke_path_value(call, self.local(slot), Some(&missing), Type::Str)?;
         let flag = |value| Expr {
             ty: Type::Bool,
             kind: ExprKind::Bool(value),
@@ -109,29 +120,35 @@ impl Checker<'_> {
         }))
     }
 
-    /// None suppresses this special method; a present callable is invoked once.
-    fn invoke_fspath_value(
+    /// Invoke a retrieved descriptor or instance field. Only the special path
+    /// protocol treats None as an absent method.
+    pub(in crate::frontend) fn invoke_path_value(
         &mut self,
         call: &ast::ExprCall,
         value: Expr,
-        missing: &Expr,
+        missing: Option<&Expr>,
+        on_error: Type,
     ) -> Result<Expr, String> {
-        if let Some(selected) = self.map_fspath_arms(&value, &call.func, |checker, arm| {
-            checker.invoke_fspath_value(call, arm, missing)
-        })? {
+        if let Some(selected) =
+            self.map_path_protocol_arms(&value, &call.func, |checker, arm| {
+                checker.invoke_path_value(call, arm, missing, on_error)
+            })?
+        {
             return Ok(selected);
         }
-        if value.ty == Type::None {
+        if value.ty == Type::None
+            && let Some(missing) = missing
+        {
             return Ok(missing.clone());
         }
         if self.types.signature(value.ty).is_some() {
             return self.invoke(call, value);
         }
         let actual = self.path_argument_type_name(value.ty);
-        self.sys_type_error(
-            call,
-            Type::Str,
+        Ok(Self::path_operand_type_error(
+            value,
+            on_error,
             format!("'{actual}' object is not callable"),
-        )
+        ))
     }
 }

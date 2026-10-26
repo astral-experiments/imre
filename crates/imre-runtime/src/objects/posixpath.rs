@@ -1,17 +1,35 @@
 //! Raw POSIX spellings. Only ASCII slash and dot are special, including in byte paths.
 
+use crate::StrOwner;
 use std::collections::TryReserveError;
 use std::ffi::OsString;
 use std::ops::Range;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::rc::Rc;
 
-use super::exceptions::{Error, Kind};
+use super::exceptions::{Error, Kind, sequence_allocation_failed};
 use super::{Bytes, Str};
 
 enum Spelling<'a> {
     Text(&'a Str),
     Bytes(&'a Bytes),
+}
+
+enum OwnedSpelling {
+    WholeText(crate::StrOwner),
+    WholeBytes(crate::BytesOwner),
+    Text(Str),
+    Bytes(Bytes),
+}
+
+impl OwnedSpelling {
+    fn into_raw(self) -> *const () {
+        match self {
+            Self::Text(text) => StrOwner::into_raw(StrOwner::new(text)).cast(),
+            Self::WholeText(text) => StrOwner::into_raw(text).cast(),
+            Self::WholeBytes(bytes) => crate::BytesOwner::into_raw(bytes).cast(),
+            Self::Bytes(bytes) => crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)).cast(),
+        }
+    }
 }
 
 impl<'a> Spelling<'a> {
@@ -34,25 +52,29 @@ impl<'a> Spelling<'a> {
     }
 
     /// All split offsets are adjacent to ASCII delimiters or at an endpoint.
-    fn slice(&self, range: Range<usize>) -> *const () {
+    fn slice(&self, range: Range<usize>) -> Option<OwnedSpelling> {
         if range == (0..self.bytes().len()) {
-            // SAFETY: borrow obtained both typed references from rooted Rc payloads.
-            return unsafe {
+            // SAFETY: both references originate in rooted owners.
+            return Some(unsafe {
                 match self {
-                    Self::Text(text) => {
-                        Rc::into_raw(super::acquire_rc::<Str>(std::ptr::from_ref(*text) as usize))
-                            .cast()
-                    }
-                    Self::Bytes(bytes) => Rc::into_raw(super::acquire_rc::<Bytes>(
-                        std::ptr::from_ref(*bytes) as usize,
-                    ))
-                    .cast(),
+                    Self::Text(t) => OwnedSpelling::WholeText(StrOwner::acquire_word(
+                        std::ptr::from_ref(*t) as usize,
+                    )),
+                    Self::Bytes(b) => OwnedSpelling::WholeBytes(crate::acquire_bytes(
+                        std::ptr::from_ref(*b) as usize,
+                    )),
                 }
-            };
+            });
         }
         match self {
-            Self::Text(s) => Rc::into_raw(Rc::new(Str::from(&s[range]))).cast(),
-            Self::Bytes(b) => Rc::into_raw(Rc::new(b[range].to_vec())).cast(),
+            Self::Text(s) => Str::try_new(&s[range]).ok().map(OwnedSpelling::Text),
+            Self::Bytes(b) => {
+                let part = &b[range];
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(part.len()).ok()?;
+                copy.extend_from_slice(part);
+                Some(OwnedSpelling::Bytes(copy))
+            }
         }
     }
 }
@@ -77,24 +99,52 @@ pub unsafe extern "C" fn imre_posix_join(
     count: usize,
     kind: u32,
 ) -> *const () {
-    let mut output = Vec::new();
     // SAFETY: the compiler passes an initialized array with exactly count entries.
-    for &path in unsafe { std::slice::from_raw_parts(paths, count) } {
+    let paths = unsafe { std::slice::from_raw_parts(paths, count) };
+    if let Some(&last) = paths.last() {
+        // SAFETY: every argument has already been evaluated and rooted.
+        let final_part = unsafe { Spelling::borrow(last, kind) };
+        if final_part.bytes().starts_with(b"/") {
+            // An absolute final path replaces the whole prefix. Return one owner
+            // of that argument without allocating a copy.
+            match final_part {
+                // SAFETY: the spelling tag proves the rooted Rc payload type.
+                Spelling::Text(_) => unsafe {
+                    StrOwner::increment_strong_count(last.cast::<Str>())
+                },
+                // SAFETY: the spelling tag proves the rooted Rc payload type.
+                Spelling::Bytes(_) => unsafe { crate::retain_bytes(last.cast::<Bytes>()) },
+            }
+            return last;
+        }
+    }
+    let mut output = Vec::new();
+    for &path in paths {
         // SAFETY: the compiler rooted each argument and proved a homogeneous tag.
         let part = unsafe { Spelling::borrow(path, kind) };
         let bytes = part.bytes();
         if bytes.starts_with(b"/") {
             output.clear();
-        } else if !output.is_empty() && output.last() != Some(&b'/') {
+        }
+        let separator = !output.is_empty() && output.last() != Some(&b'/');
+        // A slice is bounded by isize::MAX, so one separator still fits usize.
+        if output
+            .try_reserve(bytes.len() + usize::from(separator))
+            .is_err()
+        {
+            sequence_allocation_failed();
+            return std::ptr::null();
+        }
+        if separator {
             output.push(b'/');
         }
         output.extend_from_slice(bytes);
     }
     if kind == 0 {
         let text = String::from_utf8(output).expect("ASCII separators preserve UTF-8");
-        Rc::into_raw(Rc::new(Str::from(text))).cast()
+        StrOwner::into_raw(StrOwner::new(Str::from(text))).cast()
     } else {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     }
 }
 
@@ -109,15 +159,22 @@ pub unsafe extern "C" fn imre_posix_component(path: *const (), bytes: u32, head:
         .iter()
         .rposition(|&b| b == b'/')
         .map_or(0, |i| i + 1);
-    if head == 0 {
-        path.slice(cut..spelling.len())
+    let range = if head == 0 {
+        cut..spelling.len()
     } else {
         // A directory made entirely of slashes retains them all.
         let end = spelling[..cut]
             .iter()
             .rposition(|&b| b != b'/')
             .map_or(cut, |i| i + 1);
-        path.slice(0..end)
+        0..end
+    };
+    match path.slice(range) {
+        Some(result) => result.into_raw(),
+        None => {
+            sequence_allocation_failed();
+            std::ptr::null()
+        }
     }
 }
 
@@ -134,10 +191,19 @@ pub unsafe extern "C" fn imre_posix_splitext(path: *const (), bytes: u32, out: *
         .rposition(|&b| b == b'.')
         .filter(|&dot| last[..dot].iter().any(|&b| b != b'.'))
         .map_or(spelling.len(), |dot| spelling.len() - last.len() + dot);
-    // SAFETY: the fresh tuple has two pointer-width slots and takes both owners.
-    unsafe {
-        out.write(path.slice(0..cut));
-        out.add(1).write(path.slice(cut..spelling.len()));
+    // Keep both slices owned here until the complete tuple can be published.
+    let parts = path.slice(0..cut).and_then(|root| {
+        let ext = path.slice(cut..spelling.len())?;
+        Some((root, ext))
+    });
+    if let Some((root, ext)) = parts {
+        // SAFETY: the fresh tuple has two pointer-width slots and takes both owners.
+        unsafe {
+            out.write(root.into_raw());
+            out.add(1).write(ext.into_raw());
+        }
+    } else {
+        sequence_allocation_failed();
     }
 }
 
@@ -174,7 +240,7 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
         return Error::new(Kind::TypeError, "'NoneType' object is not iterable").returning(0);
     }
     let compute = |storage: &super::Storage| -> Result<usize> {
-        let values = &storage.sequence().values;
+        let values = &storage.sequence()?.values;
         let Some(&first) = values.first() else {
             return Err(Error::new(
                 Kind::ValueError,
@@ -232,11 +298,11 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
             }
         }
         if bytes {
-            let owner = Rc::into_raw(Rc::new(prefix)) as usize;
+            let owner = crate::BytesOwner::into_raw(crate::BytesOwner::new(prefix)) as usize;
             Ok(owner | usize::from(kind == 2))
         } else {
             let value = std::str::from_utf8(&prefix).expect("joined UTF-8 path components");
-            Ok(Rc::into_raw(Rc::new(
+            Ok(StrOwner::into_raw(StrOwner::new(
                 Str::try_new(value).map_err(|_| Error::allocation())?,
             )) as usize)
         }
@@ -318,11 +384,11 @@ pub unsafe extern "C" fn imre_posix_normalize(
         return std::ptr::null();
     };
     if bytes != 0 {
-        Rc::into_raw(Rc::new(output)).cast()
+        crate::BytesOwner::into_raw(crate::BytesOwner::new(output)).cast()
     } else {
         // An undecodable cwd component canceled by `..` never reaches the text result.
         match super::paths::path_utf8(OsString::from_vec(output)) {
-            Ok(text) => Rc::into_raw(Rc::new(text)).cast(),
+            Ok(text) => StrOwner::into_raw(StrOwner::new(text)).cast(),
             Err(error) => error.returning(std::ptr::null()),
         }
     }

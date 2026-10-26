@@ -6,7 +6,11 @@ use super::*;
 /// A callable signature is not a storage edge, but a callable value may own a
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
-    matches!(ty, Type::Callable(_))
+    // The declaration reader boxes only owners it has proven to be noncapturing.
+    if matches!(ty, Type::AnnotationValue(_)) || types.constructor_base(ty).is_some() {
+        return false;
+    }
+    (matches!(ty, Type::Callable(_)) && !types.is_plain_callback(ty))
         || types
             .children(ty)
             .into_iter()
@@ -14,8 +18,21 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
 }
 
 fn invalid_aggregate(ty: Type, types: &Types) -> bool {
-    if matches!(ty, Type::Callable(_) | Type::ForwardRef(_)) || types.is_partial_frame(ty) {
+    if matches!(
+        ty,
+        Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_) | Type::CmpKey(..)
+    ) || types.is_partial_frame(ty)
+        || types.is_dispatch_registry(ty)
+    {
         false
+    } else if matches!(ty, Type::VarTuple(_)) {
+        // A completed display cannot acquire a reference to itself. Its fields
+        // own the same callable records as locals; mutable containers and class
+        // fields still reject storing the tuple through contains_callable().
+        types
+            .children(ty)
+            .into_iter()
+            .any(|field| invalid_aggregate(field, types))
     } else if let Some(payload) = types.payload(ty) {
         invalid_aggregate(payload, types)
     } else {
@@ -83,6 +100,9 @@ pub(super) fn targets(
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, .. } = &value.kind {
                 targets.entry(value.ty).or_default().insert(*function);
+                if let Some(signature) = types.index_callable_signature(value.ty) {
+                    targets.entry(signature).or_default().insert(*function);
+                }
             }
         });
     }
@@ -102,6 +122,54 @@ pub(super) fn targets(
 }
 
 impl Checker<'_> {
+    /// Capture a native receiver once and give a saved method its positional signature.
+    pub(super) fn bound_builtin(
+        &mut self,
+        node: &impl Ranged,
+        receiver: Expr,
+        builtin: Builtin,
+        parameters: Vec<Type>,
+        returns: Type,
+    ) -> Expr {
+        let mut locals = vec![receiver.ty];
+        locals.extend(&parameters);
+        let arguments = locals
+            .iter()
+            .enumerate()
+            .map(|(slot, &ty)| Expr {
+                ty,
+                kind: ExprKind::Local(slot),
+            })
+            .collect();
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    returns,
+                    locals,
+                    body: vec![Statement::Return(Expr {
+                        ty: returns,
+                        kind: ExprKind::Builtin(builtin, arguments),
+                    })],
+                },
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                source_frame: false,
+                recursion_error: error(self.source, node, "recursive native method adapter"),
+            },
+        );
+        Expr {
+            ty: self.types.callable(parameters, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: Some(Box::new(receiver)),
+            },
+        }
+    }
+
     /// Expose str.join or a bound string's join as an exact native callback.
     pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
         let list = self.types.list(Type::Str);
@@ -129,6 +197,7 @@ impl Checker<'_> {
                 module: self.module,
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
+                source_frame: false,
                 recursion_error: self.graph.modules[self.module]
                     .error(site, "recursive calls through str.join are unsupported"),
                 function: ir::Function {
@@ -180,13 +249,13 @@ impl Checker<'_> {
         if signature.params[skip..].iter().any(|parameter| {
             matches!(
                 parameter.kind,
-                ParameterKind::KeywordOnly | ParameterKind::KeywordRest
+                ParameterKind::KeywordOnly | ParameterKind::Variadic | ParameterKind::KeywordRest
             )
         }) {
             return Err(error(
                 self.source,
                 node,
-                "function values cannot have keyword-only parameters",
+                "function values require fixed positional parameters",
             ));
         }
         let mut signature = signature.clone();
@@ -220,19 +289,26 @@ impl Checker<'_> {
                 signature.returns
             },
         );
-        let ty = if receiver.is_none()
-            && let Some(&policy) = self.classes.cached.get(&signature.id)
-        {
+        let unbound = receiver.is_none();
+        let ty = if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
         };
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Callable {
                 function: signature.id,
                 receiver: receiver.map(Box::new),
             },
+        };
+        Ok(if unbound {
+            Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
+            }
+        } else {
+            value
         })
     }
 
@@ -309,6 +385,7 @@ impl Checker<'_> {
             ));
         }
         let id = self.helpers.reserve();
+        let omitted_free = self.unbound_assert_captures();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -318,6 +395,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
         helper.class = self.class;
@@ -366,6 +444,7 @@ impl Checker<'_> {
                 },
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
+                source_frame: true,
                 recursion_error: self.graph.modules[self.module]
                     .error(lambda, "recursive calls are unsupported in this prototype"),
             },
@@ -388,6 +467,67 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::Placeholder(kind) = callable.ty {
+            return self.placeholder_call(call, callable, kind);
+        }
+        if let Type::CmpKey(frame, _) = callable.ty {
+            return self.bind_cmp_key(call, callable, frame);
+        }
+        let callable = if callable.ty == Type::FunctionRef
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+        {
+            typing::typed_function(callable, self.types.callable(vec![], Type::None))
+        } else {
+            callable
+        };
+        if callable.ty == Type::OverloadStub {
+            if call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+                || call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "expanded arguments to an overload dummy require runtime argument validation",
+                ));
+            }
+            let mut args = call
+                .arguments
+                .args
+                .iter()
+                .chain(call.arguments.keywords.iter().map(|k| &k.value))
+                .collect::<Vec<_>>();
+            args.sort_by_key(|e| e.range().start());
+            let mut body = vec![Statement::Expr(callable)];
+            for arg in args {
+                body.push(Statement::Expr(self.expr(arg)?));
+            }
+            // A real overload dummy accepts arbitrary arguments. Keep checks inside each operand.
+            self.graph.checked_overload(self.module, call.range());
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
+            for arg in &call.arguments.args {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Scope {
+                    body,
+                    clear: vec![],
+                    value: Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::CallStub),
+                            vec![],
+                        ),
+                    }),
+                },
+            });
+        }
         if let Type::StrDescriptor(method) = callable.ty {
             return self.invoke_descriptor(call, callable, method);
         }
@@ -413,12 +553,20 @@ impl Checker<'_> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let values = call
             .arguments
             .args
             .iter()
             .zip(params)
-            .map(|(argument, ty)| self.expr_expected(argument, ty))
+            .enumerate()
+            .map(|(slot, (argument, ty))| {
+                if slot == 0 && index_callable {
+                    self.integer_index(argument)
+                } else {
+                    self.expr_expected(argument, ty)
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));

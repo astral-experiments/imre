@@ -1,14 +1,14 @@
 //! Conservative escaping-error summaries over the final, rewritten typed IR.
 //!
-//! Allocation failure remains fatal under the current runtime contract. Fixed
-//! fields cannot raise: the checker fixes their indices, prevents partially
+//! Some runtime operations report allocation failure. Fixed fields cannot raise:
+//! the checker fixes their indices, prevents partially
 //! initialized objects from escaping, and proves optional payloads present.
 //! Container bounds, I/O, conversion, explicit raises and uncertain operations
 //! remain fallible. Catching an error does not make its containing function
 //! infallible here; every handler, else and finally body is included.
 
 use crate::callables::Targets;
-use crate::ir::{Expr, ExprKind, Module, Statement};
+use crate::ir::{Expr, ExprKind, Module, Statement, Type};
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -42,7 +42,10 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !block(&function.body, &functions, targets) {
+            if functions[id]
+                && !module.source_frames.get(id).is_some_and(Option::is_some)
+                && !block(&function.body, &functions, targets)
+            {
                 functions[id] = false;
                 changed = true;
             }
@@ -137,6 +140,18 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
+        // Fixed-offset datetime ordering raises on a mix of naive and aware operands.
+        // Preserve this effect across a direct call even when both operands are simple locals.
+        ExprKind::Compare(values, ops)
+            if ops.iter().zip(values).any(|(op, value)| {
+                matches!(
+                    value.ty,
+                    crate::ir::Type::Calendar(crate::ir::CalendarType::DateTime)
+                ) && !matches!(op, crate::ir::Compare::Equal | crate::ir::Compare::NotEqual)
+            }) =>
+        {
+            true
+        }
         // Even an existing point needs space when appended to a packed list literal.
         ExprKind::List(values)
             if !values.is_empty()
@@ -147,11 +162,27 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         {
             true
         }
-        ExprKind::List(values) | ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
-            values
+        ExprKind::Compare(values, _) => {
+            // A structural comparison may allocate a traversal stack, including
+            // when a set or Counter looks up an equal record key.
+            values.windows(2).any(|pair| {
+                matches!(
+                    pair[0].ty,
+                    Type::Class(_)
+                        | Type::Tuple(_)
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::SimpleNamespace(_)
+                )
+            }) || values
                 .iter()
                 .any(|value| expression(value, functions, targets))
         }
+        ExprKind::List(values) | ExprKind::Boolean(_, values) => values
+            .iter()
+            .any(|value| expression(value, functions, targets)),
         ExprKind::Dict { entries, .. } => !entries.is_empty(),
         ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
@@ -175,7 +206,9 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            expression(left, functions, targets) || expression(right, functions, targets)
+            targets.types.truth_may_materialize(left.ty)
+                || expression(left, functions, targets)
+                || expression(right, functions, targets)
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
@@ -276,12 +309,16 @@ mod tests {
             }
         }
         let module = Module {
+            list_builds: Default::default(),
+            ignore_python_environment: false,
+            command_utf8_mode: None,
             types,
             functions,
             class_fields: Vec::new(),
             class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             entry: function(Vec::new()),
         };
         assert_eq!(analyze(&module).functions, [true, true, false, false]);
@@ -329,11 +366,15 @@ mod tests {
             kind: ExprKind::Local(0),
         };
         let mut module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Return(integer())]),
@@ -387,11 +428,15 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -408,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn proven_sequence_pulls_remove_only_their_own_index_errors() {
+    fn proven_sequence_pulls_preserve_deferred_read_errors() {
         let source = crate::modules::SourceGraph::single(
             r#"
 def checked(values: list[str], index: int) -> str:
@@ -422,11 +467,14 @@ def backward(values: list[str]) -> bool:
 
 def conversion(values: list[str]) -> bool:
     return any(int(value) for value in values)
+
+def integers(values: list[int]) -> int:
+    return len(values)
 "#,
         )
         .unwrap();
         let module = crate::frontend::lower(&source).unwrap();
-        assert_eq!(analyze(&module).functions, [true, false, false, true]);
+        assert_eq!(analyze(&module).functions, [true, true, true, true, false]);
     }
 
     #[test]
@@ -443,11 +491,15 @@ def conversion(values: list[str]) -> bool:
             },
         };
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),

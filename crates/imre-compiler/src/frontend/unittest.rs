@@ -10,6 +10,56 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Read the concrete case's class metadata even when a fixture receives a base-typed case.
+    pub(super) fn testcase_class_text(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        let Some(owner) = attribute.value.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if owner.attr.as_str() != "__class__" || !matches!(name, "__module__" | "__qualname__") {
+            return Ok(None);
+        }
+        let receiver = self.expr(&owner.value)?;
+        let Type::Class(base) = receiver.ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(base) {
+            return Ok(None);
+        }
+        self.dispatch_record(base, receiver, attribute, |checker, class, _| {
+            let record = &checker.classes.declarations.definitions[class];
+            if record
+                .methods
+                .iter()
+                .any(|m| m.name.as_str() == "__class__")
+                || record.fields.iter().any(|f| f.name == "__class__")
+                || record.static_bindings.contains_key("__class__")
+                || record.static_bindings.contains_key(name)
+            {
+                return Err(error(
+                    checker.source,
+                    attribute,
+                    "custom TestCase class metadata requires its original descriptor",
+                ));
+            }
+            let module = &checker.graph.modules[record.definition.module];
+            let text = if name == "__qualname__" {
+                record.name.as_str()
+            } else if record.definition.module == checker.graph.entry {
+                "__main__"
+            } else if module.bundled && module.name == "unittest" && record.name == "TestCase" {
+                "unittest.case"
+            } else {
+                module.name.as_str()
+            };
+            Ok(unpacking::string(text))
+        })
+        .map(Some)
+    }
+
     pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
@@ -171,6 +221,7 @@ impl Checker<'_> {
                 ("tomllib", "TOMLDecodeError"),
                 ("json", "JSONDecodeError"),
                 ("csv", "Error"),
+                ("socket", "gaierror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;
@@ -346,13 +397,13 @@ impl Checker<'_> {
             match key {
                 "expected_exception" => {
                     if expected.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     expected = Some(self.unittest_expected(&keyword.value, &mut body, this)?);
                 }
                 "expected_regex" if regex => {
                     if pattern.is_some() {
-                        duplicate = Some(key);
+                        duplicate.get_or_insert(key);
                     }
                     pattern = Some(self.unittest_pattern(&keyword.value, &mut body, &mut clear)?);
                 }
@@ -663,7 +714,7 @@ impl Checker<'_> {
                     }
                 }
                 _ => match &mut callee {
-                    ast::Expr::Attribute(attr) => {
+                    ast::Expr::Attribute(attr) => 'method: {
                         let unbound = if attr
                             .value
                             .as_name_expr()
@@ -681,6 +732,16 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
+                            // Sealed poll methods have no property lookup or user callback.
+                            if self.locals[slot] == Type::Poll
+                                && matches!(
+                                    attr.attr.as_str(),
+                                    "poll" | "register" | "modify" | "unregister"
+                                )
+                            {
+                                *attr.value = root;
+                                break 'method attr.attr.to_string();
+                            }
                             let Type::Class(owner) = self.locals[slot] else {
                                 return Err(error(
                                     self.source,

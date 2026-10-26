@@ -28,7 +28,7 @@ impl Checker<'_> {
             args.values.push(if index == 0 {
                 self.expr(expression)?
             } else {
-                self.cursor_index(expression)?
+                self.integer_index(expression)?
             });
         }
         let object =
@@ -49,7 +49,7 @@ impl Checker<'_> {
                 .arguments
                 .args
                 .iter()
-                .map(|node| self.cursor_index(node))
+                .map(|node| self.integer_index(node))
                 .collect::<Result<Vec<_>, _>>()?;
             let args = match args.as_slice() {
                 [stop] => vec![pipelines::integer(0), stop.clone(), pipelines::integer(1)],
@@ -285,7 +285,7 @@ impl Checker<'_> {
             ));
         }
         let default = if let Some(default) = default {
-            self.cursor_index(default)?
+            self.integer_index(default)?
         } else {
             pipelines::integer(0)
         };
@@ -295,8 +295,12 @@ impl Checker<'_> {
         })
     }
 
-    fn cursor_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn integer_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
+        self.index_value(value, node)
+    }
+
+    pub(super) fn index_value(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == Type::Bool {
             return Ok(Expr {
                 ty: Type::Int,

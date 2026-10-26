@@ -35,6 +35,8 @@ For the eleven host-driven methods, compiled Imre code shares the host process's
 
 Run `native_descriptors.py` and `host_descriptors.py` here with the pinned reference interpreter. Both accept `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and an optional `--cpython-source`. Each run uses temporary fixtures. Host-driven calls expose only explicitly routed operations. An absent bridge operation fails the test.
 
+The two [Linux pipe2 methods](PIPE2.md) are separate from the 23 descriptor methods above.
+
 ## Structured OS errors
 
 For a failed descriptor operation, the compiled entry returns the caught OS exception subclass, errno and strerror. The host checks the class before it raises the transported error for the upstream assertions. File errors retain the original str or bytes object; the runtime ownership test covers a second filename and a bytes path containing 0xff.
@@ -90,13 +92,13 @@ work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
 that fixture requirement. Other first errors belong to upstream case helpers,
 such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
 diagnostic describes the first failed build step, not the result of running the
-method. The [canonical rollup](../native_report.py) counts 21 native bodies with
-host fixtures, 20 host-driven native operations, one mixed body, 441 blockers,
+method. The [canonical rollup](../native_report.py) counts 27 native bodies with
+host fixtures, 15 host-driven native operations, two mixed bodies, 439 blockers,
 five private reference-only cases, and 91 upstream skips at each level.
 
 To refresh these diagnostics, run `method_preflight.py` twice with the same
 `--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
 `--opt-level 0|3` and a distinct `--result`. Pass both files to
 `evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
-CI independently reruns the 42 exercised methods at both levels and
+CI independently reruns the 44 exercised methods at both levels and
 compares their results with the denominator reports.

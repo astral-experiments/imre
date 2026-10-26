@@ -6,7 +6,6 @@ use std::thread;
 
 use super::*;
 use crate::StorageCell;
-use crate::objects::acquire_rc;
 
 type Captured = (ExitStatus, Vec<u8>, Vec<u8>);
 
@@ -29,8 +28,8 @@ unsafe fn wait_for_process(handle: *const Object) -> bool {
         return true;
     }
     // SAFETY: the compiler roots this exact process through the await.
-    let owner: Rc<Object> = unsafe { acquire_rc(handle as usize) };
-    ready(&owner) || asyncio::suspend(Box::new(move || ready(&owner)))
+    let owner: crate::ObjectOwner = unsafe { crate::ObjectOwner::acquire_word(handle as usize) };
+    ready(&owner) || asyncio::suspend(Rc::new(move || ready(&owner))).is_none()
 }
 
 pub(in crate::objects) struct AsyncProcess {
@@ -105,7 +104,15 @@ pub unsafe extern "C" fn imre_async_process_spawn(
     stderr: u32,
 ) -> *const Object {
     // SAFETY: the exact argv stays rooted during this arity check.
-    if unsafe { object(args).0.with(|s| s.sequence().values.is_empty()) } {
+    let empty = unsafe {
+        object(args)
+            .0
+            .with(|s| s.sequence().map(|words| words.values.is_empty()))
+    };
+    if match empty {
+        Ok(empty) => empty,
+        Err(error) => return error.returning(std::ptr::null()),
+    } {
         return Error::new(
             Kind::TypeError,
             "create_subprocess_exec() missing 1 required positional argument: 'program'",
@@ -116,9 +123,9 @@ pub unsafe extern "C" fn imre_async_process_spawn(
     let result = unsafe { prepare_process(args, cwd, env) }
         .and_then(|(launch, cwd)| AsyncProcess::spawn(launch, cwd.as_ref(), stdout, stderr))
         .map(|process| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::AsyncProcess(
-                Box::new(process),
-            )))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::AsyncProcess(Box::new(process)),
+            ))))
         });
     finish(result, std::ptr::null())
 }
@@ -179,7 +186,7 @@ pub unsafe extern "C" fn imre_async_process_communicate(
                 .enumerate()
             {
                 let owner: *const Bytes = if captured {
-                    Rc::into_raw(Rc::new(std::mem::take(bytes)))
+                    crate::BytesOwner::into_raw(crate::BytesOwner::new(std::mem::take(bytes)))
                 } else {
                     std::ptr::null()
                 };

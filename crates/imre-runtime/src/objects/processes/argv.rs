@@ -1,7 +1,59 @@
-//! Convert rooted Python command objects into independent, NUL-checked exec arguments.
+//! Inspect original Python argument objects for command-line quoting and Unix exec.
 
 use super::*;
 use crate::objects::records::descriptor;
+
+/// Escape a single argument using the Microsoft C runtime's quote and backslash rules.
+/// A trailing backslash needs an extra copy only when we add a closing quote.
+fn quote_argument(text: &str) -> Result<Str> {
+    let quoted = text.is_empty() || text.contains([' ', '\t']);
+    let mut output = String::new();
+    // Plain text is copied once. Reserve any extra escapes before emitting them.
+    output
+        .try_reserve(text.len().saturating_add(2 * usize::from(quoted)))
+        .map_err(|_| Error::allocation())?;
+    let mut slashes = 0;
+    if quoted {
+        output.push('"');
+    }
+    for (offset, ch) in text.char_indices() {
+        if ch == '\\' {
+            slashes += 1;
+        } else {
+            if ch == '"' {
+                output
+                    .try_reserve((text.len() - offset).saturating_add(slashes + 1))
+                    .map_err(|_| Error::allocation())?;
+                output.extend(std::iter::repeat_n('\\', slashes + 1));
+            }
+            slashes = 0;
+        }
+        output.push(ch);
+    }
+    if quoted {
+        output
+            .try_reserve(slashes + 1)
+            .map_err(|_| Error::allocation())?;
+        output.extend(std::iter::repeat_n('\\', slashes));
+        output.push('"');
+    }
+    Ok(Str::from(output))
+}
+
+/// # Safety
+/// The compiler roots the result of os.fspath (str, bytes or their union) for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_subprocess_quote_argument(word: usize, kind: u32) -> *const Str {
+    // SAFETY: path protocol callbacks run before this borrow, and quoting does not call user code.
+    let result = unsafe {
+        with_bytes(word, WordKind::new(kind), |bytes| {
+            let text = std::str::from_utf8(bytes)
+                .map_err(|error| crate::objects::bytes::decode_error(bytes, error))?;
+            quote_argument(text).map(|value| crate::StrOwner::into_raw(crate::StrOwner::new(value)))
+        })
+    };
+    finish(result, std::ptr::null())
+}
 
 /// Borrow argv[0] and its descriptor while the original command stays rooted.
 pub(super) fn first(cmd: &OwnedWord) -> Option<(usize, WordKind)> {
@@ -94,22 +146,25 @@ pub(super) unsafe fn with_bytes<T>(word: usize, kind: WordKind, f: impl FnOnce(&
 
 /// Subprocess exception messages interpolate str(cmd), which differs from repr
 /// for a standalone string or Path. Lists and tuples keep their normal repr.
-pub(super) fn display(cmd: &OwnedWord) -> String {
+pub(super) fn message_prefix(cmd: &OwnedWord) -> std::result::Result<String, fmt::Error> {
+    let mut text = String::new();
+    let mut output = ReprWriter(&mut text);
+    output.write_str("Command '")?;
     // SAFETY: formatting cannot mutate the closed, acyclic command object.
     unsafe {
         if cmd.kind.raw() == 3 {
-            return (&*(cmd.word as *const Str)).as_str().to_owned();
-        }
-        if cmd.kind.raw() == 5
-            && let Some(path) = object(cmd.word as *const Object).0.with(|s| {
+            output.write_str((&*(cmd.word as *const Str)).as_str())?;
+        } else if cmd.kind.raw() == 5
+            && let Some(result) = object(cmd.word as *const Object).0.with(|s| {
                 matches!(s, Storage::Path { .. } | Storage::PurePath(_))
-                    .then(|| s.path().to_owned())
+                    .then(|| output.write_str(s.path()))
             })
         {
-            return path;
+            result?;
+        } else {
+            crate::objects::values::try_write_repr(&mut output, cmd.word, cmd.kind)?;
         }
-        let mut text = String::new();
-        crate::objects::values::write_repr(&mut text, cmd.word, cmd.kind);
-        text
     }
+    output.write_char('\'')?;
+    Ok(text)
 }

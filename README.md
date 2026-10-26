@@ -19,6 +19,23 @@ $ ./hello
 Hello, world!
 ```
 
+You can also run the file or a command string directly. Both compile to native code.
+
+```console
+$ imre hello.py
+Hello, world!
+$ imre -I -B -c 'import sys; print(sys.implementation.name)'
+imre
+$ uv python find imre
+/path/to/bin/imre
+$ uv run --python imre hello.py
+Hello, world!
+```
+
+For discovery, put `imre` on `PATH`. Stock uv runs its Python probe under Imre
+to find the executable. For building and installing extension wheels, see the
+[uv build instructions](docs/extensions.md#build-with-uv).
+
 > [!WARNING]
 > This README includes human edits; all code changes, PR summaries, and additional
 > documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
@@ -29,6 +46,9 @@ Hello, world!
 Imre compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
+The [standard library support table](docs/stdlib.md) lists the operations and
+CPython test coverage for each module.
+
 For a complete example, Imre can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
@@ -37,13 +57,14 @@ Imre also runs Ruff’s original memory reporter. It compares saved JSON capture
 or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
 [Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
 
-Imre builds Ruff’s ecosystem checker from its original Python package. It clones
-58 repositories and compares the diagnostics from two Ruff binaries.
-[Run the ecosystem checker](examples/ruff_ecosystem/README.md#run-the-original-check-command).
+Imre builds Ruff’s ecosystem reporter from its original Python package. One
+executable compares two Ruff versions on 58 repositories: `check` reports
+diagnostic changes and `format` renders the Git patches between their outputs.
+[Run the ecosystem reporter](examples/ruff_ecosystem/README.md#run-the-original-commands).
 
 Imre supports:
 
-- Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)
+- Statically resolved imports, including [native wheels built with setuptools or scikit-build-core](docs/extensions.md)
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations
@@ -55,6 +76,8 @@ Imre supports:
 - Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.
+- Use IPv4 TCP sockets on POSIX: bind and accept local connections, connect, exchange bytes, duplicate sockets, and control descriptor blocking and inheritance.
+- Serve one blocking TCP request with [socketserver.TCPServer](benchmarks/cpython_stdlib/full/socketserver/README.md) and a Python handler subclass.
 - Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:

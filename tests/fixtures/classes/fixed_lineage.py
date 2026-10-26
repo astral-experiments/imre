@@ -18,6 +18,38 @@ class Entry:
         return Entry(**{**dataclasses.asdict(self), "enabled": True})
 
 
+class Result:
+    def value(self) -> bool | int | None:
+        return 17
+
+
+class Missing(Result):
+    def value(self) -> None:
+        return None
+
+
+class FalseResult(Result):
+    def value(self) -> bool:
+        return False
+
+
+class ZeroResult(Result):
+    def value(self) -> int:
+        return 0
+
+
+def observe_result(result: Result) -> None:
+    value = result.value()
+    if value is None:
+        print("missing")
+    elif isinstance(value, bool):
+        print("boolean")
+        print(value)
+    else:
+        print("integer")
+        print(value)
+
+
 class Rows(ABC):
     def __init__(self, lines: Iterable[str]) -> None:
         self.lines = list(lines)
@@ -135,3 +167,8 @@ def run() -> None:
 
 
 run()
+
+observe_result(Result())
+observe_result(Missing())
+observe_result(FalseResult())
+observe_result(ZeroResult())

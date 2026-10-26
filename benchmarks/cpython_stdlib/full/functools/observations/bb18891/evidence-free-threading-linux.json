@@ -1,0 +1,38 @@
+[
+{
+  "schema": "imre.cpython-stdlib.native-evidence/v1",
+  "suite": "test.test_free_threading.test_functools",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "opt_level": 0,
+  "denominator": 4,
+  "distinct_ids": 4,
+  "counts": {
+    "blocked": 4
+  },
+  "records": [
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded", "occurrence": 1, "opt_level": 0, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 0, "method_sha256": "15b0e5a9b5d7c54ed63f45cd1e75c1a62388e0527cabe3bf4acf6105c2ae0b1f", "worker_method": "_test_concurrent_operations", "worker_sha256": "c0c9520955a6e40456d0f8b63493671edfa3076716b2d5922c7ebad7d591df01"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded", "occurrence": 1, "opt_level": 0, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 0, "method_sha256": "5ffa85661b05485d1b787da76d48462dd50883eca6a6cd5ec33b72663e2a924c", "worker_method": "_test_concurrent_operations", "worker_sha256": "c0c9520955a6e40456d0f8b63493671edfa3076716b2d5922c7ebad7d591df01"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded", "occurrence": 1, "opt_level": 0, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 0, "method_sha256": "8b76b8b527520854f54f3f4e8dfc2117ea3fe7255c06ad13458a9df459eaebaa", "worker_method": "_test_reentrant_cache_clear", "worker_sha256": "4fc9eed3cacc3e25635a56847675acd5b22054186e33910ec966d28d34f8facc"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded", "occurrence": 1, "opt_level": 0, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 0, "method_sha256": "2133c396d2d20cf168ed39c2afa9a379202c5e2d137e8efad18d2b3dec4e88ae", "worker_method": "_test_reentrant_cache_clear", "worker_sha256": "4fc9eed3cacc3e25635a56847675acd5b22054186e33910ec966d28d34f8facc"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"}
+  ]
+},
+{
+  "schema": "imre.cpython-stdlib.native-evidence/v1",
+  "suite": "test.test_free_threading.test_functools",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "opt_level": 3,
+  "denominator": 4,
+  "distinct_ids": 4,
+  "counts": {
+    "blocked": 4
+  },
+  "records": [
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_bounded", "occurrence": 1, "opt_level": 3, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 3, "method_sha256": "15b0e5a9b5d7c54ed63f45cd1e75c1a62388e0527cabe3bf4acf6105c2ae0b1f", "worker_method": "_test_concurrent_operations", "worker_sha256": "c0c9520955a6e40456d0f8b63493671edfa3076716b2d5922c7ebad7d591df01"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_concurrent_operations_unbounded", "occurrence": 1, "opt_level": 3, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 3, "method_sha256": "5ffa85661b05485d1b787da76d48462dd50883eca6a6cd5ec33b72663e2a924c", "worker_method": "_test_concurrent_operations", "worker_sha256": "c0c9520955a6e40456d0f8b63493671edfa3076716b2d5922c7ebad7d591df01"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_bounded", "occurrence": 1, "opt_level": 3, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 3, "method_sha256": "8b76b8b527520854f54f3f4e8dfc2117ea3fe7255c06ad13458a9df459eaebaa", "worker_method": "_test_reentrant_cache_clear", "worker_sha256": "4fc9eed3cacc3e25635a56847675acd5b22054186e33910ec966d28d34f8facc"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"},
+    {"id": "test.test_free_threading.test_functools.TestLRUCache.test_reentrant_cache_clear_unbounded", "occurrence": 1, "opt_level": 3, "fixture_variant": "CPython 3.14.5 free-threading build, GIL disabled; original working-threading class decorator", "reference": "pass", "outcome": "blocked", "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:1:1: Imre: standard-library imports and shadowing are unsupported: \"random\"", "evidence": {"compiler_commit": "bb188911d7fa2fcabc2817fda9dd384423f3a008", "opt_level": 3, "method_sha256": "2133c396d2d20cf168ed39c2afa9a379202c5e2d137e8efad18d2b3dec4e88ae", "worker_method": "_test_reentrant_cache_clear", "worker_sha256": "4fc9eed3cacc3e25635a56847675acd5b22054186e33910ec966d28d34f8facc"}, "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "blocked"}
+  ]
+}
+]

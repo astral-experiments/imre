@@ -1,0 +1,382 @@
+{
+  "schema": "imre.subprocess.active-controls/v1",
+  "imre_revision": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+  "tested_tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+  "toolchain": {
+    "imre": "67c43b24d625367586cd592406e2189e543b04985961f276ef2c3a469e75481f",
+    "runtime": "096e155136cb1d9df08a753fae714190465c9eb15d41b9f0e7ed36a8d2a1d7ae",
+    "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "retained_objects": [
+    {
+      "commit": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+      "tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+      "level": "0",
+      "native_control_sha256": "b5d8214c56ba66b3481612c9ab2e58046c1fc7434b93dc9725f99bbad9be8e80",
+      "native_control_stdout": "retained original Popen objects, reaped on failed and successful launches",
+      "original_receipt_sha256": "16611935f621b97057c174bd8b5789391ebd6769990aebce6d3d1ad17502a3c2",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import time;time.sleep(3)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": -9,
+          "fixture_waitpid_errno": 10,
+          "failed_launch_errno": 2,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        },
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import sys, time;time.sleep(0.2)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            1,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": 0,
+          "fixture_waitpid_errno": null,
+          "failed_launch_errno": null,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        }
+      }
+    },
+    {
+      "commit": "c6a2c4b4d870e8ccbaa296f0fd18ea585e87d511",
+      "tree": "d0785aeda2d2799bfdba1e2247d3ac09282fe19a",
+      "level": "3",
+      "native_control_sha256": "61688d604af3b3ba6fee71ab180ec0877bf234932077091077b1b0d6ee289165",
+      "native_control_stdout": "retained original Popen objects, reaped on failed and successful launches",
+      "original_receipt_sha256": "66384bb0e2ac52a734b63e8b635d4bef7edf90e9330cbf06cc8bf201d5327625",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import time;time.sleep(3)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": -9,
+          "fixture_waitpid_errno": 10,
+          "failed_launch_errno": 2,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        },
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import sys, time;time.sleep(0.2)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            1,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": 0,
+          "fixture_waitpid_errno": null,
+          "failed_launch_errno": null,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        }
+      }
+    }
+  ],
+  "waits": [
+    {
+      "opt_level": 0,
+      "parent_sha256": "ad5ebf8010dfed80316c84346fe02a488218e4f0ca3f1097e6d325f754fc0ace",
+      "modes": {
+        "wait": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        },
+        "poll": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "parent_sha256": "a871c496de3ec21b24dfe695698f29c62588cc77369704defd760a3deb792d39",
+      "modes": {
+        "wait": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        },
+        "poll": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        }
+      }
+    }
+  ],
+  "adjacent_streams": [
+    {
+      "level": 0,
+      "rows": {
+        "string-io-identity": {
+          "native_sha256": "76265e46db68351db7ce6c5cc9f02a3cb096df773a981e3fd1d7b51a191841ad",
+          "stdout": [
+            "True",
+            "True"
+          ],
+          "files": {}
+        },
+        "popen-buffer-size": {
+          "native_sha256": "35ed9aee56f4cdb86e56416141bc4b07920d8868eb6a3718694ef9f1b29cbefd",
+          "stdout": [
+            "0",
+            "True",
+            "True",
+            "True",
+            "6",
+            "b'before:2345:error:after'",
+            "True",
+            "True",
+            "b'ABC'",
+            "0",
+            "text",
+            "b'ok'",
+            "b'bytes'",
+            "0",
+            "evaluated stdout",
+            "stdout and stderr arguments may not be used with capture_output.",
+            "I/O operation on closed file",
+            "closed descriptor",
+            "invalid stdin merge",
+            "True",
+            "True",
+            "True",
+            "False",
+            "0",
+            "0",
+            "Python int too large to convert to C int",
+            "I/O operation on closed file",
+            "embedded NUL in the command",
+            "I/O operation on closed file",
+            "oversized descriptor",
+            "oversized descriptor with cwd",
+            "invalid executable",
+            "oversized descriptor with cwd",
+            "posix_spawn: argv must not be empty",
+            "0"
+          ],
+          "files": {
+            "redirect-input": "2224512ef44a62e580bb1c0dcb33aff688f4e7da8a488aeb4e7ca402c5cacf45",
+            "redirect-output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      }
+    },
+    {
+      "level": 3,
+      "rows": {
+        "string-io-identity": {
+          "native_sha256": "e1279dff983cbd23b85d297493b4108baaba0bcbf7863556dec1c943ee7b72e3",
+          "stdout": [
+            "True",
+            "True"
+          ],
+          "files": {}
+        },
+        "popen-buffer-size": {
+          "native_sha256": "d83134ccc5f29923c33cd1e912f5f94ad946de1d7aca1af7ab627d0da05967b7",
+          "stdout": [
+            "0",
+            "True",
+            "True",
+            "True",
+            "6",
+            "b'before:2345:error:after'",
+            "True",
+            "True",
+            "b'ABC'",
+            "0",
+            "text",
+            "b'ok'",
+            "b'bytes'",
+            "0",
+            "evaluated stdout",
+            "stdout and stderr arguments may not be used with capture_output.",
+            "I/O operation on closed file",
+            "closed descriptor",
+            "invalid stdin merge",
+            "True",
+            "True",
+            "True",
+            "False",
+            "0",
+            "0",
+            "Python int too large to convert to C int",
+            "I/O operation on closed file",
+            "embedded NUL in the command",
+            "I/O operation on closed file",
+            "oversized descriptor",
+            "oversized descriptor with cwd",
+            "invalid executable",
+            "oversized descriptor with cwd",
+            "posix_spawn: argv must not be empty",
+            "0"
+          ],
+          "files": {
+            "redirect-input": "2224512ef44a62e580bb1c0dcb33aff688f4e7da8a488aeb4e7ca402c5cacf45",
+            "redirect-output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      }
+    }
+  ],
+  "exception_abi": {
+    "0": [
+      "0 tests/fixtures/processes/exception_handlers.py 9163ea6575bf14a885c69864e19a586d16d85c686c19bf3d96b70e6b2c010948 CPython and linked Imre: 7",
+      "0 benchmarks/cpython_stdlib/full/subprocess/exception_abi_integration.py 2c8d58d4f26d74368029425050853e581897c5783a338ad1ee2d006c8822bc20 CPython and linked Imre: 5",
+      "0 benchmarks/cpython_stdlib/full/shutil/csv_exception_handlers.py 07b20460ff72f2038d052f57835eaea6c4f509b1fc49b71859055984ef946307 CPython and linked Imre: 7"
+    ],
+    "3": [
+      "3 tests/fixtures/processes/exception_handlers.py 9163ea6575bf14a885c69864e19a586d16d85c686c19bf3d96b70e6b2c010948 CPython and linked Imre: 7",
+      "3 benchmarks/cpython_stdlib/full/subprocess/exception_abi_integration.py 2c8d58d4f26d74368029425050853e581897c5783a338ad1ee2d006c8822bc20 CPython and linked Imre: 5",
+      "3 benchmarks/cpython_stdlib/full/shutil/csv_exception_handlers.py 07b20460ff72f2038d052f57835eaea6c4f509b1fc49b71859055984ef946307 CPython and linked Imre: 7"
+    ]
+  },
+  "warnings": {
+    "oracle": {
+      "pids": {
+        "default": 634316,
+        "live": 634317,
+        "exited": 634321,
+        "waited": 634322,
+        "polled": 634323,
+        "other-category": 634325,
+        "ignored": 634326
+      },
+      "emitted": [
+        634317,
+        634321,
+        634325
+      ]
+    },
+    "0": {
+      "pids": {
+        "default": 634677,
+        "live": 634678,
+        "exited": 634679,
+        "waited": 634680,
+        "polled": 634681,
+        "other-category": 634684,
+        "ignored": 634685
+      },
+      "emitted": [
+        634678,
+        634679,
+        634684
+      ],
+      "native_parent": 634675,
+      "actor_sha256": "9c8aa340916048dd6403392a9b71d07a772dd1675317f1cda39087f95d193fcb"
+    },
+    "3": {
+      "pids": {
+        "default": 635419,
+        "live": 635420,
+        "exited": 635421,
+        "waited": 635422,
+        "polled": 635423,
+        "other-category": 635425,
+        "ignored": 635427
+      },
+      "emitted": [
+        635420,
+        635421,
+        635425
+      ],
+      "native_parent": 635418,
+      "actor_sha256": "cb5592ed778ee22b7b83cffa8174544d96534553a401e5857e34f47a43c96644"
+    }
+  }
+}

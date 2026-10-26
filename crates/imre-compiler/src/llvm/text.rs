@@ -69,6 +69,9 @@ impl Emitter<'_, '_> {
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }
+            TextOperation::Upper => {
+                self.checked_instruction(format!("call ptr @imre_str_upper(ptr {source})"))
+            }
             TextOperation::Capitalize => {
                 self.checked_instruction(format!("call ptr @imre_str_capitalize(ptr {source})"))
             }

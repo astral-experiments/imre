@@ -53,3 +53,10 @@ try:
     str.rstrip([42])
 except TypeError as error:
     print(error)
+
+
+# Mark boundaries on both sides of Unicode 16 letter ranges.
+for code in [0x1C88, 0x1C89, 0x1C8A, 0x1C8B, 0x16E9F, 0x16EA0, 0x10FFFF]:
+    text = chr(code)
+    print(text.isalnum())
+    print(("a" + text + "9").isalnum())
