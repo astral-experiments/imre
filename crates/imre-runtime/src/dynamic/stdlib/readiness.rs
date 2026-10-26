@@ -41,11 +41,12 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     let fields = ctx.alloc(Value::Tuple(names.to_vec()));
     ctx.bind(class_scope, "__annotations__", annotations);
     ctx.bind(class_scope, "_fields", fields);
-    let base = ctx.alloc(Value::Native("typing.NamedTuple".into()));
+    let base = ctx.builtin("typing.NamedTuple");
+    let ancestors = ctx.lineage(base);
     let key = ctx.alloc(Value::Class {
         name: "SelectorKey".into(),
         scope: class_scope,
-        bases: vec![base],
+        ancestors,
     });
     ctx.bind(scope, "SelectorKey", key);
 }
