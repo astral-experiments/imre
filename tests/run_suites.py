@@ -2,6 +2,7 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,7 +11,9 @@ import time
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workers", type=int, default=4)
+    cpu_count = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    parser.add_argument("--workers", type=int, default=min(4, cpu_count),
+                        help="number of suites to run at once (default: available CPUs, up to 4)")
     parser.add_argument("--log-dir", required=True, type=Path)
     parser.add_argument("--suites", nargs="+", required=True)
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
