@@ -71,14 +71,17 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             let flags = u32::from(metadata.dataclass_eq)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
-                | (u32::from(metadata.value_struct) << 3);
+                | (u32::from(metadata.value_struct) << 3)
+                | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4);
             // The runtime walks the physical layout. Hidden cache and shadow fields
             // own their payloads, but have no public name, equality, or repr role.
             let layout = (0..module.class_fields[class].len()).map(|index| {
                 metadata.fields.get(index).map_or(("", 0), |field| {
                     (
                         field.name.as_str(),
-                        u32::from(field.compare) | (u32::from(field.repr) << 1),
+                        u32::from(field.compare)
+                            | (u32::from(field.repr) << 1)
+                            | (u32::from(field.repr_text) << 2),
                     )
                 })
             });
