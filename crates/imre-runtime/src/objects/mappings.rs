@@ -1340,14 +1340,20 @@ impl Set {
     }
 
     /// Transfer exact string keys into a new, immutable set.
-    fn frozen_strings(keys: impl Iterator<Item = Result<OwnedWord, Error>>) -> Result<crate::ObjectOwner, Error> {
+    fn frozen_strings(
+        keys: impl Iterator<Item = Result<OwnedWord, Error>>,
+    ) -> Result<crate::ObjectOwner, Error> {
         let mut tables = Tables::new(3);
         for key in keys {
             tables.insert(key?, ())?;
         }
-        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(
-            TableOwner::new(Self { tables, frozen: true }),
-        )))).map_err(|_| Error::allocation())
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(TableOwner::new(
+            Self {
+                tables,
+                frozen: true,
+            },
+        )))))
+        .map_err(|_| Error::allocation())
     }
 
     /// Deep-copy admission proves each set member is unchanged by deepcopy.
@@ -2683,7 +2689,9 @@ pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
                 let text = Str::try_new(name).map_err(|_| Error::allocation())?;
                 let key = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
                 // SAFETY: transfer the newly owned native string to the set.
-                Ok(unsafe { OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3)) })
+                Ok(unsafe {
+                    OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
+                })
             });
         match Set::frozen_strings(keys) {
             Ok(names) => crate::ObjectOwner::into_raw(root.get_or_init(|| names).clone()),
@@ -2791,7 +2799,10 @@ pub unsafe extern "C" fn imre_key_union(
         }
     }
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Set(TableOwner::new(Set { tables: result, frozen: false })),
+        Storage::Set(TableOwner::new(Set {
+            tables: result,
+            frozen: false,
+        })),
     ))))
 }
 /// Builds an intersection directly from two key views or sets. The output owns
@@ -2910,7 +2921,11 @@ pub(super) unsafe fn set_add(value: *const Object, key: usize) -> Result<(), Err
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_set_discard(value: *const Object, key: usize) {
     // SAFETY: returned key owners remain independent of their former table slots.
-    let removed = unsafe { object(value).0.with_mut(|s| s.set_mut().mutable_tables("discard")?.remove(key)) };
+    let removed = unsafe {
+        object(value)
+            .0
+            .with_mut(|s| s.set_mut().mutable_tables("discard")?.remove(key))
+    };
     if let Err(error) = removed {
         error.raise();
     }

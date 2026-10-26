@@ -1817,7 +1817,6 @@ fn annotation_with_aliases(
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
             "bytes" => Ok(Type::Bytes),
-            "type" => Ok(Type::BuiltinClass),
             "BaseException" | "Exception" => Ok(Type::Exception),
             "ImportError" => Ok(Type::ImportException),
             "object" => Ok(Type::ObjectValue),
@@ -6585,6 +6584,7 @@ impl<'a> Checker<'a> {
                         | Type::BuiltinClass
                         | Type::Path
                         | Type::PurePath(_)
+                        | Type::FrozenStrings
                         | Type::Set(_)
                         | Type::Deque(_)
                         | Type::SimpleNamespace(_)
