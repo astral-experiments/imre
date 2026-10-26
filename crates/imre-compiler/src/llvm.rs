@@ -5434,6 +5434,21 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsSeparator { alternate } => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_os_separator(i32 {})",
+                    u32::from(*alternate)
+                ));
+                Value {
+                    ty: returns,
+                    operand: if *alternate {
+                        self.instruction(format!("ptrtoint ptr {operand} to i64"))
+                    } else {
+                        operand
+                    },
+                    small_integer: false,
+                }
+            }
             Builtin::DocCaptureStart => {
                 self.checked_line("call void @imre_doctest_capture_start()");
                 none()
@@ -9716,6 +9731,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()
 declare ptr @imre_ascii_escape(ptr)

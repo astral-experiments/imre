@@ -34,6 +34,7 @@ impl Context {
             self.heap.get(value),
             Value::Class { .. }
                 | Value::Function { .. }
+                | Value::AttrGetter(_)
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -170,6 +171,7 @@ impl Context {
             | ("contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
+            | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
@@ -391,6 +393,7 @@ impl Context {
                 all.extend(args);
                 self.call(callable, all, kwargs)
             }
+            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()

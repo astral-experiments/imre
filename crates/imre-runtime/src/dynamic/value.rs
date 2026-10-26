@@ -177,10 +177,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
     },
     Native(String),
-    IoMethod {
-        owner: Id,
-        name: &'static str,
-    },
+    AttrGetter(std::rc::Rc<[Vec<String>]>),
     Raised(Error),
     Method {
         callable: Id,
@@ -199,6 +196,10 @@ pub(super) enum Value {
     Iterator {
         values: Vec<Id>,
         offset: usize,
+    },
+    IoMethod {
+        owner: Id,
+        name: &'static str,
     },
     File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
@@ -311,6 +312,7 @@ impl Value {
             | Self::ByteArray(_)
             | Self::Hash(_)
             | Self::Native(_)
+            | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
             | Self::RegexPattern(_)

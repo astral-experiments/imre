@@ -26,7 +26,14 @@ pub(in super::super) fn view_items(
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input {
-        if let Ok(source) = entries(ctx, input).map(<[_]>::to_vec) {
+        let source = match ctx.heap.get(input) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries.clone()),
+            Value::Context(bindings) => {
+                Some(bindings.iter().map(|(&key, &value)| (key, value)).collect())
+            }
+            _ => None,
+        };
+        if let Some(source) = source {
             for (key, value) in source {
                 ctx.put_item(dict, key, value)?;
             }

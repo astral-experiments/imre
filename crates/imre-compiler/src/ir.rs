@@ -973,6 +973,9 @@ pub(crate) enum Builtin {
     SysIntern,
     SysIsInterned,
     OsName,
+    OsSeparator {
+        alternate: bool,
+    },
     DocCaptureStart,
     DocCaptureTake,
     AsciiEscape,
