@@ -6407,6 +6407,9 @@ impl Emitter<'_, '_> {
             Builtin::DefaultRecordRepr => {
                 self.call("imre_record_default_repr", Type::Str, &[&args[0].value])
             }
+            Builtin::DecimalIntegerText => {
+                self.call("imre_decimal_int_text", Type::Str, &[&args[0].value])
+            }
             Builtin::Str => match args[0].value.ty {
                 Type::Path | Type::PurePath(_) => {
                     self.call("imre_path_text", Type::Str, &[&args[0].value])
@@ -9693,6 +9696,7 @@ declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @imre_int_str(i64)
+declare ptr @imre_decimal_int_text(i64)
 declare ptr @imre_bool_str(i32)
 declare ptr @imre_none_str()
 declare ptr @imre_text_open(ptr, i32, ptr)
