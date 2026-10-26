@@ -12,6 +12,7 @@ pub(super) mod ast;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
+mod email;
 mod files;
 mod fnmatch;
 mod functools;
@@ -51,6 +52,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "marshal"
             | "pickle"
             | "datetime"
+            | "email"
+            | "email.utils"
             | "time"
             | "hashlib"
             | "hmac"
@@ -349,6 +352,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
+        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
         | ("fnmatch", "filter")
@@ -390,6 +394,9 @@ pub(super) fn call(
         return readiness::call(ctx, method, args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
+    if let Some(function) = name.strip_prefix("email.utils.") {
+        return email::call(ctx, function, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
     }
