@@ -28,6 +28,7 @@ mod pickle;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
+mod traceback;
 pub(super) mod urllib;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -37,6 +38,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "codecs"
             | "types"
             | "io"
+            | "traceback"
             | "sysconfig"
             | "ast"
             | "os"
@@ -115,6 +117,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         text: None,
+        text_memory: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
@@ -211,6 +214,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let module = ctx.module("re")?;
             ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
         }
+        ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
@@ -503,6 +507,7 @@ pub(super) fn call(
         | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
+        "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
@@ -532,6 +537,7 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
             let id = option(args, 0, kwargs, "s")?
                 .ok_or_else(|| Error::new("TypeError", "missing required argument 's'"))?;

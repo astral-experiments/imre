@@ -442,11 +442,12 @@ impl Context {
         }
         value
     }
-    fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
-        self.heap.enter(scope);
+    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+        let entry = self.code_object(code).entry;
+        self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
-        let result = unsafe { code(self, scope) };
+        let result = unsafe { entry(self, scope) };
         self.heap.leave(result);
         self.pending.take().map_or(Ok(result), Err)
     }
@@ -595,13 +596,23 @@ impl Context {
             }
             _ => {}
         }
-        if let Some((path, code)) = source {
+        if let Some((path, entry)) = source {
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
                 let file = self.text(path.to_string_lossy());
                 self.bind(scope, "__file__", file);
             }
+            let filename = self.text(path.to_string_lossy());
+            let name_id = self.text("<module>");
+            let code = self.alloc(Value::Code(value::CodeObject {
+                entry,
+                parameters: NONE,
+                name: name_id,
+                filename,
+                first_line: 1,
+                module_definition: true,
+            }));
             if let Err(error) = self.execute(code, scope) {
                 self.modules.remove(name);
                 return Err(error);
