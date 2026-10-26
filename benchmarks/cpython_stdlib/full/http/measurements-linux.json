@@ -1,6 +1,6 @@
 {
-  "compiler_sha256": "79e9553bed214856383671488ebe8eee12364cb12c56cf3af0e0d7676399c07c",
-  "runtime_sha256": "19ff5b1fca1a82a0caad9fbcc461513de3d40e3694d379d74eed4db9147e0a14",
+  "compiler_sha256": "875d774c436d95c242acd6acecfe883ca3200328f0628699f5f1cae727823e04",
+  "runtime_sha256": "85262465beefa34bd0a6bc4e06d6e5642fc91e9f72c82893ae60b8a8cdfed1f0",
   "worker_sha256": "58da4fcc2de3741d05b5e2da832fd94054ecd8efc57d6fa08365336ec181b0af",
   "suites": {
     "httplib": [
@@ -326,7 +326,7 @@
         "hosted": {},
         "server": {
           "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
-          "contract_sha256": "d9b29a6631838964fdfcf096abd302e1f35651a433e18fd8e75b6c074980a371",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
           "host_cases": [
             "BaseHTTPServerTestCase.test_command",
             "BaseHTTPServerTestCase.test_request_line_trimming",
@@ -369,7 +369,7 @@
         "hosted": {},
         "server": {
           "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
-          "contract_sha256": "d9b29a6631838964fdfcf096abd302e1f35651a433e18fd8e75b6c074980a371",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
           "host_cases": [
             "BaseHTTPServerTestCase.test_command",
             "BaseHTTPServerTestCase.test_request_line_trimming",
@@ -412,7 +412,7 @@
         "hosted": {},
         "server": {
           "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
-          "contract_sha256": "d9b29a6631838964fdfcf096abd302e1f35651a433e18fd8e75b6c074980a371",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
           "host_cases": [
             "BaseHTTPServerTestCase.test_command",
             "BaseHTTPServerTestCase.test_request_line_trimming",
@@ -455,7 +455,7 @@
         "hosted": {},
         "server": {
           "source_sha256": "1114d2d0401a2fcee6c65a4b59510c570cd06b424a4c20e3a475569c1d4c98a6",
-          "contract_sha256": "d9b29a6631838964fdfcf096abd302e1f35651a433e18fd8e75b6c074980a371",
+          "contract_sha256": "684c5977570989107d2f61d4948f3e178ccdf65b6b88e8bac8b79dfd94f1a713",
           "host_cases": [
             "BaseHTTPServerTestCase.test_command",
             "BaseHTTPServerTestCase.test_request_line_trimming",
