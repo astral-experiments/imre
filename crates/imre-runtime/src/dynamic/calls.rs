@@ -366,6 +366,7 @@ impl Context {
                             "FileNotFoundError"
                                 | "PermissionError"
                                 | "IsADirectoryError"
+                                | "NotADirectoryError"
                                 | "BlockingIOError"
                                 | "TimeoutError"
                                 | "socket.gaierror"
@@ -416,20 +417,27 @@ impl Context {
             }
             Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::TextFile(file) if name == "closed" => {
+                return Ok(if file.closed() { TRUE } else { FALSE });
+            }
             Value::Raised(Error {
                 os_args: Some(args),
                 ..
-            }) if matches!(name, "errno" | "strerror" | "args") => {
-                let (code, description) = *args;
-                return Ok(match name {
-                    "errno" => self.int(code),
-                    "strerror" => self.text(description),
-                    _ => {
-                        let fields = vec![self.int(code), self.text(description)];
-                        self.alloc(Value::Tuple(fields))
+            }) => match name {
+                "errno" => return Ok(self.int(args.errno)),
+                "strerror" => return Ok(self.text(args.description)),
+                "args" => {
+                    let fields = vec![self.int(args.errno), self.text(args.description)];
+                    return Ok(self.alloc(Value::Tuple(fields)));
+                }
+                "filename" | "filename2" => {
+                    if let Some([first, second]) = args.text_paths {
+                        let path = if name == "filename" { first } else { second };
+                        return Ok(path.map_or(NONE, |path| self.text(path)));
                     }
-                });
-            }
+                }
+                _ => {}
+            },
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {

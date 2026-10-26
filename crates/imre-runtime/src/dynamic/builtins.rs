@@ -45,6 +45,8 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "BlockingIOError"
             | "TimeoutError"
             | "FileNotFoundError"
+            | "IsADirectoryError"
+            | "NotADirectoryError"
             | "PermissionError"
             | "AssertionError"
             | "MemoryError"
@@ -165,6 +167,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "socket.socket"
+        }
+        Value::TextFile(_)
+            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+        {
+            "TextIOWrapper"
         }
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
@@ -507,10 +514,14 @@ pub(super) fn call(
             let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
+            if matches!(mode, "w" | "wt" | "tw") {
+                let file = crate::objects::TextFile::create(path)?;
+                return Ok(ctx.alloc(Value::TextFile(file)));
+            }
             if mode != "rb" {
                 return Err(Error::new(
                     "ValueError",
-                    "only binary read mode is supported for dynamic files",
+                    "unsupported mode for dynamic files",
                 ));
             }
             let file = File::open(path).map_err(|e| {

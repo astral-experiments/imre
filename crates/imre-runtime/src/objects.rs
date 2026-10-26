@@ -32,6 +32,8 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
+mod text_file;
+pub(crate) use text_file::TextFile;
 pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
