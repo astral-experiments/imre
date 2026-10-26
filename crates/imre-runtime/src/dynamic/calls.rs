@@ -602,7 +602,9 @@ impl Context {
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
-            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame" | "complex") => {
+            Value::Native(class)
+                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float") =>
+            {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
                     "__module__" => return Ok(self.text("builtins")),

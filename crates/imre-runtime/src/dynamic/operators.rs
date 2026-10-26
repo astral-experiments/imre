@@ -390,14 +390,11 @@ impl Context {
                 scalar: Some(payload),
                 ..
             } => self.display(*payload),
-            Value::Bytes(bytes) => format!(
-                "b'{}'",
-                bytes
-                    .iter()
-                    .flat_map(|&x| std::ascii::escape_default(x))
-                    .map(char::from)
-                    .collect::<String>()
-            ),
+            Value::Bytes(bytes) => {
+                let mut output = String::new();
+                crate::objects::write_bytes_repr(&mut output, bytes);
+                output
+            }
             Value::ByteArray(bytes) => {
                 let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
                     '"'

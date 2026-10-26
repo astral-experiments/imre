@@ -7,6 +7,7 @@ use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod float;
 mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
@@ -100,6 +101,7 @@ const TYPES: &[&str] = &[
     "bytes",
     "complex",
     "dict",
+    "float",
     "frozenset",
     "int",
     "list",
@@ -934,6 +936,7 @@ pub(super) fn call(
             ctx.module(name.split('.').next().unwrap())
         }
         "complex" => ctx.new_complex(args, kwargs),
+        "float" => float::construct(ctx, args, kwargs),
         "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;

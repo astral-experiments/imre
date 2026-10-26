@@ -16,6 +16,7 @@ pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
 };
