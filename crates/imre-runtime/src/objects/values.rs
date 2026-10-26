@@ -562,6 +562,7 @@ unsafe fn write_repr_with(
     while let Some(task) = current.take().or_else(|| pending.pop()) {
         // SAFETY: each cursor carries the rooted container's concrete storage kind.
         if let Some((word, kind, marker)) = unsafe { task.recursive_container() }
+            // SAFETY: the current cursor keeps this container live while its guard takes a reference.
             && !unsafe { ReprGuard::enter(word, kind, &mut pending) }?
         {
             output.write_str(marker)?;
