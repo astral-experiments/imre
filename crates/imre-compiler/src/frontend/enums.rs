@@ -368,7 +368,7 @@ impl Checker<'_> {
                 matches!(
                     value.kind,
                     ExprKind::Builtin(Builtin::WrapperAttributes(_), _)
-                )
+                ) || self.is_partial_args(value)
             });
         // Namespace owners and their backing dictionaries are distinct rooted
         // objects. Optional storage preserves their pointer words and None tag.

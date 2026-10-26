@@ -22,8 +22,10 @@ its own capacity for eviction and for `cache_info()`.
 a fixed signature. Calls fill positional `functools.Placeholder` slots first.
 The partial can be returned, called repeatedly, or passed as a callback. Bound
 methods retain their receiver; captured mutable arguments keep their identity.
-Passing a placeholder last or as a keyword raises `TypeError`. Binding keyword
-defaults and inspecting a partial's attributes are not yet supported.
+Passing a placeholder last or as a keyword raises `TypeError`. A partial with a
+known original target retains its `func` and positional `args`; nested partials
+fill earlier placeholders in the public tuple. Public tuples containing callbacks
+and binding keyword defaults remain unsupported.
 
 | Area | Supported behavior |
 | --- | --- |

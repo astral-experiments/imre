@@ -721,7 +721,10 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
             Type::KnownInstance(KnownInstanceType::FunctoolsPartial(_))
         )
     };
-    if is_partial(callee) {
+    // A branch can choose partials with different bound arguments but the same native ABI.
+    if is_partial(callee)
+        || matches!(callee, Type::Union(union) if union.elements(db).iter().copied().all(is_partial))
+    {
         return rule == "too-many-positional-arguments"
             || (rule == "missing-argument" && call.range() == range);
     }
