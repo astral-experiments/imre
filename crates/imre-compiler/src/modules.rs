@@ -1891,6 +1891,7 @@ fn resolve_binding(
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
+const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -1918,6 +1919,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     module.symbol(name).or_else(|| {
         let implementation = match module {
             IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
+            IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -2690,6 +2692,13 @@ impl<'a> Loader<'a> {
                         .any(|a| a.name.as_str() == "AbstractContextManager")
                 }))
             .then_some((CONTEXTLIB_ABSTRACT, include_str!("../stdlib/contextlib.py"))),
+            (module == Some(IntrinsicModule::Contextlib)
+                && imports
+                    .is_none_or(|names| names.iter().any(|a| a.name.as_str() == "ExitStack")))
+            .then_some((
+                CONTEXTLIB_EXIT_STACK,
+                include_str!("../stdlib/contextlib_exitstack.py"),
+            )),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {
                     names
