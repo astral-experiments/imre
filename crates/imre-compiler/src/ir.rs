@@ -1170,6 +1170,7 @@ pub(crate) enum Builtin {
     SysArgv,
     OptionalStrConcat,
     SysOrigArgv,
+    CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
     SysGetRecursionLimit,
     GeneratorFrameEnter(String),

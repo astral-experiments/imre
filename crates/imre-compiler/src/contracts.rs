@@ -485,6 +485,7 @@ impl Builtin {
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
+            | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
