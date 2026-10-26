@@ -14,7 +14,7 @@ pub(in crate::dynamic) struct Pattern {
     pub(in crate::dynamic) source: String,
     pub(in crate::dynamic) flags: i64,
     regex: Regex,
-    full: OnceCell<std::result::Result<Regex, regex_automata::meta::BuildError>>,
+    full: OnceCell<std::result::Result<Regex, String>>,
 }
 
 impl Pattern {
@@ -26,10 +26,10 @@ impl Pattern {
         self.full
             .get_or_init(|| {
                 let source = python_escapes(&self.source, self.flags & ASCII != 0);
-                Regex::new(&format!(r"(?:{source})\z"))
+                Regex::new(&format!(r"(?:{source})\z")).map_err(|err| err.to_string())
             })
             .as_ref()
-            .map_err(|err| Error::new("re.error", err.to_string()))
+            .map_err(|message| Error::new("re.error", message.clone()))
     }
 }
 
