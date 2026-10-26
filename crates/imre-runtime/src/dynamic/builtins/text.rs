@@ -130,7 +130,7 @@ pub(super) fn construct(
         "bool" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 1)?;
-            Ok(boolean(args.first().is_some_and(|&id| ctx.truth(id))))
+            Ok(boolean(ctx.optional_truth(args.first().copied(), false)?))
         }
         "repr" => {
             positional(name, kwargs)?;

@@ -135,13 +135,7 @@ impl Context {
             "slice" => self.slice(a, b),
             "call" => {
                 let args = self.items(b)?;
-                let Value::Dict(entries) = self.heap.get(c) else {
-                    return Err(Error::new("TypeError", "expected keyword dict"));
-                };
-                let kwargs = entries
-                    .iter()
-                    .map(|&(k, v)| Ok((self.str_value(k)?.to_owned(), v)))
-                    .collect::<Result<Vec<_>>>()?;
+                let kwargs = self.keyword_args(c)?;
                 self.call(a, args, kwargs)
             }
             "class" => self.class(a, b, c),
@@ -151,7 +145,7 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "truth" => Ok(flag(self.truth(a))),
+            "truth" => Ok(flag(self.truth(a)?)),
             "iter" => {
                 let values = self.items(a)?;
                 Ok(self.alloc(Value::Iterator { values, offset: 0 }))
@@ -173,7 +167,7 @@ impl Context {
                 *offset += 1;
                 Ok(v)
             }
-            "not" => Ok(flag(!self.truth(a))),
+            "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" | "~" => {
                 let v = self.as_int(a)?;
                 let result = match op {
@@ -303,6 +297,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         token_missing: NONE,
         modules: HashMap::new(),
         classes: HashMap::new(),
+        builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
     };
@@ -481,6 +476,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
         ctx.modules
             .values()
             .chain(ctx.classes.values())
+            .chain(ctx.builtins.values())
             .copied()
             .chain(ctx.contexts.iter().copied())
             .chain(

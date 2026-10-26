@@ -19,8 +19,54 @@ impl Context {
             _ => None,
         }
     }
-    pub(super) fn truth(&self, id: Id) -> bool {
-        match self.heap.get(id) {
+    pub(super) fn optional_truth(&mut self, value: Option<Id>, default: bool) -> Result<bool> {
+        value.map_or(Ok(default), |id| self.truth(id))
+    }
+
+    pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
+        let Some(hook) = self.bound_slot(id, "__len__")? else {
+            return Ok(None);
+        };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        let length = if let Ok(integer) = self.as_int(value) {
+            integer
+        } else if let Some(index) = self.bound_slot(value, "__index__")? {
+            let result = self.call(index, Vec::new(), Vec::new())?;
+            self.as_int(result).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__index__ returned non-int (type {})",
+                        self.type_name(result)
+                    ),
+                )
+            })?
+        } else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "'{}' object cannot be interpreted as an integer",
+                    self.type_name(value)
+                ),
+            ));
+        };
+        let length = length
+            .to_i64()
+            .and_then(|n| isize::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "cannot fit 'int' into an index-sized integer",
+                )
+            })?;
+        if length < 0 {
+            return Err(Error::new("ValueError", "__len__() should return >= 0"));
+        }
+        Ok(Some(length as usize))
+    }
+
+    pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
+        Ok(match self.heap.get(id) {
             Value::None => false,
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
@@ -31,7 +77,7 @@ impl Context {
             | Value::Set(v)
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
-            Value::DictView { dict, .. } => self.truth(*dict),
+            Value::DictView { dict, .. } => return self.truth(*dict),
             Value::Context(bindings) => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
@@ -40,8 +86,25 @@ impl Context {
                     start > stop
                 }
             }
+            Value::Instance { .. } => {
+                if let Some(hook) = self.bound_slot(id, "__bool__")? {
+                    let value = self.call(hook, Vec::new(), Vec::new())?;
+                    let Value::Bool(result) = self.heap.get(value) else {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "__bool__ should return bool, returned {}",
+                                self.type_name(value)
+                            ),
+                        ));
+                    };
+                    *result
+                } else {
+                    self.instance_len(id)?.is_none_or(|len| len != 0)
+                }
+            }
             _ => true,
-        }
+        })
     }
     pub(super) fn equal(&self, a: Id, b: Id) -> bool {
         if a == b {
