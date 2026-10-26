@@ -95,3 +95,11 @@ def current():
         next(values)
     except UnboundLocalError as error:
         print(str(error), next(values, "closed"))
+
+    def relay(values):
+        yield from values
+
+    nested = [42]
+    for _ in range(6000):
+        nested = relay(nested)
+    print(next(nested), list(nested))
