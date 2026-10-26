@@ -29,7 +29,7 @@ impl FunctionFields {
             qualname,
             doc,
             annotate,
-            module: ctx.text(ctx.scope_data(scope).module.clone()),
+            module: ctx.function_module(scope),
             annotations: None,
             type_params: ctx.alloc(Value::Tuple(Vec::new())),
             dict: ctx.dict(Vec::new()),
@@ -51,6 +51,19 @@ impl FunctionFields {
 }
 
 impl Context {
+    fn function_module(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let root = self.scope_data(scope);
+        if let Some(globals) = root.globals {
+            return self
+                .dict_named_item(globals.dict, "__name__")
+                .unwrap_or(NONE);
+        }
+        self.text(root.module.clone())
+    }
+
     pub(super) fn function_attr(
         &mut self,
         fun: Id,
