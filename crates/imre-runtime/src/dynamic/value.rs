@@ -373,6 +373,7 @@ pub(super) enum Value {
         kind: &'static str,
         sequence: Option<Id>,
         offset: usize,
+        reverse: bool,
     },
     IoMethod {
         owner: Id,

@@ -25,6 +25,7 @@ struct SourceModule {
 
 enum IteratorSlice<'a> {
     Values(&'a [Id]),
+    Reversed(&'a [Id]),
     Bytes(&'a [u8]),
 }
 
@@ -32,7 +33,7 @@ impl IteratorSlice<'_> {
     /// Counts positions without allocating boxed integers for bytes.
     fn len(&self) -> usize {
         match self {
-            Self::Values(values) => values.len(),
+            Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
         }
     }
@@ -147,7 +148,10 @@ impl Context {
     /// Borrows the unconsumed part of the iterator's current sequence.
     fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
         let Value::Iterator {
-            sequence, offset, ..
+            sequence,
+            offset,
+            reverse,
+            ..
         } = self.heap.get(id)
         else {
             return Err(Error::new("TypeError", "expected iterator"));
@@ -156,6 +160,9 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
+            Value::List(values) if *reverse => {
+                IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
+            }
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
@@ -198,10 +205,18 @@ impl Context {
         }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
         };
-        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-            *offset += 1;
+        if let Value::Iterator {
+            offset, reverse, ..
+        } = self.heap.get_mut(id)
+        {
+            if *reverse {
+                *offset -= 1;
+            } else {
+                *offset += 1;
+            }
         }
         Ok(Some(item))
     }
@@ -241,6 +256,7 @@ impl Context {
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
                     IteratorSlice::Bytes(bytes) => {
                         let mut values = Vec::with_capacity(bytes.len());
                         while let Some(byte) = self.next_item(id)? {

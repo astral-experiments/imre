@@ -42,6 +42,7 @@ impl Context {
         Ok(self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
+            reverse: false,
             kind,
         }))
     }

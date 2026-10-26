@@ -85,7 +85,12 @@ pub(in crate::dynamic) fn attribute(
 ) -> Result<Id> {
     let class = value.class();
     match (class, name) {
-        ("datetime", "tzinfo") => return Ok(tzinfo),
+        ("datetime" | "time", "tzinfo") => return Ok(tzinfo),
+        ("time", _) => {
+            if let Some(i) = FIELDS[3..].iter().position(|s| *s == name) {
+                return Ok(ctx.int(value.clock_parts()[i]));
+            }
+        }
         ("date" | "datetime", "timetuple" | "toordinal" | "weekday")
         | ("timedelta", "total_seconds") => {
             let callable = ctx.builtin(&format!("datetime.{class}.{name}"));
@@ -124,6 +129,43 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match method {
+        "time" => time(ctx, args, kwargs),
+        "datetime.combine" => {
+            let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
+            let day = required(day, "combine()", "date", 1)?;
+            let invalid = |ctx: &Context, id: Id, pos: usize, class: &str| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "combine() argument {pos} must be datetime.{class}, not {}",
+                        if id == NONE {
+                            "None"
+                        } else {
+                            ctx.type_name(id)
+                        }
+                    ),
+                )
+            };
+            let day = match ctx.heap.get(day) {
+                Value::Calendar { value, .. } if matches!(value.class(), "date" | "datetime") => {
+                    value.clone()
+                }
+                _ => return Err(invalid(ctx, day, 1, "date")),
+            };
+            let clock = required(clock, "combine()", "time", 2)?;
+            let (clock, clock_tz) = match ctx.heap.get(clock) {
+                Value::Calendar { value, tzinfo } if value.class() == "time" => {
+                    (value.clone(), *tzinfo)
+                }
+                _ => return Err(invalid(ctx, clock, 2, "time")),
+            };
+            let tz = tz.unwrap_or(clock_tz);
+            Ok(store(
+                ctx,
+                day.combine(&clock, zone(ctx, tz)?.as_ref())?,
+                tz,
+            ))
+        }
         "timedelta" => {
             let args = bind(method, args, kwargs, UNITS)?;
             let mut units = std::array::from_fn(|_| CalendarNumber::Int(crate::Int::from(0)));
@@ -290,4 +332,68 @@ pub(super) fn call(
             format!("unknown datetime operation {method}"),
         )),
     }
+}
+
+/// Convert all integer-index operands before validating ranges and timezone, as in _datetime.
+fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["hour", "minute", "second", "microsecond", "tzinfo", "fold"];
+    let count = args.len() + kwargs.len();
+    if count > names.len() {
+        return Err(Error::new(
+            "TypeError",
+            format!("function takes at most 6 arguments ({count} given)"),
+        ));
+    }
+    if args.len() > 5 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "function takes at most 5 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let mut fields = [0; 5];
+    let mut tz = NONE;
+    for (i, name) in names.iter().enumerate() {
+        let value = args.get(i).copied().or_else(|| {
+            kwargs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, id)| *id)
+        });
+        if let Some(id) = value {
+            if *name == "tzinfo" {
+                tz = id;
+            } else {
+                fields[if i == 5 { 4 } else { i }] = Calendar::component(&ctx.index_integer(id)?)?;
+            }
+        }
+    }
+    for (key, _) in kwargs {
+        match names.iter().position(|name| name == key) {
+            Some(i) if i < args.len() => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "argument for function given by name ('{key}') and position ({})",
+                        i + 1
+                    ),
+                ));
+            }
+            None => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("this function got an unexpected keyword argument '{key}'"),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let local = Calendar::time_micros(fields)?;
+    Ok(store(
+        ctx,
+        Calendar::time(local, fields[4], zone(ctx, tz)?.as_ref())?,
+        tz,
+    ))
 }
