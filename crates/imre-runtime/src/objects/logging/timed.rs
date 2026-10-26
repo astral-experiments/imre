@@ -106,7 +106,7 @@ pub(super) fn overflow() -> Error {
     )
 }
 
-pub(super) fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
+pub(in crate::objects) fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
     let mut result = MaybeUninit::uninit();
     // SAFETY: the timestamp and properly sized result live through the reentrant libc call.
     let ptr = unsafe {
@@ -123,7 +123,7 @@ pub(super) fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
     Ok(unsafe { result.assume_init() })
 }
 
-pub(super) fn float_seconds(value: f64) -> Result<i64> {
+pub(in crate::objects) fn float_seconds(value: f64) -> Result<i64> {
     if value.is_nan() {
         return Err(Error::new(
             Kind::ValueError,

@@ -4360,6 +4360,17 @@ impl Emitter<'_, '_> {
                     Dictionary => {
                         self.call("imre_logrecord_dictionary", returns, &[&args[0].value])
                     }
+                    HasAttr => self.call(
+                        "imre_logrecord_hasattr",
+                        returns,
+                        &[&args[0].value, &args[1].value],
+                    ),
+                    FieldView => {
+                        let fallback = args.get(2).map_or("null", |arg| arg.value.operand.as_str());
+                        Value { ty: Type::ObjectValue, operand: self.checked_instruction(format!(
+                            "call ptr @imre_logrecord_field_view(ptr {}, ptr {}, ptr {fallback})",
+                            args[0].value.operand, args[1].value.operand)), small_integer: false }
+                    }
                     AddExtra => {
                         let mapping = self.word(&args[1].value);
                         self.checked_line(format!(
@@ -4661,6 +4672,10 @@ impl Emitter<'_, '_> {
             }
             Builtin::PercentFormat => {
                 let name = match args[1].value.ty {
+                    Type::Dict(_) => "imre_str_percent_dict",
+                    ty if self.module.types.element(ty) == Some(Type::ObjectValue) => {
+                        "imre_str_percent_pack"
+                    }
                     Type::Str => "imre_str_percent_text",
                     Type::Int => "imre_str_percent_int",
                     Type::Tuple(_) => {
@@ -4670,6 +4685,19 @@ impl Emitter<'_, '_> {
                     _ => unreachable!("checked percent operand"),
                 };
                 self.call(name, Type::Str, &[&args[0].value, &args[1].value])
+            }
+            Builtin::ClockParts(utc) => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let stamp = &args[0].value.operand;
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_clock_parts(double {stamp}, i1 {utc}, ptr @{layout})"
+                    )),
+                    small_integer: false,
+                }
             }
             Builtin::WallTime => self.call("imre_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("imre_json_empty_object", returns, &[]),
@@ -8735,6 +8763,7 @@ declare i64 @imre_async_loop_run(ptr, ptr)
 declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
+declare ptr @imre_clock_parts(double, i1, ptr)
 declare double @imre_wall_time()
 declare void @imre_warning_filter(ptr, ptr, ptr, ptr, ptr, i64, i32, i32, i32)
 declare void @imre_warning_reset()
@@ -8742,6 +8771,8 @@ declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, pt
 declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
 declare ptr @imre_str_percent_int(ptr,i64)
+declare ptr @imre_str_percent_pack(ptr,ptr)
+declare ptr @imre_str_percent_dict(ptr,ptr)
 declare ptr @imre_str_percent_text(ptr,ptr)
 declare ptr @imre_async_group()
 declare void @imre_async_group_enter(ptr)
@@ -9024,6 +9055,7 @@ declare void @imre_socket_listen(ptr, i64)
 declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
+declare ptr @imre_socket_getfqdn(ptr)
 declare ptr @imre_socket_sockname(ptr, ptr)
 declare ptr @imre_socket_recv(ptr, i64, i64)
 declare i64 @imre_socket_send(ptr, ptr, i64)
@@ -9613,6 +9645,8 @@ declare void @imre_formatter_set_default_msec(ptr,i64)
 declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
 declare ptr @imre_logrecord_dictionary(ptr)
+declare i1 @imre_logrecord_hasattr(ptr,ptr)
+declare ptr @imre_logrecord_field_view(ptr,ptr,ptr)
 declare void @imre_logrecord_extra(ptr, i64)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)
 declare void @imre_logrecord_put(ptr,ptr,i64,i32)

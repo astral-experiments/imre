@@ -27,6 +27,18 @@ class Inherited(Defaults):
     pass
 
 
+class C:
+    label = "first"
+
+
+class D(C):
+    label = "second"
+
+
+def label(value: C) -> str:
+    return value.label
+
+
 class Other:
     repeated = ("hi", "ß")
 
@@ -53,6 +65,10 @@ class Sequences:
 
 
 log: list[str] = []
+print(C.label)
+print(D.label)
+print(label(C()))
+print(label(D()))
 print(Defaults.text)
 print(Inherited.text)
 print(Inherited().read())

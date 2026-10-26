@@ -689,6 +689,12 @@ impl Types {
                     self.string_literal(strings)
                 }
             }
+            [dict @ Type::Dict(_), record @ Type::Class(id)]
+            | [record @ Type::Class(id), dict @ Type::Dict(_)]
+                if !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![*dict, *record])))
+            }
             choices @ [_, _, ..]
                 if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
                     && choices
@@ -1084,10 +1090,22 @@ impl Types {
 
     /// The percent formatter reads positional operands from an exact tuple's descriptor.
     pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
-        let Type::Tuple(id) = ty else { return false };
-        matches!(&self.0.borrow().shapes[id], Shape::Tuple(fields)
-            if fields.iter().all(|ty| matches!(ty,
-                Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::StrLiteral(_) | Type::Bytes)))
+        matches!(ty, Type::Tuple(_))
+            && self.tuple_origin(ty).is_none()
+            && self.fields(ty).is_some_and(|fields| {
+                fields.into_iter().all(|field| {
+                    matches!(
+                        field,
+                        Type::None
+                            | Type::Bool
+                            | Type::Int
+                            | Type::Float
+                            | Type::Str
+                            | Type::StrLiteral(_)
+                            | Type::Bytes
+                    ) || self.payload(field) == Some(Type::Str)
+                })
+            })
     }
 
     /// Stat results use ten visible integer slots and a separate tail for named attributes.

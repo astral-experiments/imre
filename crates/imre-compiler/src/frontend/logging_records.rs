@@ -256,15 +256,126 @@ impl Checker<'_> {
             }
             "lineno" => Type::Int,
             "created" | "relativeCreated" | "msecs" => Type::Float,
-            _ => {
+            "getMessage" => {
                 return Err(error(
                     self.source,
                     attr,
-                    "record field has no statically known representation",
+                    "a bound LogRecord method is not a data field",
+                ));
+            }
+            name if name.starts_with("__") && name.ends_with("__") => {
+                return Err(error(
+                    self.source,
+                    attr,
+                    "LogRecord class descriptor as a value",
+                ));
+            }
+            _ => {
+                return Ok(op(
+                    Op::FieldView,
+                    Type::ObjectValue,
+                    vec![record, text(name)],
                 ));
             }
         };
         Ok(op(Op::Read, ty, vec![record, text(name)]))
+    }
+
+    /// Bind reflection on a concrete LogRecord to the same field store used by formatters.
+    pub(super) fn record_namespace_builtin(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        let Some(record) = args.first().filter(|arg| arg.ty == Type::LogRecord) else {
+            return Ok(None);
+        };
+        let dictionary = || {
+            op(
+                Op::Dictionary,
+                self.types.dict(Type::Str, Type::ObjectValue),
+                vec![record.clone()],
+            )
+        };
+        if name == "vars" && args.len() == 1 {
+            self.reject_builtin_keywords(call)?;
+            return Ok(Some(dictionary()));
+        }
+        if !matches!((name, args.len()), ("hasattr", 2) | ("getattr", 2 | 3)) {
+            return Ok(None);
+        }
+        self.reject_builtin_keywords(call)?;
+        let key = &args[1];
+        if !matches!(key.ty, Type::Str | Type::StrLiteral(_)) {
+            let type_name = match key.ty {
+                Type::None => "NoneType",
+                Type::Bool => "bool",
+                Type::Int => "int",
+                Type::Float => "float",
+                Type::Bytes => "bytes",
+                Type::List(_) => "list",
+                Type::Dict(_) => "dict",
+                Type::Tuple(_) => "tuple",
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "LogRecord reflection needs a representable attribute name type",
+                    ));
+                }
+            };
+            // This exact call raises a native TypeError after evaluating its arguments.
+            if name == "getattr" {
+                self.graph.checked_overload(self.module, call.range());
+            }
+            let result = if name == "hasattr" {
+                Type::Bool
+            } else {
+                Type::ObjectValue
+            };
+            return self
+                .sys_type_error(
+                    call,
+                    result,
+                    format!("attribute name must be string, not '{type_name}'"),
+                )
+                .map(Some);
+        }
+        if name == "hasattr" {
+            return Ok(Some(op(Op::HasAttr, Type::Bool, args.to_vec())));
+        }
+        let ExprKind::Str(field) = &key.kind else {
+            return Err(error(
+                self.source,
+                call,
+                "dynamic getattr on a LogRecord may return a class descriptor",
+            ));
+        };
+        if field == "__dict__" {
+            let mut scope = calls::ArgumentScope::default();
+            let record = scope.hold(self, record.clone());
+            if let Some(default) = args.get(2) {
+                scope.hold(self, default.clone());
+            }
+            return Ok(Some(scope.finish(op(
+                Op::Dictionary,
+                self.types.dict(Type::Str, Type::ObjectValue),
+                vec![record],
+            ))));
+        }
+        if field == "getMessage" || (field.starts_with("__") && field.ends_with("__")) {
+            return Err(error(
+                self.source,
+                call,
+                "LogRecord class descriptor as a value",
+            ));
+        }
+        let mut operands = vec![record.clone(), key.clone()];
+        if let Some(default) = args.get(2) {
+            operands.push(self.coerce(default.clone(), Type::ObjectValue, call)?);
+        }
+        Ok(Some(op(Op::FieldView, Type::ObjectValue, operands)))
     }
 
     pub(super) fn log_record_method(

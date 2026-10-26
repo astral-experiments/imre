@@ -40,6 +40,7 @@ impl Emitter<'_, '_> {
             };
         }
         let name = match op {
+            GetFqdn => "imre_socket_getfqdn",
             New => "imre_socket_new",
             Bind => "imre_socket_bind",
             Listen => "imre_socket_listen",

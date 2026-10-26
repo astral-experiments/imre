@@ -15,7 +15,7 @@ impl Fields {
         Self::Inline(
             fields
                 .into_iter()
-                .map(|(key, value)| (key.into(), value))
+                .map(|(key, value)| (key.into(), original(value)))
                 .collect(),
         )
     }
@@ -26,41 +26,31 @@ impl Fields {
                 .iter()
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| v.clone()),
-            Self::Dictionary(dict) => {
-                // SAFETY: the dictionary owns retained-value views and this lookup acquires its result.
-                let held = unsafe { dict.0.with(|s| s.dictionary().logging_key(&Str::from(key))) }?;
-                // SAFETY: held roots the view until the original field has its own owner.
-                unsafe {
-                    let (kind, word) = boxed_values::concrete(held.kind, held.word);
-                    Some(kind.acquire(word))
-                }
-            }
+            Self::Dictionary(dict) => dictionary_value(dict, &Str::from(key)),
         }
     }
 
+    /// Reuse the caller's existing string when reading an exposed record dictionary.
+    pub(super) fn get_text(&self, key: &Str) -> Option<OwnedWord> {
+        match self {
+            Self::Inline(_) => self.get(key.as_str()),
+            Self::Dictionary(dict) => dictionary_value(dict, key),
+        }
+    }
+
+    pub(super) fn missing(key: &str) -> Error {
+        Error::new(
+            Kind::AttributeError,
+            format!("'LogRecord' object has no attribute '{key}'"),
+        )
+    }
+
     pub(super) fn field(&self, key: &str) -> Result<OwnedWord> {
-        self.get(key).ok_or_else(|| {
-            Error::new(
-                Kind::AttributeError,
-                format!("'LogRecord' object has no attribute '{key}'"),
-            )
-        })
+        self.get(key).ok_or_else(|| Self::missing(key))
     }
 
     pub(super) fn insert(&mut self, key: String, value: OwnedWord) -> Result<()> {
-        // A record dictionary stores views; copying it retains each original Python value.
-        let value = if value.kind.raw() == 5 {
-            // SAFETY: kind five owns a live object throughout this storage inspection.
-            unsafe {
-                (&*(value.word as *const Object)).0.with(|s| match s {
-                    Storage::ObjectValue(v) => Some(v.clone()),
-                    _ => None,
-                })
-            }
-            .unwrap_or(value)
-        } else {
-            value
-        };
+        let value = original(value);
         match self {
             Self::Inline(fields) => {
                 if let Some((_, v)) = fields.iter_mut().find(|(k, _)| *k == key) {
@@ -89,6 +79,32 @@ impl Fields {
             unreachable!()
         };
         Ok(dict.clone())
+    }
+}
+
+fn dictionary_value(dict: &ObjectOwner, key: &Str) -> Option<OwnedWord> {
+    // SAFETY: the dictionary owns retained-value views and the lookup acquires its result.
+    let held = unsafe { dict.0.with(|s| s.dictionary().logging_key(key)) }?;
+    // SAFETY: held roots the view until the original value has an independent owner.
+    unsafe {
+        let (kind, word) = boxed_values::concrete(held.kind, held.word);
+        Some(kind.acquire(word))
+    }
+}
+
+/// Retain the Python value, including when it came from another record dictionary.
+fn original(value: OwnedWord) -> OwnedWord {
+    if value.kind.raw() == 5 {
+        // SAFETY: kind five roots the source through this immutable storage inspection.
+        unsafe {
+            (&*(value.word as *const Object)).0.with(|s| match s {
+                Storage::ObjectValue(v) => Some(v.clone()),
+                _ => None,
+            })
+        }
+        .unwrap_or(value)
+    } else {
+        value
     }
 }
 

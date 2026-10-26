@@ -22,6 +22,7 @@ mod namedtuple_fields;
 mod os;
 pub(crate) use os::credential_arity;
 mod reachability;
+pub(crate) use reachability::http_command_key;
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;
@@ -311,6 +312,7 @@ pub(crate) enum Intrinsic {
     UrlsafeB64encode,
     Socket,
     GaiError,
+    SocketGetFqdn,
     SocketConstant(&'static str),
     Sha256,
     CodecInfoClass,
@@ -820,6 +822,7 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
             (Self::Socket, name) => Intrinsic::SocketConstant(match name {
@@ -2567,6 +2570,8 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/http/__init__.py"),
             )),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
                 "string/__init__.py",
