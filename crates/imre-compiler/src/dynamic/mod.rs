@@ -231,18 +231,19 @@ pub(crate) fn compile(
         };
         source
     };
-    // The typed frontend handles normal programs. Parsing here is needed only
-    // for the standard namespaces that expose dynamic import and installation data.
-    if ![
-        "sys",
-        "platform",
-        "site",
-        "importlib",
-        "struct",
-        "SystemExit",
-    ]
-    .iter()
-    .any(|name| src.contains(name))
+    // An ordinary entry can import a package that uses the object runtime without
+    // accessing sys.path or installation metadata in the entry itself.
+    if !options.runtime_imports
+        && ![
+            "sys",
+            "platform",
+            "site",
+            "importlib",
+            "struct",
+            "SystemExit",
+        ]
+        .iter()
+        .any(|name| src.contains(name))
     {
         return Ok(None);
     }
@@ -254,7 +255,7 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        Ok(i) if i.runtime_imports => i,
+        Ok(i) if i.runtime_imports || (options.runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
