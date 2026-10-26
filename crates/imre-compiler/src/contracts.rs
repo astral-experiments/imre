@@ -615,6 +615,7 @@ impl Builtin {
             | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
+            | Self::SysStreamText { .. }
             | Self::OsName
             | Self::OptionalStrConcat
             | Self::SysOrigArgv

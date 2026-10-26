@@ -1391,7 +1391,9 @@ values. On a constructed or narrowed import exception, these fields support
 support length and integer indexing. Reinitializing an instance resets omitted
 fields. A fresh keyword dictionary display can supply the three fields. A
 repeated key inside one display uses its last value; supplying the same key in
-two call arguments raises `TypeError` before initialization. Arbitrary objects,
+two call arguments raises `TypeError` before initialization. If a keyword is an
+unknown name or an integer, the initializer updates `.args` and raises
+`TypeError` at the first invalid key, preserving the import-specific fields. Arbitrary objects,
 unpacking a separately stored dictionary, direct field writes, and pickling
 remain outside this subset.
 

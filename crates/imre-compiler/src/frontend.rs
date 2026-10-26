@@ -1131,6 +1131,10 @@ pub(crate) fn lower_with_caller_cache(
                 .command_startup
                 .as_ref()
                 .is_some_and(|(flags, _)| flags.isolated),
+            command_utf8_mode: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.utf8_mode),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -6978,15 +6982,27 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
-                if attribute.attr.as_str() == "encoding"
-                    && matches!(
-                        self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
-                        ))
-                    )
+                if let Some(Binding::Intrinsic(
+                    stream @ (Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr),
+                )) = self.resolve(&attribute.value)
+                    && matches!(attribute.attr.as_str(), "encoding" | "errors")
                 {
-                    return Ok(unpacking::string("utf-8"));
+                    let descriptor = match stream {
+                        Intrinsic::Stdin => 0,
+                        Intrinsic::Stdout => 1,
+                        Intrinsic::Stderr => 2,
+                        _ => unreachable!(),
+                    };
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::SysStreamText {
+                                descriptor,
+                                errors: attribute.attr.as_str() == "errors",
+                            },
+                            vec![],
+                        ),
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
@@ -9115,9 +9131,10 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
-        // A standard stream passed positionally is displayed like any other
-        // value. Imre's text streams have a fixed UTF-8 encoding.
+        // Passing stderr as a positional value displays the open text stream.
         if matches!(name.id.as_str(), "print" | "repr" | "str")
+            && !self.names.contains_key(name.id.as_str())
+            && self.resolve(&call.func).is_none()
             && call.arguments.keywords.is_empty()
             && call
                 .arguments
@@ -9133,8 +9150,23 @@ impl<'a> Checker<'a> {
                 }
                 pieces.push(
                     if self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::Stderr)) {
-                        unpacking::string(
-                            "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='utf-8'>",
+                        unpacking::concat(
+                            unpacking::concat(
+                                unpacking::string(
+                                    "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='",
+                                ),
+                                Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Builtin(
+                                        Builtin::SysStreamText {
+                                            descriptor: 2,
+                                            errors: false,
+                                        },
+                                        vec![],
+                                    ),
+                                },
+                            ),
+                            unpacking::string("'>"),
                         )
                     } else {
                         self.expr_expected(arg, Type::Str)?

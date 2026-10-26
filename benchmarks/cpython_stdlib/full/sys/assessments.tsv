@@ -20,7 +20,7 @@ SizeofTest.test_objecttypes	proposed	The assertions enumerate exact C struct siz
 SizeofTest.test_pythontypes	proposed	The _ast.AST, traceback and sys.flags byte sizes are calculated from CPython C pointer layouts and struct-sequence fields; those expressions do not specify Imre object sizes.
 SizeofTest.test_slots	proposed	This test derives subclass sizes from CPython's three additional slot pointers and, when needed, the GC header, including an additional GC header relative to the base object.
 SysModuleTest.test_attributes	blocked	This single routine also reads float_info, int_info, hash_info, prefixes, builtin names and implementation metadata. Hash and digit descriptions need to agree with actual native algorithms.
-SysModuleTest.test_c_locale_surrogateescape	blocked	The native child needs per-stream error policies under LC_ALL=C, PYTHONCOERCECLOCALE=0, -X utf8=0 and PYTHONIOENCODING overrides.
+SysModuleTest.test_c_locale_surrogateescape	blocked	The unchanged child calls getattr(sys, name) for each standard stream. Its first LC_ALL=C process stops compiling at the sys operand before any policy is read; see the stock six-child comparison in the occurrence report.
 SysModuleTest.test_call_tracing	blocked	sys.call_tracing must accept a real callable and tuple and reject the non-tuple argument. The native tracing/callable boundary is absent.
 SysModuleTest.test_clear_type_cache	proposed	The sole call is deprecated sys._clear_type_cache(), whose warning refers to CPython's method lookup cache. Imre statically resolves methods; this proposes only this private cache warning.
 SysModuleTest.test_current_exceptions	blocked	The sys snapshot must associate each running thread with its active exception; a current-thread TLS value alone cannot satisfy the two-thread fixture.
@@ -28,18 +28,18 @@ SysModuleTest.test_current_frames	blocked	Requires a live frame snapshot for a b
 SysModuleTest.test_debugmallocstats	proposed	The stderr assertions name pymalloc arenas and the free PyDictObjects list. Imre does not use those CPython allocators or freelists.
 SysModuleTest.test_disable_gil_abi	proposed	This sole assertion ties the CPython extension ABI suffix 't' to its Py_GIL_DISABLED configure flag. Imre does not implement that binary extension ABI.
 SysModuleTest.test_dlopenflags	blocked	A persistent native loader policy must be shared by get/setdlopenflags and future extension loading, with errors for invalid arity.
-SysModuleTest.test_exit	blocked	The unchanged method verifies the native caught payloads and child exits through stderr flushing. Compiling its next child with lone U+DCFF fails before the final Latin-1 check (#405, #409).
+SysModuleTest.test_exit	blocked	Six native caught calls and five native children complete. The next child cannot compile its lone U+DCFF. Running the later untouched Latin-1 child separately emits 68 e9 0a and exits 1; the complete method remains blocked (#405, #409).
 SysModuleTest.test_exit_codes_under_repl	blocked	Requires interactive stdin/REPL execution and exit propagation from exit(), __import__('sys').exit and raise SystemExit for statuses 0 and 123.
 SysModuleTest.test_getallocatedblocks	blocked	The check uses live allocation counts before and after gc.collect, with optional total refcount/intern accounting. The native allocator does not expose these counters.
 SysModuleTest.test_getframe	blocked	A callable native frame must expose the test function's actual code object by identity and reject out-of-range depth and extra arguments.
 SysModuleTest.test_getframemodulename	blocked	Native source frames supply the current or calling module and return None beyond the stack. The original first comparison still needs unittest equality for str | None; its loop needs sys._getframe, f_globals and f_back identity.
 SysModuleTest.test_intern	blocked	The original parent can query one live native string table. The whole native body also needs its test.support/random imports, callable assertions and the original local str subclass S with its own __hash__.
-SysModuleTest.test_ioencoding	blocked	The native streams must honor CP424, ASCII replacement/strict/surrogateescape, and emit Python UnicodeEncodeError for unencodable writes.
+SysModuleTest.test_ioencoding	failed	The unchanged method's first native child cannot find CP424 on this branch. Its three original ASCII children match independently. The final child needs chr(0xdcbd) to produce a Python string containing a lone surrogate for surrogateescape.
 SysModuleTest.test_is_finalizing	blocked	The runtime must transition during final destruction, after atexit; the original reads sys.is_finalizing both during execution and inside __del__.
 SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
 SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
-SysModuleTest.test_posix_locale_surrogateescape	blocked	The same verified child checks stdin/stdout/stderr error policies under LC_ALL=POSIX, both with and without an encoding override.
+SysModuleTest.test_posix_locale_surrogateescape	blocked	The original LC_ALL=POSIX child stops at getattr(sys, name) before any stream read. The report keeps its argv, first failed host assertion and six stock control children.
 SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.
 SysModuleTest.test_refcount	blocked	Native getrefcount must reject missing arguments, preserve the None singleton count across global bindings and expose total count only if available.
 SysModuleTest.test_setrecursionlimit_to_depth	blocked	Rejecting a limit below the current depth needs actual frame depth and exception-safe restoration of nested calls.
