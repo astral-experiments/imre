@@ -36,7 +36,12 @@ pub(super) fn resolve(
                 ));
             }
             for argument in &args.args {
-                if mapping_base(graph, definition.module, argument) {
+                if mapping_base(graph, definition.module, argument)
+                    || (args.args.len() == 1
+                        && graph
+                            .session
+                            .builtin_object_base(definition.module, argument))
+                {
                     continue;
                 }
                 match graph.resolve(definition.module, argument) {
