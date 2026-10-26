@@ -57,6 +57,7 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::PartialPlaceholder => "PlaceholderType",
             Value::Raised(error) => &error.kind,
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {
@@ -187,6 +188,7 @@ pub(super) enum Value {
         args: Id,
         keywords: Id,
     },
+    PartialPlaceholder,
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
@@ -304,6 +306,7 @@ impl Value {
             | Self::Bytes(_)
             | Self::Hash(_)
             | Self::Native(_)
+            | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
             | Self::RegexPattern(_)

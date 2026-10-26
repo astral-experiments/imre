@@ -366,8 +366,30 @@ impl Context {
                 args: bound,
                 keywords,
             } => {
-                let mut positional = self.items(bound)?;
-                positional.extend(args);
+                let bound = self.items(bound)?;
+                let required = bound
+                    .iter()
+                    .filter(|&&id| matches!(self.heap.get(id), Value::PartialPlaceholder))
+                    .count();
+                if args.len() < required {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "missing positional arguments in 'partial' call; expected at least {required}, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let mut supplied = args.into_iter();
+                let mut positional = Vec::with_capacity(bound.len() + supplied.len());
+                for argument in bound {
+                    if matches!(self.heap.get(argument), Value::PartialPlaceholder) {
+                        positional.push(supplied.next().unwrap());
+                    } else {
+                        positional.push(argument);
+                    }
+                }
+                positional.extend(supplied);
                 let mut merged = self.keyword_args(keywords)?;
                 for (key, value) in kwargs {
                     if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
