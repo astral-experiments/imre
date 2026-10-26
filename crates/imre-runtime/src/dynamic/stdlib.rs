@@ -13,6 +13,7 @@ pub(super) mod datetime;
 mod files;
 mod hashlib;
 mod hmac;
+mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
@@ -37,6 +38,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "json"
             | "datetime"
+            | "time"
             | "hashlib"
             | "hmac"
             | "re"
@@ -84,6 +86,7 @@ fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Res
 fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::NamedTuple {
         class: None,
+        extras: Vec::new(),
         names: fields.iter().map(|(name, _)| (*name).to_owned()).collect(),
         values: fields.iter().map(|&(_, value)| value).collect(),
     })
@@ -177,6 +180,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     }
     let id = match (module, name) {
         ("datetime", "UTC") => datetime::utc(ctx),
+        ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
+            ctx.builtin(&format!("time.{name}"))
+        }
         ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
@@ -349,6 +355,9 @@ pub(super) fn call(
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("time.") {
+        return time::call(ctx, method, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);

@@ -256,6 +256,10 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Instance { class, .. } => Ok(*class),
+            Value::NamedTuple {
+                class: Some("time.struct_time"),
+                ..
+            } => Ok(self.builtin("time.struct_time")),
             Value::Raised(error) => {
                 let name = error.kind.clone();
                 Ok(self
@@ -329,6 +333,13 @@ impl Context {
                 },
             ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (
+                "time.struct_time",
+                Value::NamedTuple {
+                    class: Some("time.struct_time"),
+                    ..
+                },
+            ) => true,
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
                     c == value.class() || (c == "date" && value.class() == "datetime")
@@ -516,12 +527,16 @@ impl Context {
                 class,
                 names,
                 values,
+                extras,
             } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if class == Some("time.struct_time") && matches!(name, "tm_zone" | "tm_gmtoff") {
-                    return Ok(NONE);
+                if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
+                    return Ok(*value);
+                }
+                if class == Some("time.struct_time") && name == "__class__" {
+                    return Ok(self.builtin("time.struct_time"));
                 }
                 if matches!(class, Some("SplitResult" | "SplitResultBytes"))
                     && let Some(property) = stdlib::urllib::property(self, values[1], name)?

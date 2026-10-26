@@ -310,6 +310,7 @@ def report(text):
         for fixture in (
             "boxed_contextvars.py",
             "boxed_datetime.py",
+            "boxed_time.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
