@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 mod files;
 mod hashlib;
+mod hmac;
 mod json;
 mod regex;
 
@@ -26,6 +27,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "json"
             | "hashlib"
+            | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -280,6 +282,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps")
         | ("hashlib", "sha1")
+        | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
@@ -353,6 +356,9 @@ pub(super) fn call(
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.dumps" => (1, &["ensure_ascii"]),
         "hashlib.sha1" => (1, &["data"]),
+        "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
+        "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
+        "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
         "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
@@ -390,6 +396,9 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
+        "hmac.compare_digest" => return hmac::compare(ctx, args),
+        method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);

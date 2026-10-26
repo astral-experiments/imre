@@ -331,6 +331,8 @@ def report(text):
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,
             "-IB",
