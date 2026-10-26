@@ -905,6 +905,8 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
+            (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
+            (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
