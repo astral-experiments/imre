@@ -283,6 +283,74 @@ pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const By
     unsafe { (&*left).cmp(&*right) as i32 }
 }
 
+pub(crate) fn bytes_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    memchr::memmem::find(haystack, needle).is_some()
+}
+
+pub(crate) fn bytes_contains_int(haystack: &[u8], needle: &Int) -> Result<bool> {
+    let byte = needle
+        .as_small()
+        .and_then(|n| u8::try_from(n).ok())
+        .ok_or_else(|| Error::new(Kind::ValueError, "byte must be in range(0, 256)"))?;
+    Ok(memchr::memchr(byte, haystack).is_some())
+}
+
+/// A field covering the entire immutable input retains its original owner.
+pub(crate) fn rsplit_bytes(
+    data: &[u8],
+    separator: Option<&[u8]>,
+    limit: usize,
+) -> Result<Vec<Option<Bytes>>> {
+    let mut parts = Vec::new();
+    let mut push = |field: &[u8]| -> Result<()> {
+        parts.try_reserve(1).map_err(|_| Error::memory_error())?;
+        let owned = if field.len() == data.len() {
+            None
+        } else {
+            let mut bytes = allocate(field.len())?;
+            bytes.extend_from_slice(field);
+            Some(bytes)
+        };
+        parts.push(owned);
+        Ok(())
+    };
+    let mut end = data.len();
+    if let Some(sep) = separator {
+        if sep.is_empty() {
+            return Err(Error::new(Kind::ValueError, "empty separator"));
+        }
+        for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
+            push(&data[start + sep.len()..end])?;
+            end = start;
+        }
+        push(&data[..end])?;
+    } else {
+        let whitespace = |b: u8| matches!(b, b' ' | b'\t'..=b'\r');
+        let mut splits = 0;
+        loop {
+            while end > 0 && whitespace(data[end - 1]) {
+                end -= 1;
+            }
+            if end == 0 {
+                break;
+            }
+            if splits == limit {
+                push(&data[..end])?;
+                break;
+            }
+            let start = data[..end]
+                .iter()
+                .rposition(|&b| whitespace(b))
+                .map_or(0, |i| i + 1);
+            push(&data[start..end])?;
+            end = start;
+            splits += 1;
+        }
+    }
+    parts.reverse();
+    Ok(parts)
+}
+
 /// Tests for an immutable subsequence; the empty needle matches even empty bytes.
 ///
 /// # Safety
@@ -290,7 +358,7 @@ pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const By
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *const Bytes) -> u32 {
     // SAFETY: both byte buffers are immutable and rooted for the call.
-    u32::from(unsafe { memchr::memmem::find(&*haystack, &*needle) }.is_some())
+    unsafe { u32::from(bytes_contains(&*haystack, &*needle)) }
 }
 
 /// Integer needles are byte values, including on an empty haystack, not indices.
@@ -299,22 +367,9 @@ pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *co
 /// Root the canonical integer and immutable bytes; pending error state is clear.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
-    // Canonical integers outside the tagged small range cannot represent a byte.
-    // SAFETY: the caller roots the exact canonical integer until this call returns.
-    let byte = unsafe { Int::borrow(needle) }
-        .as_small()
-        .and_then(|n| u8::try_from(n).ok());
-    let Some(byte) = byte else {
-        return finish(
-            Err(Error::new(
-                Kind::ValueError,
-                "byte must be in range(0, 256)",
-            )),
-            0,
-        );
-    };
-    // SAFETY: the caller keeps the immutable haystack alive.
-    u32::from(memchr::memchr(byte, unsafe { &*haystack }).is_some())
+    // SAFETY: the caller keeps both the canonical integer and immutable bytes rooted.
+    let (number, haystack) = unsafe { (Int::borrow(needle), &*haystack) };
+    finish(bytes_contains_int(haystack, &number).map(u32::from), 0)
 }
 
 /// # Safety

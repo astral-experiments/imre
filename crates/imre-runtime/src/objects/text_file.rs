@@ -6,6 +6,10 @@ use super::{exceptions::Result, files, text};
 pub(crate) struct TextFile(crate::ObjectOwner);
 
 impl TextFile {
+    pub(crate) fn standard(stderr: bool) -> Self {
+        Self(files::standard_stream(stderr))
+    }
+
     pub(crate) fn create(path: &str) -> Result<Self> {
         let path = text::try_owned_string(path)?;
         let file = files::open(&path, 1, false, false)?;

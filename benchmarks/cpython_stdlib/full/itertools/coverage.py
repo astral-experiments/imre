@@ -209,6 +209,23 @@ def blocked(exc, directory, node=None):
     return row
 
 
+def missing_itertools_import(directory, fixture, node):
+    """Recognize the native entry's first import failing before the original method runs."""
+    first_line = fixture.partition("\n")[0]
+    if not first_line.startswith("from itertools import "):
+        return None
+    result = subprocess.run([directory / "case"], cwd=directory, capture_output=True, text=True, timeout=60)
+    error = 'ModuleNotFoundError: no module named "itertools"'
+    entry = (directory / "case.py").resolve()
+    traceback = f'Traceback (most recent call last):\n  File "{entry}", line 1\n{error}\n'
+    if result.returncode == 1 and not result.stdout and result.stderr == traceback:
+        return {"outcome": "blocked", "reason": f"case.py:1: {error}",
+                "roles": dict.fromkeys(ROLES, "unobserved"),
+                "evidence": {"stage": "native fixture import", "source": first_line,
+                             "upstream_method_line": node.lineno}}
+    return None
+
+
 def identity_gated_method(tools, directory, src, case, node, fixture, decorators):
     """Run the original host decorators; compile the entire unchanged def only if they are identities."""
     from test import support
@@ -311,6 +328,9 @@ def run(args, reference, level):
                     row["evidence"]["cpu_enabled_reference"] = "pass"
                 continue
             if not reviewed and short != "RegressionTests.test_long_chain_of_empty_iterables":
+                if startup := missing_itertools_import(directory, fixture, node):
+                    preflight[key] = startup
+                    continue
                 raise ValueError(f"Complete method now compiles: review its operations and assertion fixture: {name}")
             executions[key] = execute
         return run_evidence(suite, executions, reference, level, preflight=preflight, exceptions=exceptions)

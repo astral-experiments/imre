@@ -12,6 +12,7 @@ pub(super) mod ast;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
+mod email;
 mod files;
 mod fnmatch;
 mod functools;
@@ -25,7 +26,7 @@ mod marshal;
 mod operator;
 mod pickle;
 pub(super) mod readiness;
-mod regex;
+pub(super) mod regex;
 mod socket;
 pub(super) mod urllib;
 
@@ -34,6 +35,7 @@ pub(super) fn is_module(name: &str) -> bool {
         name,
         "sys"
             | "codecs"
+            | "types"
             | "io"
             | "sysconfig"
             | "ast"
@@ -50,6 +52,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "marshal"
             | "pickle"
             | "datetime"
+            | "email"
+            | "email.utils"
             | "time"
             | "hashlib"
             | "hmac"
@@ -191,6 +195,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("re", "ASCII") => ctx.int(regex::ASCII),
+        ("re", "UNICODE") => ctx.int(regex::UNICODE),
+        ("re", "A" | "U") => {
+            let module = ctx.module("re")?;
+            ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
+        }
+        ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "FrameType") => ctx.builtin("frame"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
@@ -301,7 +313,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.alloc(Value::Native(format!("operator.{name}")))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
-        ("sys", "exit")
+        ("sys", "exit" | "exc_info" | "exception")
         | (
             "sysconfig",
             "get_path"
@@ -340,12 +352,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "compile")
+        | ("re", "match" | "fullmatch" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
+        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
         | ("fnmatch", "filter")
@@ -387,6 +400,9 @@ pub(super) fn call(
         return readiness::call(ctx, method, args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
+    if let Some(function) = name.strip_prefix("email.utils.") {
+        return email::call(ctx, function, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
     }
@@ -450,6 +466,9 @@ pub(super) fn call(
             keywords,
         }));
     }
+    if name.starts_with("re.") {
+        return regex::module_call(ctx, name, args, kwargs);
+    }
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
@@ -469,9 +488,10 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
-        | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
+        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "sys.exc_info" | "sys.exception" => (0, &[]),
         "sys.exit"
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
@@ -480,7 +500,6 @@ pub(super) fn call(
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
-        | "re.compile"
         | "collections.defaultdict"
         | "functools.lru_cache"
         | "functools._cached"
@@ -746,6 +765,16 @@ pub(super) fn call(
             eprintln!("Warning: {}", ctx.str_value(argument(args, 0)?)?);
             NONE
         }
+        "sys.exception" => ctx.heap.active_exception(),
+        "sys.exc_info" => {
+            let exc = ctx.heap.active_exception();
+            let (class, traceback) = if exc == NONE {
+                (NONE, NONE)
+            } else {
+                (ctx.exact_type(exc)?, ctx.exception_traceback(exc)?)
+            };
+            ctx.alloc(Value::Tuple(vec![class, exc, traceback]))
+        }
         "sys.exit" => {
             // PyErr_SetObject normalizes a tuple as the exception's constructor
             // arguments and propagates a supplied SystemExit instance directly.
@@ -768,10 +797,7 @@ pub(super) fn call(
         {
             return files::call(ctx, name, args, kwargs);
         }
-        name if name.starts_with("re.")
-            || name.starts_with("pattern.")
-            || name == "match.group" =>
-        {
+        name if name.starts_with("pattern.") || name == "match.group" => {
             return regex::call(ctx, name, args);
         }
         _ => {
