@@ -607,9 +607,16 @@ impl Context {
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
-            Value::Native(class) if class == "datetime.datetime" && name == "fromtimestamp" => {
-                return Ok(self.builtin("datetime.datetime.fromtimestamp"));
+            Value::Native(class)
+                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+            {
+                return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "datetime.time" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("time")),
+                "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }

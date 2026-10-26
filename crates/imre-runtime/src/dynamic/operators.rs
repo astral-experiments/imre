@@ -231,6 +231,11 @@ impl Context {
                 Ok(Some(self.as_int(a)?.cmp(&self.as_int(b)?)))
             }
             (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y)),
+            (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. })
+                if a.class() == "time" && b.class() == "time" =>
+            {
+                Ok(Some(a.clock_order(b)?))
+            }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => int_float(a, *f),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 Ok(int_float(b, *f)?.map(Ordering::reverse))

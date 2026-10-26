@@ -131,6 +131,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
+            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -356,6 +357,7 @@ pub(super) enum Value {
     Iterator {
         sequence: Option<Id>,
         offset: usize,
+        reverse: bool,
     },
     IoMethod {
         owner: Id,
