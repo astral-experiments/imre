@@ -403,8 +403,10 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
             18 => usize::from(matches!(doc(a), Value::String(_))),
             19 => {
                 let mut repr = String::new();
-                doc(a).view()?.try_write_repr(&mut repr)?;
-                StrOwner::into_raw(StrOwner::new(Str::new(repr))) as usize
+                doc(a)
+                    .view()?
+                    .try_write_repr(&mut crate::objects::values::ReprWriter(&mut repr))?;
+                crate::checked_owned_str(Str::from(repr))? as usize
             }
             20 => usize::from(doc(a).truth()),
             21 => {

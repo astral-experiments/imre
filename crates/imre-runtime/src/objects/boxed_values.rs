@@ -1,5 +1,5 @@
 //! Owning, type-erased views of native Python scalars, sequences, and eligible dataclasses.
-use super::exceptions::Error;
+use super::exceptions::{Error, Rendered, finish_display, rendered};
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, object, records, values};
 use crate::Int;
@@ -46,17 +46,20 @@ pub(super) unsafe fn tuple_item(tuple: usize, index: usize) -> (WordKind, usize)
     }
 }
 
-pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> StrOwner {
+pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
     if kind.raw() == 3 && !repr {
         // SAFETY: the owning field roots the exact string.
-        return unsafe { crate::StrOwner::acquire_word(word) };
+        return Ok(unsafe { StrOwner::acquire_word(word) });
     }
+    rendered(word_repr(kind, word)?.into())
+}
+
+/// Render directly into the buffer used by a short-lived consumer such as stderr.
+pub(super) fn word_repr(kind: WordKind, word: usize) -> Result<String, std::fmt::Error> {
     let mut result = String::new();
-    // SAFETY: only concrete, representable field types reach this routine.
-    unsafe {
-        values::write_checked_repr(&mut result, word, kind);
-    }
-    StrOwner::new(result.into())
+    // SAFETY: callers retain this exact value throughout structural formatting.
+    unsafe { values::try_write_repr(&mut values::ReprWriter(&mut result), word, kind) }?;
+    Ok(result)
 }
 
 /// Transfer the formatted string only after all visited fields and callbacks succeed.
@@ -72,12 +75,7 @@ pub(super) unsafe fn checked_text(kind: WordKind, word: usize, repr: bool) -> *c
             // The storage borrow ends before a user-defined __str__ can be called.
             return super::exceptions::imre_exception_message(word as *const Object);
         }
-        let text = word_text(kind, word, repr);
-        if super::exceptions::imre_error_pending() == 0 {
-            StrOwner::into_raw(text)
-        } else {
-            std::ptr::null()
-        }
+        finish_display(word_text(kind, word, repr))
     }
 }
 

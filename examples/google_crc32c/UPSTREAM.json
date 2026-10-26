@@ -6,14 +6,18 @@
     "license": "Apache-2.0",
     "files": {
       "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-      "_crc32c.c": "9e4db34e452344101407c81f0b2613b2bb37be6cc29fde5198d119838ef590f4",
-      "google_crc32c/__config__.py": "da2d0aa4aa3eca998c4bf3fd8b7a8e6c05b679e9825adae6bbf3c95e4b631cef",
-      "google_crc32c/__init__.py": "0ee9fa5611b143ef1fc9d191fe15f853d2b79fc5cf6170832a6a080406ada733",
-      "google_crc32c/_checksum.py": "3ffd402cdb19a686131d6adf32a103c11c0a749ff2d447f1c1591775d559d359",
-      "google_crc32c/cext.py": "a05ecd16929650e128c9895b546200255a3c48d0e25914ff558c82235e3ee63a",
-      "google_crc32c/python.py": "f73cba001001fca33c24945c6671386faf15aa7384151366086b9fae371beea7",
-      "test___init__.py": "8dc0c3b1b1b22b50c29bbbdd254d39d39d3d0e5847ed89f4d1eb4294e2340068"
-    }
+      "pyproject.toml": "f38452b82ca79afcb5d6bf9a2d297d6d29d28c35e1fce162978f845a7ef82a21",
+      "setup.cfg": "43598688f74ca88a7f792bfd7bcc9c8c599db6338baa5961e246fa516cdb06fa",
+      "setup.py": "83a99c73dbbcf68d0ebf18a77d8b96a7f8fdaf8141d692181a20be16452e4e79",
+      "src/google_crc32c/__config__.py": "da2d0aa4aa3eca998c4bf3fd8b7a8e6c05b679e9825adae6bbf3c95e4b631cef",
+      "src/google_crc32c/__init__.py": "0ee9fa5611b143ef1fc9d191fe15f853d2b79fc5cf6170832a6a080406ada733",
+      "src/google_crc32c/_checksum.py": "3ffd402cdb19a686131d6adf32a103c11c0a749ff2d447f1c1591775d559d359",
+      "src/google_crc32c/_crc32c.c": "9e4db34e452344101407c81f0b2613b2bb37be6cc29fde5198d119838ef590f4",
+      "src/google_crc32c/cext.py": "a05ecd16929650e128c9895b546200255a3c48d0e25914ff558c82235e3ee63a",
+      "src/google_crc32c/python.py": "f73cba001001fca33c24945c6671386faf15aa7384151366086b9fae371beea7",
+      "tests/test___init__.py": "8dc0c3b1b1b22b50c29bbbdd254d39d39d3d0e5847ed89f4d1eb4294e2340068"
+    },
+    "sdist_sha256": "a428e25fb7691024de47fecfbff7ff957214da51eddded0da0ae0e0f03a2cf79"
   },
   "core": {
     "repository": "https://github.com/google/crc32c",

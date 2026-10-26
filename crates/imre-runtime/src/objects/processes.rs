@@ -6,6 +6,7 @@
 
 use crate::StrOwner;
 use std::ffi::{CStr, CString, OsStr};
+use std::fmt::{self, Write as _};
 use std::fs;
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -19,6 +20,7 @@ use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeou
 use super::files::{decode_utf8_text, os_error};
 use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
+use super::values::ReprWriter;
 use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, Object, Storage, Str, fail, object};
 
@@ -85,25 +87,24 @@ impl ProcessError {
         }
     }
 
-    pub(super) fn message(&self) -> Str {
-        let cmd = argv::display(&self.cmd);
+    pub(super) fn message(&self) -> std::result::Result<Str, fmt::Error> {
+        let mut text = argv::message_prefix(&self.cmd)?;
+        let mut output = ReprWriter(&mut text);
         if self.returncode < 0 {
             let signal = -self.returncode;
             if let Some(name) = signal_name(signal) {
-                Str::from(format!(
-                    "Command '{cmd}' died with <Signals.{name}: {signal}>."
-                ))
+                write!(output, " died with <Signals.{name}: {signal}>.")?;
             } else {
-                Str::from(format!(
-                    "Command '{cmd}' died with unknown signal {signal}."
-                ))
+                write!(output, " died with unknown signal {signal}.")?;
             }
         } else {
-            Str::from(format!(
-                "Command '{cmd}' returned non-zero exit status {}.",
+            write!(
+                output,
+                " returned non-zero exit status {}.",
                 self.returncode
-            ))
+            )?;
         }
+        Ok(text.into())
     }
 }
 
@@ -185,13 +186,20 @@ impl TimeoutError {
     }
 
     /// Formatting observes later mutations of the same rooted argv list.
-    pub(super) fn message(&self) -> Str {
-        let cmd = argv::display(&self.cmd);
-        let seconds = match &self.timeout {
-            Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
-            Deadline::Float(seconds) => crate::floats::render(*seconds),
-        };
-        Str::from(format!("Command '{cmd}' timed out after {seconds} seconds"))
+    pub(super) fn message(&self) -> std::result::Result<Str, fmt::Error> {
+        let mut text = argv::message_prefix(&self.cmd)?;
+        let mut output = ReprWriter(&mut text);
+        match &self.timeout {
+            Deadline::Integer(seconds) => {
+                write!(output, " timed out after {} seconds", seconds.big())?
+            }
+            Deadline::Float(seconds) => write!(
+                output,
+                " timed out after {} seconds",
+                crate::floats::render(*seconds)
+            )?,
+        }
+        Ok(text.into())
     }
 }
 

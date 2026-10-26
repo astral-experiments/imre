@@ -34,8 +34,55 @@ def record(n: int, calls: list[int]) -> int:
     return n
 
 
+def expanded_keywords() -> None:
+    calls: list[int] = []
+    try:
+        ImportError(
+            record(1, calls), name=record(2, calls),
+            **{'name': record(3, calls), 'path': record(4, calls)},
+            **{'name_from': record(5, calls)},
+        )
+    except TypeError as err:
+        print(str(err))
+    print(repr(calls))
+    # Replacing an entry in one display still evaluates both values.
+    describe(ImportError(**{'name': record(6, calls), 'name': record(7, calls)}))
+    describe(ImportError(**{'name': [0], 'name': 'retained'}))
+    print(repr(calls))
+    try:
+        Missing(name=record(8, calls), **{'name': record(9, calls)}, **{'path': record(10, calls)})
+    except TypeError as err:
+        print(str(err))
+    print(repr(calls))
+    try:
+        ModuleNotFoundError(**{'path': 'one'}, **{'path': 'two'})
+    except TypeError as err:
+        print(str(err))
+    try:
+        ImportError(**{1: 'bad'})
+    except TypeError as err:
+        print(str(err))
+    try:
+        ImportError(**1)
+    except TypeError as err:
+        print(str(err))
+    old = ImportError('old', name='pkg', path='file', name_from='symbol')
+    try:
+        old.__init__('new', **{'name': 'first'}, name='second')
+    except TypeError as err:
+        print(str(err))
+    describe(old)
+    try:
+        old.__init__('new', **{'name': 'first', 'unexpected': 'second'})
+    except TypeError as err:
+        print(str(err))
+    describe(old)
+
+
 def exercise() -> None:
     describe(ImportError())
+    describe(ImportError(**{'name': 'pkg'}))
+    describe(ModuleNotFoundError('missing', **{'path': b'archive'}, **{'name': 'pkg', 'name_from': 'symbol'}))
     describe(ImportError(None))
     describe(ImportError(b'x\xff', name='a.b', path='m.py', name_from='b'))
     describe(ImportError('bad', 1237940039285380274899124224, False, name=b'name', path=None, name_from=(3,)))
@@ -111,4 +158,5 @@ def exercise() -> None:
 
 
 check_guard()
+expanded_keywords()
 exercise()

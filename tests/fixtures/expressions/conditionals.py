@@ -52,6 +52,11 @@ def number_or_missing(value: int | None, flag: bool) -> int | None:
     return value if flag else 8
 
 
+def add_after_conditional(value: int | None) -> int:
+    result = value + 1 if value is not None else 0
+    return value + result
+
+
 def letters(value: str | None) -> list[str]:
     return [character for character in value] if value is not None else []
 
@@ -73,6 +78,11 @@ def nested_slice() -> list[list[str]]:
 
 
 def main() -> None:
+    print(add_after_conditional(4))
+    try:
+        print(add_after_conditional(None))
+    except TypeError as error:
+        print(str(error))
     print(label(None))
     print(label("é"))
     print(alternate_label(None))

@@ -309,6 +309,7 @@ mod tests {
         let module = Module {
             list_builds: Default::default(),
             ignore_python_environment: false,
+            command_utf8_mode: None,
             types,
             functions,
             class_fields: Vec::new(),

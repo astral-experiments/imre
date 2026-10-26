@@ -82,7 +82,33 @@ REJECTED = {
     "generator_sibling_suspended_optional": REQUIRE_INT + "value: int | None = 1\nfor result, ignored in zip((require_int(value) + item for outer in [0] if value is not None for item in range(2)), ((value := None) for index in range(2))):\n    print(result)\n",
 }
 
+OPTIONAL_ADD_ERROR = "TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'"
+
 ERRORS = {
+    "generator_add_none": (
+        "def bad(values: list[int | None]) -> int:\n    return sum(value + 1 for value in values)\nbad([None])\n",
+        OPTIONAL_ADD_ERROR,
+    ),
+    "generator_export_add_none": (
+        "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nprint(value + 1)\n",
+        OPTIONAL_ADD_ERROR,
+    ),
+    "generator_after_start_add_none": (
+        "value: int | None = None\nprint(sum(((value := None) or 0 for index in [1]), (value := 1)))\nprint(value + 1)\n",
+        OPTIONAL_ADD_ERROR,
+    ),
+    "generator_after_strict_add_none": (
+        "value: int | None = None\nfor left, right in zip(((value := None) or 0 for index in [1]), [2], strict=(value := 1)):\n    print(value + 1)\n",
+        OPTIONAL_ADD_ERROR,
+    ),
+    "generator_resume_add_none": (
+        "value: int | None = 1\nfor result in (value + item for outer in [0] if value is not None for item in range(2)):\n    value = None\n",
+        OPTIONAL_ADD_ERROR,
+    ),
+    "generator_sibling_resume_add_none": (
+        "value: int | None = 1\nfor result, ignored in zip((value + item for outer in [0] if value is not None for item in range(2)), ((value := None) for index in range(2))):\n    print(result)\n",
+        OPTIONAL_ADD_ERROR,
+    ),
     "outer_range_before_start": (
         'def start() -> int:\n    print("unexpected start")\n    return 7\nprint(sum((value for value in range(0, 3, 0)), start()))\n',
         "ValueError",

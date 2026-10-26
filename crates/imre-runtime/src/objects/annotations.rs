@@ -1,5 +1,7 @@
 //! ForwardRef's immutable fields use the normal owned record layout. Nominal
 //! equality omits is_argument, as required by annotationlib's compatibility API.
+use std::fmt::Write as _;
+
 use super::records::descriptor;
 use super::words::{NULLABLE, WordKind};
 use super::{Str, exceptions, values};
@@ -92,26 +94,29 @@ pub(super) unsafe fn equal(left: usize, right: usize) -> bool {
 
 /// # Safety
 /// The word roots a ForwardRef; its owner has a compiler-checked printable layout.
-pub(super) unsafe fn write_repr(output: &mut String, word: usize) {
+pub(super) unsafe fn write_repr(
+    output: &mut values::ReprWriter<'_>,
+    word: usize,
+) -> std::fmt::Result {
     let record = word as *const usize;
     // SAFETY: all fields stay rooted during formatting, including the optional module and owner.
     unsafe {
-        output.push_str("ForwardRef(");
-        exceptions::push_string_repr(&*(field(record, 0).1 as *const Str), output);
+        output.write_str("ForwardRef(")?;
+        exceptions::write_quoted_repr(&*(field(record, 0).1 as *const Str), output)?;
         let (kind, module) = field(record, 1);
         if module != 0 {
-            output.push_str(", module=");
-            values::write_repr(output, module, kind);
+            output.write_str(", module=")?;
+            values::try_write_repr(output, module, kind)?;
         }
         if field(record, 4).1 != 0 {
-            output.push_str(", is_class=True");
+            output.write_str(", is_class=True")?;
         }
         let (kind, owner) = field(record, 2);
         if kind.raw() != 0 && (kind.raw() & NULLABLE == 0 || owner != 0) {
-            output.push_str(", owner=");
-            values::write_repr(output, owner, kind);
+            output.write_str(", owner=")?;
+            values::try_write_repr(output, owner, kind)?;
         }
-        output.push(')');
+        output.write_char(')')
     }
 }
 

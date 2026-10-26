@@ -1129,7 +1129,11 @@ pub extern "C" fn imre_input() -> *const Str {
         return objects::errno_error(error).returning(std::ptr::null());
     }
     finish(
-        sys::read_input_line().and_then(|line| StrOwner::try_new(Str::from(line)).map(StrOwner::into_raw).map_err(|_| Error::allocation())),
+        sys::read_input_line().and_then(|line| {
+            StrOwner::try_new(Str::from(line))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }

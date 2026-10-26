@@ -4,6 +4,32 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// int() on a closed string/integer value preserves the integer or parses the
+    /// string. Keep the original value alive and evaluate it only once.
+    pub(super) fn integer_from_text_or_int(&mut self, value: Expr) -> Expr {
+        let (slot, test, text, integer) = self.protocol_alternatives(value.ty).unwrap();
+        debug_assert_eq!((text.ty, integer.ty), (Type::Str, Type::Int));
+        let parsed = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Int, vec![text]),
+        };
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(parsed),
+                        Box::new(integer),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     /// Store a protocol operand once, then provide the test and exact values for
     /// its two possible layouts. The caller assigns the operand to the returned slot.
     pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
@@ -173,6 +199,7 @@ impl Checker<'_> {
         use InstanceType::{Deque, Exact, List, Tuple};
         match self.collection_class_name(expression) {
             Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
             Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
             Some("collections.abc.Sequence") => {
                 return Ok(vec![
@@ -220,7 +247,7 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
         if matches!(
-            self.resolve(expression),
+            self.collection_binding(expression),
             Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
         ) {
             let mut classes = vec![InstanceType::Dict];
@@ -419,6 +446,16 @@ impl Checker<'_> {
         };
         let first = self.expr(first)?;
         let second = self.expr(second)?;
+        self.builtin_subclass_values(first, second, call)
+    }
+
+    /// Compare evaluated class operands or raise for an invalid Python argument.
+    pub(super) fn builtin_subclass_values(
+        &self,
+        first: Expr,
+        second: Expr,
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
             (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
                 ty: Type::Bool,
@@ -439,7 +476,7 @@ impl Checker<'_> {
             )),
             _ => Err(error(
                 self.source,
-                call,
+                at,
                 "issubclass requires supported native class objects",
             )),
         }
