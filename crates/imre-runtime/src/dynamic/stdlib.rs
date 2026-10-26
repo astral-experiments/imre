@@ -352,7 +352,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "compile")
+        | ("re", "match" | "fullmatch" | "search" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
@@ -465,6 +465,9 @@ pub(super) fn call(
             args,
             keywords,
         }));
+    }
+    if name == "pattern.search" {
+        return regex::search(ctx, args, kwargs);
     }
     if name.starts_with("re.") {
         return regex::module_call(ctx, name, args, kwargs);

@@ -223,7 +223,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch") => "pattern",
+        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+            "pattern"
+        }
         Value::RegexMatch { .. } if attr == "group" => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
@@ -288,6 +290,43 @@ pub(super) fn bind<const N: usize>(
         if values[index].replace(*argument).is_some() {
             return Err(type_error(format!(
                 "{name} got multiple values for argument {key:?}"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+/// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+pub(super) fn bind_method_arguments<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    let count = args.len() + kwargs.len();
+    if count > N {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(type_error(format!(
+            "{name}() takes at most {N} {kind}arguments ({count} given)"
+        )));
+    }
+    let mut values = [None; N];
+    for (slot, &arg) in values.iter_mut().zip(args) {
+        *slot = Some(arg);
+    }
+    for (key, value) in kwargs {
+        let index = names
+            .iter()
+            .position(|param| *param == key)
+            .ok_or_else(|| {
+                type_error(format!(
+                    "{name}() got an unexpected keyword argument '{key}'"
+                ))
+            })?;
+        if values[index].replace(*value).is_some() {
+            return Err(type_error(format!(
+                "argument for {name}() given by name ('{key}') and position ({})",
+                index + 1
             )));
         }
     }
