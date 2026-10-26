@@ -210,3 +210,5 @@ pub unsafe extern "C" fn imre_url_unquote(
     })();
     finish(result, std::ptr::null())
 }
+
+mod query;
