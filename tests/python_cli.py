@@ -387,6 +387,7 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
+            "boxed_python_iterators.py",
             "boxed_bytes_separators.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",

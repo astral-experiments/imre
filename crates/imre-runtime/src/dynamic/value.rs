@@ -156,6 +156,7 @@ impl Context {
             Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
             Value::Iterator { reverse: true, .. } => "list_reverseiterator",
+            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -197,16 +198,9 @@ impl Context {
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
-        let message = match args {
-            [] => String::new(),
-            [one] => self.display(*one),
-            many => {
-                let tuple = self.alloc(Value::Tuple(many.to_vec()));
-                self.display(tuple)
-            }
-        };
-        let mut error = Error::new(kind, message);
+        let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -393,6 +387,12 @@ pub(super) enum Value {
         strict: bool,
         pending: Option<Id>,
     },
+    CallableIterator(Option<[Id; 2]>),
+    // Private to a compiled loop. Python-visible iterators keep their original identity.
+    LoopIterator {
+        source: Id,
+        peeked: Option<Id>,
+    },
     Iterator {
         sequence: Option<Id>,
         offset: usize,
@@ -454,6 +454,11 @@ impl Value {
             } => {
                 visit.extend(inputs.iter());
                 visit.extend(pending);
+            }
+            Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
+            Self::LoopIterator { source, peeked } => {
+                visit.push(*source);
+                visit.extend(peeked);
             }
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);

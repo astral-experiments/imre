@@ -1,7 +1,6 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use std::cell::RefCell;
-use std::fs::File;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -73,6 +72,8 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "iter"
+                | "next"
                 | "reversed"
                 | "ord"
                 | "callable"
@@ -193,7 +194,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "socket.socket"
         }
         Value::TextFile(_)
-            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+            if matches!(
+                attr,
+                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+            ) =>
         {
             "TextIOWrapper"
         }
@@ -645,6 +649,31 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
+        "iter" | "next" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            match args {
+                [] => Err(type_error(format!(
+                    "{name} expected at least 1 argument, got 0"
+                ))),
+                [iterable] if name == "iter" => ctx.iterator(*iterable),
+                [iterator] => ctx
+                    .next_result(*iterator)?
+                    .ok_or_else(|| Error::new("StopIteration", "")),
+                [callable, sentinel] if name == "iter" => {
+                    if !ctx.callable(*callable) {
+                        return Err(type_error("iter(v, w): v must be callable"));
+                    }
+                    Ok(ctx.alloc(Value::CallableIterator(Some([*callable, *sentinel]))))
+                }
+                [iterator, default] => Ok(ctx.next_item(*iterator)?.unwrap_or(*default)),
+                _ => Err(type_error(format!(
+                    "{name} expected at most 2 arguments, got {}",
+                    args.len()
+                ))),
+            }
+        }
         "reversed" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -761,11 +790,35 @@ pub(super) fn call(
             super::property::construct(ctx, fields)
         }
         "open" => {
-            let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
+            arity(name, args, 0, 2)?;
+            let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if matches!(mode, "w" | "wt" | "tw") {
-                let file = crate::objects::TextFile::create(path)?;
+            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
+                if mode.contains('b') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "binary mode doesn't take an encoding argument",
+                    ));
+                }
+                let encoding = ctx.str_value(encoding)?;
+                if !matches!(
+                    crate::objects::Codec::lookup(encoding)?,
+                    crate::objects::Codec::Utf8 { signature: false }
+                ) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "text files require UTF-8 encoding",
+                    ));
+                }
+            }
+            let text_mode = match mode {
+                "r" | "rt" | "tr" => Some(0),
+                "w" | "wt" | "tw" => Some(1),
+                _ => None,
+            };
+            if let Some(text_mode) = text_mode {
+                let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             if mode != "rb" {
@@ -774,14 +827,7 @@ pub(super) fn call(
                     "unsupported mode for dynamic files",
                 ));
             }
-            let file = File::open(path).map_err(|e| {
-                let kind = match e.kind() {
-                    io::ErrorKind::NotFound => "FileNotFoundError",
-                    io::ErrorKind::PermissionDenied => "PermissionError",
-                    _ => "OSError",
-                };
-                Error::new(kind, format!("{path}: {e}"))
-            })?;
+            let (file, _) = crate::objects::open_file(path, 0)?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
                 io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))

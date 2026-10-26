@@ -2,13 +2,19 @@ class Missing(AttributeError):
     pass
 
 
+class MissingKey(KeyError):
+    pass
+
+
 def current():
-    for error in (Exception(), ValueError("a'b"), TypeError(None), Missing("x", 7)):
-        print(repr(error), f"{error!r}")
+    for error in (Exception(), ValueError("a'b"), TypeError(None), Missing("x", 7),
+                  KeyError("missing"), MissingKey(""), KeyError(17)):
+        print(repr(error), f"{error!r}", str(error), error)
     payload = [2]
     error = RuntimeError(payload)
+    many = ValueError("x", payload)
     payload.append(3)
-    print(repr(error))
+    print(repr(error), str(error), str(many))
     payload.append(error)
     print(repr(error))
     try:
