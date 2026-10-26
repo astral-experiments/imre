@@ -7,9 +7,10 @@ use super::*;
 /// its fields during those writes, so admit only fields with resource-free contents.
 pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> Option<&'a [Expr]> {
     if let ExprKind::Tuple(fields) = &expression.kind {
-        return (!module
-            .types
-            .may_own_file(expression.ty, &module.class_fields, true))
+        return (module.types.time_attributes(expression.ty).is_none()
+            && !module
+                .types
+                .may_own_file(expression.ty, &module.class_fields, true))
         .then_some(fields);
     }
     let (Type::Class(class), ExprKind::Construct { initializer, args }) =
@@ -147,8 +148,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             // stat_result appends raw numeric attributes after the visible tuple.
             let flags = 3
                 | (u32::from(module.types.is_stat_result(ty)) << 3)
-                | (u32::from(module.types.tuple_origin(ty) == Some(crate::types::STRUCT_TIME))
-                    << 4);
+                | (u32::from(module.types.time_attributes(ty).is_some()) << 4);
             (
                 1,
                 flags,

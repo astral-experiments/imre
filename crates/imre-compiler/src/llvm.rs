@@ -4715,7 +4715,14 @@ impl Emitter<'_, '_> {
                 };
                 self.call(name, Type::Str, &[&args[0].value, &args[1].value])
             }
-            Builtin::Mktime => self.call("imre_mktime", Type::Float, &[&args[0].value]),
+            Builtin::Mktime => self.call(
+                "imre_mktime",
+                Type::Float,
+                &[&args[0].value, &args.get(1).unwrap_or(&args[0]).value],
+            ),
+            Builtin::TimeSequenceLength => {
+                self.call("imre_time_sequence_length", Type::Int, &[&args[0].value])
+            }
             Builtin::TimeComponent => {
                 self.call("imre_time_component", Type::Int, &[&args[0].value])
             }
@@ -8758,16 +8765,20 @@ fn record_layouts(module: &Module, output: &mut Output) {
             .map(|&ty| storage_type(ty))
             .collect::<Vec<_>>()
             .join(", ");
+        let extra = module.types.time_attributes(ty);
+        let kind_count = fields.len() + extra.map_or(0, |tail| tail.len());
         let kinds = fields
             .iter()
-            .map(|&ty| format!("i32 {}", representation_kind(ty, &module.types)))
+            .copied()
+            .chain(extra.into_iter().flatten())
+            .map(|ty| format!("i32 {}", representation_kind(ty, &module.types)))
             .collect::<Vec<_>>()
             .join(", ");
         let count = fields.len();
         writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
         writeln!(
             output.entry_buffer(),
-            "@kinds_{name} = private unnamed_addr constant [{count} x i32] [{kinds}]"
+            "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
         let semantics = records::semantics(module, ty, &name, output.entry_buffer());
@@ -8825,7 +8836,8 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare ptr @imre_clock_parts(double, i1, ptr)
-declare double @imre_mktime(ptr)
+declare double @imre_mktime(ptr, ptr)
+declare i64 @imre_time_sequence_length(i64)
 declare i64 @imre_time_component(i64)
 declare void @imre_time_extras(ptr, i64, i64)
 declare i64 @imre_time_extra(ptr, i1)
@@ -9760,6 +9772,8 @@ declare ptr @imre_log_enabled_cache(ptr)
 declare ptr @imre_log_names()
 declare ptr @imre_log_numbers()
 declare ptr @imre_log_names_copy()
+declare i64 @imre_union_from_float(i64, i1)
+declare i64 @imre_union_into_float(i64, i1)
 declare i64 @imre_union_from_int(i64)
 declare i64 @imre_union_into_int(i64)
 declare void @imre_log_dict_config(ptr)

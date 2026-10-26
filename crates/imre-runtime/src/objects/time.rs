@@ -4,6 +4,7 @@ use super::{
     Int,
     calendar::c_component,
     exceptions::{Error, Kind, finish},
+    records::descriptor,
     words::WordKind,
 };
 use std::ffi::CStr;
@@ -49,9 +50,7 @@ pub unsafe extern "C" fn imre_clock_parts(
                         .add(9)
                         .write(crate::StrOwner::into_raw(owner) as usize);
                 }
-                record
-                    .add(10)
-                    .write(Int::from(tm.tm_gmtoff as i64).into_raw());
+                record.add(10).write(Int::from(tm.tm_gmtoff).into_raw());
                 record
             }
         }),
@@ -60,12 +59,19 @@ pub unsafe extern "C" fn imre_clock_parts(
 }
 
 /// # Safety
+/// The time descriptor has two attribute kinds after the visible tuple kinds.
+unsafe fn extra_kind(record: *const usize, index: usize) -> WordKind {
+    // SAFETY: callers pass one of the two indices of a rooted time tuple.
+    unsafe { WordKind::new(*descriptor(record).kinds.add(index)) }
+}
+
+/// # Safety
 /// A rooted struct_time has two additional zero-initialized words for its named attributes.
 pub(super) unsafe fn release_extras(record: *const usize) {
-    // SAFETY: the final record owner transfers the nullable string and integer.
+    // SAFETY: the final record owner transfers both attributes using their declared kinds.
     unsafe {
-        WordKind::new(3).release(*record.add(9));
-        WordKind::new(2).release(*record.add(10));
+        extra_kind(record, 9).release(*record.add(9));
+        extra_kind(record, 10).release(*record.add(10));
     }
 }
 
@@ -75,8 +81,8 @@ pub(super) unsafe fn release_extras(record: *const usize) {
 pub unsafe extern "C" fn imre_time_extras(record: *mut usize, zone: usize, offset: usize) {
     // SAFETY: each acquired reference is transferred to one initially empty tail slot.
     unsafe {
-        WordKind::new(3).retain(zone);
-        WordKind::new(2).retain(offset);
+        extra_kind(record, 9).retain(zone);
+        extra_kind(record, 10).retain(offset);
         record.add(9).write(zone);
         record.add(10).write(offset);
     }
@@ -86,12 +92,29 @@ pub unsafe extern "C" fn imre_time_extras(record: *mut usize, zone: usize, offse
 /// The time tuple remains rooted while its selected optional attribute is retained.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_time_extra(record: *const usize, zone: bool) -> usize {
-    // SAFETY: the two hidden words use nullable string and integer representations.
+    // SAFETY: the descriptor specifies the concrete nullable representation of each hidden field.
     unsafe {
         let word = *record.add(if zone { 9 } else { 10 });
-        WordKind::new(if zone { 3 } else { 2 }).retain(word);
+        extra_kind(record, if zone { 9 } else { 10 }).retain(word);
         word
     }
+}
+
+/// Validate the list length before loading any of its tuple fields.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_time_sequence_length(word: usize) -> usize {
+    // Every native list length is a nonnegative tagged immediate.
+    let n = word >> 1;
+    if (9..=11).contains(&n) {
+        return word;
+    }
+    let bound = if n < 9 { "least 9" } else { "most 11" };
+    Error::new(
+        Kind::TypeError,
+        format!("time.struct_time() takes an at {bound}-sequence ({n}-sequence given)"),
+    )
+    .raise();
+    0
 }
 
 /// Validate one __index__ result before invoking any later tuple field's protocol.
@@ -104,9 +127,9 @@ pub extern "C" fn imre_time_component(value: usize) -> usize {
 }
 
 /// # Safety
-/// The argument is a rooted tuple with nine tagged integers in positional order.
+/// The argument is a rooted tuple with nine tagged integers in positional order. The original tuple supplies named timezone attributes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_mktime(record: *const usize) -> f64 {
+pub unsafe extern "C" fn imre_mktime(record: *const usize, original: *const usize) -> f64 {
     let result = (|| {
         let mut parts = [0; 9];
         for (i, part) in parts.iter_mut().enumerate() {
@@ -136,6 +159,56 @@ pub unsafe extern "C" fn imre_mktime(record: *const usize) -> f64 {
         tm.tm_sec = second;
         tm.tm_yday = yearday.wrapping_sub(1);
         tm.tm_isdst = isdst;
+        // The extended tuple may contain caller-supplied attributes. CPython
+        // validates them even though POSIX mktime determines the timezone itself.
+        let mut zone_bytes = Vec::new();
+        // SAFETY: original remains rooted with its own physical descriptor.
+        if unsafe { descriptor(original).has_time_zone() } {
+            // SAFETY: the descriptor marks the two hidden attributes.
+            unsafe {
+                let zone = *original.add(9);
+                if zone != 0 {
+                    if extra_kind(original, 9).base() != 3 {
+                        return Err(Error::new(
+                            Kind::TypeError,
+                            "bad argument type for built-in operation",
+                        ));
+                    }
+                    zone_bytes.extend_from_slice((&*(zone as *const crate::Str)).as_bytes());
+                    zone_bytes.push(0);
+                    tm.tm_zone = zone_bytes.as_mut_ptr().cast();
+                }
+                let offset = *original.add(10);
+                if offset != 0 {
+                    let kind = extra_kind(original, 10);
+                    tm.tm_gmtoff = match kind.base() {
+                        1 => (offset - 1) as libc::c_long,
+                        2 => num_traits::ToPrimitive::to_i64(&*Int::borrow(offset).big())
+                            .and_then(|n| libc::c_long::try_from(n).ok())
+                            .ok_or_else(|| {
+                                Error::new(
+                                    Kind::OverflowError,
+                                    "Python int too large to convert to C long",
+                                )
+                            })?,
+                        _ => {
+                            let name = match kind.base() {
+                                3 => "str",
+                                7 => "float",
+                                8 => "bytes",
+                                6 => "tuple",
+                                4 => "list",
+                                _ => "object",
+                            };
+                            return Err(Error::new(
+                                Kind::TypeError,
+                                format!("'{name}' object cannot be interpreted as an integer"),
+                            ));
+                        }
+                    };
+                }
+            }
+        }
         tm.tm_wday = -1;
         // SAFETY: mktime owns no pointers from this initialized tm. On success it
         // writes the normalized weekday, even when the timestamp is exactly -1.

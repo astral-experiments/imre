@@ -3402,7 +3402,7 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
-        if let Some(fields) = self.types.library_tuple_fields(receiver.ty) {
+        if let Some(fields) = self.types.fields(receiver.ty) {
             return self.fixed_tuple_slice(receiver, &fields, slice);
         }
         if !matches!(receiver.ty, Type::Str | Type::Bytes)
@@ -3498,7 +3498,7 @@ impl<'a> Checker<'a> {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
-            && (matches!(args[0].ty, Type::Str | Type::Bytes)
+            && (matches!(args[0].ty, Type::Str | Type::Bytes | Type::Float)
                 || args[0].ty == Type::Int && value.ty == self.types.string_or_int())
         {
             self.narrowed.insert_mut(slot, args[0].ty);
@@ -7345,7 +7345,7 @@ impl<'a> Checker<'a> {
                     return Ok(field);
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
-                    if self.types.tuple_origin(receiver.ty) == Some(crate::types::STRUCT_TIME) {
+                    if self.types.time_attributes(receiver.ty).is_some() {
                         return self.struct_time_field(receiver, attribute, &declaration);
                     }
                     if self.types.is_stat_result(receiver.ty) {
@@ -9647,6 +9647,26 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if name.id == "tuple"
+            && self.unshadowed_builtin(&call.func, "tuple")
+            && let [value] = args.as_slice()
+            && let Some(fields) = self.types.library_tuple_fields(value.ty)
+        {
+            let mut scope = calls::ArgumentScope::default();
+            let source = scope.hold(self, value.clone());
+            let items = fields
+                .iter()
+                .enumerate()
+                .map(|(i, &ty)| Expr {
+                    ty,
+                    kind: ExprKind::Field(Box::new(source.clone()), i),
+                })
+                .collect();
+            return Ok(scope.finish(Expr {
+                ty: self.types.tuple(fields),
+                kind: ExprKind::Tuple(items),
+            }));
+        }
         if let [value] = args.as_slice()
             && let Type::Placeholder(kind) = value.ty
         {

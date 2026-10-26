@@ -7,7 +7,7 @@ fn tag(ty: Type) -> u8 {
         Type::Str => 0,
         Type::Bytes => 1,
         // Both are Object owners and occupy separate closed unions with str.
-        Type::List(_) | Type::Dict(_) | Type::FrozenStrings => 2,
+        Type::List(_) | Type::Dict(_) | Type::FrozenStrings | Type::Float => 2,
         // These owners share the always-true Object tag. No admitted union
         // contains both an exception and a LogRecord.
         Type::Exception | Type::LogRecord => 3,
@@ -42,7 +42,12 @@ impl Emitter<'_, '_> {
         }
         let tag = tag(source);
         let word = self.word(&value);
-        let operand = if source == Type::Int {
+        let operand = if source == Type::Float {
+            self.instruction(format!(
+                "call i64 @imre_union_from_float(i64 {word}, i1 {})",
+                value.ty != source
+            ))
+        } else if source == Type::Int {
             self.instruction(format!("call i64 @imre_union_from_int(i64 {word})"))
         } else if tag != 0 {
             let bits = if matches!(source, Type::Enum(_) | Type::IntEnum(_)) {
@@ -92,16 +97,23 @@ impl Emitter<'_, '_> {
             self.forget(&value);
             return self.decode_word(value.operand, returns);
         }
-        let word = if returns == Type::Int {
-            self.instruction(format!(
-                "call i64 @imre_union_into_int(i64 {})",
-                value.operand
-            ))
-        } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
-            self.instruction(format!("lshr i64 {}, 3", value.operand))
-        } else {
-            self.instruction(format!("and i64 {}, -8", value.operand))
-        };
+        let word =
+            if returns == Type::Float || self.module.types.payload(returns) == Some(Type::Float) {
+                self.instruction(format!(
+                    "call i64 @imre_union_into_float(i64 {}, i1 {})",
+                    value.operand,
+                    returns != Type::Float
+                ))
+            } else if returns == Type::Int {
+                self.instruction(format!(
+                    "call i64 @imre_union_into_int(i64 {})",
+                    value.operand
+                ))
+            } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
+                self.instruction(format!("lshr i64 {}, 3", value.operand))
+            } else {
+                self.instruction(format!("and i64 {}, -8", value.operand))
+            };
         self.forget(&value);
         self.decode_word(word, returns)
     }
@@ -135,7 +147,10 @@ impl Emitter<'_, '_> {
             ));
             let mut result = "false".to_string();
             for member in self.module.types.children(value.ty) {
-                if classes.iter().any(|class| class.accepts(member)) {
+                if classes
+                    .iter()
+                    .any(|class| class.accepts(member, &self.module.types))
+                {
                     let tag = super::representation_kind(member, &self.module.types);
                     let is_member = self.instruction(format!("icmp eq i32 {kind}, {tag}"));
                     result = self.instruction(format!("or i1 {result}, {is_member}"));
@@ -159,13 +174,18 @@ impl Emitter<'_, '_> {
             ));
         }
         if value.ty == Type::Calendar(ir::CalendarType::Date) {
-            if classes.iter().any(|class| class.accepts(value.ty)) {
-                return "true".to_owned();
-            }
             if classes
                 .iter()
-                .any(|class| class.accepts(Type::Calendar(ir::CalendarType::DateTime)))
+                .any(|class| class.accepts(value.ty, &self.module.types))
             {
+                return "true".to_owned();
+            }
+            if classes.iter().any(|class| {
+                class.accepts(
+                    Type::Calendar(ir::CalendarType::DateTime),
+                    &self.module.types,
+                )
+            }) {
                 return self.instruction(format!(
                     "call i1 @imre_calendar_is_datetime(ptr {})",
                     value.operand
@@ -174,7 +194,10 @@ impl Emitter<'_, '_> {
         }
         // Frontend class tests include every descendant. If they include the
         // declared base, all layouts which can reach this view already match.
-        if matches!(value.ty, Type::Class(_)) && classes.iter().any(|class| class.accepts(value.ty))
+        if matches!(value.ty, Type::Class(_))
+            && classes
+                .iter()
+                .any(|class| class.accepts(value.ty, &self.module.types))
         {
             return "true".to_owned();
         }
@@ -194,7 +217,11 @@ impl Emitter<'_, '_> {
                 (12, Type::Set(0)),
             ]
             .iter()
-            .filter(|(_, ty)| classes.iter().any(|class| class.accepts(*ty)))
+            .filter(|(_, ty)| {
+                classes
+                    .iter()
+                    .any(|class| class.accepts(*ty, &self.module.types))
+            })
             .fold(0, |mask, (kind, _)| mask | 1 << *kind);
             let mut matched = (mask != 0).then(|| {
                 let kind = self.instruction(format!(
@@ -244,7 +271,7 @@ impl Emitter<'_, '_> {
                 }
             } else if let Some(members) = self.module.types.members(value.ty) {
                 let accepts_tag = |ty| {
-                    class.accepts(ty)
+                    class.accepts(ty, &self.module.types)
                         || matches!(
                             (class, ty),
                             (InstanceType::Exact(Type::Class(_)), Type::Class(_))
@@ -326,7 +353,7 @@ impl Emitter<'_, '_> {
                 ));
                 self.instruction(format!("icmp ne i32 {matched}, 0"))
             } else {
-                u8::from(class.accepts(value.ty)).to_string()
+                u8::from(class.accepts(value.ty, &self.module.types)).to_string()
             };
             result = self.instruction(format!("or i1 {result}, {current}"));
         }

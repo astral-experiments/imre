@@ -36,6 +36,50 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
     (value & !7, WordKind::new(kind))
 }
 
+/// # Safety
+/// The caller transfers raw f64 bits or a nullable float owner, as indicated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_from_float(word: usize, optional: bool) -> usize {
+    let bits = if optional {
+        if word == 0 {
+            return 0;
+        }
+        // SAFETY: the optional owned its boxed float until this read and release.
+        unsafe {
+            let value = crate::floats::imre_float_unbox(word);
+            crate::floats::imre_float_box_release(word);
+            value.to_bits() as usize
+        }
+    } else {
+        word
+    };
+    // SAFETY: kind 7 takes the unboxed float bits; the result owns the box.
+    unsafe { (super::boxed_values::imre_box_value(7, bits) as usize) | 2 }
+}
+
+/// # Safety
+/// The caller transfers a narrowed float member, or zero for an optional result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_union_into_float(word: usize, optional: bool) -> usize {
+    if word == 0 {
+        return 0;
+    }
+    // SAFETY: this tag denotes a boxed float in every admitted timestamp union.
+    let owner = unsafe { crate::ObjectOwner::from_raw((word & !7) as *const Object) };
+    // SAFETY: the acquired owner roots this immutable scalar through the read.
+    let bits = unsafe {
+        owner.0.with(|storage| match storage {
+            super::Storage::ObjectValue(value) => value.word,
+            _ => unreachable!(),
+        })
+    };
+    if optional {
+        crate::floats::imre_float_box(f64::from_bits(bits as u64))
+    } else {
+        bits
+    }
+}
+
 /// An immediate integer already uses its low bit. Give it aligned storage
 /// inside the union; an existing large integer transfers its allocation.
 pub(super) fn integer(value: Int) -> usize {
@@ -103,6 +147,7 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
             1 => !(*(word as *const Bytes)).is_empty(),
             2 => object(word as *const Object).0.with(|s| match s {
                 super::Storage::Set(set) => !set.is_empty(),
+                super::Storage::ObjectValue(v) => f64::from_bits(v.word as u64) != 0.0,
                 _ => crate::finish(s.sequence().map(|words| !words.values.is_empty()), false),
             }),
             7 => !(*(word as *const BigInt)).is_zero(),

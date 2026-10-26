@@ -95,7 +95,7 @@ impl RecordDescriptor {
         unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 4 != 0) }
     }
 
-    fn has_time_zone(&self) -> bool {
+    pub(super) fn has_time_zone(&self) -> bool {
         // SAFETY: generated record semantics outlive the descriptor.
         unsafe { self.semantics.as_ref() }.is_some_and(|s| s.kind == 1 && s.flags & 16 != 0)
     }

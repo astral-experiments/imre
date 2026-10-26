@@ -1,7 +1,7 @@
 //! Convert local civil time and preserve the nine sequence fields of struct_time.
 
 use super::*;
-use crate::types::STRUCT_TIME;
+use crate::types::TupleOrigin;
 
 impl Checker<'_> {
     pub(super) fn clock_parts(&mut self, call: &ast::ExprCall, utc: bool) -> Result<Expr, String> {
@@ -75,11 +75,7 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(arg)?;
-        let Some(fields) = self.types.library_tuple_fields(value.ty).or_else(|| {
-            matches!(value.ty, Type::Tuple(_))
-                .then(|| self.types.fields(value.ty))
-                .flatten()
-        }) else {
+        let Some(fields) = self.types.fields(value.ty) else {
             return Ok(expandtabs::type_error_after(
                 Type::Float,
                 vec![value],
@@ -108,7 +104,7 @@ impl Checker<'_> {
             ty: self.types.tuple(vec![Type::Int; 9]),
             kind: ExprKind::Tuple(words),
         };
-        Ok(scope.finish(op(Builtin::Mktime, Type::Float, vec![tuple])))
+        Ok(scope.finish(op(Builtin::Mktime, Type::Float, vec![tuple, record])))
     }
 
     pub(super) fn struct_time_new(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -126,7 +122,66 @@ impl Checker<'_> {
             fields
         } else {
             let value = self.expr(arg)?;
+            if let Some(element) = self.types.element(value.ty) {
+                let source = scope.hold(self, value);
+                let length = op(Builtin::Len, Type::Int, vec![source.clone()]);
+                let checked = op(Builtin::TimeSequenceLength, Type::Int, vec![length]);
+                let count = scope.hold(self, checked);
+                let item = |n| {
+                    op(
+                        Builtin::ListGet,
+                        element,
+                        vec![source.clone(), pipelines::integer(n)],
+                    )
+                };
+                let extra_ty = self.types.optional(element);
+                let extra = |n| -> Result<Expr, String> {
+                    let present = self.coerce(item(n), extra_ty, arg)?;
+                    let absent = self.coerce(
+                        Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        },
+                        extra_ty,
+                        arg,
+                    )?;
+                    let test =
+                        pipelines::compare(Compare::Greater, count.clone(), pipelines::integer(n));
+                    Ok(Expr {
+                        ty: extra_ty,
+                        kind: ExprKind::Conditional(
+                            Box::new(test),
+                            Box::new(present),
+                            Box::new(absent),
+                        ),
+                    })
+                };
+                let ty = self.types.namedtuple_layout(
+                    TupleOrigin::StructTime(extra_ty, extra_ty),
+                    vec![element; 9],
+                );
+                let value = Expr {
+                    ty,
+                    kind: ExprKind::Tuple((0..9).map(item).collect()),
+                };
+                let zone = extra(9)?;
+                let offset = extra(10)?;
+                let result = scope.hold(self, value);
+                let attach = op(
+                    Builtin::TimeExtras,
+                    Type::None,
+                    vec![result.clone(), zone, offset],
+                );
+                return Ok(scope.finish(self.evaluated_receiver(Some(attach), result)));
+            }
             if !matches!(value.ty, Type::Tuple(_)) {
+                if matches!(value.ty, Type::Int | Type::Bool | Type::Float | Type::None) {
+                    return Ok(expandtabs::type_error_after(
+                        self.types.struct_time(),
+                        vec![value],
+                        "constructor requires a sequence".into(),
+                    ));
+                }
                 return Err(error(
                     self.source,
                     arg,
@@ -153,9 +208,19 @@ impl Checker<'_> {
                 message,
             )));
         }
-        let ty = self
+        let regular = self
             .types
-            .namedtuple_layout(STRUCT_TIME, fields[..9].iter().map(|e| e.ty).collect());
+            .time_attributes(self.types.struct_time())
+            .unwrap();
+        let extra_type = |index: usize| match fields.get(index + 9) {
+            Some(value) if value.ty != Type::None => self.types.optional(value.ty),
+            _ => regular[index],
+        };
+        let attrs = [extra_type(0), extra_type(1)];
+        let ty = self.types.namedtuple_layout(
+            TupleOrigin::StructTime(attrs[0], attrs[1]),
+            fields[..9].iter().map(|e| e.ty).collect(),
+        );
         let result = Expr {
             ty,
             kind: ExprKind::Tuple(fields[..9].to_vec()),
@@ -163,16 +228,12 @@ impl Checker<'_> {
         if fields.len() == 9 {
             return Ok(scope.finish(result));
         }
-        let zone = self.coerce(fields[9].clone(), self.types.optional(Type::Str), arg)?;
         let empty = Expr {
             ty: Type::None,
             kind: ExprKind::None,
         };
-        let offset = self.coerce(
-            fields.get(10).cloned().unwrap_or(empty),
-            self.types.optional(Type::Int),
-            arg,
-        )?;
+        let zone = self.coerce(fields[9].clone(), attrs[0], arg)?;
+        let offset = self.coerce(fields.get(10).cloned().unwrap_or(empty), attrs[1], arg)?;
         let result = scope.hold(self, result);
         let attach = op(
             Builtin::TimeExtras,
@@ -193,8 +254,7 @@ impl Checker<'_> {
                 let zone = node.attr.as_str() == "tm_zone";
                 Ok(op(
                     Builtin::TimeExtra(zone),
-                    self.types
-                        .optional(if zone { Type::Str } else { Type::Int }),
+                    self.types.time_attributes(value.ty).unwrap()[usize::from(!zone)],
                     vec![value],
                 ))
             }
@@ -219,7 +279,7 @@ impl Checker<'_> {
             "__match_args__" => {
                 return self.namedtuple_class_attribute(
                     node,
-                    &self.types.namedtuple_metadata(STRUCT_TIME).unwrap(),
+                    &self.types.tuple_metadata(self.types.struct_time()).unwrap(),
                 );
             }
             _ => {
