@@ -304,6 +304,7 @@ pub(super) fn text_method(
         ));
     }
     match name {
+        "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {
             let Value::Str(value) = ctx.heap.get(args[0]) else {
                 return Err(Error::new(
