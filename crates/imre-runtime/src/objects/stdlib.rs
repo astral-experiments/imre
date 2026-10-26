@@ -507,7 +507,10 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 }
                 result.push_str(&*(word as *const Str));
             }
-            StrOwner::into_raw(StrOwner::new(result))
+            StrOwner::try_new(result).map_or_else(
+                |_| Error::memory_error().returning(std::ptr::null()),
+                StrOwner::into_raw,
+            )
         })
     }
 }

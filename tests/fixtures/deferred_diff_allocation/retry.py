@@ -74,6 +74,8 @@ def check(mode: str, shape: str) -> None:
             elif mode == "pack-project":
                 selected = [v[2:] for v in rows if v.startswith("+ ")]
                 number = len(selected)
+            elif mode == "join-owner":
+                value = ",".join(rows)
             elif mode == "project":
                 changes = [v for v in rows if v.startswith(("+", "-"))]
                 number = len(changes)
