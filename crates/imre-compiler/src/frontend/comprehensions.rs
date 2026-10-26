@@ -411,6 +411,7 @@ impl Checker<'_> {
                 &list.generators,
                 &list.elt,
                 expected.and_then(|ty| self.types.element(ty)),
+                false,
             )?
         {
             return Ok(filtered);

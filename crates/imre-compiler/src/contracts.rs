@@ -469,6 +469,7 @@ impl Builtin {
             | Self::GlobalGet(_)
             | Self::IntBounded { .. }
             | Self::SysGetRecursionLimit
+            | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
@@ -597,6 +598,7 @@ impl Builtin {
             | Self::SysStreamFlush { .. }
             | Self::SysGetFrameModuleName
             | Self::SysSetRecursionLimit
+            | Self::GeneratorFrameEnter(_)
             | Self::RaiseException
             | Self::SystemExitNew { .. }
             | Self::SystemExitCode

@@ -1133,6 +1133,8 @@ pub(crate) enum Builtin {
     SysOrigArgv,
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    GeneratorFrameEnter(String),
+    GeneratorFrameLeave,
     SysSetRecursionLimit,
     /// The child layout descriptors follow the literal subcommand order.
     ParseArgs {
