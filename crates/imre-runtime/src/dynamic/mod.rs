@@ -105,16 +105,71 @@ impl Context {
             )
         })
     }
-    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
-    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
-        let Value::Iterator { values, offset } = self.heap.get_mut(id) else {
+    /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
+    fn iterator(&mut self, id: Id) -> Result<Id> {
+        let sequence = match self.heap.get(id) {
+            Value::Iterator { .. } => return Ok(id),
+            Value::List(_) | Value::Tuple(_) => id,
+            Value::Instance {
+                dictionary: Some(_),
+                ..
+            } => {
+                let method = self
+                    .bound_slot(id, "__iter__")?
+                    .expect("dict iterator slot");
+                let result = self.call(method, Vec::new(), Vec::new())?;
+                return if matches!(self.heap.get(result), Value::Iterator { .. }) {
+                    Ok(result)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "iter() returned non-iterator of type '{}'",
+                            self.type_name(result)
+                        ),
+                    ))
+                };
+            }
+            _ => {
+                let values = self.items(id)?;
+                self.alloc(Value::Tuple(values))
+            }
+        };
+        Ok(self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+        }))
+    }
+
+    /// Reads the current position and permanently detaches the source on exhaustion.
+    fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let Value::Iterator { sequence, offset } = self.heap.get(id) else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
-        let Some(&value) = values.get(*offset) else {
+        let Some(sequence) = sequence else {
             return Ok(None);
         };
-        *offset += 1;
-        Ok(Some(value))
+        let (Value::List(values) | Value::Tuple(values)) = self.heap.get(*sequence) else {
+            unreachable!("iterator sequence")
+        };
+        let item = values.get(*offset).copied();
+        if item.is_none()
+            && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
+        {
+            *sequence = None;
+        }
+        Ok(item)
+    }
+
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let item = self.peek_item(id)?;
+        if item.is_some()
+            && let Value::Iterator { offset, .. } = self.heap.get_mut(id)
+        {
+            *offset += 1;
+        }
+        Ok(item)
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -133,21 +188,19 @@ impl Context {
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
-            Value::Iterator { values, offset } => {
-                if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-                    *offset = values.len();
+            Value::Iterator { .. } => {
+                let mut values = Vec::new();
+                while let Some(item) = self.next_item(id)? {
+                    values.push(item);
                 }
-                Ok(values[offset..].to_vec())
+                Ok(values)
             }
             Value::Instance {
                 dictionary: Some(_),
                 ..
             } => {
-                let iter = self
-                    .bound_slot(id, "__iter__")?
-                    .expect("dict iterator slot");
-                let values = self.call(iter, Vec::new(), Vec::new())?;
-                self.items(values)
+                let iterator = self.iterator(id)?;
+                self.items(iterator)
             }
             Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self

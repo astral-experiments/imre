@@ -152,16 +152,8 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => {
-                let values = self.items(a)?;
-                Ok(self.alloc(Value::Iterator { values, offset: 0 }))
-            }
-            "more" => {
-                let Value::Iterator { values, offset } = self.heap.get(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                Ok(flag(*offset < values.len()))
-            }
+            "iter" => self.iterator(a),
+            "more" => Ok(flag(self.peek_item(a)?.is_some())),
             "next" => self
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),

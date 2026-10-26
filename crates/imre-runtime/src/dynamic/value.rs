@@ -253,7 +253,7 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     Iterator {
-        values: Vec<Id>,
+        sequence: Option<Id>,
         offset: usize,
     },
     IoMethod {
@@ -292,11 +292,10 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v)
-            | Self::Tuple(v)
-            | Self::Set(v)
-            | Self::NamedTuple { values: v, .. }
-            | Self::Iterator { values: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) | Self::NamedTuple { values: v, .. } => {
+                visit.extend(v)
+            }
+            Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::Dict(entries) => {
                 for (key, value) in entries {
                     visit.extend([*key, *value]);
