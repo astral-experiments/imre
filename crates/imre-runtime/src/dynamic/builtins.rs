@@ -23,6 +23,7 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "NotImplementedError"
             | "TypeError"
             | "ValueError"
+            | "EOFError"
             | "UnicodeError"
             | "UnicodeDecodeError"
             | "UnicodeEncodeError"
