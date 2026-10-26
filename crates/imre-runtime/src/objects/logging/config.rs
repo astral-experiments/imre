@@ -300,6 +300,9 @@ fn configure(cfg: Pairs) -> Result<()> {
         ));
     }
     let incremental = get(&cfg, "incremental").is_some_and(|v| v.truth());
+    if !incremental && !super::handler::close_existing() {
+        return Ok(());
+    }
     if let Some(v) = get(&cfg, "handlers")
         && v.truth()
     {
@@ -593,10 +596,14 @@ fn file_config(path: &str, disable: bool, encoding: Option<&Str>) -> Result<()> 
             .map(Str::as_str)
             .ok_or_else(|| Error::string_key(Str::from(key)))
     };
-    for group in ["formatters", "handlers"] {
-        if !option(group, "keys")?.trim().is_empty() {
-            return Err(unsupported(group));
-        }
+    if !option("formatters", "keys")?.trim().is_empty() {
+        return Err(unsupported("formatters"));
+    }
+    if !super::handler::close_existing() {
+        return Ok(());
+    }
+    if !option("handlers", "keys")?.trim().is_empty() {
+        return Err(unsupported("handlers"));
     }
     let names: Vec<_> = option("loggers", "keys")?
         .split(',')

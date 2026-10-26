@@ -185,6 +185,21 @@ class Handler:
         _rename_handler(self, self._name, None)
 
 
+def _shutdown_handler(handler: Handler) -> None:
+    try:
+        try:
+            handler.acquire()
+            handler.flush()
+            handler.close()
+        except (OSError, ValueError):
+            pass
+        finally:
+            handler.release()
+    except BaseException:
+        if logging.raiseExceptions:
+            raise
+
+
 def getHandlerByName(name: str) -> Handler | None:
     return _lookup_handler(name)
 
