@@ -1,4 +1,5 @@
 from collections import deque
+from typing import Callable
 
 
 def receiver(values: deque[str]) -> deque[str]:
@@ -27,6 +28,22 @@ def mixed_readers(values: deque[int], flag: bool) -> None:
         read = plain_index
     print(selected(1))
     print(read(1))
+
+
+def rebind_methods(first: deque[str], second: deque[str]) -> None:
+    read: Callable[[int], str] = first.__getitem__
+    old = read
+    read = receiver(second).__getitem__
+    print(old(True))
+    print(read(True))
+    write = first.__setitem__
+    write = second.__setitem__
+    write(False, "replaced")
+    erase = first.__delitem__
+    erase = second.__delitem__
+    erase(True)
+    print(list(first))
+    print(list(second))
 
 
 values = deque("abcd", maxlen=4)
@@ -109,3 +126,4 @@ print(list(map(read, [True, False])))
 print(list(filter(read, [False, True])))
 mixed_readers(flags, True)
 mixed_readers(flags, False)
+rebind_methods(deque("ab"), deque("cd"))
