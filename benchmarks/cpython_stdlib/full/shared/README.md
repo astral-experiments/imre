@@ -2,7 +2,7 @@
 
 This directory contains original sources shared by the module suites. The [manifest](UPSTREAM.json) records the CPython commit and Git blob ID of each file. The files are distributed under the [upstream Python license](../../upstream/LICENSE).
 
-The [staging command](../stage_tests.py) verifies Git blob IDs and assembles these files together with the module owners’ fixtures into a single source root. It includes the original `test.support` and `test.libregrtest` packages, the translation tool and the HTTPS certificate used by the tests. Product modules still resolve through the interpreter or compiler under test.
+The [staging command](../stage_tests.py) verifies Git blob IDs and assembles these files together with the module owners’ fixtures into a single source root. It includes the original `test.support` and `test.libregrtest` packages, the translation tool, and the certificates and keys used by CPython’s HTTPS tests. Product modules still resolve through the interpreter or compiler under test.
 
 To check every original occurrence using a test-enabled CPython 3.14.5 on Linux:
 
