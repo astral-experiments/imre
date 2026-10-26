@@ -142,7 +142,7 @@ impl Context {
     }
 
     /// Compare arbitrary boxed values and surface recursive context comparisons.
-    fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
+    pub(super) fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
         let mut exhausted = false;
         let result = self.equal_inner(a, b, usize::MAX, &mut exhausted);
         if exhausted {
@@ -408,12 +408,13 @@ impl Context {
                 .copied()
                 .ok_or_else(|| self.lookup_error("KeyError", key));
         }
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            if let Some(&(_, v)) = entries.iter().find(|(k, _)| self.equal(*k, key)) {
-                return Ok(v);
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            let (_, index) = self.find_dictionary_key(obj, key, None)?;
+            if let Some(index) = index {
+                return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
             }
             if let Value::DefaultDict { factory, .. } = self.heap.get(obj)
                 && *factory != NONE
@@ -441,21 +442,11 @@ impl Context {
             .ok_or_else(|| Error::new("IndexError", "index out of range"))
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            let index = entries.iter().position(|(k, _)| self.equal(*k, key));
-            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                self.heap.get_mut(obj)
-            else {
-                unreachable!()
-            };
-            if let Some(i) = index {
-                entries[i].1 = val
-            } else {
-                entries.push((key, val));
-            }
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.set_dictionary_key(obj, key, val, None, true)?;
         } else if let Value::ByteArray(data) = self.heap.get(obj) {
             let i = self.as_integer(key)?;
             let i = if i < 0 { data.len() as i64 + i } else { i };
@@ -519,9 +510,8 @@ impl Context {
         if matches!(
             self.heap.get(container),
             Value::Dict(_) | Value::DefaultDict { .. }
-        ) && !builtins::hashable(self, item)
-        {
-            return Err(Error::new("TypeError", "unhashable key"));
+        ) {
+            return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
         for value in self.items(container)? {
             if self.checked_equal(value, item)? {
@@ -841,7 +831,7 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+    pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
@@ -905,17 +895,11 @@ impl Context {
             return Ok(());
         }
         match self.heap.get(obj) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                if !builtins::hashable(self, key) {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("unhashable type: '{}'", self.type_name(key)),
-                    ));
-                }
-                let i = entries
-                    .iter()
-                    .position(|(k, _)| self.equal(*k, key))
-                    .ok_or_else(|| Error::new("KeyError", self.repr(key)))?;
+            Value::Dict(_) | Value::DefaultDict { .. } => {
+                let i = self
+                    .find_dictionary_key(obj, key, None)?
+                    .1
+                    .ok_or_else(|| self.lookup_error("KeyError", key))?;
                 let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
                     self.heap.get_mut(obj)
                 else {

@@ -24,7 +24,10 @@ pub(in super::super) fn view_items(
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
-        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+        && !ctx.for_each_mapping_item(input, dict, |ctx, key, value, hash| {
+            ctx.set_dictionary_key(dict, key, value, hash, true)
+                .map(|_| ())
+        })?
     {
         let iterator = ctx.iterator(input)?;
         for index in 0.. {
@@ -237,20 +240,14 @@ pub(super) fn method(
         }
         "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
-            if !hashable(ctx, args[0]) {
-                return Err(type_error("unhashable dictionary key"));
-            }
-            if let Some(&(_, value)) = entries(ctx, receiver)?
-                .iter()
-                .find(|(key, _)| ctx.equal(*key, args[0]))
-            {
-                return Ok(value);
-            }
             let default = args.get(1).copied().unwrap_or(NONE);
             if name == "dict.setdefault" {
-                ctx.put_item(receiver, args[0], default)?;
+                return ctx.set_dictionary_key(receiver, args[0], default, None, false);
             }
-            Ok(default)
+            let (_, index) = ctx.find_dictionary_key(receiver, args[0], None)?;
+            Ok(index.map_or(default, |i| {
+                ctx.dict_entries(receiver).expect("dictionary")[i].1
+            }))
         }
         "dict.__len__" => {
             arity(name, args, 0, 0)?;
