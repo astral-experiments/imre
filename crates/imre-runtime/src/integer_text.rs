@@ -1,8 +1,88 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
+use std::borrow::Cow;
 use std::fmt::{self, Write};
 
+use num_bigint::BigInt;
+use num_traits::Zero;
+
 use crate::{Error, Kind, Str};
+
+/// Parse the `int(text, 16)` conversion used by UUID's hexadecimal constructor.
+///
+/// # Safety
+/// The compiler roots the immutable string for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_parse_hex(text: *const Str) -> usize {
+    // SAFETY: the borrowed text is immutable for the duration of this conversion.
+    let text = unsafe { &*text };
+    crate::finish(parse_radix(text, 16).map(crate::Int::into_raw), 1)
+}
+
+/// Parse Python integer text at a validated radix, including prefixes and Unicode decimal digits.
+pub(crate) fn parse_radix(source: &str, mut base: u32) -> crate::Result<crate::Int> {
+    let original = source;
+    let original_base = base;
+    let error = || invalid_literal_in_base(original, original_base);
+    let source = source.trim();
+    let source = if source.is_ascii() {
+        Cow::Borrowed(source)
+    } else {
+        let mut normalized = String::new();
+        normalized
+            .try_reserve_exact(source.len())
+            .map_err(|_| Error::allocation())?;
+        normalized.extend(
+            source
+                .chars()
+                .map(|ch| decimal_digit(ch).map_or(ch, |digit| char::from(b'0' + digit))),
+        );
+        Cow::Owned(normalized)
+    };
+    let source = source.as_ref();
+    let (negative, digits) = match source.as_bytes().first() {
+        Some(b'-') => (true, &source[1..]),
+        Some(b'+') => (false, &source[1..]),
+        _ => (false, source),
+    };
+    let radix_prefix = digits.as_bytes().get(..2).and_then(|v| match v {
+        b"0b" | b"0B" => Some(2),
+        b"0o" | b"0O" => Some(8),
+        b"0x" | b"0X" => Some(16),
+        _ => None,
+    });
+    let mut digits = digits;
+    let guessed = base == 0;
+    let prefixed = radix_prefix.is_some_and(|r| base == 0 || r == base);
+    if prefixed {
+        base = radix_prefix.unwrap();
+        digits = digits[2..].strip_prefix('_').unwrap_or(&digits[2..]);
+    } else if guessed {
+        base = 10;
+    }
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+        || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
+    {
+        return Err(error());
+    }
+    let normalized = if digits.contains('_') {
+        let mut text = String::new();
+        text.try_reserve_exact(digits.len())
+            .map_err(|_| Error::allocation())?;
+        text.extend(digits.chars().filter(|&ch| ch != '_'));
+        Cow::Owned(text)
+    } else {
+        Cow::Borrowed(digits)
+    };
+    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(error)?;
+    if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
+        return Err(error());
+    }
+    crate::Int::try_new(if negative { -value } else { value }).map_err(|_| Error::allocation())
+}
 
 /// Record the interpreter setting before any user code can change the environment.
 #[unsafe(no_mangle)]
