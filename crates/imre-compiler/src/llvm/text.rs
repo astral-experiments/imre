@@ -120,6 +120,19 @@ impl Emitter<'_, '_> {
             TextOperation::Dedent => {
                 self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
             }
+            TextOperation::UrlQuote => {
+                let bytes = i32::from(args[0].value.ty == Type::Bytes);
+                let safe_bytes = i32::from(args[1].value.ty == Type::Bytes);
+                let encoding = self.optional_object_pointer(&args[2].value);
+                let errors = self.optional_object_pointer(&args[3].value);
+                self.checked_instruction(format!("call ptr @imre_url_quote(ptr {source}, i32 {bytes}, ptr {}, i32 {safe_bytes}, ptr {encoding}, ptr {errors})", args[1].value.operand))
+            }
+            TextOperation::UrlUnquote => {
+                let bytes = i32::from(args[0].value.ty == Type::Bytes);
+                let encoding = self.optional_object_pointer(&args[1].value);
+                let errors = self.optional_object_pointer(&args[2].value);
+                self.checked_instruction(format!("call ptr @imre_url_unquote(ptr {source}, i32 {bytes}, ptr {encoding}, ptr {errors})"))
+            }
             TextOperation::UrlSplit => {
                 let bytes = i32::from(args[0].value.ty == Type::Bytes);
                 let scheme_bytes = i32::from(args[1].value.ty == Type::Bytes);

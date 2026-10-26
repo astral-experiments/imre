@@ -1648,6 +1648,8 @@ pub(crate) enum TextOperation {
     Partition,
     Translate,
     Unquote,
+    UrlQuote,
+    UrlUnquote,
     UrlSplit,
     UrlProperty(UrlProperty),
     UrlGetUrl,
