@@ -160,7 +160,7 @@ pub(super) fn native_size(value: &Int) -> Result<isize> {
 }
 
 /// Uses Ruff's byte repr rules, including quote choice and lowercase hex escapes.
-fn repr(value: &[u8]) -> Result<Str> {
+pub(super) fn repr(value: &[u8]) -> Result<Str> {
     let mut output = String::new();
     write_quoted_repr(&mut super::values::ReprWriter(&mut output), value)
         .map_err(|_| Error::allocation())?;

@@ -403,6 +403,7 @@ impl Builtin {
             | Self::Decode
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
+            | Self::Base64Translate
             | Self::BinasciiAsciiInput
             | Self::BinasciiDecode
             | Self::BinasciiEncode
@@ -1134,6 +1135,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
+                | "imre_base64_translate"
                 | "imre_binascii_ascii_input"
                 | "imre_binascii_decode"
                 | "imre_binascii_encode"
