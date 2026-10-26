@@ -64,7 +64,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
-mod socket;
+pub(crate) mod socket;
 mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;

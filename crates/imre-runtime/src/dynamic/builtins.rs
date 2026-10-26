@@ -37,6 +37,13 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "ImportError"
             | "ModuleNotFoundError"
             | "OSError"
+            | "ConnectionError"
+            | "ConnectionRefusedError"
+            | "ConnectionResetError"
+            | "ConnectionAbortedError"
+            | "BrokenPipeError"
+            | "BlockingIOError"
+            | "TimeoutError"
             | "FileNotFoundError"
             | "PermissionError"
             | "AssertionError"
@@ -114,6 +121,31 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
+        Value::Socket(_)
+            if matches!(
+                attr,
+                "bind"
+                    | "listen"
+                    | "accept"
+                    | "connect"
+                    | "getsockname"
+                    | "fileno"
+                    | "close"
+                    | "recv"
+                    | "recv_into"
+                    | "makefile"
+                    | "send"
+                    | "sendall"
+                    | "shutdown"
+                    | "setsockopt"
+                    | "setblocking"
+                    | "getblocking"
+                    | "__enter__"
+                    | "__exit__"
+            ) =>
+        {
+            "socket.socket"
+        }
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
         Value::Dict(_) | Value::DefaultDict { .. }
@@ -143,6 +175,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "read"
+                    | "fileno"
                     | "readline"
                     | "readinto"
                     | "seek"
@@ -462,7 +495,7 @@ pub(super) fn call(
                 Error::new(kind, format!("{path}: {e}"))
             })?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
-                io::BufReader::new(file),
+                io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))
         }
         "__import__" => {
