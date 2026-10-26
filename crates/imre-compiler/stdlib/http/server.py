@@ -54,12 +54,9 @@ def _escape(text: str) -> str:
 
 
 def _log_text(value: str | int | HTTPStatus) -> str:
-    if isinstance(value, HTTPStatus):
-        return str(value.value)
-    elif isinstance(value, str):
+    if isinstance(value, str):
         return value
-    else:
-        return str(value)
+    return str(int(value))
 
 
 class HTTPServer(socketserver.TCPServer):
