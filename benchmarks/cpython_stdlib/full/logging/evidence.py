@@ -32,6 +32,7 @@ import native_hierarchy
 import native_levels
 import native_logging
 import native_make_record
+import native_plain_encoding
 import native_records
 import native_rotation
 import native_timed
@@ -161,6 +162,7 @@ def known_cases(toolchain, work, original):
     executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
     executions.update(native_make_record.record_cases(toolchain, directory("make-record")))
     executions[native_encoding.CASE] = native_encoding.encoding_case(toolchain, directory("encoding"))
+    executions[native_plain_encoding.CASE] = native_plain_encoding.plain_case(toolchain, directory("plain-encoding"))
     executions[native_encoding.SETTING] = native_encoding.stream_setting_case(toolchain, directory("stream-setting"))
     executions[native_standalone.CASE] = native_standalone.handler_case(toolchain, directory("standalone-handlers"))
     executions.update(native_basic_config.config_cases(toolchain, directory("root-config")))
