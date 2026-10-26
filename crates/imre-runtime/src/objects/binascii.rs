@@ -1,4 +1,4 @@
-//! Standard and URL-safe base64 over rooted immutable inputs.
+//! Base64 and checksums over rooted immutable inputs.
 
 use base64::Engine;
 use base64::engine::general_purpose::{GeneralPurpose, STANDARD, URL_SAFE};
@@ -7,6 +7,31 @@ use super::bytes::allocate;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Str};
 use crate::BytesOwner;
+
+/// Compute the unsigned Adler-32 of immutable bytes from an exact Python integer seed.
+///
+/// # Safety
+/// The caller roots the byte buffer and the tagged integer for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> usize {
+    // SAFETY: both inputs stay rooted and neither can change during the checksum.
+    let (data, seed) = unsafe { (&*data, crate::Int::borrow(seed)) };
+    let seed = if let Some(small) = seed.as_small() {
+        small as u32
+    } else {
+        let big = seed.big();
+        let low = big.magnitude().iter_u32_digits().next().unwrap_or(0);
+        if big.sign() == num_bigint::Sign::Minus {
+            low.wrapping_neg()
+        } else {
+            low
+        }
+    };
+    // zlib normalizes both halves even for an empty input and a noncanonical seed.
+    const BASE: u32 = 65_521;
+    let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
+    crate::Int::from_usize(zlib_rs::adler32::adler32(seed, data) as usize).into_raw()
+}
 
 fn owned(bytes: Bytes) -> *const Bytes {
     BytesOwner::into_raw(BytesOwner::new(bytes))
