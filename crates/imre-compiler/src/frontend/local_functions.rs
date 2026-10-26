@@ -158,6 +158,9 @@ impl Function {
         source: &str,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if self.signature.asynchronous {
+            types.set_coroutine_target(self.signature.id, crate::types::CoroutineTarget::Coroutine);
+        }
         if !self.captures.is_empty()
             || self.signature.params.iter().any(|p| {
                 matches!(

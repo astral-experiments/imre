@@ -56,6 +56,7 @@ pub(crate) use json::{
 };
 mod linecache;
 mod logging;
+pub(crate) use logging::record::percent_integer_field;
 mod mappings;
 mod module_specs;
 mod namespaces;
@@ -83,6 +84,7 @@ pub(crate) use text::{UrlInput, urlquote, urlsplit};
 pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
+pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 mod warnings;
@@ -90,7 +92,7 @@ mod words;
 mod zipfile;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::errno_error;
+pub(crate) use files::{errno_error, open_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -756,24 +758,27 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
 pub unsafe extern "C" fn imre_str_repeat(value: *const Str, count: usize) -> *const Str {
     // SAFETY: both arguments remain rooted for this non-reentrant operation.
     let (text, count) = unsafe { (&*value, Int::borrow(count)) };
-    let result = (|| {
-        let count = bytes::native_size(&count)?.max(0) as usize;
-        if text.is_empty() || count == 0 {
-            return Ok(StrOwner::into_raw(StrOwner::new(Str::default())));
-        }
-        let length = text
-            .len()
-            .checked_mul(count)
-            .filter(|length| *length <= isize::MAX as usize)
-            .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
-        let mut result =
-            Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
-        for _ in 0..count {
-            result.push_str(text);
-        }
-        Ok(StrOwner::into_raw(StrOwner::new(result)))
-    })();
+    let result = repeat_str(text, &count).map(|result| StrOwner::into_raw(StrOwner::new(result)));
     finish(result, std::ptr::null())
+}
+
+/// Repeats UTF-8 text with the native sequence length and allocation checks.
+pub(crate) fn repeat_str(text: &str, count: &Int) -> Result<Str, Error> {
+    let count = bytes::native_size(count)?.max(0) as usize;
+    if text.is_empty() || count == 0 {
+        return Ok(Str::default());
+    }
+    let length = text
+        .len()
+        .checked_mul(count)
+        .filter(|length| *length <= isize::MAX as usize)
+        .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
+    let mut result =
+        Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
+    for _ in 0..count {
+        result.push_str(text);
+    }
+    Ok(result)
 }
 
 /// One borrowed concatenation fragment. `usize::MAX` identifies a rooted Str

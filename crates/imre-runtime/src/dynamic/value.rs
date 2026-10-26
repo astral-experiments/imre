@@ -1,6 +1,6 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use super::Context;
@@ -18,6 +18,7 @@ pub(super) struct CodeObject {
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
+    pub coroutine: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -147,23 +148,30 @@ impl Context {
             Value::Float(_) => "float",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Zip { .. } => "zip",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
+            Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
-            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
+            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
+            Value::Iterator { kind, .. } => kind,
+            Value::Generator { .. } => "generator",
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::TypeVar(_) => "TypeVar",
+            Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
@@ -189,16 +197,9 @@ impl Context {
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
-        let message = match args {
-            [] => String::new(),
-            [one] => self.display(*one),
-            many => {
-                let tuple = self.alloc(Value::Tuple(many.to_vec()));
-                self.display(tuple)
-            }
-        };
-        let mut error = Error::new(kind, message);
+        let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -247,10 +248,13 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub is_abstract: bool,
     pub class_cell: Option<Id>,
+    pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
+    pub globals: HashSet<String>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -283,6 +287,10 @@ pub(super) enum Value {
     CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Struct {
+        format: String,
+        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+    },
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -298,6 +306,7 @@ pub(super) enum Value {
     },
     Dict(super::dictionary::Entries),
     DictionaryIterator(super::dictionary::Cursor),
+    MappingProxy(Id),
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -330,10 +339,13 @@ pub(super) enum Value {
         scope: Id,
         ancestors: Vec<Id>,
     },
+    TypeVar(super::typing::TypeVariable),
+    GenericAlias(super::typing::Alias),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        scalar: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -353,6 +365,7 @@ pub(super) enum Value {
     Method {
         callable: Id,
         receiver: Id,
+        explicit: bool,
     },
     StaticMethod {
         callable: Id,
@@ -368,13 +381,33 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
+        coroutine_marker: Option<Id>,
     },
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    Generator {
+        code: Id,
+        scope: Id,
+        running: bool,
+        exhausted: bool,
+    },
+    Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Zip {
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
+        pending: Option<Id>,
+    },
+    CallableIterator(Option<[Id; 2]>),
+    // Private to a compiled loop. Python-visible iterators keep their original identity.
+    LoopIterator {
+        source: Id,
+        peeked: Option<Id>,
+    },
     Iterator {
+        kind: &'static str,
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
@@ -387,7 +420,7 @@ pub(super) enum Value {
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
-        groups: Vec<Option<String>>,
+        groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
     },
     Context(std::rc::Rc<HashMap<Id, Id>>),
@@ -417,6 +450,17 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Zip {
+                inputs, pending, ..
+            } => {
+                visit.extend(inputs.iter());
+                visit.extend(pending);
+            }
+            Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
+            Self::LoopIterator { source, peeked } => {
+                visit.push(*source);
+                visit.extend(peeked);
+            }
             Self::DictionaryIterator(cursor) => visit.extend(cursor.owner),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
@@ -427,7 +471,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
-            Self::DictView { dict, .. } => visit.push(*dict),
+            Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
@@ -449,8 +493,10 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
+            Self::Yielded(item) => visit.push(*item),
             Self::Range { .. } => {}
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
@@ -461,6 +507,9 @@ impl Value {
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
+                if let Some((bases, mro)) = scope.class_lineage {
+                    visit.extend([bases, mro]);
+                }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
@@ -491,17 +540,23 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
+            Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
+            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
             Self::Instance {
                 class,
                 fields,
                 dictionary,
+                scalar,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
+                visit.extend(scalar);
             }
-            Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
+            Self::Method {
+                callable, receiver, ..
+            } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {
                 callable,
                 dictionary,
@@ -512,7 +567,11 @@ impl Value {
                 function,
                 args,
                 keywords,
-            } => visit.extend([*function, *args, *keywords]),
+                coroutine_marker,
+            } => {
+                visit.extend([*function, *args, *keywords]);
+                visit.extend(coroutine_marker);
+            }
             Self::Cached { function, entries } => {
                 visit.push(*function);
                 for call in entries {
@@ -526,6 +585,8 @@ impl Value {
             Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexPattern(pattern) => visit.push(pattern.source),
+            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -536,15 +597,14 @@ impl Value {
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
+            | Self::Struct { .. }
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_)
-            | Self::RegexPattern(_)
-            | Self::RegexMatch { .. } => {}
+            | Self::TextFile(_) => {}
         }
     }
 }

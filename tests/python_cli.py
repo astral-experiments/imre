@@ -63,6 +63,20 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
+        exit_stack = Path(__file__).with_name("fixtures") / "boxed_exit_stack.py"
+        expected = run(sys.executable, "-B", exit_stack)
+        actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack_import = root / "stack.py"
+        exit_stack_import.write_text("from contextlib import ExitStack\n"
+                                     "s = ExitStack()\nprint(isinstance(s, ExitStack))\n"
+                                     "print(s.__enter__() is s)\n")
+        for mode in ([], ["--reachable-only"]):
+            actual = run(imre, "run", exit_stack_import, *mode, "--quiet")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, b"True\nTrue\n", b""), actual.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -88,9 +102,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0):
+        def compare(*args, extra=None, status=0, native_args=None):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *args, extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -111,6 +125,11 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
+        (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
+        inspect_entry = root / "inspect_views.py"
+        inspect_entry.write_text("import view_inspection\n")
+        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
@@ -353,19 +372,26 @@ def report(text):
             "boxed_ast.py",
             "boxed_code_objects.py",
             "boxed_bytes_add.py",
+            "boxed_int_to_bytes.py",
+            "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
+            "boxed_re_verbose.py",
             "boxed_datetime.py",
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
+            "boxed_exception_repr.py",
             "boxed_type_identity.py",
+            "boxed_any_generator.py",
+            "boxed_global.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_module_globals.py",
             "boxed_frozenset.py",
+            "boxed_attribute_deletion.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -376,11 +402,18 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
+            "boxed_zip.py",
+            "boxed_python_iterators.py",
             "boxed_bytes_separators.py",
+            "boxed_struct.py",
             "boxed_reversed_list.py",
+            "boxed_string_new.py",
+            "boxed_string_repeat.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
+        compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
@@ -398,6 +431,9 @@ except ImportError:
     print('missing child')
 """)
             compare("-IB", "-c", imports)
+        http = fixtures.parents[1] / "crates/imre-compiler/stdlib/http/__init__.py"
+        plugin.write_bytes(http.read_bytes())
+        compare("-IB", "-c", imports + (fixtures / "boxed_http_enums.py").read_text())
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",

@@ -21,30 +21,22 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
-            "delname" | "clearname" => {
+            "declare_global" => {
                 let name = self.str_value(b)?.to_owned();
-                if let Some(namespace) = self.scope_data(a).namespace {
-                    if self.scope_name(a, &name).is_some() {
-                        self.delete_item(namespace, b)?;
-                    } else if op == "delname" {
-                        return Err(Error::new(
-                            "NameError",
-                            format!("name '{name}' is not defined"),
-                        ));
-                    }
-                    return Ok(NONE);
-                }
-                let Value::Scope(s) = self.heap.get_mut(a) else {
+                let Value::Scope(scope) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                if s.names.shift_remove(&name).is_none() && op == "delname" {
+                scope.globals.insert(name);
+                Ok(NONE)
+            }
+            "delname" | "clearname" => {
+                let name = self.str_value(b)?.to_owned();
+                let scope = self.binding_scope(a, &name);
+                if !self.remove_binding(scope, &name, b)? && op == "delname" {
                     return Err(Error::new(
                         "NameError",
                         format!("name '{name}' is not defined"),
                     ));
-                }
-                if let Some(order) = &mut s.class_body {
-                    order.retain(|member| member != &name);
                 }
                 Ok(NONE)
             }
@@ -72,6 +64,11 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 self.set_attr(a, &name, c)?;
                 Ok(c)
+            }
+            "delattr" => {
+                let name = self.str_value(b)?.to_owned();
+                self.delete_attr(a, &name)?;
+                Ok(NONE)
             }
             "get" => self.get_item(a, b),
             "delitem" => {
@@ -161,6 +158,16 @@ impl Context {
                 self.call(a, args, kwargs)
             }
             "class" => self.class(a, b, c),
+            "coroutine_function" => {
+                let Value::Function { code, .. } = *self.heap.get(a) else {
+                    return Err(Error::new("SystemError", "invalid coroutine definition"));
+                };
+                let Value::Code(code) = self.heap.get_mut(code) else {
+                    unreachable!("function code")
+                };
+                code.coroutine = true;
+                Ok(a)
+            }
             "annotate" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
@@ -168,7 +175,9 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => self.iterator(a),
+            "generator" => self.generator(a, b),
+            "yielded" => Ok(self.alloc(Value::Yielded(a))),
+            "iter" => self.loop_iterator(a),
             "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?
@@ -356,6 +365,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
+        typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -625,6 +635,7 @@ impl Context {
             filename,
             first_line: location.line,
             module_definition,
+            coroutine: false,
         }))
     }
 
@@ -700,6 +711,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
         ctx.modules
             .values()
             .chain(ctx.classes.values())
+            .chain(ctx.typing.roots())
             .chain(ctx.builtins.values())
             .chain(ctx.native_code_objects.values())
             .chain(ctx.codec_entries.roots())

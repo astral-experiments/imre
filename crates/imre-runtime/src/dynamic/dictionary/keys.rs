@@ -273,7 +273,7 @@ impl Context {
             }
             let method = self.bind_attribute(slot, key, class)?;
             let returned = self.call(method, vec![], vec![])?;
-            let hash = match self.heap.get(returned) {
+            let hash = match self.heap.get(self.scalar_value(returned)) {
                 Value::Int(n) => n.to_i64().unwrap_or_else(|| integer_hash(n)),
                 Value::Bool(b) => i64::from(*b),
                 _ => {
@@ -285,6 +285,8 @@ impl Context {
             };
             return Ok(normalized(hash));
         }
+        // Immutable scalar subclasses inherit the hash of their backing value.
+        let key = self.scalar_value(key);
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
             return Ok(hash);
         }

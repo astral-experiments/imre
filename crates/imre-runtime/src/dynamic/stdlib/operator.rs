@@ -209,7 +209,13 @@ impl Context {
             return Ok(self.int(self.dictionary_hint(cursor) as i64));
         }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            return Ok(self.int(self.iterator_remaining(value)?.len() as i64));
+            let length = i64::try_from(self.iterator_remaining(value)?.len()).map_err(|_| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            return Ok(self.int(length));
         }
         if let Some(hint) = self.bound_slot(value, "__length_hint__")? {
             let hint = match self.call(hint, vec![], vec![]) {

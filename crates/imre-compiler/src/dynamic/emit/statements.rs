@@ -13,6 +13,33 @@ enum Place {
 }
 
 impl Function<'_, '_> {
+    /// A global declaration applies to the entire code block, even in an untaken branch.
+    pub(super) fn declare_globals(&mut self, suite: &[ast::Stmt]) {
+        #[derive(Default)]
+        struct Globals<'a>(std::collections::BTreeSet<&'a str>);
+
+        impl<'a> Visitor<'a> for Globals<'a> {
+            fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+                match statement {
+                    ast::Stmt::Global(global) => {
+                        self.0.extend(global.names.iter().map(|name| name.as_str()));
+                    }
+                    ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                    _ => visitor::walk_stmt(self, statement),
+                }
+            }
+
+            fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        }
+
+        let mut globals = Globals::default();
+        globals.visit_body(suite);
+        for name in globals.0 {
+            let name = self.text(name);
+            self.op("declare_global", &[&self.scope.clone(), &name]);
+        }
+    }
+
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
@@ -38,7 +65,7 @@ impl Function<'_, '_> {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
@@ -53,6 +80,9 @@ impl Function<'_, '_> {
                             }
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
+                            }
+                            Some(Place::Attr(obj, name)) => {
+                                self.op("delattr", &[&obj, &name]);
                             }
                             _ => {
                                 self.unsupported("deletion target");
@@ -84,9 +114,10 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let generator = is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
-                    } else if is_generator(&v.body) {
+                    } else if generator {
                         Body::Unsupported(stmt, "generator function")
                     } else {
                         Body::Statements(&v.body)
@@ -98,6 +129,11 @@ impl Function<'_, '_> {
                         v.returns.as_deref(),
                         body,
                     );
+                    if v.is_async && !generator {
+                        // Set CO_COROUTINE on the definition before any decorator
+                        // can inspect it. Async generators use a different flag.
+                        self.op("coroutine_function", &[&function]);
+                    }
                     self.decorated(&v.name, &decorators, function);
                 }
                 ast::Stmt::ClassDef(v) => {
@@ -715,6 +751,12 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     match body {
         Body::Statements(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Generator(generator, element) => {
+            for filter in &generator.ifs {
+                captures.visit_expr(filter);
+            }
+            captures.visit_expr(element);
+        }
         Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
     }
     captures.0
