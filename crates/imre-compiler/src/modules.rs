@@ -22,6 +22,7 @@ mod namedtuple_fields;
 mod os;
 pub(crate) use os::credential_arity;
 mod reachability;
+pub(crate) use reachability::http_command_key;
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;

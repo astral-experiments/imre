@@ -501,6 +501,7 @@ fn collect_class(
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(name, "__init__" | "__fspath__" | "__getitem__" | "__setitem__")
+                    && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
                     && !selector_context
                     && !(mapping && name == "__contains__")

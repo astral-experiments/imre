@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -161,6 +162,27 @@ def date_case(command, wrong=False):
             connection.close()
 
 
+def public_contracts(command):
+    with listener(command) as port:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
+            conn.sendall(b"GET /old\r\n")
+            with conn.makefile("rb") as stream:
+                assert stream.read() == b"lower=0.9\n"
+    with listener(command) as port:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            conn.putrequest("CHECK", "/new")
+            conn.putheader("X-Value", "one")
+            conn.putheader("x-value", "two")
+            conn.endheaders()
+            response = conn.getresponse()
+            assert response.status == 200, response.reason
+            assert response.getheader("Server").startswith("Overridden/10 ")
+            assert response.read() == b"X-Value=one\nx-value=two\n"
+        finally:
+            conn.close()
+
+
 def main():
     options = argparse.ArgumentParser(description=__doc__)
     options.add_argument("--compiler", required=True, type=Path)
@@ -178,6 +200,7 @@ def main():
         run_case(upstream, "test_handler", [sys.executable, str(source)], wrong=True)
         for wrong in (False, True):
             date_case([sys.executable, str(source)], wrong)
+        public_contracts([sys.executable, str(HERE / "contract_server.py")])
         for level in args.opt_levels:
             for flags in ([], ["--reachable-only"]):
                 binary = root / "serve"
@@ -189,6 +212,11 @@ def main():
                 run_case(upstream, "test_handler", [str(binary)], wrong=True)
                 for wrong in (False, True):
                     date_case([str(binary)], wrong)
+                subprocess.run([args.compiler.resolve(), "build", HERE / "contract_server.py",
+                                "--runtime", args.runtime.resolve(), "--clang", args.clang,
+                                "--opt-level", level, "--no-cache", *flags, "-o", binary],
+                               check=True, timeout=180)
+                public_contracts([str(binary)])
                 print(f"O{level} {flags}: {len(METHODS)} original CPython client methods, native TCP server, wrong-status and native date controls")
 
 

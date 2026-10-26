@@ -20,6 +20,7 @@ pub(super) struct Reachable {
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
     instance_attributes: HashSet<String>,
+    http_commands: bool,
 }
 
 struct References<'a> {
@@ -98,6 +99,15 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && self.graph.resolve(self.module, &call.func).is_none()
+            && call.func.as_name_expr().is_some_and(|n| n.id == "getattr")
+            && call.arguments.keywords.is_empty()
+            && let [_, key] = call.arguments.args.as_slice()
+            && http_command_key(key)
+        {
+            self.found.http_commands = true;
+        }
         if let ast::Expr::Call(call) = expr
             && (self.graph.resolve(self.module, &call.func)
                 == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii))
@@ -336,6 +346,7 @@ impl Reachable {
                 found.methods.len(),
                 found.attributes.len(),
                 found.properties.len(),
+                found.http_commands,
             );
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
@@ -437,13 +448,8 @@ impl Reachable {
                                 || (source.is_bundled("selectors")
                                     && class.name.as_str() == "PollSelector"
                                     && name == "close")
-                                || ((name.starts_with("do_") || name == "__getattr__")
-                                    && has_base(graph, id, |module, base| {
-                                        let Some(Binding::Definition(def)) = graph.resolve(module, base) else { return false; };
-                                        let source = &graph.modules[def.module];
-                                        source.is_bundled("socketserver") && matches!(&source.parsed.syntax().body[def.statement],
-                                            ast::Stmt::ClassDef(c) if c.name.as_str() == "StreamRequestHandler")
-                                    }))
+                                || (refs.found.http_commands && (name.starts_with("do_") || name == "__getattr__")
+                                    && graph.is_http_handler(id))
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
@@ -477,6 +483,7 @@ impl Reachable {
                     found.methods.len(),
                     found.attributes.len(),
                     found.properties.len(),
+                found.http_commands,
                 )
             {
                 break;
@@ -761,6 +768,25 @@ fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
                 .and_then(|n| crate::frontend::exception_kind(n.id.as_str()))
                 .is_some()
     })
+}
+
+/// The HTTP dispatcher constructs a method name from a fixed prefix and the request command.
+ pub(crate) fn http_command_key(key: &ast::Expr) -> bool {
+    matches!(key, ast::Expr::BinOp(add) if add.op == ast::Operator::Add &&
+        matches!(&*add.left, ast::Expr::StringLiteral(lit) if lit.value.to_str() == "do_"))
+}
+
+impl SourceGraph {
+    pub(crate) fn is_http_handler(&self, class: DefinitionId) -> bool {
+        let is_base = |id: DefinitionId| {
+            let module = &self.modules[id.module];
+            module.is_bundled("http.server") && matches!(&module.parsed.syntax().body[id.statement],
+                ast::Stmt::ClassDef(c) if c.name.as_str() == "BaseHTTPRequestHandler")
+        };
+        is_base(class) || has_base(self, class, |module, base| {
+            matches!(self.resolve_type(module, base), Some(Binding::Definition(parent)) if is_base(parent))
+        })
+    }
 }
 
 /// Walk the finite class graph before fixed layouts are resolved.

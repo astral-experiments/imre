@@ -11,17 +11,10 @@ impl Checker<'_> {
             return Ok(None);
         }
         let [owner, key] = call.arguments.args.as_ref() else { return Ok(None); };
-        let ast::Expr::BinOp(add) = key else { return Ok(None); };
-        if add.op != ast::Operator::Add || !matches!(&*add.left, ast::Expr::StringLiteral(lit) if lit.value.to_str() == "do_") {
-            return Ok(None);
-        }
+        if !crate::modules::http_command_key(key) { return Ok(None); }
         let receiver = self.expr(owner)?;
         let Type::Class(base) = receiver.ty else { return Ok(None); };
-        let is_handler = std::iter::once(&base).chain(&self.classes.declarations.definitions[base].bases).any(|&id| {
-            let decl = &self.classes.declarations.definitions[id];
-            self.graph.modules[decl.definition.module].is_bundled("socketserver") && decl.name == "StreamRequestHandler"
-        });
-        if !is_handler { return Ok(None); }
+        if !self.graph.is_http_handler(self.classes.declarations.definitions[base].definition) { return Ok(None); }
         let mut scope = calls::ArgumentScope::default();
         let receiver = scope.hold(self, receiver);
         let key = self.expr_expected(key, Type::Str)?;

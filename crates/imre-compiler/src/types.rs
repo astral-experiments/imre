@@ -687,6 +687,11 @@ impl Types {
                 }
             }
             [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.string_or_int(),
+            [dict @ Type::Dict(_), record @ Type::Class(id)] | [record @ Type::Class(id), dict @ Type::Dict(_)]
+                if !self.0.borrow().custom_truth.contains(id) => {
+                    Type::Union(self.intern(Shape::Union(vec![*dict, *record])))
+                }
+
             choices @ [_, _, ..]
                 if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
                     && choices

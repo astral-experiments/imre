@@ -112,7 +112,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
     _request_version: str | None
     _command: str | None
     _path: str | None
-    _headers: HTTPMessage | None
+    _headers: HTTPMessage | dict[str, str] | None
     _close_connection: bool | None
     _buffer: list[bytes] | None
     _command_set: bool
@@ -186,14 +186,14 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         self._path = value
 
     @property
-    def headers(self) -> HTTPMessage:
+    def headers(self) -> HTTPMessage | dict[str, str]:
         value = self._headers
         if value is None:
             raise AttributeError("headers")
         return value
 
     @headers.setter
-    def headers(self, value: HTTPMessage) -> None:
+    def headers(self, value: HTTPMessage | dict[str, str]) -> None:
         self._headers = value
 
     @property
@@ -258,7 +258,8 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         if self.path.startswith("//"):
             self.path = "/" + self.path.lstrip("/")
         if len(words) == 2:
-            self.headers = HTTPMessage()
+            empty_headers: dict[str, str] = {}
+            self.headers = empty_headers
             return True
         lines: list[str] = []
         while True:
@@ -275,12 +276,12 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         message = self.MessageClass()
         message._parse(lines)
         self.headers = message
-        connection = (self.headers.get("Connection", "") or "").lower()
+        connection = (message.get("Connection", "") or "").lower()
         if connection == "close":
             self.close_connection = True
         elif connection == "keep-alive" and self.protocol_version.encode() >= b"HTTP/1.1":
             self.close_connection = False
-        if ((self.headers.get("Expect", "") or "").lower() == "100-continue"
+        if ((message.get("Expect", "") or "").lower() == "100-continue"
                 and self.protocol_version.encode() >= b"HTTP/1.1" and self.request_version.encode() >= b"HTTP/1.1"):
             return self.handle_expect_100()
         return True
