@@ -721,7 +721,6 @@ mod tests {
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };
     use crate::{BigInt, MAX_SMALL, MIN_SMALL};
-    use std::rc::Rc;
 
     /// Consumes one indexing failure and checks the exact public diagnostic.
     fn assert_index_error(expected: &str) {
@@ -940,7 +939,7 @@ mod tests {
     fn list_conversion_copies_all_bytes_across_chunk_boundaries() {
         for length in [0, 1, 63, 64, 65, 127, 128, 129, 255, 256, 257, 1024] {
             let expected = (0..length).map(|index| index as u8).collect::<Vec<_>>();
-            let source = Rc::new(List::new(
+            let source = crate::ListOwner::new(List::new(
                 expected
                     .iter()
                     .map(|&byte| Int::from_usize(usize::from(byte)))
@@ -950,9 +949,10 @@ mod tests {
             // SAFETY: both aliases root the exact list and conversion returns
             // one independently owned immutable bytes object.
             unsafe {
-                let converted = crate::BytesOwner::from_raw(imre_bytes_list(Rc::as_ptr(&source)));
+                let converted =
+                    crate::BytesOwner::from_raw(imre_bytes_list(crate::ListOwner::as_ptr(&source)));
                 assert_eq!(*converted, expected);
-                assert_eq!(Rc::strong_count(&source), 2);
+                assert_eq!(crate::ListOwner::strong_count(&source), 2);
                 alias.0.with_mut(|values| {
                     assert_eq!(values.len(), expected.len());
                     for (value, &byte) in values.iter().zip(&expected) {
@@ -982,11 +982,11 @@ mod tests {
             for position in [0, 1, 63, 64, 65, 127, 128] {
                 let mut values = (0..129).map(|_| Int::from_usize(17)).collect::<Vec<_>>();
                 values[position] = invalid.clone();
-                let source = Rc::new(List::new(values));
+                let source = crate::ListOwner::new(List::new(values));
                 // SAFETY: the source roots every exact integer while failed
                 // conversion transfers only a pending exception owner.
                 unsafe {
-                    assert!(imre_bytes_list(Rc::as_ptr(&source)).is_null());
+                    assert!(imre_bytes_list(crate::ListOwner::as_ptr(&source)).is_null());
                     let error = crate::ObjectOwner::from_raw(imre_error_take());
                     assert_eq!(
                         imre_exception_matches(

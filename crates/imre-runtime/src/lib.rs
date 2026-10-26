@@ -39,6 +39,7 @@ mod shared;
 mod string_owner;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
+type ListOwner = Shared<List>;
 type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
@@ -57,7 +58,6 @@ use std::cell::{Cell, RefCell, UnsafeCell};
 use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::AsFd;
-use std::rc::Rc;
 use std::sync::{LazyLock, Mutex, Once};
 
 const MIN_SMALL: i64 = -(1_i64 << 62);
@@ -265,15 +265,14 @@ thread_local! {
     };
     // Headers contain neither element owners nor buffer capacity. Only unique
     // allocations without Weak references enter these bounded slots.
-    static LIST_HEADERS: RefCell<[Option<Rc<List>>; 2]> = const {
+    static LIST_HEADERS: RefCell<[Option<ListOwner>; 2]> = const {
         RefCell::new([None, None])
     };
 }
 
-/// Publishes a fresh list identity, reusing an unobservable empty header when
-/// available. Live aliases and Weak references never enter the private cache.
-fn new_list(values: Vec<Int>) -> *const List {
-    let cached = LIST_HEADERS
+/// Reuses an unobservable list header and installs the supplied buffer.
+fn cached_list(values: &mut Vec<Int>) -> Option<ListOwner> {
+    let mut owner = LIST_HEADERS
         .try_with(|headers| {
             let Ok(mut headers) = headers.try_borrow_mut() else {
                 return None;
@@ -282,25 +281,25 @@ fn new_list(values: Vec<Int>) -> *const List {
             std::mem::replace(&mut headers[0], next)
         })
         .ok()
-        .flatten();
-    let owner = if let Some(mut owner) = cached {
-        let list = Rc::get_mut(&mut owner).expect("cached list header is unique");
-        let storage = list.0.0.get_mut();
-        debug_assert!(storage.is_empty() && storage.capacity() == 0);
-        *storage = values;
-        owner
-    } else {
-        Rc::new(List::new(values))
-    };
-    Rc::into_raw(owner)
+        .flatten()?;
+    let list = ListOwner::get_mut(&mut owner).expect("cached list header is unique");
+    let storage = list.0.0.get_mut();
+    debug_assert!(storage.is_empty() && storage.capacity() == 0);
+    std::mem::swap(storage, values);
+    Some(owner)
+}
+
+fn new_list(mut values: Vec<Int>) -> *const List {
+    let owner = cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)));
+    ListOwner::into_raw(owner)
 }
 
 /// Consumes a list owner, caching at most two headers whose identities can no
 /// longer be observed. Elements are destroyed before caching, using the same
 /// BigInt cleanup and bounded buffer reuse as ordinary List destruction.
-/// `Rc::get_mut` excludes Weak observers as well as other strong owners.
-fn recycle_list_header(mut owner: Rc<List>) {
-    let Some(list) = Rc::get_mut(&mut owner) else {
+/// `ListOwner::get_mut` excludes Weak observers as well as other strong owners.
+fn recycle_list_header(mut owner: ListOwner) {
+    let Some(list) = ListOwner::get_mut(&mut owner) else {
         return;
     };
     list.release_range_hint();
@@ -1204,8 +1203,8 @@ pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_retain(value: *const List) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<List> reference.
-        unsafe { Rc::increment_strong_count(value) };
+        // SAFETY: the caller owns a live list reference.
+        unsafe { ListOwner::increment_strong_count(value) };
     }
 }
 
@@ -1214,8 +1213,8 @@ pub unsafe extern "C" fn imre_list_retain(value: *const List) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_list_release(value: *const List) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<List> reference.
-        recycle_list_header(unsafe { Rc::from_raw(value) });
+        // SAFETY: the caller transfers one live list reference.
+        recycle_list_header(unsafe { ListOwner::from_raw(value) });
     }
 }
 
@@ -1942,18 +1941,18 @@ mod tests {
         let big_word = Shared::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
         let values = vec![Int::small(9).unwrap()];
-        let list = Rc::new(List::new(values));
+        let list = ListOwner::new(List::new(values));
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
             assert_eq!(
-                imre_list_append_pair(Rc::as_ptr(&list), big_word, negative),
+                imre_list_append_pair(ListOwner::as_ptr(&list), big_word, negative),
                 1
             );
             assert_eq!(Shared::strong_count(&big), 2);
             let borrowed = list.0.with(|values| values[1].0);
             assert_eq!(
-                imre_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed),
+                imre_list_append_pair(ListOwner::as_ptr(&list), borrowed, borrowed),
                 1
             );
             assert_eq!(Shared::strong_count(&big), 4);
@@ -2033,7 +2032,7 @@ mod tests {
         let negative = Shared::new(-positive.as_ref());
         let positive_weak = Shared::downgrade(&positive);
         let negative_weak = Shared::downgrade(&negative);
-        let list = Rc::new(List::new(vec![
+        let list = ListOwner::new(List::new(vec![
             Int(Shared::into_raw(positive.clone()) as usize),
             Int(Shared::into_raw(negative.clone()) as usize),
             Int::small(7).unwrap(),
@@ -2043,15 +2042,15 @@ mod tests {
         // SAFETY: start is rooted both directly and by the list. The aliased
         // mutation occurs between reductions, after all storage borrows end.
         let result = unsafe {
-            let result = Int(imre_list_sum(Rc::as_ptr(&list), start));
+            let result = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
             assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
             assert_eq!(Shared::strong_count(&positive), 2);
             assert_eq!(Shared::strong_count(&negative), 2);
             assert_eq!(
-                imre_list_set_index(Rc::as_ptr(&alias), 0, Int::small(42).unwrap().0),
+                imre_list_set_index(ListOwner::as_ptr(&alias), 0, Int::small(42).unwrap().0),
                 1
             );
-            let changed = Int(imre_list_sum(Rc::as_ptr(&list), start));
+            let changed = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
             assert_eq!(changed.as_small(), Some(49));
             result
         };
@@ -2086,9 +2085,9 @@ mod tests {
                 let reused = imre_list_new();
                 assert_eq!(reused, original);
                 assert_eq!(Int(imre_list_len(reused)).as_small(), Some(0));
-                let owner = Rc::from_raw(reused);
-                let weak = Rc::downgrade(&owner);
-                imre_list_release(Rc::into_raw(owner));
+                let owner = ListOwner::from_raw(reused);
+                let weak = ListOwner::downgrade(&owner);
+                imre_list_release(ListOwner::into_raw(owner));
                 assert!(weak.upgrade().is_none());
                 let next = imre_list_new();
                 assert_ne!(next, weak.as_ptr());
@@ -2160,7 +2159,7 @@ mod tests {
                 let pointers = || {
                     borrowed
                         .each_ref()
-                        .map(|owner| owner.as_ref().map(Rc::as_ptr))
+                        .map(|owner| owner.as_ref().map(ListOwner::as_ptr))
                 };
                 assert_eq!(pointers(), [Some(lists[2]), Some(lists[1])]);
                 let fresh = imre_list_new();
@@ -2214,7 +2213,7 @@ mod tests {
         let mut values = Vec::with_capacity(64);
         values.extend((0..64).map(|value| Int::small(value).unwrap()));
         let allocation = values.as_ptr();
-        let list = Rc::new(List::new(values));
+        let list = ListOwner::new(List::new(values));
         let alias = list.clone();
         drop(list);
         assert_eq!(take_list_buffer(48).capacity(), 0);
@@ -2322,8 +2321,8 @@ mod tests {
                 .map(|value| Int::small(value - 16).unwrap())
                 .collect::<Vec<_>>();
             values[position] = Int(Shared::into_raw(bigint) as usize);
-            let list = Rc::new(List::new(values));
-            let alias = Rc::clone(&list);
+            let list = ListOwner::new(List::new(values));
+            let alias = list.clone();
             drop(list);
             assert_eq!(weak.strong_count(), 1);
             drop(alias);
@@ -2651,7 +2650,7 @@ mod tests {
             imre_list_release(first);
             reserve(third);
             assert_eq!((&*third).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
-            drop(Rc::from_raw(second));
+            drop(ListOwner::from_raw(second));
             imre_list_release(third);
         }
         assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), 0);
