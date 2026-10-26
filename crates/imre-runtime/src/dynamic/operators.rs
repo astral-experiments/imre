@@ -684,7 +684,13 @@ impl Context {
         let iterator = self.iterator(container)?;
         self.heap.keep(iterator);
         while let Some(value) = self.next_item(iterator)? {
-            if self.checked_equal(value, item)? {
+            if value == item {
+                return Ok(true);
+            }
+            // Equality can resize the source and collect a removed candidate.
+            self.heap.keep(value);
+            let equal = self.binary("==", value, item)?;
+            if self.truth(equal)? {
                 return Ok(true);
             }
         }
