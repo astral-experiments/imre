@@ -998,7 +998,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__" | "__enter__" | "__exit__"
             )
         {
             return Err(error(
@@ -1100,7 +1100,7 @@ impl Checker<'_> {
         if attribute.attr.starts_with("__")
             && !matches!(
                 attribute.attr.as_str(),
-                "__str__" | "__post_init__" | "__copy__" | "__fspath__"
+                "__str__" | "__post_init__" | "__copy__" | "__fspath__" | "__enter__" | "__exit__"
             )
             && !(self.classes.declarations.definitions[class].mapping
                 && matches!(
@@ -1474,14 +1474,10 @@ impl Checker<'_> {
             .abstract_methods
             .is_empty()
         {
-            if self.classes.declarations.definitions[class].mapping {
-                return self.abstract_mapping_call(class, call);
-            }
-            return Err(error(
-                self.source,
-                call,
-                "cannot construct an abstract record with unimplemented methods",
-            ));
+            let declaration = &self.classes.declarations.definitions[class];
+            let message =
+                mapping_abc::abstract_message(&declaration.name, &declaration.abstract_methods);
+            return self.abstract_class_call(class, call, message);
         }
         if self.classes.declarations.definitions[class]
             .enum_members
