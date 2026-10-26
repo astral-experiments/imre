@@ -175,6 +175,8 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
         )
     }
 
@@ -229,7 +231,11 @@ impl Context {
         let source = self.iterator(iterable)?;
         if matches!(
             self.heap.get(source),
-            Value::Instance { .. } | Value::CallableIterator(_) | Value::Generator { .. }
+            Value::Instance { .. }
+                | Value::CallableIterator(_)
+                | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
         ) {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -338,6 +344,11 @@ impl Context {
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::Generator { .. } => return self.next_generator_item(id),
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
+            Value::File(_) | Value::TextFile(_) => {
+                let readline = self.lookup_attr(id, "readline")?;
+                let line = self.call(readline, Vec::new(), Vec::new())?;
+                return Ok(self.truth(line)?.then_some(line));
+            }
             Value::CallableIterator(None) => return Ok(None),
             Value::CallableIterator(Some(state)) => {
                 let [callable, sentinel] = *state;
@@ -385,6 +396,8 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::Generator { .. }
+                | Value::File(_)
+                | Value::TextFile(_)
         ) || self.slot(id, "__iter__").is_some()
         {
             let iter = self.iterator(id)?;
