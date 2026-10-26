@@ -21,6 +21,11 @@ REJECTED = {
         "pkg/parent.py": "def ready() -> int:\n    return 1\nfrom . import child\ndef later() -> int:\n    return 42\n",
         "pkg/child.py": "from .parent import later\nprint(later())\n",
     }, "has no static binding \"later\""),
+    "unready_partial_attribute": ({
+        "main.py": "import pkg.parent\n", "pkg/__init__.py": "",
+        "pkg/parent.py": "from . import child\ndef later(n: int) -> int:\n    return n + 1\n",
+        "pkg/child.py": "from . import parent\nprint(parent.later(41))\n",
+    }, "references a function before it is available"),
     "partial_child_custom_getattr": ({
         "main.py": "import pkg.http\n",
         "pkg/__init__.py": "def __getattr__(name: str) -> str:\n    print(name)\n    return \"custom\"\n",
@@ -103,7 +108,7 @@ ACCEPTED = {
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
         "pkg/parent.py": "shared = [1]\nfrom . import child\nprint(shared[-1])\n",
-        "pkg/child.py": "from . import parent as first\nfrom . import parent as second\nfirst.shared.append(42)\nprint(second.shared[-1])\n",
+        "pkg/child.py": "from . import parent as first\nfrom . import parent as second\nprint(first is second)\nfirst.shared.append(42)\nprint(second.shared[-1])\n",
     },
     "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
     "type_aliases": {
