@@ -667,6 +667,12 @@ fn collect_class(
                         &class_bindings,
                         &static_bindings,
                     )?
+                    // Named exceptions use exception_aliases so subclasses can
+                    // override a ClassVar[type[Exception]] constructor.
+                    .filter(|value| match value {
+                        ClassValue::Binding(Binding::Definition(id)) => !exceptions.contains_key(id),
+                        _ => true,
+                    })
                     .or_else(|| {
                         (dataclass.is_none()
                             && !exception_layout
