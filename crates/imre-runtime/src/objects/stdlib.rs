@@ -263,10 +263,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const () {
     if kind == 2 {
-        let mut marker = crate::sorting_empty_ints();
-        let saved = crate::cached_list(&mut marker)
-            .map_or_else(|| crate::ListOwner::try_new(List::new(marker)), Ok);
-        let Ok(saved) = saved else {
+        let Ok(saved) = crate::try_new_list(crate::sorting_empty_ints()) else {
             return super::Error::allocation().returning(std::ptr::null());
         };
         // SAFETY: the new owner is private and no callback runs during the swap.

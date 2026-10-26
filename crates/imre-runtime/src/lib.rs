@@ -289,6 +289,12 @@ fn cached_list(values: &mut Vec<Int>) -> Option<ListOwner> {
     Some(owner)
 }
 
+fn try_new_list(
+    mut values: Vec<Int>,
+) -> std::result::Result<ListOwner, allocator_api2::alloc::AllocError> {
+    cached_list(&mut values).map_or_else(|| ListOwner::try_new(List::new(values)), Ok)
+}
+
 fn new_list(mut values: Vec<Int>) -> *const List {
     let owner = cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)));
     ListOwner::into_raw(owner)
