@@ -83,7 +83,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)
-    parser.add_argument("--python", default="python3")
+    parser.add_argument("--python", default=sys.executable, help="CPython 3.14 reference executable")
     parser.add_argument("--clang", default="clang")
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
@@ -92,6 +92,16 @@ def main() -> None:
     )
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    version = run(
+        [
+            args.python, "-I", "-c",
+            "import platform; print(platform.python_implementation(), platform.python_version())",
+        ],
+        Path.cwd(),
+    )
+    require_success(version)
+    if not version.stdout.startswith("CPython 3.14."):
+        parser.error(f"--python must select CPython 3.14; {args.python} reported {version.stdout.strip()}")
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     flags = []
     if args.target:

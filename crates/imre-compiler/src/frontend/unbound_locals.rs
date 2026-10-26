@@ -6,30 +6,34 @@ use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_stm
 /// Only ordinary one-name stores participate. Other binding forms keep the
 /// existing definite-assignment requirement; we must never miss a write or a
 /// deletion that could change the value observed by a guarded load.
-pub(super) fn candidates(statements: &[ast::Stmt], interactive: bool) -> HashSet<String> {
-    #[derive(Default)]
-    struct Scan {
+pub(super) fn candidates(
+    statements: &[ast::Stmt],
+    interactive: bool,
+    guard_ordinary: &dyn Fn(&str) -> bool,
+) -> HashSet<String> {
+    struct Scan<'b> {
+        guard_ordinary: &'b dyn Fn(&str) -> bool,
         inside: bool,
         interactive: bool,
         guarded: HashSet<String>,
         other: HashSet<String>,
     }
-    impl<'a> Visitor<'a> for Scan {
+    impl<'a> Visitor<'a> for Scan<'_> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::Assign(s) if matches!(s.targets.as_slice(), [ast::Expr::Name(_)]) => {
-                    if self.interactive && self.inside {
-                        self.guarded
-                            .insert(s.targets[0].as_name_expr().unwrap().id.to_string());
+                    let name = &s.targets[0].as_name_expr().unwrap().id;
+                    if (self.interactive && self.inside) || (self.guard_ordinary)(name.as_str()) {
+                        self.guarded.insert(name.to_string());
                     }
                     self.visit_expr(&s.value);
                 }
                 ast::Stmt::AnnAssign(s)
                     if s.target.as_name_expr().is_some() && s.value.is_some() =>
                 {
-                    if self.inside {
-                        self.guarded
-                            .insert(s.target.as_name_expr().unwrap().id.to_string());
+                    let name = &s.target.as_name_expr().unwrap().id;
+                    if self.inside || (self.guard_ordinary)(name.as_str()) {
+                        self.guarded.insert(name.to_string());
                     }
                     self.visit_expr(s.value.as_deref().unwrap());
                 }
@@ -77,7 +81,10 @@ pub(super) fn candidates(statements: &[ast::Stmt], interactive: bool) -> HashSet
     }
     let mut scan = Scan {
         interactive,
-        ..Scan::default()
+        guard_ordinary,
+        inside: false,
+        guarded: HashSet::new(),
+        other: HashSet::new(),
     };
     scan.visit_body(statements);
     scan.guarded.retain(|n| !scan.other.contains(n));

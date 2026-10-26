@@ -181,13 +181,16 @@ pub extern "C" fn imre_typing_call_stub() -> u8 {
     0
 }
 
-pub(super) unsafe fn write_repr(out: &mut String, function: usize) {
+pub(super) unsafe fn write_repr(
+    out: &mut super::values::ReprWriter<'_>,
+    function: usize,
+) -> std::fmt::Result {
     use std::fmt::Write;
     // SAFETY: the enclosing container roots the admitted source function.
     unsafe {
         with_key(function as *const usize, |_, name, _| {
-            write!(out, "<function {name} at {function:#x}>").unwrap()
-        });
+            write!(out, "<function {name} at {function:#x}>")
+        })
     }
 }
 

@@ -695,7 +695,9 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
 
-`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
+`text.encode(encoding="utf-8", errors="strict")` accepts positional and named string arguments. UTF-8, UTF-8 with a signature, ASCII and Latin-1 use the native codec registry's implementations. For example, `"¢".encode("ascii", "backslashreplace")` yields `b"\\xa2"`. ASCII and Latin-1 also support `strict`, `ignore`, `replace` and `xmlcharrefreplace`. Native strings contain Unicode scalar values.
+
+`data.decode()` performs strict UTF-8 decoding. Its optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` supports strict ASCII and reports the first non-ASCII byte and its position. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Mutable `bytearray`, memory views, implicit text/byte conversions and other byte methods are outside this subset.
 
 ## Native paths and directory traversal
 
@@ -1387,8 +1389,11 @@ can be `None`, booleans, integers, strings, bytes, or fixed tuples of these
 values. On a constructed or narrowed import exception, these fields support
 `str`, `repr`, equality, truth, and type tests. Strings, bytes, and tuples also
 support length and integer indexing. Reinitializing an instance resets omitted
-fields. Arbitrary objects, expanded keyword dictionaries, direct field writes,
-and pickling remain outside this subset.
+fields. A fresh keyword dictionary display can supply the three fields. A
+repeated key inside one display uses its last value; supplying the same key in
+two call arguments raises `TypeError` before initialization. Arbitrary objects,
+unpacking a separately stored dictionary, direct field writes, and pickling
+remain outside this subset.
 
 User exception classes keep their nominal identity in both builtin and user
 handlers. A marker class may inherit several exception bases with a consistent

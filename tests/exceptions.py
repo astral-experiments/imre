@@ -24,6 +24,7 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
     def __init__(self, value, *rest):
@@ -1175,7 +1176,6 @@ print(Report("message"))
         print(Problem("shadow"))
     """,
     "import_error_unsupported_argument": "ImportError([1, 2])",
-    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
     "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
@@ -1239,14 +1239,14 @@ try:
     value = None
     raise ValueError()
 except ValueError:
-    print(value + 1)
+    number: int = value
 """,
     "finally_optional_fact": """
 value: int | None = 1
 try:
     value = None
 finally:
-    print(value + 1)
+    number: int = value
 """,
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
@@ -1280,6 +1280,27 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "handler_optional_arithmetic": (
+        """\
+value: int | None = 1
+try:
+    value = None
+    raise ValueError()
+except ValueError:
+    print(value + 1)
+""",
+        "TypeError",
+    ),
+    "finally_optional_arithmetic": (
+        """\
+value: int | None = 1
+try:
+    value = None
+finally:
+    print(value + 1)
+""",
+        "TypeError",
+    ),
     "unhandled_cleanup": (
         'try:\n    values = [999999999999999999999999999999]\n    raise ValueError("terminal")\nfinally:\n    print("cleaned")\n',
         "ValueError",
@@ -1430,6 +1451,7 @@ def main() -> None:
                 )
                 assert built.returncode == 0, (name, level, built.stderr)
                 actual = run([str(binary)])
+                binary.unlink()
                 assert actual.stdout == reference.stdout, (
                     name,
                     level,
@@ -1442,9 +1464,14 @@ def main() -> None:
                             actual.stderr
                         ) == exception_report(reference.stderr), (name, level, actual)
                     else:
-                        assert actual.returncode == 1 and actual.stderr.startswith(
-                            category + ":"
-                        ), (name, level, actual)
+                        # Implicit context is not retained, but the terminal
+                        # category and message must match CPython.
+                        assert (
+                            actual.returncode == 1
+                            and actual.stderr.startswith(category + ":")
+                            and exception_report(actual.stderr)[-1:]
+                            == exception_report(reference.stderr)[-1:]
+                        ), (name, level, actual.stderr, reference.stderr)
                 else:
                     assert actual.returncode == 0 and not actual.stderr, (
                         name,

@@ -41,12 +41,6 @@ def fixture(method):
         super().__init__()
         self.EOF = ""
 """
-    if method == "test_textio_properties":
-        case += """
-    def assertIsNone(self, value: str | None) -> None:
-        if value is not None:
-            raise AssertionError("expected None")
-"""
     return "from io import StringIO\n" + case + """
 
     def buftype(self, text: str) -> str:

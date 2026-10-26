@@ -9,7 +9,7 @@ use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, Fr
 use super::super::exceptions::{Result, string_repr};
 use super::super::words::OwnedWord;
 use super::super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
-use super::record::{self, Record, display, string};
+use super::record::{self, Record, append, display, string, write_display};
 
 static PERCENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)%\(\w+\)[#0+ -]*(\*|\d+)?(\.(\*|\d+))?[diouxefgcrsa%]").unwrap()
@@ -223,17 +223,17 @@ impl Formatter {
             Style::Dollar => {
                 for part in dollars(self.fmt.as_str())? {
                     match part {
-                        Dollar::Text(s) => out.push_str(s),
-                        Dollar::Field(key) => out.push_str(&display(&self.get(r, key)?, false)),
+                        Dollar::Text(s) => append(&mut out, s)?,
+                        Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?)?,
                     }
                 }
             }
             Style::Percent => {
                 let mut tail = self.fmt.as_str();
                 while let Some((literal, rest)) = tail.split_once('%') {
-                    out.push_str(literal);
+                    append(&mut out, literal)?;
                     if let Some(rest) = rest.strip_prefix('%') {
-                        out.push('%');
+                        append(&mut out, "%")?;
                         tail = rest;
                         continue;
                     }
@@ -242,10 +242,10 @@ impl Formatter {
                         .ok_or_else(|| Error::new(Kind::TypeError, "format requires a mapping"))?;
                     let (key, rest) = record::mapping_key(rest)?;
                     let (text, rest) = record::percent_value(rest, &self.get(r, key)?)?;
-                    out.push_str(&text);
+                    append(&mut out, &text)?;
                     tail = rest;
                 }
-                out.push_str(tail);
+                append(&mut out, tail)?;
             }
             Style::Brace => out = self.brace_fields(r, self.fmt.as_str(), 0)?,
         }
@@ -259,7 +259,7 @@ impl Formatter {
         let mut out = String::new();
         for part in braces(fmt)? {
             match part {
-                FormatPart::Literal(s) => out.push_str(&s),
+                FormatPart::Literal(s) => append(&mut out, &s)?,
                 FormatPart::Field {
                     field_name,
                     conversion_spec,
@@ -287,14 +287,14 @@ impl Formatter {
                         }
                     }
                     if let Some(c) = conversion_spec {
-                        v = string(&record::percent_value(&c.to_string(), &v)?.0);
+                        v = record::owned_string(record::percent_value(&c.to_string(), &v)?.0)?;
                     }
                     let spec = if format_spec.contains('{') {
                         self.brace_fields(r, &format_spec, depth + 1)?
                     } else {
                         format_spec
                     };
-                    out.push_str(&format_specifier(&v, &spec)?);
+                    append(&mut out, &format_specifier(&v, &spec)?)?;
                 }
             }
         }
@@ -360,7 +360,7 @@ impl Formatter {
 
     fn format(&self, r: &mut Record) -> Result<String> {
         let message = r.message()?;
-        r.fields.insert("message".into(), string(&message));
+        r.fields.insert("message".into(), message);
         if self.uses_time() {
             let time = self.time(r, self.date.as_deref().map(Str::as_str))?;
             r.fields.insert("asctime".into(), string(&time));
@@ -384,9 +384,9 @@ impl Formatter {
         for key in ["exc_text", "stack_info"] {
             if let Some(v) = r.fields.get(key).filter(|v| record::truth(v)) {
                 if !text.ends_with('\n') {
-                    text.push('\n');
+                    append(&mut text, "\n")?;
                 }
-                text.push_str(&display(v, false));
+                write_display(&mut text, v)?;
             }
         }
         Ok(text)
@@ -409,7 +409,7 @@ fn number(v: &OwnedWord) -> Result<f64> {
 /// Apply Python's alignment after converting the scalar; the field width counts characters.
 fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     if spec.is_empty() {
-        return Ok(display(value, false));
+        return display(value);
     }
     let mut tail = spec;
     let mut align = None;

@@ -555,6 +555,7 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
+    UnboundLocalRead(TextRange),
     Decorator(TextRange),
     RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
@@ -580,6 +581,7 @@ impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
+            Self::UnboundLocalRead(range) => (range, 10),
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
@@ -608,6 +610,7 @@ impl CheckedDiagnostic {
             Self::AbstractClassCall(call) | Self::CallableKey(call) => {
                 diagnostic == "call-non-callable" && call == range
             }
+            Self::UnboundLocalRead(read) => diagnostic == "unresolved-reference" && read == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }

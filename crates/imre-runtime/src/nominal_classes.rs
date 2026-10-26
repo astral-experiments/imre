@@ -43,6 +43,9 @@ pub unsafe extern "C" fn imre_builtin_issubclass(child: *const Str, parent: *con
                         || matches!(child, "tuple" | "str" | "bytes" | "range" | "memoryview")
                 }
                 "collections.abc.MutableMapping" => child == "dict",
+                "collections.abc.Mapping" => {
+                    matches!(child, "dict" | "collections.abc.MutableMapping")
+                }
                 _ => false,
             },
     )

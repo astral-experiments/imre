@@ -69,6 +69,8 @@ The 30 native operations in `test_implementation` were measured at `dc0ea48199b4
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 
+The original `test_executable` runs its own assertions around a native process launched with an altered program name. Its stock reference and native child are recorded separately in the occurrence report.
+
 The versioned gate loads the original suite and runs its selected methods
 under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
