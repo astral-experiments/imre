@@ -5,6 +5,7 @@ mod builtins;
 mod calls;
 mod ffi;
 mod operators;
+mod property;
 mod stdlib;
 mod super_object;
 mod value;
