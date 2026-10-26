@@ -143,7 +143,11 @@ pub unsafe extern "C" fn imre_str_encode_options(
     }
     let result = Codec::lookup(encoding).and_then(|codec| {
         // SAFETY: the caller roots the original string through conversion and error construction.
-        unsafe { codec.encode(&*text, Some(errors), || Ok(StrOwner::acquire_word(text as usize))) }
+        unsafe {
+            codec.encode(&*text, Some(errors), || {
+                Ok(StrOwner::acquire_word(text as usize))
+            })
+        }
     });
     finish(result.and_then(encoded_bytes), std::ptr::null())
 }
@@ -487,6 +491,20 @@ fn decoding_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_str_encode_retains_the_original_text_until_the_error_is_dropped() {
+        let text = StrOwner::new(Str::new("xé€"));
+        let name = Str::new("ascii");
+        let policy = Str::new("strict");
+        // SAFETY: all three arguments remain live until encoding returns.
+        let result = unsafe { imre_str_encode_options(StrOwner::as_ptr(&text), &name, &policy) };
+        assert!(result.is_null());
+        let error = super::super::exceptions::take_pending().unwrap();
+        assert_eq!(StrOwner::strong_count(&text), 2);
+        drop(error);
+        assert_eq!(StrOwner::strong_count(&text), 1);
+    }
 
     #[test]
     fn strict_registry_errors_retain_text_and_copy_bytes() {
