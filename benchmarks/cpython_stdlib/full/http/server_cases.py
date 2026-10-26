@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -195,13 +196,19 @@ def date_case(command, wrong=False):
 
 def public_contracts(command):
     # Compare the child's bound name with an independent CPython lookup.
+    start = time.monotonic()
     command = [*command, socket.getfqdn("127.0.0.1")]
+    lookup = time.monotonic() - start
+    start = time.monotonic()
     with listener(command) as port:
+        legacy_start = time.monotonic() - start
         with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
             conn.sendall(b"GET /old\r\n")
             with conn.makefile("rb") as stream:
                 assert stream.read() == b"lower=0.9\n"
+    start = time.monotonic()
     with listener(command) as port:
+        persistent_start = time.monotonic() - start
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         try:
             conn.connect()
@@ -220,6 +227,7 @@ def public_contracts(command):
                 assert response.read() == b"X-Value=one\nx-value=two\n"
         finally:
             conn.close()
+    return lookup, legacy_start, persistent_start
 
 
 def run_methods(tests, command):
