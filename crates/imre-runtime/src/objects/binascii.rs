@@ -27,10 +27,25 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
             low
         }
     };
-    // zlib normalizes both halves even for an empty input and a noncanonical seed.
     const BASE: u32 = 65_521;
-    let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
-    crate::Int::from_usize(zlib_rs::adler32::adler32(seed, data) as usize).into_raw()
+    let checksum = if data.len() == 1 {
+        // Match zlib's observable one-byte fast path, including its single
+        // subtraction for each noncanonical seed half.
+        let mut sum1 = (seed & 0xffff) + u32::from(data[0]);
+        if sum1 >= BASE {
+            sum1 -= BASE;
+        }
+        let mut sum2 = (seed >> 16) + sum1;
+        if sum2 >= BASE {
+            sum2 -= BASE;
+        }
+        (sum2 << 16) | sum1
+    } else {
+        // zlib normalizes both halves for empty and multi-byte inputs.
+        let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
+        zlib_rs::adler32::adler32(seed, data)
+    };
+    crate::Int::from_usize(checksum as usize).into_raw()
 }
 
 fn owned(bytes: Bytes) -> *const Bytes {
