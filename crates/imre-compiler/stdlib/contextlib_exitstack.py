@@ -1,9 +1,17 @@
-from contextlib import AbstractContextManager
 import sys
+import types
 
 
 class ExitStack(AbstractContextManager):
-    """Context manager for dynamic management of a stack of exit callbacks."""
+    """Context manager for dynamic management of a stack of exit callbacks.
+
+    For example:
+        with ExitStack() as stack:
+            files = [stack.enter_context(open(fname)) for fname in filenames]
+            # All opened files will automatically be closed at the end of
+            # the with statement, even if attempts to open files later
+            # in the list raise an exception.
+    """
 
     _exit_callbacks: list[tuple[bool, object]]
 
@@ -14,6 +22,7 @@ class ExitStack(AbstractContextManager):
         return self
 
     def pop_all(self) -> "ExitStack":
+        """Preserve the context stack by transferring it to a new instance."""
         new_stack = type(self)()
         new_stack._exit_callbacks = self._exit_callbacks
         self._exit_callbacks = []
@@ -25,7 +34,7 @@ class ExitStack(AbstractContextManager):
         except AttributeError:
             self._exit_callbacks.append((True, exit))
         else:
-            self._exit_callbacks.append((True, method.__get__(exit)))
+            self._exit_callbacks.append((True, types.MethodType(method, exit)))
         return exit
 
     def enter_context(self, cm):
@@ -36,7 +45,7 @@ class ExitStack(AbstractContextManager):
         except AttributeError:
             raise TypeError(f"'{cls.__module__}.{cls.__qualname__}' object does not support the context manager protocol") from None
         result = enter(cm)
-        self._exit_callbacks.append((True, exit.__get__(cm)))
+        self._exit_callbacks.append((True, types.MethodType(exit, cm)))
         return result
 
     def callback(self, callback, /, *args: object, **kwds: object):
@@ -46,7 +55,8 @@ class ExitStack(AbstractContextManager):
         self._exit_callbacks.append((True, _exit_wrapper))
         return callback
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+    def __exit__(self, *exc_details: object) -> bool:
+        exc = exc_details[1]
         received = exc is not None
         frame_exc = sys.exception()
         suppressed = False
@@ -64,6 +74,7 @@ class ExitStack(AbstractContextManager):
                     pending = False
                     exc = None
             except BaseException as new_exc:
+                # Nested with statements keep earlier cleanup exceptions in the chain.
                 last = new_exc
                 while last.__context__ is not None and last.__context__ is not exc:
                     if last.__context__ is frame_exc:
@@ -82,4 +93,5 @@ class ExitStack(AbstractContextManager):
         return received and suppressed
 
     def close(self) -> None:
+        """Immediately unwind the context stack."""
         self.__exit__(None, None, None)

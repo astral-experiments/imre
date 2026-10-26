@@ -246,6 +246,7 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub is_abstract: bool,
     pub class_cell: Option<Id>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
@@ -358,6 +359,7 @@ pub(super) enum Value {
     Method {
         callable: Id,
         receiver: Id,
+        explicit: bool,
     },
     StaticMethod {
         callable: Id,
@@ -540,7 +542,9 @@ impl Value {
                 visit.extend(fields.values());
                 visit.extend(scalar);
             }
-            Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
+            Self::Method {
+                callable, receiver, ..
+            } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {
                 callable,
                 dictionary,

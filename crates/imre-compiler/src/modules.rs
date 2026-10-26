@@ -31,6 +31,15 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "contextlib" => Some((
+            "contextlib.py",
+            concat!(
+                include_str!("../stdlib/contextlib.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_exitstack.py")
+            ),
+        )),
         "_imre_socketserver_poll" => Some((
             "_imre_socketserver_poll.py",
             if cfg!(any(target_os = "linux", target_os = "macos")) {
@@ -1176,6 +1185,7 @@ pub(crate) struct SourceGraph {
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
+    required_library_methods: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
@@ -1364,6 +1374,11 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
+        if let Some((library, roots)) = &self.required_library_methods
+            && module == *library
+        {
+            return roots.methods.contains(&(module, method.start()));
+        }
         self.reachable
             .as_ref()
             .is_none_or(|r| r.methods.contains(&(module, method.start())))
@@ -1553,6 +1568,10 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if let Some((library, roots)) = &self.required_library_methods {
+            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
+                .extend_from_slice(&roots.skipped[*library]);
+        }
         // The bundled _simple_enum factories are lowered to immutable member tables.
         // Keep the actual category property bodies and every caller in ty's check.
         if let Some((id, http)) = self
@@ -2163,6 +2182,7 @@ impl<'a> Loader<'a> {
             mutable_documents: false,
             mutable_builtin_len: false,
             reachable: None,
+            required_library_methods: None,
             entry_filename,
             inputs: self.inputs,
             session: self.session,
@@ -2174,7 +2194,20 @@ impl<'a> Loader<'a> {
             initialization: self.initialization,
             errno_names: self.errno_names,
         };
-        graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
+        if reachable_only {
+            graph.reachable = Some(reachability::Reachable::collect(&graph, None));
+        } else if let Some(library) = graph
+            .modules
+            .iter()
+            .position(|m| m.is_bundled(CONTEXTLIB_EXIT_STACK))
+        {
+            // A sealed library can own higher-order methods that require object dispatch.
+            // Strict builds still visit even an uncalled first-party function using them.
+            graph.required_library_methods = Some((
+                library,
+                reachability::Reachable::collect(&graph, Some(library)),
+            ));
+        }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
         graph.mutable_builtin_len = graph.writes_builtin_len();
@@ -2697,7 +2730,10 @@ impl<'a> Loader<'a> {
                     .is_none_or(|names| names.iter().any(|a| a.name.as_str() == "ExitStack")))
             .then_some((
                 CONTEXTLIB_EXIT_STACK,
-                include_str!("../stdlib/contextlib_exitstack.py"),
+                concat!(
+                    "from contextlib import AbstractContextManager\n",
+                    include_str!("../stdlib/contextlib_exitstack.py")
+                ),
             )),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {
