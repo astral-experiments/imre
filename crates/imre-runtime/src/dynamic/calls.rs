@@ -301,6 +301,7 @@ impl Context {
             | Value::Module { .. }
             | Value::ThreadLocal(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
+            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
@@ -445,6 +446,7 @@ impl Context {
             | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
+            | ("_io.TextIOWrapper", Value::TextFile(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
