@@ -62,3 +62,13 @@ names, paths, enums, disabled loggers, and the last-resort handler.
 The production compiler and IR verifier matched CPython's 20 output lines, stderr and exit status at O0 and O3. The [comparison receipt](record-delivery-linux.json) records both runs. The [full suite](evidence-linux.json) accounts for all 272 occurrences per level. The original stream-setting test again runs its body and three identity assertions natively under CPython's setup and cleanup. The direct comparison adds no upstream occurrences.
 
 An empty record has no `__qualname__` field. Adding that key with value `None` makes `hasattr` true; deleting it makes `hasattr` false again. The [canonical attribute correction](https://github.com/astral-sh/imre/pull/1504) and the comparison receipt cover this sequence on pinned CPython and Imre.
+
+## Extra fields on emitted events
+
+The [event comparison](../../../../tests/fixtures/files/logging_event_extra.py)
+checks argument evaluation even for a disabled logger. An enabled call copies
+extra fields before dispatch; a protected name raises before either recording
+handler sees the event. The check covers logger and module calls, heterogeneous
+literals, an aliased mapping, an empty mapping, and `None`.
+
+The production compiler and IR verifier matched CPython's 36 output lines, stderr and exit status at O0 and O3. The [comparison receipt](event-extra-linux.json) records both runs. The [full suite](evidence-linux.json) retained all 272 occurrences per level and their original fixture and assertion roles. The direct comparison adds no upstream occurrences.

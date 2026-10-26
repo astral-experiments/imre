@@ -1,0 +1,490 @@
+{
+  "schema": "logging-event-extra-comparison-v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source": "0b963db30770440358b18cda78984a5bfe6b2488",
+  "tree": "39c2d6e246e092b46a392404af0f7ded976b65be",
+  "canonical_stream": "2b5d7086da9c4f831c7fc5cda4e9ac0256c6e7ab",
+  "fixture": "tests/fixtures/files/logging_event_extra.py",
+  "fixture_blob": "3c54691136513c2f6eaafeb06534f8537a085419",
+  "observations": [
+    "disabled level",
+    "disabled message",
+    "disabled argument",
+    "disabled extra",
+    "0",
+    "enabled level",
+    "enabled message",
+    "enabled argument",
+    "enabled extra",
+    "True",
+    "value kept",
+    "enabled extra",
+    "enabled extra: value kept",
+    "notice",
+    "12",
+    "None",
+    "value",
+    "False",
+    "changed",
+    "empty",
+    "\"Attempt to overwrite 'asctime' in LogRecord\"",
+    "\"Attempt to overwrite 'message' in LogRecord\"",
+    "\"Attempt to overwrite 'msg' in LogRecord\"",
+    "\"Attempt to overwrite 'name' in LogRecord\"",
+    "\"Attempt to overwrite 'args' in LogRecord\"",
+    "True",
+    "True",
+    "0",
+    "\"Attempt to overwrite 'name' in LogRecord\"",
+    "1",
+    "DEBUG debug debug",
+    "INFO info info",
+    "WARNING warning warning",
+    "ERROR error error",
+    "CRITICAL critical critical",
+    "WARNING log log"
+  ],
+  "oracle": {
+    "status": 0,
+    "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+    "output_lines": 36,
+    "stderr": ""
+  },
+  "levels": {
+    "0": {
+      "status": 0,
+      "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+      "output_lines": 36,
+      "stderr": ""
+    },
+    "3": {
+      "status": 0,
+      "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+      "output_lines": 36,
+      "stderr": ""
+    }
+  },
+  "compiler_modes": {
+    "production": {
+      "tools": {
+        "imre": "3e74aa9acc3d6e228daa1975e8a432c193f7bc71c8a30e600f9c6899d6ddb380",
+        "libimre_runtime.a": "f0bdbbd02740eacc27ea4f0793e7ef553de8faab9b4bf6b0ddc5928ed7802b78"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+          "output_lines": 36,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+          "output_lines": 36,
+          "stderr": ""
+        }
+      }
+    },
+    "verify-ir": {
+      "tools": {
+        "imre": "e4115021da537dd8701cc18f8b4d42dad1e3eb2ce7df2972ae8fca464b3d28b8",
+        "libimre_runtime.a": "f0bdbbd02740eacc27ea4f0793e7ef553de8faab9b4bf6b0ddc5928ed7802b78"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+          "output_lines": 36,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+          "output_lines": 36,
+          "stderr": ""
+        }
+      }
+    }
+  },
+  "suite_parent": "820c40311a6a176698e34b29a25b03c8d84e97c1",
+  "suite_denominator": 272,
+  "suite_sha256": "a4628cb524c07a5d4f0dc43ccc2dcb1060f4e09abeaf5502219e85db27c2073b",
+  "upstream_test_blob": "c1dc06e02d965781df0498a444aa0a333bd28a85",
+  "changed_suite_occurrences": 0,
+  "changed_suite_classifications": 0,
+  "stream_suite_sha256": "a82cc5368b71777aab028e44daf876f675b918cd6d4999ab7b4bc3b4434d0885",
+  "instance_qualname": {
+    "control": "\"\"\"Distinguish an instance field from the class's qualified name.\"\"\"\nimport logging\n\n\ndef present(record: logging.LogRecord, name: str) -> bool:\n    return hasattr(record, name)\n\n\nrecord = logging.makeLogRecord({})\nprint(present(record, '__qualname__'))\nfields = vars(record)\nfields['__qualname__'] = None\nprint(present(record, '__qualname__'))\nprint(str(fields['__qualname__']))\ndel fields['__qualname__']\nprint(present(record, '__qualname__'))\nprint(present(record, '__firstlineno__'))\nprint(present(record, 'getMessage'))\n",
+    "observations": [
+      "False",
+      "True",
+      "None",
+      "False",
+      "True",
+      "True"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+      "output_lines": 6,
+      "stderr": ""
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        }
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "manager_cleanup_suite_sha256": "1b7e4344055c8095119f352ed1293846691cdc748dbef2da8bd26a578dd486a5",
+  "delivered_attributes": {
+    "source": "\"\"\"Read and retain an emitted extra through both original-record handlers.\"\"\"\nimport logging\n\n\nclass Capture(logging.Handler):\n    records: list[logging.LogRecord]\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.records = []\n\n    def emit(self, record: logging.LogRecord | None) -> None:\n        if record is not None:\n            self.records.append(record)\n\n\ndef check() -> None:\n    parent = logging.getLogger('retained-extra')\n    child = logging.getLogger('retained-extra.child')\n    parent.propagate = False\n    child.setLevel(logging.DEBUG)\n    first = Capture()\n    second = Capture()\n    parent.addHandler(second)\n    child.addHandler(first)\n    source = {'tag': 'original'}\n    child.info('value: %s', 'kept', extra=source)\n    record = first.records[0]\n    print(record is second.records[0])\n    previous = record.tag\n    source['tag'] = 'source was edited'\n    print(str(record.tag))\n    vars(record)['tag'] = 'dictionary was edited'\n    print(str(previous))\n    print(str(second.records[0].tag))\n    del vars(record)['tag']\n    print(hasattr(record, 'tag'))\n    print(str(getattr(record, 'tag', 'fallback')))\n    print(record.getMessage())\n\n\ncheck()\n",
+    "fixture_blob": "44e22db25f200cf4adbb4b4fe30db08924913df8",
+    "observations": [
+      "True",
+      "original",
+      "original",
+      "dictionary was edited",
+      "False",
+      "fallback",
+      "value: kept"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "373e921accb16a69b6fae9f437adcd794d45619feb2d48f14131c636404f2812",
+      "output_lines": 7,
+      "stderr": ""
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "373e921accb16a69b6fae9f437adcd794d45619feb2d48f14131c636404f2812",
+          "output_lines": 7,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "373e921accb16a69b6fae9f437adcd794d45619feb2d48f14131c636404f2812",
+          "output_lines": 7,
+          "stderr": ""
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "373e921accb16a69b6fae9f437adcd794d45619feb2d48f14131c636404f2812",
+          "output_lines": 7,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "373e921accb16a69b6fae9f437adcd794d45619feb2d48f14131c636404f2812",
+          "output_lines": 7,
+          "stderr": ""
+        }
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "extra_call_order": {
+    "source": "\"\"\"Check that evaluating extra runs before enablement, root setup, and dispatch.\"\"\"\nimport logging\n\n\nclass Capture(logging.Handler):\n    records: list[logging.LogRecord]\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.records = []\n\n    def emit(self, record: logging.LogRecord | None) -> None:\n        if record is not None:\n            self.records.append(record)\n\n\ndef no_fields(marker: str) -> None:\n    print(marker)\n\n\ndef reject(marker: str) -> dict[str, str]:\n    print(marker)\n    raise ValueError(\"extra evaluation failed\")\n\n\ndef check() -> None:\n    print(len(logging.root.handlers))\n    try:\n        logging.warning(\"never delivered\", extra=reject(\"before root configuration\"))\n    except ValueError as exc:\n        print(str(exc))\n    print(len(logging.root.handlers))\n\n    logs = logging.getLogger(\"extra.call.order\")\n    logs.propagate = False\n    capture = Capture()\n    logs.addHandler(capture)\n    logs.setLevel(logging.WARNING)\n    logs.debug(\"disabled\", extra=no_fields(\"None while disabled\"))\n    print(len(capture.records))\n    logs.warning(\"enabled %s\", \"value\", extra=no_fields(\"None while enabled\"))\n    print(capture.records[0].getMessage())\n    try:\n        logs.error(\"never delivered\", extra=reject(\"before handler\"))\n    except ValueError as exc:\n        print(str(exc))\n    print(len(capture.records))\n\n\ncheck()\n",
+    "fixture_blob": "81349fe560e7f8fcecee8adf794c7d64bb17533c",
+    "observations": [
+      "0",
+      "before root configuration",
+      "extra evaluation failed",
+      "0",
+      "None while disabled",
+      "0",
+      "None while enabled",
+      "enabled value",
+      "before handler",
+      "extra evaluation failed",
+      "1"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "7b323ece50e21ac36136e1ff015292143a19b671d435d29be91499a50dff33f4",
+      "output_lines": 11,
+      "stderr": ""
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7b323ece50e21ac36136e1ff015292143a19b671d435d29be91499a50dff33f4",
+          "output_lines": 11,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7b323ece50e21ac36136e1ff015292143a19b671d435d29be91499a50dff33f4",
+          "output_lines": 11,
+          "stderr": ""
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7b323ece50e21ac36136e1ff015292143a19b671d435d29be91499a50dff33f4",
+          "output_lines": 11,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7b323ece50e21ac36136e1ff015292143a19b671d435d29be91499a50dff33f4",
+          "output_lines": 11,
+          "stderr": ""
+        }
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "reachable_event_levels_by_compiler": {
+    "default": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+        "output_lines": 36,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+        "output_lines": 36,
+        "stderr": ""
+      }
+    },
+    "verify": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+        "output_lines": 36,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "1a5192b5745270bad84d50ac5bb3a239ac4fb0f7d12635b6ab9679b5eade8355",
+        "output_lines": 36,
+        "stderr": ""
+      }
+    }
+  },
+  "before_event_extra": {
+    "public_source": "186b0c1dc8ebc65ff2ca65112578776f7a48da6c",
+    "canonical_delivery": "3208750bb2b708fee859a1f744eca6c92d91cb1c",
+    "original_fixture_sha256": "a12245beeec410def813c71bcd4a64d990431683ff5216ffbeb4ea14f7c901c5",
+    "levels": {
+      "O0-normal": {
+        "stage": "compile",
+        "diagnostic": " Compiling case.py (-O0)\ncase.py:33:5: Imre: keyword arguments are unsupported for this builtin\n"
+      },
+      "O0-reachable": {
+        "stage": "compile",
+        "diagnostic": " Compiling case.py (-O0)\ncase.py:33:5: Imre: keyword arguments are unsupported for this builtin\n"
+      },
+      "O3-normal": {
+        "stage": "compile",
+        "diagnostic": " Compiling case.py (-O3)\ncase.py:33:5: Imre: keyword arguments are unsupported for this builtin\n"
+      },
+      "O3-reachable": {
+        "stage": "compile",
+        "diagnostic": " Compiling case.py (-O3)\ncase.py:33:5: Imre: keyword arguments are unsupported for this builtin\n"
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "make_record_mixed_extra": {
+    "source": "\"\"\"Exercise the shared event/makeRecord mapping conversion and reserved-field check.\"\"\"\nimport logging\n\n\ndef check() -> None:\n    logger = logging.getLogger(\"extra.record\")\n    record = logger.makeRecord(\"extra.record\", logging.INFO, \"source.py\", 12,\n                               \"value %s\", (\"kept\",), None,\n                               extra={\"text\": \"yes\", \"number\": 12, \"nil\": None, \"enabled\": True})\n    print(record.getMessage())\n    print(str(record.__dict__[\"text\"]))\n    print(str(record.__dict__[\"number\"]))\n    print(str(record.__dict__[\"nil\"]))\n    print(str(record.__dict__[\"enabled\"]))\n    aliased = {\"tag\": \"original\"}\n    copied = logger.makeRecord(\"extra.record\", logging.INFO, \"source.py\", 13,\n                               \"copied\", (), None, extra=aliased)\n    aliased[\"tag\"] = \"new\"\n    print(str(copied.__dict__[\"tag\"]))\n    try:\n        logger.makeRecord(\"extra.record\", logging.INFO, \"source.py\", 14,\n                          \"never returned\", (), None, extra={\"tag\": \"first\", \"message\": \"bad\"})\n    except KeyError as error:\n        print(str(error))\n    print(record.getMessage())\n\n\ncheck()\n",
+    "observations": [
+      "value kept",
+      "yes",
+      "12",
+      "None",
+      "True",
+      "original",
+      "\"Attempt to overwrite 'message' in LogRecord\"",
+      "value kept"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "8dd1a08091e8ac4119516fa92068d137be4afdb14f5a3e1919f8d7c2597c2c1f",
+      "output_lines": 8,
+      "stderr": ""
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "8dd1a08091e8ac4119516fa92068d137be4afdb14f5a3e1919f8d7c2597c2c1f",
+          "output_lines": 8,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "8dd1a08091e8ac4119516fa92068d137be4afdb14f5a3e1919f8d7c2597c2c1f",
+          "output_lines": 8,
+          "stderr": ""
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "8dd1a08091e8ac4119516fa92068d137be4afdb14f5a3e1919f8d7c2597c2c1f",
+          "output_lines": 8,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "8dd1a08091e8ac4119516fa92068d137be4afdb14f5a3e1919f8d7c2597c2c1f",
+          "output_lines": 8,
+          "stderr": ""
+        }
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "file_handler": {
+    "fixture": "tests/fixtures/files/logging_file_delivery.py",
+    "fixture_blob": "42417ef9ce3f6012d5217b501ebc38db1bd03a54",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+      "output_lines": 25,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+        "output_lines": 25,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+        "output_lines": 25,
+        "stderr": ""
+      }
+    }
+  },
+  "root_config_suite_sha256": "f03e37684fc30f7b2da356a36a056d7a09ebdd265623bee56d723bca192b8043",
+  "logging_config_cleanup": {
+    "fixture": "tests/fixtures/files/logging_config_cleanup.py",
+    "fixture_blob": "0f1cf0e8d062c66ca8b01c3dd899689492fa71b9",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+      "output_lines": 13,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+        "output_lines": 13,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+        "output_lines": 13,
+        "stderr": ""
+      }
+    }
+  },
+  "logging_file_codecs": {
+    "fixture": "tests/fixtures/files/logging_file_codecs.py",
+    "fixture_blob": "07f1d9c88cbf8084862dd6213696c8c7013ce38b",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+      "output_lines": 51,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+        "output_lines": 51,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+        "output_lines": 51,
+        "stderr": ""
+      }
+    }
+  },
+  "standalone_suite_sha256": "1012a444ad446c068cdd43481a3a2bf454d4391abffbb6469a19577dc2a52848",
+  "detached_fallback": {
+    "source": "import logging\n\nclass Capture(logging.Handler):\n    records: list[logging.LogRecord]\n    def __init__(self) -> None:\n        super().__init__()\n        self.records = []\n    def emit(self, record: logging.LogRecord | None) -> None:\n        if record is not None:\n            self.records.append(record)\n\ndef main() -> None:\n    logging.basicConfig(level=logging.DEBUG, format=\"ROOT %(name)s:%(message)s\")\n    managed = logging.getLogger(\"twins\")\n    detached = logging.Logger(\"twins\")\n    capture = Capture()\n    detached.addHandler(capture)\n    values = {\"word\": \"before\"}\n    detached.warning(\"retained %(word)s\", values)\n    values[\"word\"] = \"after\"\n    print(capture.records[0].getMessage())\n    detached.warning(\"bad %\", 9)\n    print(capture.records[1].msg)\n    detached.removeHandler(capture)\n    detached.info(\"ignored %\", 2)\n    detached.warning(\"last resort %04d\", 7)\n    managed.warning(\"managed %04d\", 11)\n\nmain()\n",
+    "observations": [
+      "retained after",
+      "bad %"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+      "output_lines": 2,
+      "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        }
+      }
+    }
+  }
+}

@@ -89,3 +89,5 @@ coverage for record representation, metadata and flag changes.
 
 [Formatter execution](formatters.md) covers all three styles and records where
 the original precision regression executes.
+
+The [event-extra comparison](event-extra-linux.json) records deferred formatting and field collisions on emitted native records.

@@ -167,6 +167,41 @@ impl Checker<'_> {
         })
     }
 
+    /// Retain heterogeneous literal fields, or borrow an existing mapping through the log call.
+    pub(super) fn logging_extra(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
+        let value = if matches!(arg, ast::Expr::Dict(_)) {
+            self.expr_expected(arg, self.types.dict(Type::Str, Type::ObjectValue))?
+        } else {
+            self.expr(arg)?
+        };
+        let concrete = self.types.payload(value.ty).unwrap_or(value.ty);
+        if concrete != Type::None {
+            let Some((Type::Str, field)) = self.types.mapping(concrete) else {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "logging extra needs a string-key mapping",
+                ));
+            };
+            self.check_record_value_type(field, arg)?;
+        }
+        Ok(value)
+    }
+
+    /// Add the extra fields once, after construction and before any handler can see the record.
+    pub(super) fn record_with_extra(&mut self, new: Expr, extra: Expr) -> Expr {
+        if extra.ty == Type::None {
+            return new;
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let record = scope.hold(self, new);
+        scope.hold(
+            self,
+            op(Op::AddExtra, Type::None, vec![record.clone(), extra]),
+        );
+        scope.finish(record)
+    }
+
     /// Bind Logger.makeRecord in call order and apply extra only after the new record exists.
     pub(super) fn logger_make_record(
         &mut self,
@@ -187,23 +222,10 @@ impl Checker<'_> {
         })
         .collect();
         let args = self.arguments_with(call, &params, Some(logger), |checker, i, arg| {
-            let value = checker.expr(arg)?;
             if i == 8 {
-                let concrete = checker.types.payload(value.ty).unwrap_or(value.ty);
-                if concrete != Type::None
-                    && !matches!(checker.types.mapping(concrete), Some((Type::Str, _)))
-                {
-                    return Err(error(
-                        checker.source,
-                        arg,
-                        "logging extra needs a string-key mapping",
-                    ));
-                }
-                if let Some((_, field)) = checker.types.mapping(concrete) {
-                    checker.check_record_value_type(field, arg)?;
-                }
-                return Ok(value);
+                return checker.logging_extra(arg);
             }
+            let value = checker.expr(arg)?;
             checker.check_record_value(value, arg)
         })?;
         let mut scope = calls::ArgumentScope::default();
@@ -220,17 +242,7 @@ impl Checker<'_> {
                 .map(|i| bound[i].clone())
                 .into(),
         );
-        let record = scope.hold(self, new);
-        if bound[9].ty != Type::None {
-            scope.hold(
-                self,
-                op(
-                    Op::AddExtra,
-                    Type::None,
-                    vec![record.clone(), bound[9].clone()],
-                ),
-            );
-        }
+        let record = self.record_with_extra(new, bound[9].clone());
         Ok(scope.finish(record))
     }
 
