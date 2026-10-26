@@ -130,7 +130,8 @@ impl Context {
                             | "object.__getattribute__"
                             | "object.__setattr__"
                             | "object.__init__"
-                    ) || name.starts_with("dict.")
+                    ) || name == "list.pop"
+                        || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -688,6 +689,9 @@ impl Context {
             }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
+            }
+            Value::Native(class) if class == "list" && name == "pop" => {
+                return Ok(self.builtin("list.pop"));
             }
             Value::Native(class)
                 if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
