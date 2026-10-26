@@ -32,7 +32,7 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-mod fnmatch;
+pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;

@@ -59,6 +59,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
+            Value::ByteArray(_) => "bytearray",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..

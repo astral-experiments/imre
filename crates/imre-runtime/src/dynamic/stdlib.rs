@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
+mod fnmatch;
 mod hashlib;
 mod hmac;
 pub(super) mod io;
@@ -27,6 +28,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "os"
             | "os.path"
+            | "fnmatch"
             | "operator"
             | "platform"
             | "site"
@@ -283,6 +285,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "fsdecode" | "uname")
         | ("os.path", "join" | "abspath" | "dirname")
+        | ("fnmatch", "filter")
         | ("operator", "attrgetter")
         | (
             "platform",
@@ -325,6 +328,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "fnmatch.filter" {
+        return fnmatch::filter(ctx, args, kwargs);
+    }
     if name == "operator.attrgetter" {
         return operator::attrgetter(ctx, args, kwargs);
     }
