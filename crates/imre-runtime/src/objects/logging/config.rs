@@ -88,7 +88,25 @@ pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Obje
 pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     // SAFETY: the incoming logger stays live for the walk.
     let key = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.format.is_some() && reaches_root(logs, &key))
+    LOGGERS.with_borrow(|logs| {
+        let mut current = key.as_str();
+        loop {
+            let attached = &logs.entries[current].handlers;
+            // SAFETY: every registry entry owns a concrete list of handler records.
+            if unsafe { attached.0.with(|s| !s.sequence_storage().values.is_empty()) } {
+                return true;
+            }
+            if current == "root" {
+                return logs.format.is_some();
+            }
+            if !control(current).propagate {
+                return false;
+            }
+            current = logs
+                .parent_name(current)
+                .expect("non-root logger has a parent");
+        }
+    })
 }
 
 /// A logger with propagation stopped before root has only the default last-resort handler.
@@ -100,10 +118,16 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     logger: *const Object,
     level: usize,
     message: *const Str,
+    found: bool,
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
     let logger_name = unsafe { name(logger) };
-    if LOGGERS.with_borrow(|logs| reaches_root(logs, &logger_name)) {
+    let (root, configured) =
+        LOGGERS.with_borrow(|logs| (reaches_root(logs, &logger_name), logs.format.is_some()));
+    if found && !(root && configured) {
+        return;
+    }
+    if root {
         // SAFETY: all three original owners remain live.
         unsafe { super::imre_log_emit(logger, level, message) };
     } else {

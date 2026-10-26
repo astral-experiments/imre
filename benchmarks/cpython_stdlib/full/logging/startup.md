@@ -30,6 +30,11 @@ To repeat the first row, run `python3 benchmarks/cpython_stdlib/full/check_suite
 For the second, also pass `--support-file` for each pinned `.py` outside
 `Lib/test`, relative to `Lib`. Codec support is tracked in [#691](https://github.com/astral-sh/imre/pull/691).
 
+On the [native stream and codec source](https://github.com/astral-sh/imre/commit/c0a1a2ed0fc7dfc0410b2718dc8ca22837601754),
+both vendored entry points first report `configparser` at line 27. With
+reachable-only compilation, both first report `pickle` at line 32. The
+[four diagnostics](startup-codec-vendored-linux.json) executed zero tests.
+
 There is one starred tuple **display** in the pinned test:
 [`ConfigDictTest.test_config_queue_handler`, line 3990](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py#L3990).
 After three ordinary fields it expands `*dqs` (two factory dictionaries from

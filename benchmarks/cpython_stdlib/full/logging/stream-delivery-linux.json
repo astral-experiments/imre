@@ -1,0 +1,84 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "levels": {
+    "0": {
+      "test_id": "test.test_logging.EncodingTest.test_encoding_cyrillic_unicode",
+      "observed": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Native logger dispatch, StreamHandler terminator, CP1251 writer and BytesIO contents",
+          "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child",
+          "opt_level": 0,
+          "method_sha256": "c7fdda1ada09790ab5fdbafd1fb35eee75ac211d17116ed87f4507aa8294a863",
+          "assertion": "Native exact-bytes equality on the two original operands",
+          "shared_assertion_blocker": "expected bool | int, got bytes; annotations are enforced contracts",
+          "actual_bytes_hex": "e4ee20f1e2e8e4e0ede8ff0a",
+          "expected_bytes_hex": "e4ee20f1e2e8e4e0ede8ff0a"
+        }
+      },
+      "stream_setting": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Default sys.stderr, StreamHandler replacement and unchanged-stream identity",
+          "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child",
+          "opt_level": 0,
+          "method_sha256": "829efb248ac9b45c5c66cb4da1a5847fc755127c43a6b49dc1ec280b2b80e0d7",
+          "assertion": "Native object identity and None checks on the original operands",
+          "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"
+        }
+      },
+      "control_stdout_sha256": "3093feeaf4793d86c6eaa8ed38c55c9806f29d0216a3e61537ad3b0555453307",
+      "control_observations": 21
+    },
+    "3": {
+      "test_id": "test.test_logging.EncodingTest.test_encoding_cyrillic_unicode",
+      "observed": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Native logger dispatch, StreamHandler terminator, CP1251 writer and BytesIO contents",
+          "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child",
+          "opt_level": 3,
+          "method_sha256": "c7fdda1ada09790ab5fdbafd1fb35eee75ac211d17116ed87f4507aa8294a863",
+          "assertion": "Native exact-bytes equality on the two original operands",
+          "shared_assertion_blocker": "expected bool | int, got bytes; annotations are enforced contracts",
+          "actual_bytes_hex": "e4ee20f1e2e8e4e0ede8ff0a",
+          "expected_bytes_hex": "e4ee20f1e2e8e4e0ede8ff0a"
+        }
+      },
+      "stream_setting": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "Default sys.stderr, StreamHandler replacement and unchanged-stream identity",
+          "fixture": "Original CPython BaseTest setup and teardown; its DEBUG root, formatter and StringIO handler are recreated in the native child",
+          "opt_level": 3,
+          "method_sha256": "829efb248ac9b45c5c66cb4da1a5847fc755127c43a6b49dc1ec280b2b80e0d7",
+          "assertion": "Native object identity and None checks on the original operands",
+          "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"
+        }
+      },
+      "control_stdout_sha256": "3093feeaf4793d86c6eaa8ed38c55c9806f29d0216a3e61537ad3b0555453307",
+      "control_observations": 21
+    }
+  }
+}

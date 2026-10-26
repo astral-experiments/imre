@@ -25,17 +25,16 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The replay of [`4fe0c598`](https://github.com/astral-sh/imre/commit/4fe0c598cbcba2390d715ea8784bb47106e24d37) includes logger hierarchy, handler registration,
-formatters, and ordinary, timed and [size-based rotation](rotation.md).
-Both levels have the same counts:
+The replay covers logger hierarchy, stream delivery, record fields, handler registration,
+formatters, and ordinary, timed and [size-based rotation](rotation.md). The counts agree at both levels.
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 17 |
+| Imre | Imre | Imre | CPython hooks and native child | 19 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
 | CPython | CPython | Imre | CPython hooks and native child | 1 |
-| Blocked before execution | | | | 208 |
+| Blocked before execution | | | | 206 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -44,6 +43,8 @@ rollover with an explicit time, record representation, formatter precision,
 an empty name filter, both buffering formatters, and [FileHandler](files.md)
 delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
+The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
+The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
 Four bodies verify native stderr with the original
 CPython output helper. The 39 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

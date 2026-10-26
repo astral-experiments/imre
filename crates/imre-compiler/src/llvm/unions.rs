@@ -1,4 +1,4 @@
-//! Representation changes transfer the same exact Rc owner across a union boundary.
+//! Representation changes transfer the same owner across a union boundary.
 
 use super::*;
 
@@ -8,7 +8,9 @@ fn tag(ty: Type) -> u8 {
         Type::Bytes => 1,
         // Both are Object owners and occupy separate closed unions with str.
         Type::List(_) | Type::FrozenStrings => 2,
-        Type::Exception => 3,
+        // These owners share the always-true Object tag. No admitted union
+        // contains both an exception and a LogRecord.
+        Type::Exception | Type::LogRecord => 3,
         Type::Class(_) | Type::Tuple(_) => 4,
         Type::Enum(_) => 5,
         Type::Path => 6,
