@@ -455,7 +455,10 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
-            Value::Function { fields, .. } => {
+            Value::Function { scope, fields, .. } => {
+                if name == "__globals__" {
+                    return Ok(self.module_globals(scope));
+                }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
@@ -585,8 +588,11 @@ impl Context {
                 name: module,
                 scope,
             } => {
-                if let Some(value) = self.scope_data(scope).names.get(name) {
-                    return Ok(*value);
+                if name == "__dict__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.scope_name(scope, name) {
+                    return Ok(value);
                 }
                 if stdlib::is_module(&module) {
                     let value = stdlib::attribute(self, &module, name)?;
@@ -687,6 +693,9 @@ impl Context {
                 name: module,
                 scope,
             } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }

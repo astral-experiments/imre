@@ -694,6 +694,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "icu_properties",
  "imre-regex",
+ "indexmap",
  "itoa",
  "libc",
  "linux-raw-sys",

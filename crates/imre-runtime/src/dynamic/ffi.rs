@@ -21,12 +21,28 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
-            "delname" => {
+            "delname" | "clearname" => {
                 let name = self.str_value(b)?.to_owned();
+                if let Some(namespace) = self.scope_data(a).namespace {
+                    if self.scope_name(a, &name).is_some() {
+                        self.delete_item(namespace, b)?;
+                    } else if op == "delname" {
+                        return Err(Error::new(
+                            "NameError",
+                            format!("name '{name}' is not defined"),
+                        ));
+                    }
+                    return Ok(NONE);
+                }
                 let Value::Scope(s) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                s.names.remove(&name);
+                if s.names.shift_remove(&name).is_none() && op == "delname" {
+                    return Err(Error::new(
+                        "NameError",
+                        format!("name '{name}' is not defined"),
+                    ));
+                }
                 if let Some(order) = &mut s.class_body {
                     order.retain(|member| member != &name);
                 }
@@ -58,6 +74,10 @@ impl Context {
                 Ok(c)
             }
             "get" => self.get_item(a, b),
+            "delitem" => {
+                self.delete_item(a, b)?;
+                Ok(NONE)
+            }
             "put" | "keyword" => {
                 if op == "keyword" && self.contains(b, a)? {
                     return Err(Error::new(
@@ -146,7 +166,7 @@ impl Context {
             }
             "class" => self.class(a, b, c),
             "annotate" => {
-                if let Some(mapping) = self.scope_data(a).names.get("__annotations__").copied() {
+                if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)

@@ -66,6 +66,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "callable"
                 | "isinstance"
                 | "getattr"
+                | "globals"
                 | "setattr"
                 | "hasattr"
                 | "open"
@@ -456,6 +457,12 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
+        }
+        "globals" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(type_error("globals() takes no arguments"));
+            }
+            Ok(ctx.module_globals(ctx.heap.current_scope()))
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
