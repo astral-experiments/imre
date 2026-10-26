@@ -19,6 +19,8 @@ The four passing `test.test_time.TimeTestCase` methods are `test_mktime`, `test_
 
 `tests/time_local.py` compares actual output with separate CPython processes under UTC and a controlled US Eastern DST rule. It covers epoch and civil round trips, DST flags and gap normalization, numeric ranges, ordered `__index__` calls and exceptions, struct_time class identity, nine sequence slots and both hidden attributes.
 
+The runtime-imported `time.mktime` uses the same local-time conversion. The boxed CLI fixture checks tuple and `struct_time` inputs, field and offset conversion order, and the distinct errors for a list and a tuple of the wrong length.
+
 `werkzeug_http_date.py` uses the locked Flask wheelhouse. CPython calls the complete, unchanged Werkzeug 3.1.8 `http_date`. Imre compiles the original `isinstance` test, `mktime` assignment and final `email.utils.formatdate` call in a wrapper typed for this branch. It compares eight inputs in two timezones at O0 and O3 in ordinary and reachable-only builds. These consumer checks are separate from the upstream method counts.
 
 ## Reproduce
