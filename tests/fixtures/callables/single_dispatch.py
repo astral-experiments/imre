@@ -1,3 +1,4 @@
+import re
 from functools import singledispatch
 
 
@@ -155,11 +156,44 @@ def heterogeneous() -> None:
         print(str(exc))
 
 
+def registered_format(text_or_bytes: str | bytes, optional: str | None) -> None:
+    @singledispatch
+    def select(item):
+        return "base"
+
+    @select.register(int)
+    def show_number(item):
+        return "int %s" % (item,)
+
+    def show_ascii(item):
+        return "%% %a" % (item,)
+
+    print(select(""))
+    print(select((re.compile("ignored"),)))
+    print(select(12))
+    print(select(True))
+    print(select.dispatch(int) is show_number)
+    print(select.dispatch(object) is select.dispatch(str))
+    print(select.dispatch(int)("direct"))
+    print(show_number(text_or_bytes))
+    print(show_number(optional))
+    print(show_number((1, "nested")))
+    print(show_number(numbers(False)))
+    print(show_number(int))
+    print(show_ascii("π"))
+    try:
+        print(show_number(numbers(True)))
+    except ValueError as exc:
+        print(str(exc))
+
+
 exercise(True)
 exercise(False)
 local_registry()
 decorated()
 decorated()
 heterogeneous()
+registered_format("literal", None)
+registered_format(b"bytes", "present")
 wrapper_text(True)
 wrapper_text(False)

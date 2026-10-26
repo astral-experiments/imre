@@ -72,6 +72,23 @@ def expanded_keywords() -> None:
     except TypeError as err:
         print(str(err))
     describe(old)
+    prior = old.args
+    try:
+        old.__init__('number key', **{1: 'bad'}, **{'unknown': 'later'})
+    except TypeError as err:
+        print(str(err))
+    print(repr(prior))
+    describe(old)
+    try:
+        old.__init__('unknown first', **{'unknown': 'first'}, **{1: 'later'})
+    except TypeError as err:
+        print(str(err))
+    describe(old)
+    try:
+        old.__init__('duplicate', **{1: 'first'}, **{1: 'second'})
+    except TypeError as err:
+        print(str(err))
+    describe(old)
     try:
         old.__init__('new', **{'name': 'first', 'unexpected': 'second'})
     except TypeError as err:

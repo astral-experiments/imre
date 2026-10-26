@@ -77,40 +77,140 @@ fn class(ty: Type) -> Option<(&'static str, InstanceType)> {
     })
 }
 
-/// Test bool before int: both match an int instance test.
-fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
-    if types.is_unread_argument(arg.ty) {
-        return Some(field(arg.clone(), 0, Type::Str));
+/// One text conversion can observe an otherwise layout-independent callback argument.
+pub(super) fn text_conversion(fmt: &str) -> bool {
+    let mut chars = fmt.chars();
+    let mut found = false;
+    while chars.any(|c| c == '%') {
+        match chars.next() {
+            Some('%') => (),
+            Some('s' | 'r' | 'a') if !found => found = true,
+            _ => return false,
+        }
     }
-    if let Some(inner) = types.payload(arg.ty) {
+    found
+}
+
+/// Choose an exact class and value together; bool matches before its int base.
+fn with_class(
+    types: &Types,
+    value: Expr,
+    make: &impl Fn(&'static str, Expr) -> Expr,
+) -> Option<Expr> {
+    if let Some(inner) = types.payload(value.ty) {
         let present = Expr {
             ty: inner,
-            kind: ExprKind::Unwrap(Box::new(arg.clone())),
+            kind: ExprKind::Unwrap(Box::new(value.clone())),
         };
         return Some(conditional(
-            builtin(Builtin::IsNone, Type::Bool, vec![arg.clone()]),
-            unpacking::string("NoneType"),
-            value_class(types, &present)?,
+            builtin(Builtin::IsNone, Type::Bool, vec![value]),
+            with_class(
+                types,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                make,
+            )?,
+            with_class(types, present, make)?,
         ));
     }
-    if let Some(mut members) = types.members(arg.ty) {
+    if let Some(mut members) = types.members(value.ty) {
         members.sort_by_key(|ty| *ty != Type::Bool);
-        let mut members = members.into_iter().map(class).collect::<Option<Vec<_>>>()?;
-        let mut name = unpacking::string(members.pop()?.0);
-        for (key, test) in members.into_iter().rev() {
-            name = conditional(
+        let project = |ty| builtin(Builtin::UnionProject, ty, vec![value.clone()]);
+        let mut frame = with_class(types, project(members.pop()?), make)?;
+        for ty in members.into_iter().rev() {
+            let (_, test) = class(ty)?;
+            frame = conditional(
                 builtin(
                     Builtin::IsInstance(vec![test]),
                     Type::Bool,
-                    vec![arg.clone()],
+                    vec![value.clone()],
                 ),
-                unpacking::string(key),
-                name,
+                with_class(types, project(ty), make)?,
+                frame,
             );
         }
-        return Some(name);
+        return Some(frame);
     }
-    Some(unpacking::string(class(arg.ty)?.0))
+    let (name, _) = class(value.ty)?;
+    Some(make(name, value))
+}
+
+/// Keep the supplied object and its concrete formatting descriptor, even for an unread argument.
+fn callback_frame(types: &Types, classes: &ClassInfo, value: Expr) -> Option<Expr> {
+    with_class(types, value, &|name, value| {
+        let printable = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(dataclass_values::can_format(value.ty, types, classes)),
+        };
+        let positional = Expr {
+            ty: types.tuple(vec![value.ty]),
+            kind: ExprKind::Tuple(vec![value]),
+        };
+        let positional = builtin(
+            Builtin::RecordView,
+            types.callback_positional(),
+            vec![positional],
+        );
+        let frame = Expr {
+            ty: types.tuple(vec![Type::Str, positional.ty, Type::Bool]),
+            kind: ExprKind::Tuple(vec![unpacking::string(name), positional, printable]),
+        };
+        builtin(Builtin::RecordView, types.callback_argument(), vec![frame])
+    })
+}
+
+fn value_class(types: &Types, arg: &Expr) -> Option<Expr> {
+    if types.is_callback_argument(arg.ty) {
+        return Some(field(arg.clone(), 0, Type::Str));
+    }
+    with_class(types, arg.clone(), &|name, _| unpacking::string(name))
+}
+
+/// Only formatting inspects the argument: an unread callback may safely retain opaque resources.
+pub(super) fn format_argument(types: &Types, fmt: &Expr, rhs: &Expr) -> Option<Expr> {
+    let ExprKind::Str(text) = &fmt.kind else {
+        return None;
+    };
+    let ExprKind::Tuple(arguments) = &rhs.kind else {
+        return None;
+    };
+    let [arg] = arguments.as_slice() else {
+        return None;
+    };
+    if !text_conversion(text)
+        || !types.is_callback_argument(arg.ty)
+        || !matches!(arg.kind, ExprKind::Local(_))
+    {
+        return None;
+    }
+    let positional = field(arg.clone(), 1, types.callback_positional());
+    let unsupported = Statement::Raise(Some(Expr {
+        ty: Type::Exception,
+        kind: ExprKind::Exception {
+            kind: exception_kind("NotImplementedError").unwrap(),
+            message: Some(Box::new(unpacking::string(
+                "formatting a callback argument with opaque fields is unsupported",
+            ))),
+        },
+    }));
+    Some(Expr {
+        ty: Type::Str,
+        kind: ExprKind::Scope {
+            body: vec![Statement::If(
+                field(arg.clone(), 2, Type::Bool),
+                vec![],
+                vec![unsupported],
+            )],
+            value: Box::new(builtin(
+                Builtin::PercentFormat,
+                Type::Str,
+                vec![fmt.clone(), positional],
+            )),
+            clear: vec![],
+        },
+    })
 }
 
 pub(super) enum LocalDecorator {
@@ -153,9 +253,8 @@ impl Registration {
 }
 
 impl Checker<'_> {
-    /// Store the class alongside the original owned value. Its concrete record
-    /// descriptor releases the payload after the caller and callback finish.
-    pub(super) fn pack_unread_value(
+    /// Root the evaluated argument before inspecting its class or formatting it.
+    pub(super) fn pack_callback_value(
         &mut self,
         value: Expr,
         arg: &ast::Expr,
@@ -166,18 +265,14 @@ impl Checker<'_> {
         }
         let mut scope = calls::ArgumentScope::default();
         let value = scope.hold(self, value);
-        let name = value_class(self.types, &value).ok_or_else(|| {
+        let frame = callback_frame(self.types, self.classes, value).ok_or_else(|| {
             error(
                 self.source,
                 arg,
                 "this callback argument needs a known builtin class",
             )
         })?;
-        let frame = Expr {
-            ty: self.types.tuple(vec![Type::Str, value.ty]),
-            kind: ExprKind::Tuple(vec![name, value]),
-        };
-        Ok(scope.finish(builtin(Builtin::RecordView, ty, vec![frame])))
+        Ok(scope.finish(frame))
     }
 
     /// An unbound function cannot retain its dispatcher through a captured receiver.
@@ -276,10 +371,13 @@ impl Checker<'_> {
         self.helpers.finish(
             id,
             comprehensions::Helper {
-                module: self.module,
+                // functools.update_wrapper copies the wrapped function's __module__.
+                module: text
+                    .as_ref()
+                    .map_or(self.module, |metadata| metadata.module),
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
-                source_frame: false,
+                source_frame: true,
                 recursion_error: self.graph.modules[self.module]
                     .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
@@ -470,7 +568,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         match decorator {
             LocalDecorator::Dispatch => {
-                self.new_dispatcher(target, Some(self.function_text(def)), def)
+                self.new_dispatcher(target, Some(self.function_text(self.module, def)), def)
             }
             LocalDecorator::Register(selection) => selection.apply(self, target, def),
         }
