@@ -1,8 +1,9 @@
-"""Compare handler ordering, identity, level filtering, flush and the CP1251 terminator."""
+"""Compare stream delivery, handler errors, and the CP1251 terminator."""
 import codecs
 import io
 import logging
 import sys
+from logging import StreamHandler
 
 
 def handle_result(handler: logging.Handler, record: logging.LogRecord) -> None:
@@ -90,4 +91,32 @@ def exercise() -> None:
     handler.close()
 
 
+class ReportingStream(StreamHandler):
+    def handleError(self, record: logging.LogRecord) -> None:
+        print("handled " + record.getMessage())
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if message == "format error":
+            raise ValueError(message)
+        if message == "recursive format":
+            raise RecursionError(message)
+        return message
+
+
+def check_stream_errors() -> None:
+    output = io.StringIO()
+    handler = ReportingStream(output)
+    for message in ("format error", "recursive format", "closed stream"):
+        record = logging.LogRecord("delivery", 30, "source.py", 7, message, (), None)
+        if message == "closed stream":
+            output.close()
+        try:
+            handler.handle(record)
+            print("returned")
+        except RecursionError:
+            print("recursion propagated")
+
+
 exercise()
+check_stream_errors()
