@@ -2,19 +2,40 @@
 
 use std::env;
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use imre_compiler::{CommandFlags, PythonCommand};
 
-/// The command operand ends interpreter option parsing; every remaining word belongs to the program.
+pub(super) enum Invocation {
+    Command(PythonCommand),
+    Script {
+        path: PathBuf,
+        flags: CommandFlags,
+        executable: String,
+    },
+}
+
+enum Input {
+    Command(String),
+    Script(PathBuf),
+}
+
+/// The command or script ends interpreter option parsing; remaining words belong to the program.
 pub(super) fn parse(
     mut arg: OsString,
     args: &mut impl Iterator<Item = OsString>,
-) -> Result<PythonCommand, String> {
+) -> Result<Invocation, String> {
     let mut isolated = false;
     let mut optimize: i32 = 0;
     let mut dont_write_bytecode = false;
     let mut utf8 = None;
-    let source = 'options: loop {
+    let input = 'options: loop {
+        if arg == "--" {
+            break Input::Script(args.next().ok_or("expected a script after --")?.into());
+        }
+        if !arg.as_encoded_bytes().starts_with(b"-") {
+            break Input::Script(arg.into());
+        }
         let mut flags = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix('-'))
@@ -25,7 +46,7 @@ pub(super) fn parse(
                 'I' => isolated = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
-                'c' => break 'options operand(flags.as_str(), args, "-c")?,
+                'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
                     let value = match option.as_str() {
@@ -87,10 +108,17 @@ pub(super) fn parse(
         .into_os_string()
         .into_string()
         .map_err(|_| "interpreter path is not UTF-8")?;
-    Ok(PythonCommand {
-        source: dedent(source),
-        flags,
-        executable,
+    Ok(match input {
+        Input::Command(source) => Invocation::Command(PythonCommand {
+            source: dedent(source),
+            flags,
+            executable,
+        }),
+        Input::Script(path) => Invocation::Script {
+            path,
+            flags,
+            executable,
+        },
     })
 }
 

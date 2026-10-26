@@ -34,10 +34,12 @@ mod format_cursors;
 mod functools;
 mod hashlib;
 mod inspect;
+pub(crate) mod interpreter_stdlib;
 mod itertools;
 mod join_buffer;
 mod joined_lines;
 mod json;
+pub(crate) use json::write_string as write_json_string;
 mod linecache;
 mod logging;
 mod mappings;
@@ -61,6 +63,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::split_parts;
 mod typing;
 pub(crate) use text::short_string;
 mod unions;
@@ -1190,7 +1193,7 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
 }
 
 /// Python also treats the four ASCII information separators as whitespace.
-fn python_whitespace(value: char) -> bool {
+pub(crate) fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
 }
 
@@ -1434,6 +1437,21 @@ unsafe fn split_string_lines<const KEEP: bool>(value: *const Str) -> *const Obje
         }),
         std::ptr::null(),
     )
+}
+
+/// Visit line fields using the same scanner as native str.splitlines.
+pub(crate) fn visit_line_fields<'a>(
+    value: &'a str,
+    keep_ends: bool,
+    mut visit: impl FnMut(&'a str),
+) {
+    let mut offsets = LineOffsets::new(value);
+    while let Some(mut range) = offsets.next(value) {
+        if keep_ends {
+            range.end = offsets.start;
+        }
+        visit(&value[range]);
+    }
 }
 
 fn split_lines(

@@ -32,6 +32,7 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod dynamic;
 mod extensions;
 mod floats;
 mod shared;
@@ -113,6 +114,18 @@ impl Int {
         }
     }
 
+    fn to_i64(&self) -> Option<i64> {
+        self.as_small().or_else(|| self.big().to_i64())
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if let (Some(x), Some(y)) = (self.as_small(), other.as_small()) {
+            x.cmp(&y)
+        } else {
+            self.big().cmp(&other.big())
+        }
+    }
+
     fn into_raw(self) -> usize {
         ManuallyDrop::new(self).0
     }
@@ -120,6 +133,22 @@ impl Int {
     /// Borrows an ABI argument without acquiring or consuming its reference.
     unsafe fn borrow(raw: usize) -> ManuallyDrop<Self> {
         ManuallyDrop::new(Self(raw))
+    }
+}
+
+impl From<i64> for Int {
+    fn from(value: i64) -> Self {
+        Self::small(value).unwrap_or_else(|| Self::new(BigInt::from(value)))
+    }
+}
+
+impl std::fmt::Display for Int {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(small) = self.as_small() {
+            small.fmt(f)
+        } else {
+            self.big().fmt(f)
+        }
     }
 }
 
@@ -753,8 +782,13 @@ fn parse_integer_literal(literal: &str) -> Option<BigInt> {
 pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
     // SAFETY: both handles are borrowed by the ABI call.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
+    finish(integer_binary(&a, &b, op).map(Int::into_raw), 1)
+}
+
+/// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
+fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     if matches!(op, 8 | 9) {
-        return finish(integer_shift(&a, &b, op == 8).map(Int::into_raw), 1);
+        return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
@@ -766,7 +800,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
-                    return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
+                    return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -781,7 +815,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
             _ => fail("SystemError", "invalid integer operation"),
         };
         if let Some(value) = result.and_then(Int::small) {
-            return value.into_raw();
+            return Ok(value);
         }
     }
     let (a, b) = (a.big(), b.big());
@@ -794,7 +828,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                return Error::new(Kind::ZeroDivisionError, "division by zero").returning(1);
+                return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -808,7 +842,7 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
         }
         _ => fail("SystemError", "invalid integer operation"),
     };
-    Int::new(result).into_raw()
+    Ok(Int::new(result))
 }
 
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
@@ -874,12 +908,7 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
 pub unsafe extern "C" fn imre_int_compare(a: usize, b: usize) -> i32 {
     // SAFETY: the ABI caller keeps both handles alive.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
-    let order = if let (Some(a), Some(b)) = (a.as_small(), b.as_small()) {
-        a.cmp(&b)
-    } else {
-        a.big().cmp(&b.big())
-    };
-    match order {
+    match a.cmp(&b) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,

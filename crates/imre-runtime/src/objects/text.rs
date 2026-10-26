@@ -340,8 +340,13 @@ pub(super) fn push_part(parts: &mut Words, source: &StrOwner, value: &str) {
 }
 
 /// Whitespace runs count as one split; a zero limit only strips the starting end.
-fn whitespace_parts(source: &StrOwner, limit: usize, reverse: bool, parts: &mut Words) {
-    let mut remaining = source.as_str();
+fn whitespace_parts<'a>(
+    source: &'a str,
+    limit: usize,
+    reverse: bool,
+    mut push: impl FnMut(&'a str),
+) {
+    let mut remaining = source;
     let mut splits = 0;
     loop {
         remaining = if reverse {
@@ -353,7 +358,7 @@ fn whitespace_parts(source: &StrOwner, limit: usize, reverse: bool, parts: &mut 
             break;
         }
         if splits == limit {
-            push_part(parts, source, remaining);
+            push(remaining);
             break;
         }
         let boundary = if reverse {
@@ -362,15 +367,15 @@ fn whitespace_parts(source: &StrOwner, limit: usize, reverse: bool, parts: &mut 
             remaining.find(python_whitespace)
         };
         let Some(boundary) = boundary else {
-            push_part(parts, source, remaining);
+            push(remaining);
             break;
         };
         if reverse {
             let width = remaining[boundary..].chars().next().unwrap().len_utf8();
-            push_part(parts, source, &remaining[boundary + width..]);
+            push(&remaining[boundary + width..]);
             remaining = &remaining[..boundary];
         } else {
-            push_part(parts, source, &remaining[..boundary]);
+            push(&remaining[..boundary]);
             remaining = &remaining[boundary..];
         }
         splits += 1;
@@ -378,23 +383,29 @@ fn whitespace_parts(source: &StrOwner, limit: usize, reverse: bool, parts: &mut 
 }
 
 /// A one-byte UTF-8 separator is ASCII, so each match is a scalar boundary.
-fn byte_parts(source: &StrOwner, separator: u8, limit: usize, reverse: bool, parts: &mut Words) {
+fn byte_parts<'a>(
+    source: &'a str,
+    separator: u8,
+    limit: usize,
+    reverse: bool,
+    mut push: impl FnMut(&'a str),
+) {
     debug_assert!(separator.is_ascii());
     let boundaries = memchr::memchr_iter(separator, source.as_bytes());
     if reverse {
         let mut end = source.len();
         for index in boundaries.rev().take(limit) {
-            push_part(parts, source, &source[index + 1..end]);
+            push(&source[index + 1..end]);
             end = index;
         }
-        push_part(parts, source, &source[..end]);
+        push(&source[..end]);
     } else {
         let mut start = 0;
         for index in boundaries.take(limit) {
-            push_part(parts, source, &source[start..index]);
+            push(&source[start..index]);
             start = index + 1;
         }
-        push_part(parts, source, &source[start..]);
+        push(&source[start..]);
     }
 }
 
@@ -421,29 +432,44 @@ fn split_text(
         maxsplit as usize
     };
     let mut parts = Words::new(3);
-    if let Some(separator) = separator {
-        if separator.is_empty() {
-            return Err(Error::new(Kind::ValueError, "empty separator"));
-        }
-        let count = limit.saturating_add(1);
-        if separator.len() == 1 {
-            byte_parts(source, separator.as_bytes()[0], limit, reverse, &mut parts);
-        } else if reverse {
-            for part in source.rsplitn(count, separator) {
-                push_part(&mut parts, source, part);
-            }
-        } else {
-            for part in source.splitn(count, separator) {
-                push_part(&mut parts, source, part);
-            }
-        }
-    } else {
-        whitespace_parts(source, limit, reverse, &mut parts);
-    }
+    split_parts(source, separator, limit, reverse, |s| {
+        push_part(&mut parts, source, s)
+    })
+    .map_err(|message| Error::new(Kind::ValueError, message))?;
     if reverse {
         parts.values.reverse();
     }
     Ok(parts)
+}
+
+/// Visit borrowed split fields from either end; rsplit visits the last field first.
+pub(crate) fn split_parts<'a>(
+    source: &'a str,
+    separator: Option<&str>,
+    limit: usize,
+    reverse: bool,
+    mut push: impl FnMut(&'a str),
+) -> std::result::Result<(), &'static str> {
+    if let Some(separator) = separator {
+        if separator.is_empty() {
+            return Err("empty separator");
+        }
+        let count = limit.saturating_add(1);
+        if separator.len() == 1 {
+            byte_parts(source, separator.as_bytes()[0], limit, reverse, push);
+        } else if reverse {
+            for part in source.rsplitn(count, separator) {
+                push(part);
+            }
+        } else {
+            for part in source.splitn(count, separator) {
+                push(part);
+            }
+        }
+    } else {
+        whitespace_parts(source, limit, reverse, push);
+    }
+    Ok(())
 }
 
 /// Splits by an explicit separator or Python whitespace, from either end.

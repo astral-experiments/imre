@@ -22,8 +22,10 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 mod binary;
 mod decoder;
 mod encode;
+
 #[cfg(test)]
 pub(super) use encode::imre_json_dumps;
+pub(crate) use encode::write_string;
 pub(super) mod readonly;
 mod syntax;
 mod toml;
