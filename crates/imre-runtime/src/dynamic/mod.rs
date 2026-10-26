@@ -156,17 +156,20 @@ impl Context {
             }
         }
         if builtins::is_builtin(name) {
-            if let Some(&value) = self.builtins.get(name) {
-                return Ok(value);
-            }
-            let value = self.alloc(Value::Native(name.to_owned()));
-            self.builtins.insert(name.to_owned(), value);
-            return Ok(value);
+            return Ok(self.builtin(name));
         }
         Err(Error::new(
             "NameError",
             format!("name {name:?} is not defined"),
         ))
+    }
+    fn builtin(&mut self, name: &str) -> Id {
+        if let Some(&value) = self.builtins.get(name) {
+            return value;
+        }
+        let value = self.alloc(Value::Native(name.to_owned()));
+        self.builtins.insert(name.to_owned(), value);
+        value
     }
     fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
         self.heap.enter(scope);

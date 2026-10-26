@@ -288,7 +288,12 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
-        for fixture in ("boxed_contextvars.py", "boxed_descriptors.py", "boxed_proxy_truth.py"):
+        for fixture in (
+            "boxed_contextvars.py",
+            "boxed_descriptors.py",
+            "boxed_proxy_truth.py",
+            "boxed_setattr.py",
+        ):
             plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]

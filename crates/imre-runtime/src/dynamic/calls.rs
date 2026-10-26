@@ -52,15 +52,17 @@ impl Context {
             return self.call(get, vec![value, receiver, owner], Vec::new());
         }
         if receiver != NONE {
-            match self.heap.get(value) {
+            let method = match self.heap.get(value) {
                 Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => {
-                    return Ok(self.alloc(Value::Method {
-                        callable: value,
-                        receiver,
-                    }));
-                }
-                _ => {}
+                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => true,
+                Value::Native(name) => name == "object.__setattr__",
+                _ => false,
+            };
+            if method {
+                return Ok(self.alloc(Value::Method {
+                    callable: value,
+                    receiver,
+                }));
             }
         }
         Ok(value)
@@ -228,6 +230,9 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "object" && name == "__setattr__" => {
+                return Ok(self.builtin("object.__setattr__"));
+            }
             Value::Module {
                 name: module,
                 scope,
@@ -274,6 +279,15 @@ impl Context {
         ))
     }
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
+            let name = self.text(name);
+            self.call(hook, vec![name, value], Vec::new())?;
+            return Ok(());
+        }
+        self.default_set_attr(obj, name, value)
+    }
+
+    pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -305,9 +319,14 @@ impl Context {
                 self.bind(scope, name, value);
             }
             _ => {
+                let attr = self.text(name);
                 return Err(Error::new(
                     "AttributeError",
-                    format!("cannot set attribute {name:?}"),
+                    format!(
+                        "'{}' object has no attribute {} and no __dict__ for setting new attributes",
+                        self.type_name(obj),
+                        self.repr(attr)
+                    ),
                 ));
             }
         }
@@ -335,6 +354,7 @@ impl Context {
                                 | "bytes"
                                 | "range"
                                 | "function"
+                                | "object"
                         )
                     ) =>
             {
