@@ -8882,6 +8882,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(op @ (Intrinsic::ShlexQuote | Intrinsic::ShlexJoin))) => {
                 return self.shlex_call(call, op);
             }
+            Some(Binding::Intrinsic(Intrinsic::TemporaryFile)) => return self.temporary_file(call),
             _ => {}
         }
         if let Some(Binding::Intrinsic(

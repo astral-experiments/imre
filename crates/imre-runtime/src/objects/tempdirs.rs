@@ -158,6 +158,48 @@ fn default_directory() -> Result<Str> {
     })
 }
 
+/// Linux can create an unnamed inode directly. Other filesystems use exclusive
+/// creation followed by unlink, leaving the descriptor as its only owner.
+pub(super) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
+    let directory = directory.map_or_else(default_directory, |value| Ok(Str::from(value)))?;
+    let directory = Path::new(directory.as_str());
+    if directory.as_os_str().as_bytes().contains(&0) {
+        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+    }
+    #[cfg(target_os = "linux")]
+    if let Ok(file) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_TMPFILE)
+        .mode(0o600)
+        .open(directory)
+    {
+        return Ok(file);
+    }
+    let directory = absolute(directory).map_err(os_error)?;
+    for _ in 0..ATTEMPTS {
+        let path = directory.join(format!("tmp{}", random_name().map_err(os_error)?));
+        let file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(errno_with_filename(error, path.to_str())),
+        };
+        fs::remove_file(&path).map_err(|e| errno_with_filename(e, path.to_str()))?;
+        return Ok(file);
+    }
+    Err(Error::new(
+        Kind::FileExistsError,
+        "No usable temporary file name found",
+    ))
+}
+
 fn create(directory: Option<&str>, prefix: &str, suffix: &str) -> Result<Str> {
     let directory = directory.map_or_else(default_directory, |value| Ok(Str::from(value)))?;
     for _ in 0..ATTEMPTS {

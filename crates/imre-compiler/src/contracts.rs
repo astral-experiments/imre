@@ -219,6 +219,7 @@ impl Builtin {
                     | PathOperation::Rmdir
                     | PathOperation::Replace
                     | PathOperation::TemporaryDirectory
+                    | PathOperation::TemporaryFile
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
                     | PathOperation::Walk
