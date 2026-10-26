@@ -8523,6 +8523,13 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
                 return self.calendar_constructor(kind, call);
             }
+            Some(Binding::Intrinsic(
+                which @ (Intrinsic::EmailParseDate
+                | Intrinsic::EmailFormatDateTime
+                | Intrinsic::EmailFormatDate),
+            )) => {
+                return self.email_date(which, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 return self.configure_logging(call);
             }

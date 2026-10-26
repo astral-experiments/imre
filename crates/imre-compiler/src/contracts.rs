@@ -94,6 +94,9 @@ impl Builtin {
                         | crate::ir::CalendarOp::Delta
                         | crate::ir::CalendarOp::Zone
                         | crate::ir::CalendarOp::Now
+                        | crate::ir::CalendarOp::EmailParseDate
+                        | crate::ir::CalendarOp::EmailFormatDateTime
+                        | crate::ir::CalendarOp::EmailFormatDate
                         | crate::ir::CalendarOp::Shift { .. }
                         | crate::ir::CalendarOp::Negate
                 ),
@@ -1017,6 +1020,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_calendar_delta"
                 | "imre_calendar_zone"
                 | "imre_calendar_now"
+                | "imre_email_parsedate"
+                | "imre_email_format_datetime"
+                | "imre_email_formatdate"
                 | "imre_calendar_shift"
                 | "imre_calendar_negate"
                 | "imre_calendar_compare"

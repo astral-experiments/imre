@@ -21,6 +21,25 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Op::EmailFormatDate => {
+                let kind = match get(0).ty {
+                    Type::None => 0,
+                    Type::Int => 1,
+                    Type::Float => 2,
+                    _ => unreachable!(),
+                };
+                let timestamp = self.word(get(0));
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_email_formatdate(i32 {kind}, i64 {timestamp}, i1 {}, i1 {})",
+                    get(1).operand,
+                    get(2).operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             Op::Delta => {
                 let mask = args.iter().enumerate().fold(0, |v, (i, a)| {
                     v | (i32::from(a.value.ty == Type::Float) << i)
@@ -57,6 +76,8 @@ impl Emitter<'_, '_> {
                     Op::Utc => "imre_calendar_utc",
                     Op::ZoneLimit => "imre_calendar_zone_limit",
                     Op::Now => "imre_calendar_now",
+                    Op::EmailParseDate => "imre_email_parsedate",
+                    Op::EmailFormatDateTime => "imre_email_format_datetime",
                     Op::Negate => "imre_calendar_negate",
                     Op::Field => "imre_calendar_field",
                     Op::TzInfo => "imre_calendar_tzinfo",
