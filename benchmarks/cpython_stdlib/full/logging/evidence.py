@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
+import native_adapter_events
 import native_basic_config
 import native_config
 import native_encoding
@@ -167,6 +168,7 @@ def known_cases(toolchain, work, original):
     executions[native_standalone.CASE] = native_standalone.handler_case(toolchain, directory("standalone-handlers"))
     executions.update(native_basic_config.config_cases(toolchain, directory("root-config")))
     executions.update(native_manager.manager_cases(toolchain, directory("manager-enable")))
+    executions.update(native_adapter_events.adapter_cases(toolchain, directory("adapter-events")))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
@@ -230,7 +232,9 @@ class MethodProbe:
             imports.append("import logging")
             attrs = {ast.unparse(n) for n in ast.walk(node) if isinstance(n, ast.Attribute)}
             imports.extend(f"import logging.{pkg}" for pkg in ("handlers", "config") if f"logging.{pkg}" in attrs)
-        adapter = "\n".join(imports) + "\n" + testcase_fixture()
+        fixture = (native_adapter_events.fixture_for(name, 30)
+                   if owner.__name__ == native_adapter_events.OWNER else testcase_fixture())
+        adapter = "\n".join(imports) + "\n" + fixture
         with tempfile.TemporaryDirectory(dir=work) as tmp:
             try:
                 native_method(toolchain, Path(tmp), SOURCE, owner.__name__, case.id(), adapter)
@@ -242,6 +246,12 @@ class MethodProbe:
                 result["evidence"].update(stage="native method compilation", source=f"Lib/test/test_logging.py:{node.lineno}")
                 # suite_native prefixes the unmodified def with the adapter and one newline.
                 location = re.search(r"<native-case>/case\.py:(\d+):(\d+):", diagnostic)
+                if location and owner.__name__ == native_adapter_events.OWNER:
+                    site = native_adapter_events.helper_site(name, adapter, int(location[1]))
+                    if site:
+                        line, statement = site
+                        result["evidence"].update(stage="native helper compilation",
+                            source=f"Lib/test/test_logging.py:{line}:{location[2]}", statement=statement)
                 if location:
                     line = node.lineno + int(location[1]) - len((adapter + "\n").splitlines()) - 1
                     if node.lineno <= line <= node.end_lineno:

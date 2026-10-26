@@ -36,3 +36,30 @@ used prospective source `11a468899dc7153afc8cf3ed96b9ef05b7e18745`,
 tree `8fed170daef2bc0fd9119ce79f4e726b63669d7b`. The [suite report](evidence-linux.json)
 retains all 272 occurrences at each level. Against the prior main-based report,
 21 blocked diagnostics moved; classifications and execution roles are unchanged.
+
+## Event delivery
+
+The [focused report](adapter-events-linux.json) covers seven of the 14 original
+`LoggerAdapterTest` methods. `test_has_handlers` and
+`test_extra_not_merged_by_default` run their complete bodies and assertions in
+Imre. Four context methods use CPython assertions to compare the strings read
+from native records. `test_is_enabled_for` uses CPython's cleanup stack to
+restore the native manager threshold. All seven retain the original CPython
+fixture. The remaining seven are attempted by the [full runner](evidence.py);
+their individual diagnostics are in the [suite report](evidence-linux.json).
+
+The [public fixture](../../../../tests/fixtures/files/logging_adapter_events.py)
+compares 38 outputs with CPython, including the order of argument evaluation,
+the overridable enablement and processing hooks, the rerouted record's caller,
+and collisions before delivery. The checks also distinguish an omitted
+`extra` from an explicit `None`. Three concrete attribute checks exercise
+positive and negative assertions. Two deliberately broken recording handlers
+run the unchanged default-extra test: dropping its record raises `0 != 1`;
+inserting `foo` raises `'LogRecord' object has unexpected attribute 'foo'`.
+These controls add no suite occurrences.
+
+At O0 and O3 the complete suite records 25 native bodies and assertions
+with mixed fixtures and 55 host-assisted native operations
+(4 native bodies with CPython assertions and 51 CPython bodies).
+There are 189 blockers and three original reference skips out of 272.
+No test fixture is fully native.
