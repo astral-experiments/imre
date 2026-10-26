@@ -275,6 +275,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             );
             ctx.alloc(Value::List(vec![suffix]))
         }
+        ("operator", name)
+            if name == "attrgetter" || operator::Operation::named(name).is_some() =>
+        {
+            ctx.alloc(Value::Native(format!("operator.{name}")))
+        }
         ("subprocess", "PIPE") => ctx.int(-1),
         ("sys", "exit")
         | (
@@ -291,7 +296,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "fsdecode" | "uname")
         | ("os.path", "join" | "abspath" | "dirname")
-        | ("operator", "attrgetter")
         | (
             "platform",
             "system"
@@ -340,8 +344,13 @@ pub(super) fn call(
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
     }
-    if name == "operator.attrgetter" {
-        return operator::attrgetter(ctx, args, kwargs);
+    if let Some(name) = name.strip_prefix("operator.") {
+        if name == "attrgetter" {
+            return operator::attrgetter(ctx, args, kwargs);
+        }
+        if let Some(op) = operator::Operation::named(name) {
+            return op.call(ctx, name, args, kwargs);
+        }
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
