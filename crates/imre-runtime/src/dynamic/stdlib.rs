@@ -29,6 +29,7 @@ pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
 mod structure;
+mod traceback;
 pub(super) mod urllib;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -38,6 +39,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "codecs"
             | "types"
             | "io"
+            | "traceback"
             | "sysconfig"
             | "ast"
             | "os"
@@ -115,6 +117,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::Instance {
         class,
         dictionary: None,
+        text_memory: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
@@ -211,6 +214,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let module = ctx.module("re")?;
             ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
         }
+        ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
@@ -218,7 +222,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
-        ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
+        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
         ("socket", name) => return socket::attribute(ctx, name),
@@ -363,7 +367,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "compile")
+        | ("re", "match" | "fullmatch" | "search" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
@@ -483,6 +487,9 @@ pub(super) fn call(
             keywords,
         }));
     }
+    if name == "pattern.search" {
+        return regex::search(ctx, args, kwargs);
+    }
     if name.starts_with("re.") {
         return regex::module_call(ctx, name, args, kwargs);
     }
@@ -509,6 +516,7 @@ pub(super) fn call(
         | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
+        "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
@@ -538,6 +546,7 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
             let id = option(args, 0, kwargs, "s")?
                 .ok_or_else(|| Error::new("TypeError", "missing required argument 's'"))?;

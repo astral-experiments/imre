@@ -133,6 +133,9 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
+    if name == "re.search" {
+        return search(ctx, &[pattern, string], &[]);
+    }
     call(ctx, name, &[pattern, string])
 }
 
@@ -140,6 +143,102 @@ fn groups<'a>(caps: &Captures, text: &'a str) -> Vec<Option<&'a str>> {
     (0..caps.group_len())
         .map(|i| caps.get_group(i).map(|span| &text[span.range()]))
         .collect()
+}
+
+fn capture(regex: &Regex, text: &str, input: Input<'_>) -> Option<Value> {
+    let mut captures = regex.create_captures();
+    regex.captures(input, &mut captures);
+    if !captures.is_match() {
+        return None;
+    }
+    let names: HashMap<_, _> = regex
+        .group_info()
+        .pattern_names(PatternID::ZERO)
+        .enumerate()
+        .filter_map(|(i, name)| name.map(|s| (s.to_owned(), i)))
+        .collect();
+    let groups = groups(&captures, text)
+        .into_iter()
+        .map(|value| value.map(str::to_owned))
+        .collect();
+    Some(Value::RegexMatch { groups, names })
+}
+
+/// Convert the Python character bounds before searching the original UTF-8 text.
+pub(super) fn search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let receiver = argument(args, 0)?;
+    let [string, pos, endpos] = crate::dynamic::builtins::bind_method_arguments(
+        "search",
+        &args[1..],
+        kwargs,
+        ["string", "pos", "endpos"],
+    )?;
+    let string = string.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            "search() missing required argument 'string' (pos 1)",
+        )
+    })?;
+    let mut index = |arg| -> Result<usize> {
+        let value = ctx
+            .index_integer(arg)?
+            .to_i64()
+            .and_then(|v| isize::try_from(v).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+        Ok(usize::try_from(value).unwrap_or(0))
+    };
+    let start = pos.map(&mut index).transpose()?.unwrap_or(0);
+    let end = endpos.map(index).transpose()?.unwrap_or(usize::MAX);
+    let pattern = match ctx.heap.get(receiver) {
+        Value::RegexPattern(pattern) => Rc::clone(pattern),
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "expected compiled regular expression",
+            ));
+        }
+    };
+    let text = match ctx.heap.get(string) {
+        Value::Str(text) => text.as_str(),
+        Value::Bytes(_) | Value::ByteArray(_) => {
+            return Err(Error::new(
+                "TypeError",
+                "cannot use a string pattern on a bytes-like object",
+            ));
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "expected string or bytes-like object, got '{}'",
+                    ctx.type_name(string)
+                ),
+            ));
+        }
+    };
+    let byte = |i| {
+        if i >= text.len() {
+            text.len()
+        } else if i == 0 {
+            0
+        } else {
+            text.char_indices()
+                .nth(i)
+                .map_or(text.len(), |(offset, _)| offset)
+        }
+    };
+    let (start, end) = (byte(start), byte(end));
+    if start > end {
+        return Ok(NONE);
+    }
+    let text = &text[..end];
+    let matched = capture(&pattern.regex, text, Input::new(text).range(start..end));
+    Ok(matched.map_or(NONE, |value| ctx.alloc(value)))
 }
 
 pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -183,22 +282,8 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let text = ctx.str_value(argument(args, 1)?)?.to_owned();
     match name {
         "re.match" | "pattern.match" | "re.fullmatch" | "pattern.fullmatch" => {
-            let mut captures = regex.create_captures();
-            regex.captures(Input::new(&text).anchored(Anchored::Yes), &mut captures);
-            if !captures.is_match() {
-                return Ok(NONE);
-            }
-            let names: HashMap<_, _> = regex
-                .group_info()
-                .pattern_names(PatternID::ZERO)
-                .enumerate()
-                .filter_map(|(i, name)| name.map(|s| (s.to_owned(), i)))
-                .collect();
-            let groups = groups(&captures, &text)
-                .into_iter()
-                .map(|value| value.map(str::to_owned))
-                .collect();
-            Ok(ctx.alloc(Value::RegexMatch { groups, names }))
+            let matched = capture(regex, &text, Input::new(&text).anchored(Anchored::Yes));
+            Ok(matched.map_or(NONE, |value| ctx.alloc(value)))
         }
         "pattern.findall" => {
             let mut found = Vec::new();
