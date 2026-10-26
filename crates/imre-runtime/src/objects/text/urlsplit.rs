@@ -15,16 +15,20 @@ fn invalid(message: impl Into<String>) -> Error {
 // SAFETY: the caller roots the exact string or bytes layout selected by the flag.
 unsafe fn data<'a>(word: *const c_void, is_bytes: bool) -> &'a [u8] {
     if is_bytes {
+        // SAFETY: The byte flag selects a rooted Bytes owner.
         unsafe { &*word.cast::<Bytes>() }.as_slice()
     } else {
+        // SAFETY: The other flag selects a rooted UTF-8 string owner.
         unsafe { &*word.cast::<Str>() }.as_bytes()
     }
 }
 
 unsafe fn decoded<'a>(word: *const c_void, is_bytes: bool) -> Result<&'a str> {
+    // SAFETY: The caller supplies the matching rooted layout for this borrow.
     let raw = unsafe { data(word, is_bytes) };
     if is_bytes && let Some(i) = raw.iter().position(|b| !b.is_ascii()) {
         return Err(bytes::ascii_decode_error(
+            // SAFETY: This branch established that word points to an owned byte buffer.
             unsafe { crate::acquire_bytes(word as usize) },
             i,
         ));
@@ -186,12 +190,14 @@ pub unsafe extern "C" fn imre_url_split(
     let (is_bytes, scheme_bytes) = (is_bytes != 0, scheme_bytes != 0);
     finish(
         (|| {
+            // SAFETY: The scheme remains rooted with the layout identified by scheme_bytes.
             if is_bytes != scheme_bytes && !unsafe { data(scheme, scheme_bytes) }.is_empty() {
                 return Err(Error::new(
                     Kind::TypeError,
                     "Cannot mix str and non-str arguments",
                 ));
             }
+            // SAFETY: The generated caller roots the URL through the allocation of its result.
             let url = clean(unsafe { decoded(url, is_bytes)? }, false);
             if !is_bytes && scheme_bytes {
                 return Err(Error::new(
@@ -199,11 +205,13 @@ pub unsafe extern "C" fn imre_url_split(
                     "a bytes-like object is required, not 'str'",
                 ));
             }
+            // SAFETY: The scheme remains rooted until the fields have been copied.
             let scheme = clean(unsafe { decoded(scheme, scheme_bytes)? }, true);
             for (i, field) in split(&url, &scheme, fragments != 0)?
                 .into_iter()
                 .enumerate()
             {
+                // SAFETY: split returns exactly five fields, each written once to the zeroed record.
                 unsafe { out.add(i).write(owned(&field, is_bytes)?) };
             }
             Ok(())
@@ -259,6 +267,7 @@ pub unsafe extern "C" fn imre_url_property(
     property: u32,
 ) -> usize {
     let is_bytes = is_bytes != 0;
+    // SAFETY: The compiler projects the rooted netloc field with its known layout.
     let netloc = unsafe { data(netloc, is_bytes) };
     finish(
         (|| {
@@ -325,6 +334,7 @@ pub unsafe extern "C" fn imre_url_transcode(
     out: *mut usize,
 ) {
     use super::super::codecs::{Codec, encoded_bytes};
+    // SAFETY: Both bound keyword or positional arguments have exact string types.
     let (encoding, errors) = unsafe { (&*encoding, &*errors) };
     finish(
         (|| {
@@ -336,16 +346,20 @@ pub unsafe extern "C" fn imre_url_transcode(
                 // SAFETY: each source word is still rooted by the input record.
                 let word = unsafe { *input.add(i) };
                 let converted = if encode != 0 {
+                    // SAFETY: encode is emitted only for the five string fields of SplitResult.
                     let text = unsafe { &*(word as *const Str) };
                     let data = codec.encode(text, Some(errors), || {
+                        // SAFETY: The input result keeps this string alive if the codec needs an error owner.
                         Ok(unsafe { crate::StrOwner::acquire_word(word) })
                     })?;
                     encoded_bytes(data)? as usize
                 } else {
+                    // SAFETY: decode is emitted only for the five byte fields of SplitResultBytes.
                     let data = unsafe { &*(word as *const Bytes) };
                     let text = codec.decode(data, Some(errors))?;
                     crate::checked_owned_str(text.into())? as usize
                 };
+                // SAFETY: The five-slot output receives a new owned word exactly once per iteration.
                 unsafe { out.add(i).write(converted) };
             }
             Ok(())
@@ -398,6 +412,7 @@ pub unsafe extern "C" fn imre_url_geturl(
         (|| {
             let mut fields = [""; 5];
             for (i, field) in fields.iter_mut().enumerate() {
+                // SAFETY: The source has five live same-layout fields throughout reconstruction.
                 *field = unsafe { decoded(*result.add(i), is_bytes)? };
             }
             let [scheme, netloc, path, query, fragment] = fields;
