@@ -332,6 +332,7 @@ def report(text):
             "boxed_datetime.py",
             "boxed_time.py",
             "boxed_codecs.py",
+            "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
