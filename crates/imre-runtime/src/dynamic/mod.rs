@@ -146,6 +146,13 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+            let mut items = Vec::new();
+            while let Some(item) = self.next_item(id)? {
+                items.push(item);
+            }
+            return Ok(items);
+        }
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
@@ -196,7 +203,10 @@ impl Context {
                 let iter = self.iterator(id)?;
                 self.items(iter)
             }
-            _ => Err(Error::new("TypeError", "object is not iterable")),
+            _ => Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not iterable", self.type_name(id)),
+            )),
         }
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
@@ -407,6 +417,7 @@ impl Context {
         self.modules.insert(name.to_owned(), module);
         match name {
             "io" => stdlib::io::install(self, scope),
+            "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
             _ => {}
         }

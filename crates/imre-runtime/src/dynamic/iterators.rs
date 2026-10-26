@@ -48,6 +48,7 @@ impl Context {
         matches!(
             self.heap.get(value),
             Value::Generator { .. }
+                | Value::AstWalk(_)
                 | Value::RangeIterator { .. }
                 | Value::PythonIterator { .. }
                 | Value::Iterator { .. }
@@ -103,6 +104,7 @@ impl Context {
 
     pub(super) fn iterator_more(&mut self, iter: Id) -> Result<bool> {
         let (code, scope) = match *self.heap.get(iter) {
+            Value::AstWalk(ref queue) => return Ok(!queue.is_empty()),
             Value::RangeIterator { remaining, .. } => return Ok(remaining != 0),
             Value::PythonIterator {
                 buffered: Some(_), ..
@@ -166,6 +168,10 @@ impl Context {
     pub(super) fn iterator_next(&mut self, iter: Id) -> Result<Id> {
         if let Some(method) = self.bound_slot(iter, "__next__")? {
             return self.call(method, Vec::new(), Vec::new());
+        }
+        if matches!(self.heap.get(iter), Value::AstWalk(_)) {
+            return super::stdlib::ast::advance(self, iter)?
+                .ok_or_else(|| Error::new("StopIteration", ""));
         }
         if matches!(self.heap.get(iter), Value::Iterator { .. }) {
             let item = self

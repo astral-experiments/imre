@@ -280,6 +280,7 @@ pub(super) enum Value {
         source: Id,
         buffered: Option<Id>,
     },
+    AstWalk(std::collections::VecDeque<Id>),
     Iterator {
         kind: &'static str,
         sequence: Option<Id>,
@@ -366,6 +367,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Range { .. } | Self::RangeIterator { .. } => {}
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);

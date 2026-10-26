@@ -122,7 +122,10 @@ impl Context {
                 Value::Native(name) => {
                     matches!(
                         name.as_str(),
-                        "object.__getattribute__" | "object.__setattr__" | "object.__init__"
+                        "ast.AST.__init__"
+                            | "object.__getattribute__"
+                            | "object.__setattr__"
+                            | "object.__init__"
                     ) || name.starts_with("dict.")
                 }
                 _ => false,

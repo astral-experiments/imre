@@ -71,23 +71,6 @@ fn integer(source: &str, mut base: u32) -> Result<crate::Int> {
     Ok(crate::Int::new(if negative { -value } else { value }))
 }
 
-fn encoding(ctx: &Context, id: Option<Id>) -> Result<bool> {
-    let name = id
-        .map(|x| ctx.str_value(x))
-        .transpose()?
-        .unwrap_or("utf-8")
-        .to_ascii_lowercase()
-        .replace('_', "-");
-    match name.as_str() {
-        "utf8" | "utf-8" | "u8" => Ok(false),
-        "ascii" | "us-ascii" => Ok(true),
-        _ => Err(Error::new(
-            "LookupError",
-            format!("unknown encoding: {name}"),
-        )),
-    }
-}
-
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
         && ctx.str_value(id)? != "strict"
@@ -114,11 +97,15 @@ fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) ->
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {
     let text = ctx.str_value(id)?;
-    strict(ctx, errors)?;
-    if encoding(ctx, encoding_id)? && !text.is_ascii() {
-        return Err(Error::new("UnicodeEncodeError", "non-ASCII character"));
-    }
-    Ok(text.as_bytes().to_vec())
+    let encoding = encoding_id
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    let errors = errors
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("strict");
+    Ok(crate::objects::Codec::encode_str(text, encoding, errors)?)
 }
 
 pub(super) fn construct(
