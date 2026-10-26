@@ -91,7 +91,7 @@ impl Session {
                 "hashlib",
                 // The bundled OpenSSL stub still names the input `string`. CPython
                 // 3.14 calls it `data`; the native constructor takes exact bytes.
-                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash\nalgorithms_available: set[str]\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
             ),
             (
                 "tomli",

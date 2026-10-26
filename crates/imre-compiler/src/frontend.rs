@@ -6834,7 +6834,7 @@ impl<'a> Checker<'a> {
                         | Type::Poll
                         | Type::Socket
                         | Type::ProcessSelectorClass
-                        | Type::Sha256
+                        | Type::Hash
                         | Type::JsonDecoder
                         | Type::ZipFile
                         | Type::ZipInfo
@@ -7463,8 +7463,8 @@ impl<'a> Checker<'a> {
                     };
                     return Ok(codecs::writer(op, ty, vec![receiver]));
                 }
-                if receiver.ty == Type::Sha256 {
-                    return self.sha256_attribute(receiver, attribute);
+                if receiver.ty == Type::Hash {
+                    return self.hash_attribute(receiver, attribute);
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "memo" {
                     return Ok(Expr {
@@ -8411,8 +8411,10 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
                 return self.codec_getwriter(call);
             }
-            Some(Binding::Intrinsic(op @ (Intrinsic::Sha256 | Intrinsic::HashNew))) => {
-                return self.sha256_constructor(call, op == Intrinsic::HashNew);
+            Some(Binding::Intrinsic(
+                op @ (Intrinsic::Sha1 | Intrinsic::Sha256 | Intrinsic::HashNew),
+            )) => {
+                return self.hash_constructor(call, op);
             }
             Some(Binding::Intrinsic(Intrinsic::StringIo)) => return self.string_io(call),
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
@@ -9031,8 +9033,8 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::CodecWriter {
                 return self.codec_writer_method(receiver, attribute, call);
             }
-            if receiver.ty == Type::Sha256 {
-                return self.sha256_method(receiver, attribute, call);
+            if receiver.ty == Type::Hash {
+                return self.hash_method(receiver, attribute, call);
             }
             if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                 let args = self.arguments(

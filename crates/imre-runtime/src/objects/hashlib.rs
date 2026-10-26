@@ -1,148 +1,218 @@
-//! SHA-256 handles share a mutable hash state; digest reads finalize a snapshot.
+//! Hash objects share mutable state. Digest reads finalize an independent snapshot.
 
-use crate::StrOwner;
 use std::cell::RefCell;
+use std::ptr;
 
-use sha2::digest::Output;
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
+use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
+use crate::{BytesOwner, Int, ObjectOwner, StrOwner};
 
-/// Return a hash for a runtime name; aliases select the same SHA-256 provider.
-///
+#[derive(Clone)]
+pub(super) enum State {
+    Sha1(Sha1),
+    Sha256(Sha256),
+}
+
+impl State {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Sha1(_) => "sha1",
+            Self::Sha256(_) => "sha256",
+        }
+    }
+
+    fn digest<T>(&self, result: impl FnOnce(&[u8]) -> T) -> T {
+        match self {
+            Self::Sha1(h) => result(&h.clone().finalize()),
+            Self::Sha256(h) => result(&h.clone().finalize()),
+        }
+    }
+}
+
+fn handle(state: State) -> Result<*const Object> {
+    let state = allocator_api2::boxed::Box::try_new(state).map_err(|_| Error::allocation())?;
+    ObjectOwner::try_new(Object(StorageCell::new(Storage::Hash(state))))
+        .map(ObjectOwner::into_raw)
+        .map_err(|_| Error::allocation())
+}
+
 /// # Safety
 /// The caller roots the exact str and bytes until the constructor returns.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
-    use super::exceptions::{Error, Kind, finish};
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let known = ["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]
-        .iter()
-        .any(|alias| name.eq_ignore_ascii_case(alias));
-    let result = if known {
-        Ok(handle(Sha256::new_with_prefix(data)))
+    let matches = |aliases: &[&str]| aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias));
+    let result = if matches(&["sha1", "sha-1", "ssl3-sha1", "1.3.14.3.2.26"]) {
+        handle(State::Sha1(Sha1::new_with_prefix(data)))
+    } else if matches(&["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]) {
+        handle(State::Sha256(Sha256::new_with_prefix(data)))
     } else {
         Err(Error::new(
             Kind::ValueError,
             format!("unsupported hash type {name}"),
         ))
     };
-    finish(result, std::ptr::null())
+    finish(result, ptr::null())
 }
 
-thread_local! { static AVAILABLE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) }; }
+thread_local! { static AVAILABLE: RefCell<Option<ObjectOwner>> = const { RefCell::new(None) }; }
 
-/// The public algorithms set has a stable identity; changing it does not enable a provider.
+/// The public algorithms set has a stable identity. Changing it does not enable a provider.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
     use super::mappings::{imre_set_add, imre_set_new};
     AVAILABLE.with_borrow_mut(|slot| {
         let set = slot.get_or_insert_with(|| {
             // SAFETY: the fresh string-keyed set transfers one reference to this slot.
-            let set = unsafe { crate::ObjectOwner::from_raw(imre_set_new(3)) };
-            let name = StrOwner::new(Str::from("sha256"));
-            // SAFETY: both exact inputs are rooted; the set acquires its own key.
-            unsafe {
-                imre_set_add(
-                    crate::ObjectOwner::as_ptr(&set),
-                    StrOwner::as_ptr(&name) as usize,
-                )
-            };
+            let set = unsafe { ObjectOwner::from_raw(imre_set_new(3)) };
+            for name in ["sha1", "sha256"] {
+                let name = StrOwner::new(Str::from(name));
+                // SAFETY: both exact inputs are rooted; the set acquires its own key.
+                unsafe {
+                    imre_set_add(ObjectOwner::as_ptr(&set), StrOwner::as_ptr(&name) as usize)
+                };
+            }
             set
         });
-        crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(set))
+        ObjectOwner::into_raw(ObjectOwner::clone(set))
     })
 }
 
-/// Drop the process's module root so another program starts with a fresh set.
 pub(super) fn clear_algorithms() {
     AVAILABLE.with(RefCell::take);
 }
 
-fn handle(state: Sha256) -> *const Object {
-    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Sha256(Box::new(state)),
-    ))))
-}
-
-#[inline]
-fn hex(digest: Output<Sha256>) -> *const Str {
+fn hex(digest: &[u8]) -> Result<*const Str> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = Str::with_capacity(digest.len() * 2);
-    for byte in digest {
+    let mut result = Str::try_with_capacity(digest.len() * 2).map_err(|_| Error::allocation())?;
+    for &byte in digest {
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    crate::checked_owned_str(result)
 }
 
 /// # Safety
-/// The caller roots an exact bytes handle while the one-shot digest reads its contents.
+/// The caller roots the immutable bytes until the one-shot digest completes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_sha1_hex(value: *const Bytes) -> *const Str {
+    // SAFETY: the compiler roots the exact bytes until hashing returns.
+    finish(hex(&Sha1::digest(unsafe { &*value })), ptr::null())
+}
+
+/// # Safety
+/// The caller roots the immutable bytes until the one-shot digest completes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sha256_hex(value: *const Bytes) -> *const Str {
-    // SAFETY: the compiler roots the immutable bytes until hashing returns.
-    hex(Sha256::digest(unsafe { &*value }))
+    // SAFETY: the compiler roots the exact bytes until hashing returns.
+    finish(hex(&Sha256::digest(unsafe { &*value })), ptr::null())
+}
+
+/// # Safety
+/// The caller roots the initial bytes. The new hash owns its state independently.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_sha1_new(value: *const Bytes) -> *const Object {
+    // SAFETY: the provider consumes the borrowed bytes before returning.
+    finish(
+        handle(State::Sha1(Sha1::new_with_prefix(unsafe { &*value }))),
+        ptr::null(),
+    )
 }
 
 /// # Safety
 /// The caller roots the initial bytes. The new hash owns its state independently.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sha256_new(value: *const Bytes) -> *const Object {
-    // SAFETY: SHA-256 consumes the borrowed bytes before returning.
-    handle(Sha256::new_with_prefix(unsafe { &*value }))
+    // SAFETY: the provider consumes the borrowed bytes before returning.
+    finish(
+        handle(State::Sha256(Sha256::new_with_prefix(unsafe { &*value }))),
+        ptr::null(),
+    )
 }
 
 /// # Safety
 /// Both typed handles are rooted. The state update does not invoke Python code.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sha256_update(hash: *const Object, value: *const Bytes) {
+pub unsafe extern "C" fn imre_hash_update(hash: *const Object, value: *const Bytes) {
     // SAFETY: the exclusive state access cannot reenter, and no input reference is stored.
     unsafe {
         object(hash).0.with_mut(|storage| {
-            let Storage::Sha256(state) = storage else {
+            let Storage::Hash(state) = storage else {
                 unreachable!()
             };
-            state.update(&*value);
+            match &mut **state {
+                State::Sha1(h) => h.update(&*value),
+                State::Sha256(h) => h.update(&*value),
+            }
         });
     }
 }
 
 /// # Safety
-/// The caller roots an exact SHA-256 object; only the copied state escapes the borrow.
-unsafe fn snapshot(hash: *const Object) -> Sha256 {
-    // SAFETY: cloning SHA-256's fixed buffer cannot reenter or modify the object.
+/// The caller roots an exact hash object and the operation cannot invoke Python code.
+unsafe fn with_state<T>(hash: *const Object, f: impl FnOnce(&State) -> T) -> T {
+    // SAFETY: the rooted hash remains immutably borrowed for the callback.
     unsafe {
         object(hash).0.with(|storage| {
-            let Storage::Sha256(state) = storage else {
+            let Storage::Hash(state) = storage else {
                 unreachable!()
             };
-            (**state).clone()
+            f(state)
         })
     }
 }
 
 /// # Safety
-/// The caller roots the hash. Its independent copy can be updated separately.
+/// The compiler roots the hash until its provider name has been copied.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sha256_copy(hash: *const Object) -> *const Object {
-    // SAFETY: the rooted hash supplies an exact snapshot.
-    handle(unsafe { snapshot(hash) })
+pub unsafe extern "C" fn imre_hash_name(hash: *const Object) -> *const Str {
+    // SAFETY: provider names are static strings independent of the hash.
+    let name = unsafe { with_state(hash, State::name) };
+    finish(crate::checked_owned_str(Str::from(name)), ptr::null())
 }
 
 /// # Safety
-/// The caller roots the hash. The returned 32 bytes own their storage.
+/// The compiler roots the exact hash during the metadata lookup.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sha256_digest(hash: *const Object) -> *const Bytes {
-    // SAFETY: only the copied state is consumed by finalize.
-    let digest = unsafe { snapshot(hash) }.finalize();
-    crate::BytesOwner::into_raw(crate::BytesOwner::new(digest.to_vec()))
+pub unsafe extern "C" fn imre_hash_digest_size(hash: *const Object) -> usize {
+    // SAFETY: the lookup only reads the hash's algorithm tag.
+    let size = unsafe {
+        with_state(hash, |s| match s {
+            State::Sha1(_) => Sha1::output_size(),
+            State::Sha256(_) => Sha256::output_size(),
+        })
+    };
+    Int::from_usize(size).into_raw()
+}
+
+/// # Safety
+/// The caller roots the hash. Its independent copy can be updated separately.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_copy(hash: *const Object) -> *const Object {
+    // SAFETY: clone copies the provider's fixed-size buffers.
+    finish(
+        handle(unsafe { with_state(hash, State::clone) }),
+        ptr::null(),
+    )
+}
+
+/// # Safety
+/// The caller roots the hash. The returned digest owns its bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
+    // SAFETY: finalize reads a snapshot of the rooted hash.
+    let digest = unsafe { with_state(hash, |s| s.digest(super::bytes::owned_input)) };
+    finish(digest.map(BytesOwner::into_raw), ptr::null())
 }
 
 /// # Safety
 /// The caller roots the hash. The lowercase hexadecimal result owns its storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sha256_hexdigest(hash: *const Object) -> *const Str {
-    // SAFETY: finalize consumes only a snapshot of the rooted hash.
-    hex(unsafe { snapshot(hash) }.finalize())
+pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str {
+    // SAFETY: finalize reads a snapshot of the rooted hash.
+    finish(unsafe { with_state(hash, |s| s.digest(hex)) }, ptr::null())
 }

@@ -125,7 +125,7 @@ impl Type {
             | Self::CodecWriterClass
             | Self::CodecWriter
             | Self::TextOutput
-            | Self::Sha256
+            | Self::Hash
             | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
@@ -222,7 +222,7 @@ impl Type {
             | Self::CodecWriterClass
             | Self::CodecWriter
             | Self::TextOutput
-            | Self::Sha256
+            | Self::Hash
             | Self::JsonDecoder
             | Self::ZipFile
             | Self::ZipInfo
@@ -919,7 +919,7 @@ impl Emitter<'_, '_> {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::TextOutput
-            | Type::Sha256
+            | Type::Hash
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
@@ -3722,7 +3722,7 @@ impl Emitter<'_, '_> {
                 | Type::CodecWriterClass
                 | Type::CodecWriter
                 | Type::TextOutput
-                | Type::Sha256
+                | Type::Hash
                 | Type::JsonDecoder
                 | Type::ZipFile
                 | Type::ZipInfo
@@ -5676,10 +5676,11 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
             Builtin::Socket(op) => self.socket_operation(*op, &args, returns),
+            Builtin::Sha1Hex => self.call("imre_sha1_hex", Type::Str, &[&args[0].value]),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::HashNew => self.call(
                 "imre_hash_new",
-                Type::Sha256,
+                Type::Hash,
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::Placeholder(kind) => Value {
@@ -5825,20 +5826,25 @@ impl Emitter<'_, '_> {
                 self.tuple(returns, &names, Some(fields.root()))
             }
             Builtin::HashAvailable => self.call("imre_hash_algorithms_available", returns, &[]),
-            Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
-            Builtin::Sha256Update => {
-                self.void_call("imre_sha256_update", &[&args[0].value, &args[1].value]);
+            Builtin::Sha1New => self.call("imre_sha1_new", Type::Hash, &[&args[0].value]),
+            Builtin::Sha256New => self.call("imre_sha256_new", Type::Hash, &[&args[0].value]),
+            Builtin::HashName => self.call("imre_hash_name", Type::Str, &[&args[0].value]),
+            Builtin::HashDigestSize => {
+                self.call("imre_hash_digest_size", Type::Int, &[&args[0].value])
+            }
+            Builtin::HashUpdate => {
+                self.void_call("imre_hash_update", &[&args[0].value, &args[1].value]);
                 none()
             }
-            Builtin::Sha256Digest { hex } => {
+            Builtin::HashDigest { hex } => {
                 let symbol = if *hex {
-                    "imre_sha256_hexdigest"
+                    "imre_hash_hexdigest"
                 } else {
-                    "imre_sha256_digest"
+                    "imre_hash_digest"
                 };
                 self.call(symbol, returns, &[&args[0].value])
             }
-            Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::HashCopy => self.call("imre_hash_copy", Type::Hash, &[&args[0].value]),
             Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
@@ -7493,7 +7499,7 @@ impl Emitter<'_, '_> {
                     | Type::CodecWriterClass
                     | Type::CodecWriter
                     | Type::TextOutput
-                    | Type::Sha256
+                    | Type::Hash
                     | Type::JsonDecoder
                     | Type::ZipFile
                     | Type::ZipInfo
@@ -7813,7 +7819,7 @@ impl Emitter<'_, '_> {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::TextOutput
-            | Type::Sha256
+            | Type::Hash
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
@@ -7925,7 +7931,7 @@ impl Emitter<'_, '_> {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::TextOutput
-            | Type::Sha256
+            | Type::Hash
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
@@ -8588,7 +8594,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::CodecWriterClass
         | Type::CodecWriter
         | Type::TextOutput
-        | Type::Sha256
+        | Type::Hash
         | Type::JsonDecoder
         | Type::ZipFile
         | Type::ZipInfo
@@ -9007,6 +9013,7 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
+declare ptr @imre_sha1_hex(ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
@@ -9070,7 +9077,10 @@ declare void @imre_socket_set_inheritable(ptr, i64)
 declare void @imre_socket_setsockopt(ptr, i64, i64, i64)
 declare void @imre_socket_setsockopt_bytes(ptr, i64, i64, ptr)
 declare i64 @imre_socket_getsockopt(ptr, i64, i64)
+declare ptr @imre_sha1_new(ptr)
 declare ptr @imre_sha256_new(ptr)
+declare ptr @imre_hash_name(ptr)
+declare i64 @imre_hash_digest_size(ptr)
 declare ptr @imre_codec_lookup(ptr)
 declare ptr @imre_codec_name(ptr)
 declare ptr @imre_codec_encode(ptr, ptr, ptr)
@@ -9086,10 +9096,10 @@ declare ptr @imre_codec_writer_errors(ptr)
 declare void @imre_codec_writer_set_errors(ptr, ptr)
 declare ptr @imre_hash_new(ptr, ptr)
 declare ptr @imre_hash_algorithms_available()
-declare void @imre_sha256_update(ptr, ptr)
-declare ptr @imre_sha256_digest(ptr)
-declare ptr @imre_sha256_hexdigest(ptr)
-declare ptr @imre_sha256_copy(ptr)
+declare void @imre_hash_update(ptr, ptr)
+declare ptr @imre_hash_digest(ptr)
+declare ptr @imre_hash_hexdigest(ptr)
+declare ptr @imre_hash_copy(ptr)
 declare ptr @imre_bytes_io(ptr)
 declare ptr @imre_bytes_io_value(ptr)
 declare ptr @imre_string_io(i64, i64)

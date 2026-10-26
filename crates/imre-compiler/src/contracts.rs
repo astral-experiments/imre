@@ -399,6 +399,13 @@ impl Builtin {
             | Self::BytesIoValue
             | Self::CodecWriter(_)
             | Self::HashNew
+            | Self::Sha1Hex
+            | Self::Sha1New
+            | Self::Sha256Hex
+            | Self::Sha256New
+            | Self::HashName
+            | Self::HashDigest { .. }
+            | Self::HashCopy
             | Self::DecodeSplitLines
             | Self::SplitLines
             | Self::FreezeStrings
@@ -471,8 +478,6 @@ impl Builtin {
             | Self::Encode
             | Self::CsvLineNumber
             | Self::CodecName
-            | Self::Sha256Hex
-            | Self::Sha256New
             | Self::StrDescriptor(_)
             | Self::Placeholder(_)
             | Self::NewPlainObject
@@ -480,9 +485,8 @@ impl Builtin {
             | Self::JsonDecoderNew
             | Self::JsonDecoderMemo
             | Self::HashAvailable
-            | Self::Sha256Update
-            | Self::Sha256Digest { .. }
-            | Self::Sha256Copy
+            | Self::HashUpdate
+            | Self::HashDigestSize
             | Self::ActiveException
             | Self::SysIntern
             | Self::SysIsInterned
