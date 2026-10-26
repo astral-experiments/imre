@@ -8,6 +8,7 @@ use super::{
 };
 use crate::objects::interpreter_stdlib as system;
 
+pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
@@ -26,6 +27,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "codecs"
             | "io"
             | "sysconfig"
             | "os"
@@ -310,6 +312,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps" | "loads")
+        | ("codecs", "lookup")
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
@@ -358,6 +361,9 @@ pub(super) fn call(
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
+    }
+    if name == "codecs.lookup" {
+        return codecs::lookup(ctx, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);

@@ -312,6 +312,7 @@ def report(text):
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
+            "boxed_codecs.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
