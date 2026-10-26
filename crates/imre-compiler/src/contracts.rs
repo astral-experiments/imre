@@ -369,6 +369,7 @@ impl Builtin {
             | Self::DecodeAscii
             | Self::UrlsafeB64encode
             | Self::CodecLookup
+            | Self::StrEncodeOptions
             | Self::CodecEncode
             | Self::CodecDecode
             | Self::BytesIoValue
@@ -1052,6 +1053,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_fnmatch_translate_bytes"
                 | "imre_urlsafe_b64encode"
                 | "imre_codec_lookup"
+                | "imre_str_encode_options"
                 | "imre_codec_encode"
                 | "imre_codec_decode"
                 | "imre_bytes_io_value"

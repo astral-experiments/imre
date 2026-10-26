@@ -8591,6 +8591,11 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+                && attribute.attr.as_str() == "encode"
+            {
+                return self.str_encode(Self::string_value(receiver), call);
+            }
             if receiver.ty == Type::CodecInfo {
                 return self.codec_method(receiver, attribute, call);
             }
@@ -8855,20 +8860,15 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::DecodeAscii, vec![receiver]),
                 });
             }
-            if call.arguments.args.is_empty()
-                || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8"))
+            if receiver.ty == Type::Bytes
+                && attribute.attr.as_str() == "decode"
+                && (call.arguments.args.is_empty()
+                    || matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(s)] if matches!(s.value.to_str(), "utf-8" | "utf8" | "UTF-8" | "UTF8")))
             {
-                let conversion = match (receiver.ty, attribute.attr.as_str()) {
-                    (Type::Str, "encode") => Some((Builtin::Encode, Type::Bytes)),
-                    (Type::Bytes, "decode") => Some((Builtin::Decode, Type::Str)),
-                    _ => None,
-                };
-                if let Some((builtin, ty)) = conversion {
-                    return Ok(Expr {
-                        ty,
-                        kind: ExprKind::Builtin(builtin, vec![receiver]),
-                    });
-                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Decode, vec![receiver]),
+                });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
                 if attribute.attr.as_str() == "fromkeys" {

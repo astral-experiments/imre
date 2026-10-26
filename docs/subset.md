@@ -695,7 +695,9 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 `base64.urlsafe_b64encode(data)` accepts immutable bytes and returns padded bytes using the URL-safe alphabet.
 
-`text.encode()` produces UTF-8 bytes; `data.decode()` performs strict UTF-8 decoding. The optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` also supports strict ASCII, reporting the first non-ASCII byte and its position. Other encoding or error arguments are outside this subset. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Existing strings contain only Unicode scalar values, so encoding is always valid. Mutable `bytearray`, memory views, implicit text/byte conversions, additional codecs, error policies, and other byte methods are not supported.
+`text.encode(encoding="utf-8", errors="strict")` accepts positional and named string arguments. UTF-8, UTF-8 with a signature, ASCII and Latin-1 use the native codec registry's implementations. For example, `"¢".encode("ascii", "backslashreplace")` yields `b"\\xa2"`. ASCII and Latin-1 also support `strict`, `ignore`, `replace` and `xmlcharrefreplace`. Native strings contain Unicode scalar values.
+
+`data.decode()` performs strict UTF-8 decoding. Its optional positional encoding may be a literal UTF-8 spelling; `data.decode("ascii")` supports strict ASCII and reports the first non-ASCII byte and its position. Decode errors raise `UnicodeDecodeError`, including Python's byte positions/ranges and invalid-start, invalid-continuation, or truncated-sequence message. Mutable `bytearray`, memory views, implicit text/byte conversions and other byte methods are outside this subset.
 
 ## Native paths and directory traversal
 

@@ -114,18 +114,42 @@ pub unsafe extern "C" fn imre_codec_encode(
             Ok(StrOwner::acquire_word(text as usize))
         })
     };
-    finish(
-        result.and_then(|bytes| {
-            let owner = match bytes {
-                Cow::Borrowed(bytes) => owned_input(bytes)?,
-                Cow::Owned(bytes) => {
-                    BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?
-                }
-            };
-            Ok(BytesOwner::into_raw(owner))
-        }),
-        std::ptr::null(),
-    )
+    finish(result.and_then(encoded_bytes), std::ptr::null())
+}
+
+/// Return an owned byte buffer for a borrowed or freshly encoded result.
+fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
+    let owner = match bytes {
+        Cow::Borrowed(bytes) => owned_input(bytes)?,
+        Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?,
+    };
+    Ok(BytesOwner::into_raw(owner))
+}
+
+/// Encode a string using the same codec implementation as registry entries and files.
+///
+/// # Safety
+/// All three operands are rooted strings for the duration of the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_encode_options(
+    text: *const Str,
+    encoding: *const Str,
+    errors: *const Str,
+) -> *const Bytes {
+    // SAFETY: the typed compiler passes three live, immutable strings.
+    let (encoding, errors) = unsafe { (&*encoding, &*errors) };
+    if encoding.contains('\0') || errors.contains('\0') {
+        return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
+    }
+    let result = Codec::lookup(encoding).and_then(|codec| {
+        // SAFETY: the caller roots the original string through conversion and error construction.
+        unsafe {
+            codec.encode(&*text, Some(errors), || {
+                Ok(StrOwner::acquire_word(text as usize))
+            })
+        }
+    });
+    finish(result.and_then(encoded_bytes), std::ptr::null())
 }
 
 /// # Safety
@@ -467,6 +491,20 @@ fn decoding_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_str_encode_retains_the_original_text_until_the_error_is_dropped() {
+        let text = StrOwner::new(Str::new("xé€"));
+        let name = Str::new("ascii");
+        let policy = Str::new("strict");
+        // SAFETY: all three arguments remain live until encoding returns.
+        let result = unsafe { imre_str_encode_options(StrOwner::as_ptr(&text), &name, &policy) };
+        assert!(result.is_null());
+        let error = super::super::exceptions::take_pending().unwrap();
+        assert_eq!(StrOwner::strong_count(&text), 2);
+        drop(error);
+        assert_eq!(StrOwner::strong_count(&text), 1);
+    }
 
     #[test]
     fn strict_registry_errors_retain_text_and_copy_bytes() {

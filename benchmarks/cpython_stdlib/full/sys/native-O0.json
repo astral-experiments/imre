@@ -19,6 +19,21 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "12671c09b2ae0da29212cad51371d22c9fe2bbfb8e25d6505e8f4adb5d8964a2"
     },
+    "test.test_sys.SysModuleTest.test_executable": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython; original child: Imre",
+      "assertions": "CPython",
+      "fixture_execution": "CPython decorators and SysModuleTest hooks",
+      "calls": [
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable",
+        "sys.executable"
+      ]
+    },
     "test.test_sys.SysModuleTest.test_getdefaultencoding": {
       "status": "pass",
       "execution": "native-body",
