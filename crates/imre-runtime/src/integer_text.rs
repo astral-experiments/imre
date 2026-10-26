@@ -182,13 +182,35 @@ pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     {
         Err(Error::new(
             Kind::ValueError,
-            format!(
-                "Exceeds the limit ({} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit",
-                limit.digits
-            ),
+            output_limit_message(limit.digits)?,
         ))
     } else {
         Ok(())
+    }
+}
+
+fn output_limit_message(limit: u32) -> crate::Result<Str> {
+    const PREFIX: &str = "Exceeds the limit (";
+    const SUFFIX: &str = " digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit";
+    let mut buffer = itoa::Buffer::new();
+    let digits = buffer.format(limit);
+    let mut text = Str::try_with_capacity(PREFIX.len() + digits.len() + SUFFIX.len())
+        .map_err(|_| Error::memory_error())?;
+    text.push_str(PREFIX);
+    text.push_str(digits);
+    text.push_str(SUFFIX);
+    Ok(text)
+}
+
+/// Validate the largest rendered integer in a statically known argparse choices iterable.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_argparse_choice_digits(count: u64) {
+    let limit = decimal_digit_limit();
+    if limit != 0 && count > u64::from(limit) {
+        match output_limit_message(limit) {
+            Ok(message) => Error::return_checked_message(Kind::ValueError, message, ()),
+            Err(error) => error.returning(()),
+        }
     }
 }
 
