@@ -16,7 +16,8 @@ jobs:
     concurrency:
       group: macos-${{ github.ref }}
       cancel-in-progress: true
-    runs-on: macos-15  # Includes Xcode 26 for the CPython 3.14 SDK; our Namespace image stops at 16.4.
+    # Both images carry SDK 26 for the pinned CPython distribution.
+    runs-on: ${{ github.repository == 'viarius-experiments/imre' && 'nscloud-macos-tahoe-arm64-6x14' || 'macos-15' }}
     timeout-minutes: 45
     env:
       IMRE_REAL_WHEEL: .cpython-wheel-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl

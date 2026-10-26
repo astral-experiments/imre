@@ -210,6 +210,36 @@ fn resolve(host: &str) -> Result<Ipv4Addr> {
     Ok(Ipv4Addr::from(octets))
 }
 
+/// Darwin's mDNS resolver also puts the owner of the PTR query in h_aliases.
+/// Only exclude the owner of this address, preserving other dotted aliases.
+#[cfg(any(target_vendor = "apple", test))]
+fn is_reverse_owner(addr: std::net::IpAddr, alias: &str) -> bool {
+    use std::fmt::Write as _;
+    let alias = alias.strip_suffix('.').unwrap_or(alias);
+    if !alias
+        .rsplit('.')
+        .next()
+        .is_some_and(|label| label.eq_ignore_ascii_case("arpa"))
+    {
+        return false;
+    }
+    let owner = match addr {
+        std::net::IpAddr::V4(ip) => {
+            let [a, b, c, d] = ip.octets();
+            format!("{d}.{c}.{b}.{a}.in-addr.arpa")
+        }
+        std::net::IpAddr::V6(ip) => {
+            let mut owner = String::with_capacity(72);
+            for byte in ip.octets().into_iter().rev() {
+                write!(owner, "{:x}.{:x}.", byte & 15, byte >> 4).unwrap();
+            }
+            owner.push_str("ip6.arpa");
+            owner
+        }
+    };
+    alias.eq_ignore_ascii_case(&owner)
+}
+
 /// Reverse resolution must consider aliases before falling back to the primary name.
 /// Copy both while the legacy resolver's hostent is protected.
 fn fqdn(name: &str) -> Result<String> {
@@ -269,12 +299,21 @@ fn fqdn(name: &str) -> Result<String> {
             return Ok(primary);
         }
         let mut aliases = (*host).h_aliases;
-        while !aliases.is_null() && !(*aliases).is_null() {
-            let alias = CStr::from_ptr(*aliases).to_string_lossy();
-            if alias.contains('.') {
-                return Ok(alias.into_owned());
+        while !aliases.is_null() {
+            // CPython's gethost_common also accepts unaligned hostent pointer lists.
+            let entry = aliases.read_unaligned();
+            if entry.is_null() {
+                break;
             }
             aliases = aliases.add(1);
+            let alias = CStr::from_ptr(entry).to_string_lossy();
+            if alias.contains('.') {
+                #[cfg(target_vendor = "apple")]
+                if is_reverse_owner(addr, &alias) {
+                    continue;
+                }
+                return Ok(alias.into_owned());
+            }
         }
         Ok(primary)
     }
@@ -713,4 +752,24 @@ pub extern "C" fn imre_socket_getsockopt(s: &Object, level: usize, name: usize) 
         })(),
         word(0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_reverse_owner;
+
+    #[test]
+    fn darwin_ptr_owner_leaves_real_host_aliases_available() {
+        let v4 = "127.0.0.1".parse().unwrap();
+        assert!(is_reverse_owner(v4, "1.0.0.127.in-addr.arpa"));
+        assert!(is_reverse_owner(v4, "1.0.0.127.IN-ADDR.ARPA."));
+        assert!(!is_reverse_owner(v4, "loopback.example"));
+        assert!(!is_reverse_owner(v4, "2.0.0.127.in-addr.arpa"));
+        let v6 = "2001:db8::1".parse().unwrap();
+        assert!(is_reverse_owner(
+            v6,
+            "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"
+        ));
+        assert!(!is_reverse_owner(v6, "router.ip6.arpa"));
+    }
 }

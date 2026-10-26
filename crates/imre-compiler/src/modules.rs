@@ -1079,6 +1079,18 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Resolve a bundled logging definition called implicitly by native lowering.
+    pub(crate) fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
+        let module = self
+            .modules
+            .iter()
+            .find(|module| module.is_bundled(LOGGING_CLASSES))?;
+        match module.bindings.get(name)? {
+            Binding::Definition(def) => Some(*def),
+            _ => None,
+        }
+    }
+
     pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
         self.checked_diagnostics.borrow()[module].len()
     }
