@@ -47,6 +47,51 @@
       "has_signed_cookie": false,
       "body": "{\"ok\":true}\n",
       "sha256": "e5f1eb4d806641698a35efe20e098efd20d7d57a9b90ee69079d5bb650920726"
+    },
+    "escaped_hello": {
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "length": 52,
+      "allow": [],
+      "has_signed_cookie": false,
+      "body": "Hello, Málaga &lt;&amp;&gt; 東京 &#39;x&#39;&#34;",
+      "sha256": "5670adb2baf95fe5bc8d97e148ab616979b34f879305210488fa0918d21ebdda"
+    },
+    "session_first": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 13,
+      "allow": [],
+      "has_signed_cookie": true,
+      "body": "{\"visits\":1}\n",
+      "sha256": "612ca7cfc278cf5730130ed4bdef236938917758cdca289ed5feb5ad48ae3b5f"
+    },
+    "session_replay": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 13,
+      "allow": [],
+      "has_signed_cookie": true,
+      "body": "{\"visits\":2}\n",
+      "sha256": "5f0480103c948763a4b52f0802f285800bb888b66f6be016b28725802d172e22"
+    },
+    "session_tampered": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 13,
+      "allow": [],
+      "has_signed_cookie": true,
+      "body": "{\"visits\":1}\n",
+      "sha256": "612ca7cfc278cf5730130ed4bdef236938917758cdca289ed5feb5ad48ae3b5f"
+    },
+    "session_fresh": {
+      "status": 200,
+      "content_type": "application/json",
+      "length": 13,
+      "allow": [],
+      "has_signed_cookie": true,
+      "body": "{\"visits\":1}\n",
+      "sha256": "612ca7cfc278cf5730130ed4bdef236938917758cdca289ed5feb5ad48ae3b5f"
     }
   },
   "view_exception": [
