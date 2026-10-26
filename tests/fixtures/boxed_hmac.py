@@ -23,10 +23,12 @@ def check():
 
     # RFC 2202 case 6 hashes the overlong key before applying the pads.
     long_key = bytes([0xaa for _ in range(80)])
-    long_mac = hmac.HMAC(long_key, b"Test Using Larger Than Block-Size Key - Hash Key First", lazy_sha1)
+    long_mac = hmac.HMAC(
+        long_key, b"Test Using Larger Than Block-Size Key - Hash Key First", lazy_sha1
+    )
     print(long_mac.hexdigest(), calls)
     for _ in range(5000):
-        garbage = [None]
+        _discard = [None]
     print(long_mac.hexdigest(), mac.hexdigest())
     print(hmac.compare_digest("abc", "abc"), hmac.compare_digest("abc", "abD"))
     print(hmac.compare_digest(b"abc", b"dbc"), hmac.compare_digest(b"abc", b"abd"))
@@ -35,3 +37,15 @@ def check():
             hmac.compare_digest(a, b)
         except TypeError as exc:
             print(str(exc))
+
+    class Factory:
+        def __bool__(self):
+            raise ValueError("factory truth")
+
+        def __call__(self):
+            raise AssertionError("digest constructor ran")
+
+    try:
+        hmac.new(key, digestmod=Factory())
+    except ValueError as exc:
+        print(str(exc))

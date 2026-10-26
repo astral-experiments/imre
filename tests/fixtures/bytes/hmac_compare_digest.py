@@ -11,7 +11,11 @@ def marked(text: str) -> str:
     return text
 
 
-print((checked(b"\x00\xff", b"\x00\xff"), checked(b"\x00\xff", b"\x00\xfe"), checked(b"", b"x")))
+print((
+    checked(b"\x00\xff", b"\x00\xff"),
+    checked(b"\x00\xff", b"\x00\xfe"),
+    checked(b"", b"x"),
+))
 print((compare_digest("a1ff", "a1ff"), compare_digest("a1ff", "01ff")))
 try:
     compare_digest(marked("é"), marked("right"))

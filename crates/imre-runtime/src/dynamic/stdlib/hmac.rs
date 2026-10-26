@@ -25,7 +25,7 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let mut key = option(args, 0, kwargs, "key")?
         .ok_or_else(|| Error::new("TypeError", "missing required argument 'key'"))?;
     let msg = option(args, 1, kwargs, "msg")?.filter(|&id| id != NONE);
-    let digest = option(args, 2, kwargs, "digestmod")?;
+    let digest = option(args, 2, kwargs, "digestmod")?.unwrap_or(NONE);
     let Value::Bytes(bytes) = ctx.heap.get(key) else {
         return Err(Error::new(
             "TypeError",
@@ -33,9 +33,12 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
         ));
     };
     let key_len = bytes.len();
-    let digest = digest
-        .filter(|&id| ctx.truth(id))
-        .ok_or_else(|| Error::new("TypeError", "Missing required argument 'digestmod'."))?;
+    if !ctx.truth(digest)? {
+        return Err(Error::new(
+            "TypeError",
+            "Missing required argument 'digestmod'.",
+        ));
+    }
     let factory = match ctx.heap.get(digest) {
         Value::Str(name) => {
             let name = name.to_ascii_lowercase();
