@@ -2751,8 +2751,8 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if self.types.is_len_argument(expected) {
             self.pack_len_value(value, site)
-        } else if self.types.is_unread_argument(expected) {
-            self.pack_unread_value(value, site, expected)
+        } else if self.types.is_callback_argument(expected) {
+            self.pack_callback_value(value, site, expected)
         } else {
             self.coerce(value, expected, site)
         }
@@ -2790,7 +2790,7 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+        if self.types.is_len_argument(expected) || self.types.is_callback_argument(expected) {
             let value = self.expr(expression)?;
             // A partial consumes its marker before the target's own argument ABI.
             // Keep the evaluated value so a lookup or callback runs exactly once.
@@ -5479,6 +5479,11 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::OptionalStrConcat, vec![left, right]),
             });
+        }
+        if op == ast::Operator::Mod
+            && let Some(formatted) = single_dispatch::format_argument(self.types, &left, &right)
+        {
+            return Ok(formatted);
         }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
