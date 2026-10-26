@@ -127,6 +127,10 @@ impl FileState {
 
     pub(in crate::objects) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
         match self.kind {
+            FileKind::BinaryRandom => match self.stream.as_mut() {
+                Some(Stream::Random(file)) => file.read_bytes(limit),
+                _ => Err(Error::new(Kind::ValueError, "read of closed file")),
+            },
             FileKind::Memory => match self.stream()? {
                 Stream::Memory(m) => m.read(limit),
                 _ => unreachable!(),
@@ -144,6 +148,10 @@ impl FileState {
 
     pub(super) fn read_line_bytes(&mut self) -> Result<Bytes> {
         match self.kind {
+            FileKind::BinaryRandom => match self.stream.as_mut() {
+                Some(Stream::Random(file)) => file.readline(),
+                _ => Err(Error::new(Kind::ValueError, "readline of closed file")),
+            },
             FileKind::Memory => match self.stream()? {
                 Stream::Memory(m) => m.read(memchr::memchr(b'\n', m.remaining()).map(|i| i + 1)),
                 _ => unreachable!(),
@@ -186,11 +194,14 @@ impl FileState {
     }
 
     pub(in crate::objects) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
-        if self.kind == FileKind::BinaryRead && self.stream.is_none() {
+        if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom)
+            && self.stream.is_none()
+        {
             return Err(Error::new(Kind::ValueError, "seek of closed file"));
         }
         match self.stream()? {
             Stream::Read(input) => input.seek(at),
+            Stream::Random(file) => file.seek(at).map_err(super::errno_error),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
             Stream::UnreadGzip { .. }
@@ -203,6 +214,7 @@ impl FileState {
     pub(in crate::objects) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.stream()? {
             Stream::Read(input) => input.read_into(buf),
+            Stream::Random(file) => file.read_into(buf),
             Stream::UnreadGzip { .. } if buf.is_empty() => Ok(0),
             Stream::UnreadGzip { .. } => self.input()?.read_into(buf),
             Stream::Memory(m) => {
@@ -346,8 +358,12 @@ pub unsafe extern "C" fn imre_binary_tell(file: *const Object) -> usize {
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("tell on closed file.")?;
-            if f.kind == FileKind::BinaryRead && f.stream.is_none() {
+            if matches!(f.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && f.stream.is_none()
+            {
                 return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
+            }
+            if let Some(Stream::Random(file)) = &mut f.stream {
+                return file.tell().map_err(super::errno_error);
             }
             f.seek(SeekFrom::Current(0))
         })

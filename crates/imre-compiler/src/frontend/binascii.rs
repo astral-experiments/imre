@@ -27,6 +27,59 @@ fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Resolve the bytes buffer before invoking the seed's integer index protocol.
+    pub(super) fn adler32(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let one = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("1".into()),
+        };
+        let params = [
+            param("data", Type::Bytes, ParameterKind::PositionalOnly, None),
+            param("value", Type::Int, ParameterKind::PositionalOnly, Some(one)),
+        ];
+        let args = self.arguments_with(call, &params, None, |checker, _, node| {
+            checker.evaluated_argument(node)
+        })?;
+        let mut scope = calls::ArgumentScope::default();
+        let values: Vec<_> = args
+            .values
+            .into_iter()
+            .map(|v| scope.hold(self, v))
+            .collect();
+        let data = values[args.order[0]].clone();
+        if data.ty != Type::Bytes {
+            let name = self.known_nonbuffer_type(data.ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "adler32 requires a known native bytes-like input",
+                )
+            })?;
+            return Ok(scope.finish(calls::type_error(
+                Type::Int,
+                vec![],
+                format!("a bytes-like object is required, not '{name}'"),
+            )));
+        }
+        let mut seed = values[args.order[1]].clone();
+        if let Some(node) = call.arguments.args.get(1) {
+            seed = self.index_word(seed, node, false)?;
+        }
+        Ok(scope.finish(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Adler32, vec![data, seed]),
+        }))
+    }
+
+    fn known_nonbuffer_type(&self, ty: Type) -> Option<&str> {
+        match ty {
+            Type::Str | Type::StrLiteral(_) => Some("str"),
+            // Python classes can implement the buffer protocol.
+            Type::Class(_) => None,
+            _ => self.exact_argument_type_name(ty),
+        }
+    }
+
     fn base64_buffer(
         &self,
         input: Expr,
@@ -41,13 +94,7 @@ impl Checker<'_> {
         if decode && matches!(ty, Type::Str | Type::StrLiteral(_)) {
             return Ok(bytes_op(Builtin::BinasciiAsciiInput, vec![input]));
         }
-        let known = match ty {
-            Type::Str | Type::StrLiteral(_) => Some("str"),
-            // Python classes can implement the buffer protocol.
-            Type::Class(_) => None,
-            _ => self.exact_argument_type_name(ty),
-        };
-        let Some(name) = known else {
+        let Some(name) = self.known_nonbuffer_type(ty) else {
             return Err(error(
                 self.source,
                 at,

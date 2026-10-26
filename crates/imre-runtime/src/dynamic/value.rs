@@ -92,7 +92,7 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub class_body: bool,
+    pub class_body: Option<Vec<String>>,
     pub names: HashMap<String, Id>,
     pub parent: Option<Id>,
     pub module: String,

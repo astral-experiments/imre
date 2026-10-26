@@ -5650,6 +5650,11 @@ impl Emitter<'_, '_> {
             Builtin::BinasciiAsciiInput => {
                 self.call("imre_binascii_ascii_input", Type::Bytes, &[&args[0].value])
             }
+            Builtin::Adler32 => self.call(
+                "imre_zlib_adler32",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::BinasciiEncode | Builtin::BinasciiDecode => {
                 let function = if matches!(builtin, Builtin::BinasciiEncode) {
                     "imre_binascii_encode"
@@ -9155,6 +9160,7 @@ declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
+declare i64 @imre_zlib_adler32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_sha1_hex(ptr)
 declare ptr @imre_sha256_hex(ptr)
@@ -9275,6 +9281,7 @@ declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
+declare ptr @imre_tempfile_new(ptr)
 declare ptr @imre_binary_read(ptr)
 declare ptr @imre_binary_read_size(ptr, i64)
 declare ptr @imre_binary_readline(ptr)

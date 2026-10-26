@@ -1166,6 +1166,7 @@ pub(crate) enum Builtin {
     UrlsafeB64encode,
     Base64Translate,
     BinasciiAsciiInput,
+    Adler32,
     BinasciiDecode,
     BinasciiEncode,
     CodecLookup,
@@ -1772,6 +1773,7 @@ pub(crate) enum PathOperation {
     Replace,
     /// Scoped creation returns a hidden owned pathname, not an escaping manager.
     TemporaryDirectory,
+    TemporaryFile,
     CleanupTemporaryDirectory,
     ContextNew {
         temporary: bool,

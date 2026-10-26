@@ -107,6 +107,7 @@ impl Builtin {
                 ),
                 PreservesOwners,
             ),
+            Self::Adler32 => Contract::new(false, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -219,6 +220,7 @@ impl Builtin {
                     | PathOperation::Rmdir
                     | PathOperation::Replace
                     | PathOperation::TemporaryDirectory
+                    | PathOperation::TemporaryFile
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
                     | PathOperation::Walk

@@ -104,7 +104,7 @@ impl Context {
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
-            class_body: false,
+            class_body: None,
             names: HashMap::new(),
             parent,
             module: module.to_owned(),
@@ -120,6 +120,11 @@ impl Context {
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
+        if let Some(order) = &mut s.class_body
+            && !s.names.contains_key(name)
+        {
+            order.push(name.to_owned());
+        }
         s.names.insert(name.to_owned(), value);
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {

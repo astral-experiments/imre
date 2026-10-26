@@ -27,6 +27,9 @@ impl Context {
                     unreachable!()
                 };
                 s.names.remove(&name);
+                if let Some(order) = &mut s.class_body {
+                    order.retain(|member| member != &name);
+                }
                 Ok(NONE)
             }
             "scope" => {
@@ -433,7 +436,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def(
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
     let owner = ctx.scope_data(scope);
-    let scope = if owner.class_body {
+    let scope = if owner.class_body.is_some() {
         owner.parent.unwrap_or(scope)
     } else {
         scope

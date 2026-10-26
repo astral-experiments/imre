@@ -11,6 +11,86 @@ impl Context {
             .copied()
             .or_else(|| bases.iter().find_map(|&base| self.class_attr(base, name)))
     }
+
+    /// Special methods are looked up on the type, even if the instance shadows them.
+    fn slot(&self, object: Id, name: &str) -> Option<Id> {
+        let Value::Instance { class, .. } = self.heap.get(object) else {
+            return None;
+        };
+        self.class_attr(*class, name)
+    }
+
+    pub(super) fn callable(&self, value: Id) -> bool {
+        matches!(
+            self.heap.get(value),
+            Value::Class { .. }
+                | Value::Function { .. }
+                | Value::Cached { .. }
+                | Value::Native(_)
+                | Value::Method { .. }
+        ) || self.slot(value, "__call__").is_some()
+    }
+
+    fn data_descriptor(&self, descriptor: Id) -> bool {
+        matches!(self.heap.get(descriptor), Value::Property(_))
+            || self.slot(descriptor, "__set__").is_some()
+            || self.slot(descriptor, "__delete__").is_some()
+    }
+
+    pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if let Some(get) = self.slot(value, "__get__") {
+            return self.call(get, vec![value, receiver, owner], Vec::new());
+        }
+        if receiver != NONE {
+            match self.heap.get(value) {
+                Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
+                Value::Function { .. } | Value::Cached { .. } => {
+                    return Ok(self.alloc(Value::Method {
+                        callable: value,
+                        receiver,
+                    }));
+                }
+                _ => {}
+            }
+        }
+        Ok(value)
+    }
+
+    fn instance_attribute(
+        &mut self,
+        object: Id,
+        class: Id,
+        field: Option<Id>,
+        name: &str,
+    ) -> Result<Id> {
+        let member = self.class_attr(class, name);
+        let attribute = match (member, field) {
+            (Some(member), _)
+                if self.data_descriptor(member)
+                    && (self.slot(member, "__get__").is_some()
+                        || matches!(self.heap.get(member), Value::Property(_))) =>
+            {
+                self.bind_attribute(member, object, class)
+            }
+            (_, Some(field)) => Ok(field),
+            (Some(member), None) => self.bind_attribute(member, object, class),
+            (None, None) => Err(Error::new(
+                "AttributeError",
+                format!("{} has no attribute {name:?}", self.display(object)),
+            )),
+        };
+        match attribute {
+            Err(error) if error.kind == "AttributeError" => {
+                let Some(hook) = self.class_attr(class, "__getattr__") else {
+                    return Err(error);
+                };
+                let callable = self.bind_attribute(hook, object, class)?;
+                let name = self.text(name);
+                self.call(callable, vec![name], Vec::new())
+            }
+            value => value,
+        }
+    }
     fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
@@ -134,27 +214,18 @@ impl Context {
                     return Ok(value);
                 }
             }
-            Value::Class { .. } => {
+            Value::Class {
+                name: class_name, ..
+            } => {
+                if name == "__name__" {
+                    return Ok(self.text(class_name));
+                }
                 if let Some(value) = self.class_attr(obj, name) {
-                    return Ok(value);
+                    return self.bind_attribute(value, NONE, obj);
                 }
             }
             Value::Instance { class, fields } => {
-                if let Some(value) = fields.get(name) {
-                    return Ok(*value);
-                }
-                if let Some(value) = self.class_attr(class, name) {
-                    return match self.heap.get(value) {
-                        Value::Property(call) => self.call(*call, vec![obj], Vec::new()),
-                        Value::Function { .. } | Value::Cached { .. } => {
-                            Ok(self.alloc(Value::Method {
-                                callable: value,
-                                receiver: obj,
-                            }))
-                        }
-                        _ => Ok(value),
-                    };
-                }
+                return self.instance_attribute(obj, class, fields.get(name).copied(), name);
             }
             Value::NamedTuple { names, values } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
@@ -176,6 +247,18 @@ impl Context {
         ))
     }
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(descriptor) = self.slot(obj, name)
+            && self.data_descriptor(descriptor)
+        {
+            if let Some(setter) = self.slot(descriptor, "__set__") {
+                self.call(setter, vec![descriptor, obj, value], Vec::new())?;
+                return Ok(());
+            }
+            return Err(Error::new(
+                "AttributeError",
+                format!("attribute {name:?} cannot be set"),
+            ));
+        }
         match self.heap.get_mut(obj) {
             Value::Module {
                 name: module,
@@ -216,7 +299,16 @@ impl Context {
                     || !name.contains('.')
                     || matches!(
                         name.split('.').next(),
-                        Some("str" | "dict" | "list" | "set" | "tuple" | "bytes" | "range")
+                        Some(
+                            "str"
+                                | "dict"
+                                | "list"
+                                | "set"
+                                | "tuple"
+                                | "bytes"
+                                | "range"
+                                | "function"
+                        )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
@@ -411,6 +503,13 @@ impl Context {
                 }
                 Ok(value)
             }
+            Value::Instance { class, .. } => {
+                let Some(method) = self.class_attr(class, "__call__") else {
+                    return Err(Error::new("TypeError", "object is not callable"));
+                };
+                let method = self.bind_attribute(method, callable, class)?;
+                self.call(method, args, kwargs)
+            }
             _ => Err(Error::new("TypeError", "object is not callable")),
         }
     }
@@ -448,7 +547,7 @@ impl Context {
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        body_scope.class_body = true;
+        body_scope.class_body = Some(Vec::new());
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
@@ -457,6 +556,26 @@ impl Context {
             scope,
             bases,
         });
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        let members = class_scope
+            .class_body
+            .take()
+            .unwrap()
+            .into_iter()
+            .map(|name| (class_scope.names[&name], name))
+            .collect::<Vec<_>>();
+        // A hook may replace an attribute and execute code that triggers collection.
+        for &(value, _) in &members {
+            self.heap.keep(value);
+        }
+        for (value, name) in members {
+            if let Some(set_name) = self.slot(value, "__set_name__") {
+                let name = self.text(name);
+                self.call(set_name, vec![value, class, name], Vec::new())?;
+            }
+        }
         self.classes.insert(name, class);
         Ok(class)
     }

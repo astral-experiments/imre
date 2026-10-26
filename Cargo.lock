@@ -716,6 +716,7 @@ dependencies = [
  "triomphe",
  "unicode-case-mapping",
  "unicode_names2",
+ "zlib-rs",
 ]
 
 [[package]]

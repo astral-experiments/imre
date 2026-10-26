@@ -825,6 +825,37 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind the default binary update mode and an optional temporary directory.
+    pub(super) fn temporary_file(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let directory = self.types.optional(Type::Str);
+        let mut params = [
+            parameter("mode", Type::Str, Some(unpacking::string("w+b"))),
+            parameter(
+                "dir",
+                directory,
+                Some(Expr {
+                    ty: directory,
+                    kind: ExprKind::Absent(Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    })),
+                }),
+            ),
+        ];
+        params[1].kind = ParameterKind::KeywordOnly;
+        let args = self.arguments_with(call, &params, None, |checker, index, value| {
+            if index == 1 {
+                return checker.optional_path_argument(value);
+            }
+            if !matches!(value, ast::Expr::StringLiteral(lit) if matches!(lit.value.to_str(), "w+b" | "wb+")) {
+                return Err(error(checker.source, value, "TemporaryFile requires a literal binary update mode (w+b or wb+)"));
+            }
+            checker.expr_expected(value, Type::Str)
+        })?;
+        Ok(self.ordered_path_operation(PathOperation::TemporaryFile, Type::BinaryIO, args))
+    }
+
     /// A temporary-directory manager exists only at this immediate `with`
     /// boundary. Its owned name is retained privately for finally cleanup.
     pub(super) fn temporary_directory(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

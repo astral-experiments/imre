@@ -52,6 +52,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "callable"
                 | "range"
                 | "isinstance"
                 | "getattr"
@@ -117,6 +118,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
         Value::RegexMatch { .. } if attr == "group" => "match",
+        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "contextvars.ContextVar"
         }
@@ -226,10 +228,24 @@ pub(super) fn call(
         return match owner {
             "str" | "bytes" => text::method(ctx, method, args, kwargs),
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "function" if method == "__get__" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 3)?;
+                let owner = args.get(2).copied().unwrap_or(NONE);
+                if args[1] == NONE && owner == NONE {
+                    return Err(type_error("__get__(None, None) is invalid"));
+                }
+                ctx.bind_attribute(args[0], args[1], owner)
+            }
             _ => Err(type_error(format!("unknown builtin method {name}"))),
         };
     }
     match name {
+        "callable" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            Ok(boolean(ctx.callable(args[0])))
+        }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
