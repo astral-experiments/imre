@@ -169,6 +169,7 @@ impl Context {
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
             | ("range", Value::Range { .. })
+            | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
             | ("functools.partial", Value::Partial { .. })
@@ -339,6 +340,13 @@ impl Context {
                 "AttributeError",
                 format!("attribute {name:?} cannot be set"),
             ));
+        }
+        if let Value::Instance { class, .. } = self.heap.get(obj)
+            && self
+                .namedtuple_fields(*class)
+                .is_some_and(|fields| fields.iter().any(|field| field == name))
+        {
+            return Err(Error::new("AttributeError", "can't set attribute"));
         }
         match self.heap.get_mut(obj) {
             Value::Module {

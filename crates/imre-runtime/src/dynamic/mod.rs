@@ -286,8 +286,10 @@ impl Context {
             scope,
         });
         self.modules.insert(name.to_owned(), module);
-        if name == "io" {
-            stdlib::io::install(self, scope);
+        match name {
+            "io" => stdlib::io::install(self, scope),
+            "selectors" => stdlib::readiness::initialize(self, scope),
+            _ => {}
         }
         if let Some((path, code)) = source {
             self.bind(scope, "__doc__", NONE);

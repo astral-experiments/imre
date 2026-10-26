@@ -117,6 +117,21 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "dict"
         }
+        Value::Selector(_)
+            if matches!(
+                attr,
+                "register"
+                    | "modify"
+                    | "unregister"
+                    | "select"
+                    | "get_key"
+                    | "close"
+                    | "__enter__"
+                    | "__exit__"
+            ) =>
+        {
+            "selectors"
+        }
         Value::File(_)
             if matches!(
                 attr,
