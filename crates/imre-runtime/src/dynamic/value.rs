@@ -32,6 +32,7 @@ pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
+    pub os_args: Option<Box<(i64, String)>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -42,6 +43,7 @@ impl Error {
             kind: kind.to_owned(),
             message: message.into(),
             args: None,
+            os_args: None,
             trace: Vec::new(),
             exit_status: None,
         }
@@ -82,6 +84,12 @@ impl Context {
         }
     }
 
+    pub(super) fn lookup_error(&self, kind: &str, key: Id) -> Error {
+        let mut error = Error::new(kind, self.repr(key));
+        error.args = Some(vec![key]);
+        error
+    }
+
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let message = match args {
             [] => String::new(),
@@ -110,9 +118,13 @@ impl Context {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
+        let os_args = error.os_args();
         let (kind, message) = error.into_parts();
         match message {
-            Ok(message) => Self::new(kind, message.to_string()),
+            Ok(message) => Self {
+                os_args: os_args.map(Box::new),
+                ..Self::new(kind, message.to_string())
+            },
             Err(_) => Self::new("MemoryError", String::new()),
         }
     }
@@ -151,6 +163,7 @@ pub(super) enum Value {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
+    Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Range {
         start: i64,
         stop: i64,
@@ -161,6 +174,7 @@ pub(super) enum Value {
     ByteArray(Vec<u8>),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -198,6 +212,7 @@ pub(super) enum Value {
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
+        dictionary: Option<Id>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -224,7 +239,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -295,6 +310,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
+            Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.parent);
                 visit.extend(scope.names.values());
@@ -310,8 +326,13 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(bases);
             }
-            Self::Instance { class, fields } => {
+            Self::Instance {
+                class,
+                fields,
+                dictionary,
+            } => {
                 visit.push(*class);
+                visit.extend(dictionary);
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
@@ -340,6 +361,7 @@ impl Value {
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::Hash(_)
+            | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TokenMissing

@@ -8,12 +8,70 @@ use std::{
 };
 
 #[derive(Default)]
-pub(super) struct Poll {
+pub(crate) struct Poll {
     slots: Vec<libc::pollfd>,
     positions: std::collections::HashMap<i32, usize>,
 }
 
 impl Poll {
+    pub(crate) fn contains(&self, fd: i32) -> bool {
+        self.positions.contains_key(&fd)
+    }
+
+    pub(crate) fn set(
+        &mut self,
+        fd: i32,
+        events: i16,
+    ) -> std::result::Result<(), std::collections::TryReserveError> {
+        if let Some(&index) = self.positions.get(&fd) {
+            self.slots[index].events = events;
+        } else {
+            self.slots.try_reserve(1)?;
+            self.positions.try_reserve(1)?;
+            self.positions.insert(fd, self.slots.len());
+            self.slots.push(libc::pollfd {
+                fd,
+                events,
+                revents: 0,
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remove(&mut self, fd: i32) -> bool {
+        let Some(index) = self.positions.remove(&fd) else {
+            return false;
+        };
+        self.slots[index].fd = -1;
+        if self.slots.len() > self.positions.len().saturating_mul(2) {
+            self.compact();
+        }
+        true
+    }
+
+    /// Waits on the live descriptors and returns only kernel-reported events.
+    pub(crate) fn ready(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> std::result::Result<(usize, impl Iterator<Item = (i32, u16)> + '_), PollError> {
+        self.compact();
+        let fds = &mut self.slots;
+        let nfds = fds.len().try_into().map_err(|_| PollError::Overflow)?;
+        let count = wait(timeout, |remaining| {
+            let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
+            // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
+            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
+        })
+        .map_err(PollError::Io)? as usize;
+        Ok((
+            count,
+            fds.iter()
+                .filter(|p| p.revents != 0)
+                .take(count)
+                .map(|p| (p.fd, p.revents as u16)),
+        ))
+    }
+
     // Deletion leaves a tombstone so re-registering a number moves it to the end.
     fn compact(&mut self) {
         if self.slots.len() != self.positions.len() {
@@ -24,6 +82,11 @@ impl Poll {
         }
     }
 }
+pub(crate) enum PollError {
+    Overflow,
+    Io(io::Error),
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_poll_new() -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
@@ -67,31 +130,14 @@ pub unsafe extern "C" fn imre_poll_update(
                     let Storage::Poll(p) = state else {
                         unreachable!()
                     };
-                    if let Some(&i) = p.positions.get(&fd) {
-                        if mode == 2 {
-                            p.positions.remove(&fd);
-                            p.slots[i].fd = -1;
-                            if p.slots.len() > p.positions.len().saturating_mul(2) {
-                                p.compact();
-                            }
-                        } else {
-                            p.slots[i].events = events;
+                    if mode == 2 {
+                        if !p.remove(fd) {
+                            return Err(Error::key(super::words::WordKind::new(2).acquire(word)));
                         }
-                    } else if mode == 2 {
-                        return Err(Error::key(super::words::WordKind::new(2).acquire(word)));
-                    } else if mode == 1 {
+                    } else if mode == 1 && !p.contains(fd) {
                         return Err(errno_error(io::Error::from_raw_os_error(libc::ENOENT)));
                     } else {
-                        p.slots.try_reserve(1).map_err(|_| Error::allocation())?;
-                        p.positions
-                            .try_reserve(1)
-                            .map_err(|_| Error::allocation())?;
-                        p.positions.insert(fd, p.slots.len());
-                        p.slots.push(libc::pollfd {
-                            fd,
-                            events,
-                            revents: 0,
-                        });
+                        p.set(fd, events).map_err(|_| Error::allocation())?;
                     }
                     Ok(())
                 })
@@ -113,7 +159,10 @@ fn fd(word: usize) -> Result<i32> {
 }
 
 // Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait(timeout: Option<Duration>, mut call: impl FnMut(Option<Duration>) -> i32) -> Result<i32> {
+fn wait(
+    timeout: Option<Duration>,
+    mut call: impl FnMut(Option<Duration>) -> i32,
+) -> io::Result<i32> {
     let start = Instant::now();
     let mut remaining = timeout;
     loop {
@@ -123,7 +172,7 @@ fn wait(timeout: Option<Duration>, mut call: impl FnMut(Option<Duration>) -> i32
         }
         let err = io::Error::last_os_error();
         if err.kind() != io::ErrorKind::Interrupted {
-            return Err(errno_error(err));
+            return Err(err);
         }
         remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
         if remaining == Some(Duration::ZERO) {
@@ -220,37 +269,25 @@ pub unsafe extern "C" fn imre_poll_wait(
                 unreachable!()
             };
             let timeout = timeout(tag, word, true)?;
-            // Do not count tombstones against the kernel's nfds limit.
-            p.compact();
-            let fds = &mut p.slots;
-            let nfds = fds
-                .len()
-                .try_into()
-                .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
-            let count = wait(timeout, |remaining| {
-                let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
-                // SAFETY: the kernel can only write within this initialized pollfd slice.
-                libc::poll(fds.as_mut_ptr(), nfds, ms)
+            let (count, events) = p.ready(timeout).map_err(|error| match error {
+                PollError::Overflow => Error::new(Kind::OverflowError, "too many file descriptors"),
+                PollError::Io(error) => errno_error(error),
             })?;
             let mut out = Words::new(6); // owned records
             out.values
-                .try_reserve(count as usize)
+                .try_reserve(count)
                 .map_err(|_| Error::allocation())?;
-            if count > 0 {
-                for item in fds.iter().filter(|p| p.revents != 0) {
-                    // SAFETY: pair describes two writable tagged integer fields. The
-                    // result sequence takes ownership of each fully initialized tuple.
-                    {
-                        let tuple = ptr::NonNull::new(allocate_record(pair))
-                            .ok_or_else(Error::allocation)?
-                            .as_ptr();
-                        tuple.write(Int::from_usize(item.fd as usize).into_raw());
-                        tuple
-                            .add(1)
-                            .write(Int::from_usize(item.revents as u16 as usize).into_raw());
-                        out.values.push(tuple as usize);
-                    }
-                }
+            for (fd, mask) in events {
+                // SAFETY: pair describes two writable tagged integer fields. The result
+                // sequence takes ownership of each fully initialized tuple.
+                let tuple = ptr::NonNull::new(allocate_record(pair))
+                    .ok_or_else(Error::allocation)?
+                    .as_ptr();
+                tuple.write(Int::from_usize(fd as usize).into_raw());
+                tuple
+                    .add(1)
+                    .write(Int::from_usize(usize::from(mask)).into_raw());
+                out.values.push(tuple as usize);
             }
             Ok(crate::ObjectOwner::into_raw(out.into_object()))
         })
@@ -326,7 +363,8 @@ pub unsafe extern "C" fn imre_select_wait(
                         tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
                     )
                 }
-            })?;
+            })
+            .map_err(errno_error)?;
             for (i, (list, set)) in lists.into_iter().zip(&ready).enumerate() {
                 let mut result = Vec::new();
                 if count > 0 {

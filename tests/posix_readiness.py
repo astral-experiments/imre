@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,40 @@ def pipe():
     finally:
         os.close(r)
         os.close(w)
+
+
+
+def boxed_file_objects(cmd, mode):
+    ready, writer = socket.socketpair()
+    idle, other = socket.socketpair()
+    with ready, writer, idle, other:
+        if mode == "readable":
+            writer.sendall(b"x")
+        elif mode == "eof":
+            writer.shutdown(socket.SHUT_WR)
+        elif mode == "wrong-peer":
+            other.sendall(b"x")
+        fds = (ready.fileno(), idle.fileno())
+        argv = [*cmd, *map(str, fds), mode]
+        if mode == "delayed":
+            with subprocess.Popen(argv, pass_fds=fds, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True) as child:
+                try:
+                    assert select.select([child.stdout], [], [], 10)[0], "child never entered select"
+                    assert child.stdout.readline() == "waiting\n"
+                    time.sleep(0.04)
+                    writer.sendall(b"x")
+                    stdout, stderr = child.communicate(timeout=10)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                result = subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
+        else:
+            result = run(argv, pass_fds=fds)
+    if mode == "wrong-peer":
+        assert result.returncode and "AssertionError" in result.stderr, result
+    else:
+        assert result.returncode == 0 and result.stdout == "boxed selector file objects passed\n", result
 
 
 def probe(cmd, expected_state=None):
@@ -173,6 +208,12 @@ def main():
                         {"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
                         {"operation": "one native selector registers fd numbers and unregisters them after native close and dup2",
                          "fixture": "CPython runs the unchanged method and its cleanups; both processes inherit the same two socketpairs. Duplicate unregister raises native KeyError; omitting dup2 gives native EBADF."})
+            file_objects = HERE / "boxed_fileobjs.py"
+            boxed = build(file_objects, level)
+            for mode in ("readable", "idle", "eof", "delayed", "wrong-peer"):
+                boxed_file_objects([sys.executable, file_objects], mode)
+                boxed_file_objects([boxed], mode)
+            print(f"O{level} boxed selector file objects: passed; wrong-peer control detected", flush=True)
             for suite, owner, method, fixture, before, after, failure in CASES:
                 case, body, source = method_source(suite, owner, method, fixture)
                 file = work / "method.py"

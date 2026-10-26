@@ -2759,6 +2759,7 @@ impl<'a> Loader<'a> {
                 "http/__init__.py",
                 include_str!("../stdlib/http/__init__.py"),
             )),
+            "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "mimetypes" if cfg!(unix) => {

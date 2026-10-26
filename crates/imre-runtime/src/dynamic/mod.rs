@@ -44,6 +44,22 @@ impl Context {
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
+    /// The builtin mapping payload is independent of a subclass instance's attributes.
+    fn dict_storage(&self, value: Id) -> Option<Id> {
+        match self.heap.get(value) {
+            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
+            Value::Instance { dictionary, .. } => *dictionary,
+            _ => None,
+        }
+    }
+
+    fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        match self.heap.get(self.dict_storage(value)?) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
+            _ => unreachable!("dictionary payload"),
+        }
+    }
+
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
         self.alloc(Value::Dict(entries))
     }
@@ -109,7 +125,17 @@ impl Context {
                 }
                 Ok(values[offset..].to_vec())
             }
-            Value::Instance { class, fields } if self.namedtuple_fields(class).is_some() => {
+            Value::Instance {
+                dictionary: Some(_),
+                ..
+            } => {
+                let iter = self
+                    .bound_slot(id, "__iter__")?
+                    .expect("dict iterator slot");
+                let values = self.call(iter, Vec::new(), Vec::new())?;
+                self.items(values)
+            }
+            Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self
                     .namedtuple_fields(class)
                     .unwrap()
@@ -174,6 +200,11 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "dict" {
+            for method in builtins::DICT_METHODS {
+                self.builtin(&format!("dict.{method}"));
+            }
+        }
         value
     }
     fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
@@ -208,6 +239,9 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
+            if name == "urllib" {
+                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            }
             None
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
@@ -286,8 +320,10 @@ impl Context {
             scope,
         });
         self.modules.insert(name.to_owned(), module);
-        if name == "io" {
-            stdlib::io::install(self, scope);
+        match name {
+            "io" => stdlib::io::install(self, scope),
+            "selectors" => stdlib::readiness::initialize(self, scope),
+            _ => {}
         }
         if let Some((path, code)) = source {
             self.bind(scope, "__doc__", NONE);

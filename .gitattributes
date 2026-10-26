@@ -2,3 +2,5 @@
 benchmarks/results/*.json linguist-generated=true
 benchmarks/results/naming-data/*.hex linguist-generated=true
 benchmarks/cpython_stdlib/full/socket/upstream/** linguist-vendored=true whitespace=-blank-at-eol
+# The pinned decimal corpus includes CRLF and intentional whitespace.
+benchmarks/cpython_stdlib/upstream/Lib/test/decimaltestdata/** linguist-vendored=true -text -whitespace

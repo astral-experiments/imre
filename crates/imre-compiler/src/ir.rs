@@ -855,6 +855,7 @@ pub(crate) enum RandomOperation {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    DecimalIntegerText,
     Random(RandomOperation),
     Linecache(LinecacheOperation, Type, bool),
     Repeat,

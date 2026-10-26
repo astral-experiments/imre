@@ -97,16 +97,18 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let Value::Dict(items) = self.heap.get(b).clone() else {
-                    return Err(Error::new("TypeError", "expected a mapping"));
-                };
-                for (key, val) in items {
+                let mapping = self.for_each_mapping_item(b, |ctx, key, val| {
                     if op == "keywords" {
-                        self.str_value(key)?;
-                        self.op("keyword", a, key, val)?;
+                        ctx.str_value(key)
+                            .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                        ctx.op("keyword", a, key, val)?;
                     } else {
-                        self.put_item(a, key, val)?;
+                        ctx.put_item(a, key, val)?;
                     }
+                    Ok(())
+                })?;
+                if !mapping {
+                    return Err(Error::new("TypeError", "expected a mapping"));
                 }
                 Ok(a)
             }
@@ -172,6 +174,9 @@ impl Context {
                 Ok(v)
             }
             "not" => Ok(flag(!self.truth(a)?)),
+            "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
+                Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
+            }
             "neg" | "pos" | "~" => {
                 let v = self.as_int(a)?;
                 let result = match op {
@@ -400,6 +405,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .map(|s| Value::Str(s.to_owned()))
             .map_err(|e| Error::new("UnicodeError", e.to_string())),
         2 => Ok(Value::Bytes(data.to_vec())),
+        3 => data
+            .try_into()
+            .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
+            .map_err(|_| Error::new("SystemError", "invalid float literal")),
         _ => Err(Error::new("SystemError", "invalid literal kind")),
     };
     let value = value.map(|v| ctx.alloc(v));

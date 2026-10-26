@@ -13,10 +13,14 @@ pub(super) mod datetime;
 mod files;
 mod hashlib;
 mod hmac;
+pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
 mod operator;
+pub(super) mod readiness;
 mod regex;
+mod socket;
+pub(super) mod urllib;
 
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
@@ -29,6 +33,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "operator"
             | "platform"
             | "site"
+            | "selectors"
             | "struct"
             | "json"
             | "datetime"
@@ -46,6 +51,9 @@ pub(super) fn is_module(name: &str) -> bool {
             | "contextvars"
             | "warnings"
             | "subprocess"
+            | "socket"
+            | "urllib"
+            | "urllib.parse"
     )
 }
 
@@ -85,6 +93,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     let class = ctx.alloc(Value::Native(type_name.to_owned()));
     ctx.alloc(Value::Instance {
         class,
+        dictionary: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
@@ -171,6 +180,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
+        ("socket", name) => return socket::attribute(ctx, name),
         ("errno", "__doc__") => ctx.text(crate::objects::ERRNO_DOC),
         ("errno", "errorcode") => {
             let dict = ctx.dict(Vec::new());
@@ -192,6 +202,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("selectors", "EVENT_READ") => ctx.int(1),
+        ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
@@ -294,6 +306,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps" | "loads")
+        | (
+            "urllib.parse",
+            "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes",
+        )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
@@ -321,12 +337,21 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(function) = name.strip_prefix("urllib.parse.") {
+        return urllib::call(ctx, function, args, kwargs);
+    }
     if name == "operator.attrgetter" {
         return operator::attrgetter(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("selectors.") {
+        return readiness::call(ctx, method, args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
+    }
+    if let Some(name) = name.strip_prefix("socket.") {
+        return socket::call(ctx, name, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
@@ -378,7 +403,7 @@ pub(super) fn call(
             1,
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
-        "hashlib.sha1" => (1, &["data"]),
+        "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -404,6 +429,7 @@ pub(super) fn call(
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),

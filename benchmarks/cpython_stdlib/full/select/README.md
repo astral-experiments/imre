@@ -2,6 +2,8 @@
 
 The native product surface is `select.poll()` and `select.select()` for POSIX integer descriptors. A poller remembers its own interests between waits; no process-global table or socket implementation is involved. The six portable event constants come from the target's headers. `selectors.PollSelector` builds on that poller; `DefaultSelector` selects the same backend because Imre does not currently expose epoll, kqueue or devpoll.
 
+Runtime-imported Python modules can register an object with a `fileno()` method. `SelectorKey.fileobj` retains that object, and a ready result returns the original key. The standalone fixture checks a delayed writer, an idle descriptor, EOF, changing read/write interests and unregistering after close. Making the wrong peer ready must fail the same check in CPython and Imre. [File-object fixture](boxed_fileobjs.py)
+
 [UPSTREAM.json](UPSTREAM.json) pins the original CPython 3.14.5 C implementation, Python selector layer, three full test modules, and license by Git blob. The two companion manifests select the corresponding upstream test entry point for the existing reference runner.
 
 | Complete Linux reference | Discovered | Passed | Skipped | Native observation at O0 and O3 |
