@@ -23,7 +23,7 @@ pub unsafe extern "C" fn imre_log_children(logger: *const Object) -> *const Obje
     let result = LOGGERS.with_borrow(|logs| {
         // SAFETY: the constructor returns one independently owned object.
         let children = unsafe { crate::ObjectOwner::from_raw(imre_set_new(5)) };
-        if parent.standalone_propagate.is_some() {
+        if parent.standalone {
             return Ok(crate::ObjectOwner::into_raw(children));
         }
         for (key, entry) in &logs.entries {

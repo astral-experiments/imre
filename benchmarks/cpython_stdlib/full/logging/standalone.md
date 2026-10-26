@@ -5,6 +5,12 @@ has the same name or the name is `"root"`. Its parent is initially `None`.
 Its level, propagation flag, cache and live handler list belong to the instance.
 A managed logger with the same name still follows its own parent chain.
 
+`Logger.disabled` accepts Boolean assignments in Imre. CPython also retains
+other assigned values, such as the integer in `logger.disabled = 7`. Imre
+rejects that assignment at compile time. The [disabled-state comparison](instance_disabled.py)
+exercises Boolean writes, cached decisions, handler propagation and configuration.
+These direct checks add no upstream test occurrence.
+
 CPython’s [`LoggerTest.test_has_handlers`](../../upstream/Lib/test/test_logging.py)
 adds a recording handler in setup. The unchanged method checks for a handler,
 removes it while iterating the public list, and checks again. At O0 and O3 the
