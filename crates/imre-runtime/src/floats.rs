@@ -338,7 +338,7 @@ pub unsafe extern "C" fn imre_int_float_compare(integer: usize, float: f64) -> i
 /// ties to even. Scaling the integers, rather than converting both operands,
 /// permits finite results such as `10**400 / 10**400` and avoids double rounding
 /// at the subnormal boundary. Only the final sign bit is applied afterward.
-fn ratio(left: &Int, right: &Int) -> Result<f64> {
+pub(super) fn ratio(left: &Int, right: &Int) -> Result<f64> {
     // Both integer conversions are exact in this range, so hardware division
     // has the same single rounding as the arbitrary-precision path below.
     if let (Some(left), Some(right)) = (left.as_small(), right.as_small())
