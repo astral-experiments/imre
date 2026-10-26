@@ -1,14 +1,14 @@
 {
   "public_legacy_feature": "7a620758f5e244f26ddc3140eaca4d5b44246dcc",
-  "replay": "109aefce318c3a9839acf1db4607cc6ca84d39e1",
+  "replay": "472007c098d465c78943a8b1ee5b45957e4c43e4",
   "file": "crates/imre-runtime/src/objects/files/path_text.rs",
   "original_blob": "6200d2c01c3f92253f6974df381249d0abd27fbf",
   "replay_blob": "f99cc04e5d2cf9ef26940fcfc5e1cc8059949f8a",
   "returned_owner": "ObjectOwner = Shared<objects::Object>",
-  "archive_sha256": "94881e351bfca6d5ffc8ee29b31385bf6ec88419d87edb2b7850a7c5507d52f6",
+  "archive_sha256": "64f41c43acd002968fd6574b4330030c369a8bd03199d6f2c453f418d4f65a7a",
   "modes": {
     "production": {
-      "site_sha256": "b763d8f6334575e4ba6e00ea66c1593d192ce101a71b4f6429dcb83175efe4d3",
+      "site_sha256": "f36032d4c693c8a4e7eee91eddbfd871158f98874d8d791880f8aff32eb20c5d",
       "retained_functions": 7,
       "fallible_box": true,
       "fallible_object_owner": true,
@@ -18,7 +18,7 @@
       "legacy_rc_object": false
     },
     "test": {
-      "site_sha256": "aefdd28732c3b1b4517935deb6b53ba4f1a38ba2f5656b9a072aae0244b08eb5",
+      "site_sha256": "27c685bd573f79e2fbe81d44eed981fa4d1b62d388870b021824a26e076ff281",
       "retained_functions": 7,
       "fallible_box": true,
       "fallible_object_owner": true,
@@ -58,6 +58,6 @@
       "leaked_fds": []
     }
   },
-  "feature_parent": "af1c218be78e4ef06a1565524f215120fe8a14ce",
+  "feature_parent": "14f3ffec637b18500bf64781a30425c8aac2b2e0",
   "touched_logger_storage_files": []
 }
