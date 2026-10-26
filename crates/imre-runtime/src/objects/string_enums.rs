@@ -63,16 +63,20 @@ pub(super) fn compare(left: usize, right: usize) -> std::cmp::Ordering {
     with_member(left, |a| with_member(right, |b| a[2].cmp(b[2])))
 }
 
-pub(super) fn write_repr(output: &mut String, tag: usize) {
+pub(super) fn write_repr(
+    output: &mut super::values::ReprWriter<'_>,
+    tag: usize,
+) -> std::fmt::Result {
+    use std::fmt::Write as _;
     with_member(tag, |[class, name, value]| {
-        output.push('<');
-        output.push_str(class);
-        output.push('.');
-        output.push_str(name);
-        output.push_str(": ");
-        output.push_str(&string_repr(value));
-        output.push('>');
-    });
+        output.write_char('<')?;
+        output.write_str(class)?;
+        output.write_char('.')?;
+        output.write_str(name)?;
+        output.write_str(": ")?;
+        super::exceptions::write_quoted_repr(value, output)?;
+        output.write_char('>')
+    })
 }
 
 #[cfg(test)]

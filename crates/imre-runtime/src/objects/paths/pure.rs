@@ -470,11 +470,14 @@ impl PurePath {
             Ok(StrOwner::clone(&self.text))
         }
     }
-    pub(in crate::objects) fn push_posix_repr(&self, output: &mut String) {
+    pub(in crate::objects) fn write_posix_repr(
+        &self,
+        output: &mut crate::objects::values::ReprWriter<'_>,
+    ) -> std::fmt::Result {
         if self.windows && self.text.contains('\\') {
-            crate::objects::exceptions::push_windows_path_repr(&self.text, output);
+            crate::objects::exceptions::write_windows_path_repr(&self.text, output)
         } else {
-            crate::objects::exceptions::push_string_repr(&self.text, output);
+            crate::objects::exceptions::write_quoted_repr(&self.text, output)
         }
     }
 

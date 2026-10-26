@@ -16,22 +16,42 @@ runs:
         ref: 02e65f4fd3065d27b2e29324800ca6d04df16126 # 1.1.2
         path: .upstream-crc32c
         persist-credentials: false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: googleapis/python-crc32c
+        ref: 9652503fb296eef101d84b9b631f454cc7c1d538 # v1.8.0
+        path: .upstream-python-crc32c
+        persist-credentials: false
     - shell: bash
       env:
         CC: ${{ inputs.cc }}
         CXX: ${{ inputs.cxx }}
       run: |
-        python3 -m pip install "pytest==8.4.2"
+        python3 -m pip install "build==1.3.0" "pytest==8.4.2"
         work="$RUNNER_TEMP/google-crc32c"
-        mkdir -p "$work/include" "$work/consumer"
-        target/release/imre extension-header > "$work/include/Python.h"
-        python3 benchmarks/google_crc32c_build.py --crc32c-source .upstream-crc32c --output "$work" \
-          --imre-include "$work/include" --cc "$CC" --cxx "$CXX"
-        python3 scripts/pack_extension_wheel.py "$work/wheel" --name google-crc32c --version 1.8.0 --output "$work/dist"
+        export CRC32C_INSTALL_PREFIX="$work/prefix" CRC32C_PURE_PYTHON=0
+        cmake -S .upstream-crc32c -B "$work/core-build" -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX="$CRC32C_INSTALL_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+          -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCRC32C_BUILD_TESTS=OFF \
+          -DCRC32C_BUILD_BENCHMARKS=OFF -DCRC32C_USE_GLOG=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        cmake --build "$work/core-build" --target install
+
+        cxx_lib=stdc++
+        if [[ "$RUNNER_OS" == macOS ]]; then cxx_lib=c++; fi
+        # Exercise header selection in the isolated backend with CPython's include directory.
+        host_include=$(python3 -c 'import sysconfig; print(sysconfig.get_path("include"))')
+        CFLAGS="-I\"$host_include\" ${CFLAGS:-}" target/release/imre wheel .upstream-python-crc32c \
+          --overlay examples/google_crc32c/overlay --system-library "$cxx_lib" --out-dir "$work/dist"
         python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-          --implementation im --python-version 1 --abi imre1 --target "$work/site" "$work"/dist/*.whl
+          --implementation im --python-version 3.14 --abi imre1 --target "$work/site" "$work"/dist/*.whl
+        LDFLAGS="-l$cxx_lib" python3 -m pip wheel --no-deps .upstream-python-crc32c --wheel-dir "$work/cpython-dist"
+        python3 -m pip install --no-index --no-deps --no-compile --target "$work/cpython" "$work"/cpython-dist/*.whl
+        cmp "$work"/site/google_crc32c-*.dist-info/METADATA "$work"/cpython/google_crc32c-*.dist-info/METADATA
+        cmp "$work/site/google_crc32c/licenses/crc32c.txt" .upstream-crc32c/LICENSE
+        git -C .upstream-python-crc32c diff --exit-code
+        mkdir -p "$work/consumer"
         cp examples/google_crc32c/driver.py "$work/consumer/"
         target/release/imre build "$work/consumer/driver.py" --extension-path "$work/site" --clang "$CC" -o "$work/driver"
-        python3 tests/google_crc32c.py cpython --cpython-package "$work/cpython"
-        python3 tests/google_crc32c.py imre --imre-binary "$work/driver"
-        python3 tests/google_crc32c.py fallback
+        python3 tests/google_crc32c.py cpython --upstream .upstream-python-crc32c --cpython-package "$work/cpython"
+        python3 tests/google_crc32c.py imre --upstream .upstream-python-crc32c --imre-binary "$work/driver"
+        python3 tests/google_crc32c.py fallback --upstream .upstream-python-crc32c

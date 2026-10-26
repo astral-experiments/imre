@@ -1,6 +1,6 @@
 //! The default tomli_w text format for the JSON subset of TOML values.
 
-use super::{Error, Kind, Node, Str, View};
+use super::{Error, Int, Kind, Node, Str, View};
 
 fn append(out: &mut String, parts: &[&str]) -> Result<(), Error> {
     let extra = parts
@@ -10,6 +10,41 @@ fn append(out: &mut String, parts: &[&str]) -> Result<(), Error> {
     out.try_reserve(extra).map_err(|_| Error::allocation())?;
     for part in parts {
         out.push_str(part);
+    }
+    Ok(())
+}
+
+fn integer(value: &Int, out: &mut String) -> Result<(), Error> {
+    let mut buffer = itoa::Buffer::new();
+    if let Some(value) = value.as_small() {
+        return append(out, &[buffer.format(value)]);
+    }
+
+    // Convert borrowed binary limbs into groups of nine decimal digits.
+    const BASE: u64 = 1_000_000_000;
+    let value = value.big();
+    let mut chunks = Vec::<u32>::new();
+    for limb in value.iter_u32_digits().rev() {
+        let mut carry = u64::from(limb);
+        for chunk in &mut chunks {
+            let word = (u64::from(*chunk) << 32) + carry;
+            *chunk = (word % BASE) as u32;
+            carry = word / BASE;
+        }
+        while carry != 0 {
+            push(&mut chunks, (carry % BASE) as u32)?;
+            carry /= BASE;
+        }
+    }
+
+    if value.sign() == num_bigint::Sign::Minus {
+        append(out, &["-"])?;
+    }
+    let mut chunks = chunks.into_iter().rev();
+    append(out, &[buffer.format(chunks.next().unwrap_or(0))])?;
+    for chunk in chunks {
+        let digits = buffer.format(chunk);
+        append(out, &[&"000000000"[..9 - digits.len()], digits])?;
     }
     Ok(())
 }
@@ -177,13 +212,7 @@ impl View {
                 ));
             }
             Node::Bool(v) => append(out, &[if *v { "true" } else { "false" }])?,
-            Node::Integer(i) => {
-                if let Some(value) = i.as_small() {
-                    append(out, &[itoa::Buffer::new().format(value)])?;
-                } else {
-                    append(out, &[&i.big().to_str_radix(10)])?;
-                }
-            }
+            Node::Integer(i) => integer(i, out)?,
             Node::Float(f) => append(out, &[&crate::floats::render(*f)])?,
             Node::ConstantNan => append(out, &["nan"])?,
             Node::String(s) => quoted(s, out)?,

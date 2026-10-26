@@ -25,19 +25,6 @@ use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail, object};
 
 pub(super) type StringPairs = Vec<(StrOwner, StrOwner)>;
 
-struct CounterOutput<'a>(&'a mut String);
-
-impl fmt::Write for CounterOutput<'_> {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        self.0
-            .try_reserve(value.len())
-            .or_else(|_| self.0.try_reserve_exact(value.len()))
-            .map_err(|_| fmt::Error)?;
-        self.0.push_str(value);
-        Ok(())
-    }
-}
-
 #[derive(Clone)]
 pub(super) struct IntKey(pub(super) Int);
 
@@ -880,11 +867,12 @@ impl Mapping {
     /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
     pub(super) fn namespace_repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Option<(usize, usize, WordKind)> {
+    ) -> Result<Option<(usize, usize, WordKind)>, std::fmt::Error> {
+        use std::fmt::Write as _;
         if position == 0 {
-            output.push_str("namespace(");
+            output.write_str("namespace(")?;
         }
         let mut cursor = position;
         while let Some((next, key, value)) = self.tables.next(cursor) {
@@ -895,14 +883,14 @@ impl Mapping {
                 continue;
             }
             if position != 0 {
-                output.push_str(", ");
+                output.write_str(", ")?;
             }
-            output.push_str(label);
-            output.push('=');
-            return Some((next, value, self.value_kind));
+            output.write_str(label)?;
+            output.write_char('=')?;
+            return Ok(Some((next, value, self.value_kind)));
         }
-        output.push(')');
-        None
+        output.write_char(')')?;
+        Ok(None)
     }
 
     /// Copies entries in insertion order, retains immutable keys, and lets the
@@ -1199,39 +1187,39 @@ impl Mapping {
     /// Copies the next entry while the original table roots both words.
     pub(super) fn repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
     ) -> Result<Option<super::values::ReprEntry>, fmt::Error> {
         if self.missing == Missing::Zero {
-            self.write_counter_repr(&mut CounterOutput(output))?;
+            self.write_counter_repr(output)?;
             return Ok(None);
         }
         if position == 0 {
             if self.order_version.is_some() {
-                output.push_str("OrderedDict(");
+                output.write_str("OrderedDict(")?;
                 if self.tables.len() == 0 {
-                    output.push(')');
+                    output.write_char(')')?;
                     return Ok(None);
                 }
             }
             match self.missing {
-                Missing::List(_) => output.push_str("defaultdict(<class 'list'>, "),
-                Missing::NoFactory => output.push_str("defaultdict(None, "),
+                Missing::List(_) => output.write_str("defaultdict(<class 'list'>, ")?,
+                Missing::NoFactory => output.write_str("defaultdict(None, ")?,
                 _ => {}
             }
-            output.push('{');
+            output.write_char('{')?;
         }
         let Some((next, key, value)) = self.tables.next(position) else {
-            output.push('}');
+            output.write_char('}')?;
             if self.order_version.is_some()
                 || matches!(self.missing, Missing::List(_) | Missing::NoFactory)
             {
-                output.push(')');
+                output.write_char(')')?;
             }
             return Ok(None);
         };
         if position != 0 {
-            output.push_str(", ");
+            output.write_str(", ")?;
         }
         Ok(Some(super::values::ReprEntry {
             next,
@@ -1388,34 +1376,32 @@ impl Set {
     /// Copies the next key while the original set roots it.
     pub(super) fn repr_entry(
         &self,
-        output: &mut String,
+        output: &mut super::values::ReprWriter<'_>,
         position: usize,
-    ) -> Option<super::values::ReprEntry> {
+    ) -> Result<Option<super::values::ReprEntry>, std::fmt::Error> {
+        use std::fmt::Write as _;
         if position == 0 {
             if self.tables.len() == 0 {
-                output.push_str(if self.frozen { "frozenset()" } else { "set()" });
-                return None;
+                output.write_str(if self.frozen { "frozenset()" } else { "set()" })?;
+                return Ok(None);
             }
             if self.frozen {
-                output.push_str("frozenset(");
+                output.write_str("frozenset(")?;
             }
-            output.push('{');
+            output.write_char('{')?;
         }
         let Some((next, key, ())) = self.tables.next(position) else {
-            output.push('}');
-            if self.frozen {
-                output.push(')');
-            }
-            return None;
+            output.write_str(if self.frozen { "})" } else { "}" })?;
+            return Ok(None);
         };
         if position != 0 {
-            output.push_str(", ");
+            output.write_str(", ")?;
         }
-        Some(super::values::ReprEntry {
+        Ok(Some(super::values::ReprEntry {
             next,
             key: (key.word, key.kind),
             value: None,
-        })
+        }))
     }
 }
 fn release_next_key<K, V>(entries: &mut [Option<Entry<K, V>>], next: &mut usize) -> bool {

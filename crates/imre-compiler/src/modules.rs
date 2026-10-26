@@ -1307,6 +1307,12 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
     }
 
+    /// This read checks a local's assignment flag and raises Python's error if unset.
+    pub(crate) fn checked_unbound_local_read(&self, module: ModuleId, read: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::UnboundLocalRead(read));
+    }
+
     /// Native construction raises TypeError at this abstract class call.
     pub(crate) fn checked_abstract_class_call(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
