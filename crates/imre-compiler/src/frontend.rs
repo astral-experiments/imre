@@ -2246,6 +2246,33 @@ pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Resu
     Ok(())
 }
 
+/// Checks literal source ranges before boxed lowering consumes Ruff's decoded strings.
+/// A field expression and each adjacent string have their own tokens and prefixes.
+pub(crate) fn check_string_tokens(source: &str, tokens: &ast::token::Tokens) -> Result<(), String> {
+    use ast::StringFlags;
+    use ast::token::TokenKind;
+
+    for token in tokens {
+        if !matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle) {
+            continue;
+        }
+        let flags = token.unwrap_string_flags();
+        if flags.is_raw_string() || flags.is_byte_string() {
+            continue;
+        }
+        let range = if token.kind() == TokenKind::String {
+            TextRange::new(
+                token.start() + flags.opener_len(),
+                token.end() - flags.closer_len(),
+            )
+        } else {
+            token.range()
+        };
+        check_string_escapes(range, source)?;
+    }
+    Ok(())
+}
+
 /// Checks each adjacent literal with its own raw prefix and content range.
 fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), String> {
     if matches!(

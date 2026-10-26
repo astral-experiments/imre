@@ -108,6 +108,34 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
+        compare(
+            "-c",
+            r"""import sys
+print(r"\uDCFF", "\\uDCFF", "�", "\ufffd", "\U0001f642", br"\uDCFF", b"\uDCFF")
+print(rf"\uDCFF{r'\uDCFF'}")
+sys.path.append("unused")""",
+            extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"},
+        )
+        surrogate = b"surrogate string escapes are unsupported"
+        for expression in (
+            r'"surrogates:\uDCFF"',
+            r'f"{3}\U0000d800"',
+            r'''rf"\uDCFF{'\ud800'}"''',
+            r'f"{3:\udcff}"',
+        ):
+            result = run(imre, "-c", f"import sys; sys.exit({expression})")
+            assert (result.returncode, result.stdout) == (1, b""), result
+            assert surrogate in result.stderr, result.stderr
+        (root / "surrogate_module.py").write_text(r'value = "\udfff"')
+        imported = run(
+            imre,
+            "-c",
+            "import sys, surrogate_module; sys.path.append('unused'); print(surrogate_module.value)",
+        )
+        assert (imported.returncode, imported.stdout) == (1, b""), imported
+        assert b"surrogate_module.py:1:" in imported.stderr, imported.stderr
+        assert surrogate in imported.stderr, imported.stderr
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
         diagnostic = run(imre, "-c", "print(__file__)")
