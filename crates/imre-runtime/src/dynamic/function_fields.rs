@@ -74,7 +74,7 @@ impl Context {
                 } else {
                     let format = self.int(1);
                     let value = self.call(fields.annotate, vec![format], Vec::new())?;
-                    if !matches!(self.heap.get(value), Value::Dict(_)) {
+                    if self.dict_storage(value).is_none() {
                         return Err(Error::new(
                             "TypeError",
                             format!(
@@ -113,7 +113,7 @@ impl Context {
                 "__dict__ must be set to a dictionary, not a '{}'",
                 self.type_name(value)
             )),
-            "__annotations__" if value != NONE && !matches!(object, Value::Dict(_)) => {
+            "__annotations__" if value != NONE && self.dict_storage(value).is_none() => {
                 Some("__annotations__ must be set to a dict object".into())
             }
             "__annotate__" if value != NONE && !self.callable(value) => {

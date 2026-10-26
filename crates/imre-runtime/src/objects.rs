@@ -36,7 +36,7 @@ pub(crate) mod exceptions;
 mod files;
 mod text_file;
 pub(crate) use text_file::TextFile;
-mod fnmatch;
+pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
@@ -77,8 +77,8 @@ mod structs;
 mod tempdirs;
 mod text;
 pub(crate) mod time;
-pub(crate) use text::split_parts;
 pub(crate) use text::{UrlInput, urlquote, urlsplit};
+pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
 mod unions;
@@ -122,6 +122,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    WeakProxy(records::weak::WeakRecord, bool),
     FunctoolsPlaceholder {
         class: bool,
     },

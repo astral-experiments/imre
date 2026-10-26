@@ -13,8 +13,8 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if kind == "dict" => {
-                self.builtins.get(&format!("dict.{name}")).copied()
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
         }
@@ -122,8 +122,14 @@ impl Context {
                 Value::Native(name) => {
                     matches!(
                         name.as_str(),
-                        "object.__getattribute__" | "object.__setattr__" | "object.__init__"
+                        "ast.AST.__init__"
+                            | "object.__getattribute__"
+                            | "object.__setattr__"
+                            | "object.__init__"
                     ) || name.starts_with("dict.")
+                        || name
+                            .strip_prefix("str.")
+                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
                 }
                 _ => false,
             };
@@ -562,7 +568,9 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
-            Value::Native(class) if class == "dict" => {
+            Value::Native(class)
+                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+            {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
                 }

@@ -335,6 +335,7 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_ast.py",
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
@@ -344,11 +345,13 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_type_identity.py",
             "boxed_class_attribute.py",
+            "boxed_request_strings.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
             "boxed_item_assignment.py",
+            "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
