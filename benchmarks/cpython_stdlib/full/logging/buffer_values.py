@@ -11,10 +11,10 @@ class Selective(BufferingHandler):
         super().__init__(1)
         self.flushes = 0
 
-    def shouldFlush(self, value: logging.LogRecord | None) -> bool:
-        if value is None:
+    def shouldFlush(self, record: logging.LogRecord | None) -> bool:
+        if record is None:
             return False
-        level = value.levelno
+        level = record.levelno
         if level is None:
             return False
         return level >= logging.WARNING
@@ -42,7 +42,7 @@ urgent = logging.LogRecord("buffer", logging.WARNING, "", 2, "flush", (), None)
 empty = handlers.BufferingHandler(0)
 print(empty.shouldFlush(record))
 empty.emit(record)
-print(empty.buffer)
+print(len(empty.buffer))
 empty.close()
 one = logging.handlers.BufferingHandler(1)
 print(one.shouldFlush(record))
@@ -62,7 +62,7 @@ handler.emit(None)
 print(saved[0] is None)
 handler.flush()
 print(len(saved))
-print(other.buffer)
+print(len(other.buffer))
 handler.emit(record)
 handler.close()
 print(len(saved))
