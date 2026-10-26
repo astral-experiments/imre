@@ -53,77 +53,114 @@ def _paths(domain: str, directory: str, languages: list[str]) -> list[str]:
     return paths
 
 
-_PRECEDENCE = {"?": 1, ":": 1, "||": 2, "&&": 3, "==": 4, "!=": 4,
-               "<": 5, "<=": 5, ">": 5, ">=": 5, "+": 6, "-": 6,
-               "*": 7, "/": 7, "%": 7, "!": 8}
+_PRECEDENCE = {"?": 1, ":": 1, "||": 2, "&&": 3, "!": 4, "==": 5, "!=": 5,
+               "<": 6, "<=": 6, ">": 6, ">=": 6, "+": 7, "-": 7,
+               "*": 8, "/": 8, "%": 8}
 
 
-def _plural_program(expression: str) -> list[str]:
-    """Compile the restricted C plural expression to postfix operators."""
+def _tokens(expression: str) -> list[str]:
+    words: list[str] = []
+    i = 0
+    while i < len(expression):
+        start = i
+        token = expression[i]
+        i += 1
+        if token in (" ", "\t"):
+            continue
+        if token.isalnum() or token == "_":
+            while i < len(expression) and (expression[i].isalnum() or expression[i] == "_"):
+                i += 1
+            token = expression[start:i]
+            if token != "n" and token.strip("0123456789"):
+                raise ValueError("invalid token in plural form: " + token)
+        elif expression[start:i + 1] in ("!=", "==", "<=", ">=", "&&", "||"):
+            i += 1
+            token = expression[start:i]
+        elif token not in _PRECEDENCE and token not in ("(", ")"):
+            raise ValueError("invalid token in plural form: " + token)
+        words.append(token)
+    return words
+
+
+def _plural_program(expression: str) -> list[tuple[str, int, int, int]]:
+    """Compile catalog plural forms to an expression tree without executing code."""
     if len(expression) > 1000:
         raise ValueError("plural form expression is too long")
     result: list[str] = []
     operators: list[str] = []
     operand = True
     depth = 0
-    i = 0
-    while i < len(expression):
-        token = expression[i]
-        i += 1
-        if token.isspace():
-            continue
-        if token == "n" or token in "0123456789":
+    conditions = 0
+    for token in _tokens(expression):
+        if token == "n" or token[0] in "0123456789":
             if not operand:
-                raise ValueError("invalid plural form")
-            if token != "n":
-                start = i - 1
-                while i < len(expression) and expression[i] in "0123456789":
-                    i += 1
-                token = expression[start:i]
+                raise ValueError("unexpected token in plural form: " + token)
             result.append(token)
             operand = False
         elif token == "(":
             if not operand:
-                raise ValueError("invalid plural form")
+                raise ValueError("unexpected token in plural form: (")
             depth += 1
-            if depth > 20:
+            if depth > 20 or depth + conditions > 21:
                 raise ValueError("plural form expression is too complex")
             operators.append(token)
         elif token == ")":
             if operand or depth == 0:
-                raise ValueError("unbalanced parenthesis in plural form")
+                raise ValueError("unexpected token in plural form: )")
             while operators and operators[-1] != "(":
+                if operators[-1] == "?":
+                    raise ValueError("unexpected token in plural form: )")
                 result.append(operators.pop())
             operators.pop()
             depth -= 1
         else:
-            pair = expression[i - 1:i + 1]
-            if pair in ("!=", "==", "<=", ">=", "&&", "||"):
-                token = pair
-                i += 1
-            rank = _PRECEDENCE.get(token, 0)
-            if not rank or operand != (token == "!"):
-                raise ValueError("invalid plural form")
+            if operand != (token == "!"):
+                raise ValueError("unexpected token in plural form: " + token)
+            if token == "!" and operators and _PRECEDENCE.get(operators[-1], 0) > _PRECEDENCE["!"]:
+                raise ValueError("unparenthesized negation after " + operators[-1] + " in plural form")
             if token == ":":
-                while operators and operators[-1] != "?" and operators[-1] != "(":
+                while operators and operators[-1] not in ("?", "("):
                     result.append(operators.pop())
                 if not operators or operators.pop() != "?":
-                    raise ValueError("invalid plural form")
-            else:
+                    raise ValueError("unexpected token in plural form: :")
+                conditions -= 1
+            elif token != "!":
                 while operators and operators[-1] not in ("?", "("):
                     previous = _PRECEDENCE[operators[-1]]
-                    if previous < rank or (previous == rank and token in ("?", "!")):
+                    rank = _PRECEDENCE[token]
+                    if previous < rank or (previous == rank and token == "?"):
                         break
                     result.append(operators.pop())
+                if token == "?":
+                    conditions += 1
+                    if depth + conditions > 21:
+                        raise ValueError("plural form expression is too complex")
             operators.append(token)
             operand = True
-    if operand or depth:
-        raise ValueError("invalid plural form")
+    if operand:
+        raise ValueError("unexpected end of plural form")
     while operators:
-        result.append(operators.pop())
-    if "?" in result:
-        raise ValueError("invalid plural form")
-    return result
+        token = operators.pop()
+        if token == "(":
+            raise ValueError("unbalanced parenthesis in plural form")
+        if token == "?":
+            raise ValueError("unexpected end of plural form")
+        result.append(token)
+
+    tree: list[tuple[str, int, int, int]] = []
+    roots: list[int] = []
+    for token in result:
+        left, right, other = -1, -1, -1
+        if token == "!":
+            left = roots.pop()
+        elif token in _PRECEDENCE:
+            if token == ":":
+                other = roots.pop()
+            right = roots.pop()
+            left = roots.pop()
+        roots.append(len(tree))
+        tree.append((token, left, right, other))
+    return tree
 
 
 def _binary(op: str, left: int, right: int) -> int:
@@ -150,45 +187,39 @@ def _binary(op: str, left: int, right: int) -> int:
     return int(left >= right)
 
 
-def _plural_index(program: list[str], number: int) -> int:
-    # Keep arithmetic errors with their operand until a short-circuit operator
-    # selects it. An unselected ternary or logical branch cannot raise.
-    values: list[tuple[int, str]] = []
-    for token in program:
-        if token == "n":
-            values.append((number, ""))
-        elif token[0] in "0123456789":
-            values.append((int(token), ""))
+def _plural_index(tree: list[tuple[str, int, int, int]], n: int) -> int:
+    # Evaluate only the selected side of logical and conditional operators.
+    # Each frame resumes after its first or second operand is available.
+    pending = [(len(tree) - 1, 0)]
+    values: list[int] = []
+    while pending:
+        index, step = pending.pop()
+        token, left, right, other = tree[index]
+        if left < 0:
+            values.append(n if token == "n" else int(token))
+        elif step == 0:
+            pending.append((index, 1))
+            pending.append((left, 0))
+        elif step == 2:
+            rhs = values.pop()
+            lhs = values.pop()
+            values.append(_binary(token, lhs, rhs))
         elif token == "!":
-            value, error = values.pop()
-            values.append((int(not value), error))
+            values[-1] = int(not values[-1])
+        elif token == ":":
+            pending.append((right if values.pop() else other, 0))
+        elif token == "&&" or token == "||":
+            if bool(values[-1]) == (token == "&&"):
+                values.pop()
+                pending.append((right, 0))
         else:
-            right = values.pop()
-            left = values.pop()
-            if token == ":":
-                condition = values.pop()
-                if condition[1]:
-                    values.append(condition)
-                elif condition[0]:
-                    values.append(left)
-                else:
-                    values.append(right)
-            elif left[1] or (token == "&&" and not left[0]) or (token == "||" and left[0]):
-                values.append(left)
-            elif right[1] or token == "&&" or token == "||":
-                values.append(right)
-            elif right[0] == 0 and token in ("%", "/"):
-                values.append((0, "integer modulo by zero" if token == "%" else "integer division or modulo by zero"))
-            else:
-                values.append((_binary(token, left[0], right[0]), ""))
-    value, error = values[0]
-    if error:
-        raise ZeroDivisionError(error)
-    return value
+            pending.append((index, 2))
+            pending.append((right, 0))
+    return values[0]
 
 
 class _PluralRule:
-    program: list[str]
+    program: list[tuple[str, int, int, int]]
 
     def __init__(self, expression: str) -> None:
         self.program = _plural_program(expression)
@@ -220,12 +251,12 @@ def _entry(data: bytes, table: int, index: int, big: bool) -> bytes:
 class _Catalog:
     singles: dict[str, str]
     plurals: dict[str, list[str]]
-    program: list[str]
+    program: list[tuple[str, int, int, int]]
 
     def __init__(self) -> None:
         self.singles = {}
         self.plurals = {}
-        self.program = ["n", "1", "!="]
+        self.program = _plural_program("n != 1")
 
     def load(self, data: bytes) -> None:
         magic = _word(data, 0, False)

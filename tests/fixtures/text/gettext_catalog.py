@@ -1,5 +1,5 @@
 from base64 import b64decode
-from gettext import bindtextdomain, dgettext, gettext as _, ngettext, npgettext, pgettext, textdomain
+from gettext import bindtextdomain, c2py, dgettext, gettext as _, ngettext, npgettext, pgettext, textdomain
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -44,3 +44,11 @@ with TemporaryDirectory() as directory:
     print(_("file"))
     print(ngettext("one", "many", 1))
     print(ngettext("one", "many", 2))
+
+for expression in ("1 || 2 % 0", "0 && 2 % 0", "0 ? 1 / 0 : 7", "1 / n", "!n == 1", "(n > 1", "0xa"):
+    try:
+        print(c2py(expression)(0))
+    except ValueError as error:
+        print(str(error))
+    except ZeroDivisionError as error:
+        print(str(error))
