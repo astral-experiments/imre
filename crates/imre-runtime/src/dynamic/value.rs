@@ -26,6 +26,10 @@ pub(super) struct CodeObject {
 pub(super) enum Body {
     Native(Code),
     Source(std::rc::Rc<super::source_code::Program>),
+    PendingGenerator {
+        source: &'static str,
+        body_line: u32,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +106,16 @@ impl Error {
 }
 
 impl Context {
+    /// Reuse the Python exception object when an already observed error is raised again.
+    pub(super) fn raised_instance(&mut self, mut error: Error) -> Id {
+        if let Some(id) = error.trace.as_mut().and_then(|trace| trace.instance.take()) {
+            *self.heap.get_mut(id) = Value::Raised(error);
+            id
+        } else {
+            self.alloc(Value::Raised(error))
+        }
+    }
+
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
         if let Some((mut loc, frame)) = self.heap.trace_location() {
             if let Some(&[line, start, split, end]) = span {
@@ -156,6 +170,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "count",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -356,6 +371,7 @@ pub(super) enum Value {
     Generator {
         code: Id,
         scope: Id,
+        iterators: Vec<Id>,
         offset: Option<usize>,
         running: bool,
     },
@@ -415,6 +431,10 @@ pub(super) enum Value {
     },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Count {
+        current: Id,
+        step: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -483,6 +503,7 @@ impl Value {
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
+            Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Zip {
                 inputs, pending, ..
             } => {
@@ -572,7 +593,15 @@ impl Value {
                 visit.extend([code.name, code.filename, code.parameters]);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
-            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
+            Self::Generator {
+                code,
+                scope,
+                iterators,
+                ..
+            } => {
+                visit.extend([*code, *scope]);
+                visit.extend(iterators);
+            }
             Self::Class {
                 scope, ancestors, ..
             } => {

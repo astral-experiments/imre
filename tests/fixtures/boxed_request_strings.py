@@ -3,6 +3,11 @@ class Index:
         return -3
 
 
+class FormatNumber(Index):
+    def __int__(self):
+        return 5
+
+
 class DescriptorOwner:
     partition = str.partition
 
@@ -13,6 +18,17 @@ class Text(str):
 
 def current():
     text = "é🦊:東:🦊"
+    print(["\\x%02x" % code for code in (0, 15, 31, 127, 159)])
+    print("☃ %% %02d/%04d %#06X %.4o" % (7, 42, 15, 7))
+    print("%(n)+06i:%(n)-5u" % {"n": 19})
+    print("%+060d" % (1 << 150))
+    number = FormatNumber()
+    print("%04x %04i %04u" % (number, number, 2.75))
+    for field in ("%02d", "%02x"):
+        try:
+            field % "1"
+        except TypeError as error:
+            print(error)
     print(str.find(text, ":"), str.partition(text, ":"), str.rpartition(text, ":"))
     print(str.partition is str.partition)
     parent = super(Text, Text)
