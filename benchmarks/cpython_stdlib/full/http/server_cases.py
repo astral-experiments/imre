@@ -123,21 +123,26 @@ with server:
 @contextmanager
 def listener(command, wrong=False, requests=1, *, legacy=False):
     with tempfile.TemporaryFile() as errors:
+        def diagnostic(message):
+            errors.seek(0)
+            return f"{command[0]} {message}\n{errors.read().decode(errors='replace')}".rstrip()
+
         variant = "legacy" if legacy else "wrong" if wrong else "normal"
         with subprocess.Popen([*command, variant, str(requests)], stdout=subprocess.PIPE, stderr=errors) as child:
             try:
                 # HTTPServer.server_bind performs a reverse lookup before the
                 # port can be published, even for a loopback listener.
                 if not select.select([child.stdout], [], [], 60)[0]:
-                    raise TimeoutError(f"{command[0]} did not publish its TCP port within 60 seconds")
+                    child.kill()
+                    child.wait()
+                    raise TimeoutError(diagnostic("did not publish its TCP port within 60 seconds"))
                 line = child.stdout.readline()
                 if not line:
-                    errors.seek(0)
-                    raise AssertionError(errors.read().decode())
+                    status = child.wait(timeout=8)
+                    raise AssertionError(diagnostic(f"exited with status {status} before publishing a TCP port"))
                 yield int(line)
-                if child.wait(timeout=8):
-                    errors.seek(0)
-                    raise AssertionError(errors.read().decode())
+                if status := child.wait(timeout=8):
+                    raise AssertionError(diagnostic(f"exited with status {status} after publishing its port"))
             finally:
                 if child.poll() is None:
                     child.kill()
@@ -199,14 +204,20 @@ def public_contracts(command):
     with listener(command) as port:
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         try:
-            conn.putrequest("CHECK", "/new")
-            conn.putheader("X-Value", "one")
-            conn.putheader("x-value", "two")
-            conn.endheaders()
-            response = conn.getresponse()
-            assert response.status == 200, response.reason
-            assert response.getheader("Server").startswith("Overridden/10 ")
-            assert response.read() == b"X-Value=one\nx-value=two\n"
+            conn.connect()
+            first_socket = conn.sock
+            for connection in ("keep-alive", "close"):
+                conn.putrequest("CHECK", "/new")
+                conn.putheader("Connection", connection)
+                conn.putheader("X-Value", "one")
+                conn.putheader("x-value", "two")
+                conn.endheaders()
+                assert conn.sock is first_socket
+                response = conn.getresponse()
+                assert response.status == 200, response.reason
+                assert response.getheader("Connection") == connection
+                assert response.getheader("Server").startswith("Overridden/10 ")
+                assert response.read() == b"X-Value=one\nx-value=two\n"
         finally:
             conn.close()
 

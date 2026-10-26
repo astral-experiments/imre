@@ -65,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
                 body += key + '=' + value + '\n'
         self.send_response(HTTPStatus.OK)
         self.send_header('Content-Length', str(len(body)))
-        self.send_header('Connection', 'close')
+        self.send_header('Connection', 'close' if self.close_connection else 'keep-alive')
         self.end_headers()
         self.wfile.write(body.encode())
 
@@ -87,7 +87,9 @@ try:
     raise AssertionError('eager binding')
 except AttributeError:
     pass
+sys.stderr.write('binding the loopback HTTP server\n')
 server.server_bind()
+sys.stderr.write('checking bound name and activating the listener\n')
 assert server.server_port == server.server_address[1]
 assert server.server_name == sys.argv[1]
 server.server_activate()
