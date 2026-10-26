@@ -1116,7 +1116,7 @@ pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str
 pub unsafe extern "C" fn imre_str_percent_pack(fmt: &Str, pack: &Object) -> *const Str {
     // SAFETY: the formatter retains values without mutating the rooted pack.
     let rendered = unsafe { pack.0.with(|storage| {
-        let sequence = storage.sequence();
+        let sequence = storage.sequence()?;
         let items = sequence.values.iter().map(|&word| {
             // SAFETY: every value is rooted by the pack at its declared element kind.
             sequence.kind.acquire(word)
