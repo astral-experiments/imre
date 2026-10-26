@@ -670,7 +670,9 @@ fn collect_class(
                     // Named exceptions use exception_aliases so subclasses can
                     // override a ClassVar[type[Exception]] constructor.
                     .filter(|value| match value {
-                        ClassValue::Binding(Binding::Definition(id)) => !exceptions.contains_key(id),
+                        ClassValue::Binding(Binding::Definition(id)) => {
+                            !exceptions.contains_key(id)
+                        }
                         _ => true,
                     })
                     .or_else(|| {
