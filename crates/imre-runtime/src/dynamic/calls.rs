@@ -148,8 +148,12 @@ impl Context {
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
-        let Value::Instance { class, .. } = *self.heap.get(object) else {
-            return Ok(None);
+        let class = match self.heap.get(object) {
+            Value::Instance { class, .. } => *class,
+            Value::Raised(Error {
+                class: Some(class), ..
+            }) if name == "__str__" => *class,
+            _ => return Ok(None),
         };
         self.class_attr(class, name)
             .map(|slot| self.bind_attribute(slot, object, class))
