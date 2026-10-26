@@ -225,12 +225,15 @@ pub unsafe extern "C" fn imre_exception_args(value: *const Object) -> *const Obj
 }
 
 /// Format a structured error using the same arguments returned by its public getter.
-pub(super) unsafe fn projected_repr(owner: *const Object) -> Option<Str> {
+pub(super) unsafe fn write_projected_repr(
+    owner: *const Object,
+    output: &mut super::super::values::ReprWriter<'_>,
+) -> std::fmt::Result {
     // SAFETY: the caller roots an actual exception; the getter transfers a new view.
     unsafe {
         let view = imre_exception_args(owner);
         if view.is_null() {
-            return None;
+            return Err(std::fmt::Error);
         }
         let view = crate::ObjectOwner::from_raw(view);
         // End the storage borrow before a member's repr can run.
@@ -238,7 +241,7 @@ pub(super) unsafe fn projected_repr(owner: *const Object) -> Option<Str> {
             Storage::ObjectValue(tuple) => imports::Positional(tuple.clone()),
             _ => unreachable!("argument tuple view"),
         });
-        Some(tuple.repr_args())
+        tuple.write_repr_args(output)
     }
 }
 

@@ -555,6 +555,7 @@ struct CheckedFile<'db> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
+    UnboundLocalRead(TextRange),
     Decorator(TextRange),
     RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
@@ -580,6 +581,7 @@ impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
+            Self::UnboundLocalRead(range) => (range, 10),
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
@@ -608,6 +610,7 @@ impl CheckedDiagnostic {
             Self::AbstractClassCall(call) | Self::CallableKey(call) => {
                 diagnostic == "call-non-callable" && call == range
             }
+            Self::UnboundLocalRead(read) => diagnostic == "unresolved-reference" && read == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
@@ -682,8 +685,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
-/// already checked the exact open slots before requesting these diagnostics.
+/// ty 0.0.14 counts functools.Placeholder as occupied and can leave bound
+/// tuple fields open. Imre has already checked the exact remaining signature.
 /// The zero-argument constructor also has a native runtime TypeError. Match
 /// only the diagnosed invocation; unrelated binding errors remain diagnostics.
 fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
@@ -719,7 +722,8 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
         )
     };
     if is_partial(callee) {
-        return rule == "too-many-positional-arguments";
+        return rule == "too-many-positional-arguments"
+            || (rule == "missing-argument" && call.range() == range);
     }
     if !matches!(callee, Type::ClassLiteral(_)) {
         return false;

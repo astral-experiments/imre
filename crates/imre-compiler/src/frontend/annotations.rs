@@ -64,6 +64,18 @@ impl Checker<'_> {
     /// Resolve the class object exported by collections, collections.abc or array.
     /// A local with the same name takes precedence over the module binding.
     pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
+        match self.collection_binding(expression) {
+            Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
+            Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
+            Some(Binding::Intrinsic(Intrinsic::Mapping {
+                typing_alias: false,
+            })) => Some("collections.abc.Mapping"),
+            _ => None,
+        }
+    }
+
+    /// Resolve an imported collections class only when no local shadows its root.
+    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
         let mut root = expression;
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
@@ -74,11 +86,7 @@ impl Checker<'_> {
         {
             return None;
         }
-        match self.resolve(expression) {
-            Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
-            Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
-            _ => None,
-        }
+        self.resolve(expression)
     }
 }
 

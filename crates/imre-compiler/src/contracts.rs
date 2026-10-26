@@ -59,12 +59,16 @@ impl Builtin {
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, Unknown),
             Self::Str
-                if args.first().is_some_and(|e| {
-                    matches!(
-                        e.ty,
-                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
-                    )
-                }) =>
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Bytes | Type::ImportException)) =>
+            {
+                Contract::new(true, PreservesLists)
+            }
+            Self::Str
+                if args
+                    .first()
+                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_) | Type::ObjectValue)) =>
             {
                 Contract::new(true, Unknown)
             }
@@ -996,6 +1000,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_formatter_time"
                 | "imre_formatter_message"
                 | "imre_logrecord_message"
+                | "imre_logrecord_repr"
                 | "imre_log_config"
                 | "imre_log_dict_config"
                 | "imre_log_typed_dict_config"
@@ -1019,6 +1024,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
+                | "imre_bytes_str"
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"

@@ -1,6 +1,5 @@
 //! A copytree exception owns the actual list of failed entries. Python can
 //! inspect or mutate that list through args, so render its current contents.
-use crate::StrOwner;
 use std::cell::OnceCell;
 use std::rc::Rc;
 
@@ -49,17 +48,21 @@ impl Errors {
         }
     }
 
-    pub(super) fn message(&self) -> StrOwner {
-        let mut repr = String::new();
-        // SAFETY: the list and all its tuple entries are retained by this payload.
+    pub(super) fn message(&self) -> super::Rendered {
+        let mut text = String::new();
+        self.write_message(&mut values::ReprWriter(&mut text))?;
+        super::rendered(text.into())
+    }
+
+    pub(super) fn write_message(&self, output: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        // SAFETY: this payload roots the list and every tuple entry during representation.
         unsafe {
-            values::write_repr(
-                &mut repr,
+            values::try_write_unchecked_repr(
+                output,
                 crate::ObjectOwner::as_ptr(&self.entries) as usize,
                 WordKind::new(5),
             )
-        };
-        StrOwner::new(repr.into())
+        }
     }
 }
 

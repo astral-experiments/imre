@@ -160,27 +160,34 @@ pub(super) fn native_size(value: &Int) -> Result<isize> {
 }
 
 /// Uses Ruff's byte repr rules, including quote choice and lowercase hex escapes.
-fn repr(value: &[u8]) -> Str {
+fn repr(value: &[u8]) -> Result<Str> {
     let mut output = String::new();
-    write_repr(&mut output, value);
-    Str::from(output)
+    write_quoted_repr(&mut super::values::ReprWriter(&mut output), value)
+        .map_err(|_| Error::allocation())?;
+    Ok(Str::from(output))
 }
 
 pub(super) fn write_repr(output: &mut String, value: &[u8]) {
+    write_quoted_repr(output, value).expect("writing to a String cannot fail");
+}
+
+pub(super) fn write_quoted_repr(
+    output: &mut impl super::values::ReprTarget,
+    value: &[u8],
+) -> std::fmt::Result {
     let escaped = AsciiEscape::new_repr(value);
     let layout = escaped.layout();
-    if output.is_empty()
-        && let Some(size) = layout.len.and_then(|body| body.checked_add(3))
-    {
-        output.reserve_exact(size);
-    }
+    use std::fmt::Write as _;
+    let size = layout
+        .len
+        .and_then(|body| body.checked_add(3))
+        .ok_or(std::fmt::Error)?;
+    let output = output.quoted_buffer(size)?;
     let quote = layout.quote.as_char();
-    output.push('b');
-    output.push(quote);
-    escaped
-        .write_body(output)
-        .expect("writing to a String cannot fail");
-    output.push(quote);
+    output.write_char('b')?;
+    output.write_char(quote)?;
+    escaped.write_body(output)?;
+    output.write_char(quote)
 }
 
 /// # Safety
@@ -227,7 +234,14 @@ pub unsafe extern "C" fn imre_bytes_release(value: *const Bytes) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    StrOwner::into_raw(StrOwner::new(repr(unsafe { &*value })))
+    finish(
+        repr(unsafe { &*value }).and_then(|text| {
+            StrOwner::try_new(text)
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -235,8 +249,10 @@ pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_print_bytes(value: *const Bytes) {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
-    let text = repr(unsafe { &*value });
-    crate::output_text(&text);
+    match repr(unsafe { &*value }) {
+        Ok(text) => crate::output_text(&text),
+        Err(error) => error.raise(),
+    }
 }
 
 /// # Safety

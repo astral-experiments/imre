@@ -2383,7 +2383,10 @@ impl<'a> Checker<'a> {
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if (name != "__doc__" && reserved(name))
-            || self.graph.modules[self.module].bindings.contains_key(name)
+            || (self.graph.modules[self.module].bindings.contains_key(name)
+                && (self.module_scope
+                    || !self.mapping_class_import(name)
+                    || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.local_classes.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
@@ -2739,6 +2742,22 @@ impl<'a> Checker<'a> {
         unreachable!("mismatched exact types return an error")
     }
 
+    /// Adapt an evaluated argument to the target's concrete or private representation.
+    fn coerce_argument_value(
+        &mut self,
+        value: Expr,
+        expected: Type,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if self.types.is_len_argument(expected) {
+            self.pack_len_value(value, site)
+        } else if self.types.is_unread_argument(expected) {
+            self.pack_unread_value(value, site, expected)
+        } else {
+            self.coerce(value, expected, site)
+        }
+    }
+
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         self.expr_expected_or(expression, expected, None)
@@ -2777,10 +2796,8 @@ impl<'a> Checker<'a> {
             // Keep the evaluated value so a lookup or callback runs exactly once.
             return if alternative == Some(value.ty) {
                 Ok(value)
-            } else if self.types.is_len_argument(expected) {
-                self.pack_len_value(value, expression)
             } else {
-                self.pack_unread_value(value, expression, expected)
+                self.coerce_argument_value(value, expected, expression)
             };
         }
         // A record can carry user fields with distinct types. An expected scalar type
@@ -3349,7 +3366,8 @@ impl<'a> Checker<'a> {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
-            && matches!(args[0].ty, Type::Str | Type::Bytes)
+            && (matches!(args[0].ty, Type::Str | Type::Bytes)
+                || args[0].ty == Type::Int && value.ty == self.types.string_or_int())
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -4110,11 +4128,18 @@ impl<'a> Checker<'a> {
             }
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+            let mut names: Vec<_> =
+                unbound_locals::candidates(statements, self.interactive_names, &|name| {
+                    self.mapping_class_import(name)
+                })
                 .into_iter()
                 .collect();
             names.sort_unstable();
             for name in names {
+                // A later assignment shadows the imported ABC throughout this function.
+                if self.mapping_class_import(&name) && !self.names.contains_key(&name) {
+                    self.declare(&name, Type::BuiltinClass, &statements[0])?;
+                }
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
                 if self
                     .names
@@ -5351,14 +5376,10 @@ impl<'a> Checker<'a> {
     }
 
     fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {
-        if op == ast::Operator::Add
-            && value.ty == Type::Bool
+        if matches!(op, ast::Operator::Add | ast::Operator::Sub)
             && matches!(other, Type::Int | Type::Bool)
         {
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-            }
+            powers::integer(value)
         } else {
             value
         }
@@ -5958,6 +5979,8 @@ impl<'a> Checker<'a> {
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
                     if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
+                        self.graph
+                            .checked_unbound_local_read(self.module, expression.range());
                         return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
                     }
                     return Err(error(
@@ -5978,13 +6001,31 @@ impl<'a> Checker<'a> {
                 }
                 let mut values = Vec::new();
                 let mut element = Type::Int;
+                let mut mixed = false;
                 for value in &list.elts {
                     let item = self.expr(value)?;
                     if values.is_empty() {
                         element = item.ty;
                     }
-                    self.expect(element, item.ty, value)?;
+                    if !self.module_scope
+                        && matches!(element, Type::Int | Type::Str)
+                        && matches!(item.ty, Type::Int | Type::Str)
+                    {
+                        mixed |= item.ty != element;
+                    } else {
+                        self.expect(element, item.ty, value)?;
+                    }
                     values.push(item);
+                }
+                if mixed {
+                    // Local storage can infer this closed layout. Module globals and
+                    // lists with a declared element type retain their storage contract.
+                    element = self.types.string_or_int();
+                    values = values
+                        .into_iter()
+                        .zip(&list.elts)
+                        .map(|(item, at)| self.coerce(item, element, at))
+                        .collect::<Result<_, _>>()?;
                 }
                 (self.types.list(element), ExprKind::List(values))
             }
@@ -7511,7 +7552,11 @@ impl<'a> Checker<'a> {
         Ok(value)
     }
 
-    fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
+    fn call_on(
+        &mut self,
+        call: &ast::ExprCall,
+        mut receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
             || self.graph.mutable_builtin_len && self.unshadowed_len(&call.func)
         {
@@ -7604,6 +7649,33 @@ impl<'a> Checker<'a> {
         }
         if self.unshadowed_builtin(&call.func, "dict") {
             return self.dict_constructor(call, None);
+        }
+        if call.arguments.keywords.iter().any(|kw| kw.arg.is_none())
+            && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        {
+            // An import exception binds each display before initializing its fields.
+            if let Some(kind) = self.exception_category(&call.func)
+                && self.is_import_error(kind)
+                && self.class_reference(&call.func).is_none()
+            {
+                return self.import_error(call, kind, None);
+            }
+            if let ast::Expr::Attribute(method) = &*call.func
+                && method.attr.as_str() == "__init__"
+                && crate::classes::super_method(call).is_none()
+                && self.class_reference(&method.value).is_none()
+                && self.exception_category(&method.value).is_none()
+                && self.resolve(&call.func).is_none()
+            {
+                let target = match receiver.take() {
+                    Some(value) => value,
+                    None => self.expr(&method.value)?,
+                };
+                if target.ty == Type::ImportException {
+                    return self.import_error(call, 41, Some(target));
+                }
+                receiver = Some(target);
+            }
         }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
@@ -7817,6 +7889,9 @@ impl<'a> Checker<'a> {
         if let Some(copy) = self.dataclass_copy(call)? {
             return Ok(copy);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Partial)) {
+            return self.partial(call);
+        }
         if calls::starred(call) {
             match self.resolve(&call.func) {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
@@ -8022,7 +8097,6 @@ impl<'a> Checker<'a> {
                 };
                 return self.typed_expr(value);
             }
-            Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
             Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
                 return self.placeholder_call(
                     call,
@@ -9600,6 +9674,13 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Str, Type::Str)
+            }
+            "int"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Union(_))
+                    && args[0].ty == self.types.string_or_int() =>
+            {
+                return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
             }
             "int"
                 if args.len() == 1

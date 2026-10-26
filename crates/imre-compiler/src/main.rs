@@ -12,6 +12,7 @@ mod cli;
 mod python_command;
 #[cfg(unix)]
 mod run_program;
+mod wheel;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
@@ -25,10 +26,12 @@ enum Allocator {
 }
 
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
+const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
        imre [-I] [-B] [-X utf8[=0|1]] -c CODE [PROGRAM_ARGUMENTS...]
        imre extension-header
+       imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
        imre build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        imre run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
@@ -79,11 +82,14 @@ fn run() -> Result<ExitCode, String> {
         );
         return Ok(ExitCode::SUCCESS);
     }
+    if command == "wheel" {
+        return wheel::run(args);
+    }
     if command == "extension-header" {
         if args.next().is_some() {
             return Err("imre extension-header takes no arguments".into());
         }
-        print!("{}", include_str!("../../imre-runtime/include/Python.h"));
+        print!("{PYTHON_HEADER}");
         return Ok(ExitCode::SUCCESS);
     }
     let (build_options, execute) = if command == "build" || command == "check" || command == "run" {

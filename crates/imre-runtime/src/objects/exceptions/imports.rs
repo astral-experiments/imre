@@ -17,7 +17,7 @@ pub(super) struct Import {
 }
 
 impl Import {
-    pub(super) fn message(&self) -> StrOwner {
+    pub(super) fn message(&self) -> Rendered {
         if self.msg.kind.raw() == 3 {
             word_text(self.msg.kind, self.msg.word, false)
         } else {
@@ -56,9 +56,9 @@ impl Positional {
         unsafe { tuple_item(self.0.word, index) }
     }
 
-    pub(super) fn message(&self, quote_single: bool) -> StrOwner {
+    pub(super) fn message(&self, quote_single: bool) -> Rendered {
         match self.len() {
-            0 => StrOwner::new(Str::new("")),
+            0 => rendered(Str::new("")),
             1 => {
                 let (kind, word) = self.item(0);
                 word_text(kind, word, quote_single)
@@ -67,22 +67,19 @@ impl Positional {
         }
     }
 
-    pub(super) fn repr_args(&self) -> Str {
-        let mut result = String::new();
+    pub(super) fn write_repr_args(&self, output: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        use std::fmt::Write as _;
         for i in 0..self.len() {
             if i != 0 {
-                result.push_str(", ");
+                output.write_str(", ")?;
             }
             let (kind, word) = self.item(i);
             // SAFETY: each argument stays rooted by the immutable tuple.
             unsafe {
-                values::write_checked_repr(&mut result, word, kind);
-                if imre_error_pending() != 0 {
-                    break;
-                }
+                values::try_write_repr(output, word, kind)?;
             }
         }
-        result.into()
+        Ok(())
     }
 }
 
