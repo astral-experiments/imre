@@ -75,7 +75,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
-mod time;
+pub(crate) mod time;
 pub(crate) use text::split_parts;
 pub(crate) use text::{UrlInput, urlquote, urlsplit};
 mod typing;

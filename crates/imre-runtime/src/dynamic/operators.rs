@@ -283,6 +283,7 @@ impl Context {
                 class: Some(class),
                 names,
                 values,
+                ..
             } => {
                 let fields = names
                     .iter()
