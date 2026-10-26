@@ -1,0 +1,50 @@
+[
+  {
+    "stage": "full suite",
+    "opt_level": 0,
+    "reachable_only": false,
+    "diagnostic": "Compiling staged/Lib/case.py (-O0)\nstaged/Lib/case.py:2:1: Imre: staged/Lib/test/test_mimetypes.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"platform\""
+  },
+  {
+    "stage": "full suite",
+    "opt_level": 0,
+    "reachable_only": true,
+    "diagnostic": "Compiling staged/Lib/case.py (-O0)\nstaged/Lib/case.py:2:1: Imre: staged/Lib/test/test_mimetypes.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"platform\""
+  },
+  {
+    "stage": "original module hooks",
+    "opt_level": 0,
+    "reachable_only": false,
+    "diagnostic": "Compiling 0/case.py (-O0)\n0/case.py:5:5: Imre: unsupported statement in the Imre subset"
+  },
+  {
+    "stage": "original module hooks",
+    "opt_level": 0,
+    "reachable_only": true,
+    "diagnostic": "Compiling 0/case.py (-O0)\n0/case.py:5:5: Imre: unsupported statement in the Imre subset"
+  },
+  {
+    "stage": "full suite",
+    "opt_level": 3,
+    "reachable_only": false,
+    "diagnostic": "Compiling staged/Lib/case.py (-O3)\nstaged/Lib/case.py:2:1: Imre: staged/Lib/test/test_mimetypes.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"platform\""
+  },
+  {
+    "stage": "full suite",
+    "opt_level": 3,
+    "reachable_only": true,
+    "diagnostic": "Compiling staged/Lib/case.py (-O3)\nstaged/Lib/case.py:2:1: Imre: staged/Lib/test/test_mimetypes.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"platform\""
+  },
+  {
+    "stage": "original module hooks",
+    "opt_level": 3,
+    "reachable_only": false,
+    "diagnostic": "Compiling 3/case.py (-O3)\n3/case.py:5:5: Imre: unsupported statement in the Imre subset"
+  },
+  {
+    "stage": "original module hooks",
+    "opt_level": 3,
+    "reachable_only": true,
+    "diagnostic": "Compiling 3/case.py (-O3)\n3/case.py:5:5: Imre: unsupported statement in the Imre subset"
+  }
+]
