@@ -1,32 +1,37 @@
 //! Python exposes the identity of decoded dictionary keys. Every object in one
 //! input shares owners, including objects reached later through a deferred span.
 use crate::StrOwner;
+use crate::shared::Shared;
+use allocator_api2::alloc::AllocError;
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashSet;
 use std::ops::Deref;
-use std::rc::Rc;
 
 use super::{Error, Str};
 
-type Owners = Rc<RefCell<HashSet<StrOwner>>>;
+type Owners = Shared<RefCell<HashSet<StrOwner>>>;
 
 #[derive(Default)]
 pub(super) struct KeyMemo(OnceCell<Owners>);
 
 impl KeyMemo {
-    fn owners(&self) -> &Owners {
-        self.0.get_or_init(Default::default)
-    }
-
-    pub(super) fn shared(&self) -> Self {
-        Self(OnceCell::from(self.owners().clone()))
-    }
-
-    pub(super) fn fields(&self, entries: Vec<(Str, usize)>) -> ObjectFields {
-        ObjectFields {
-            entries,
-            owners: self.owners().clone(),
+    fn owners(&self) -> Result<&Owners, AllocError> {
+        if let Some(owners) = self.0.get() {
+            return Ok(owners);
         }
+        let fresh = Shared::try_new(RefCell::new(HashSet::new()))?;
+        Ok(self.0.get_or_init(|| fresh))
+    }
+
+    pub(super) fn shared(&self) -> Result<Self, AllocError> {
+        Ok(Self(OnceCell::from(self.owners()?.clone())))
+    }
+
+    pub(super) fn fields(&self, entries: Vec<(Str, usize)>) -> Result<ObjectFields, AllocError> {
+        Ok(ObjectFields {
+            entries,
+            owners: self.owners()?.clone(),
+        })
     }
 }
 

@@ -409,6 +409,7 @@ impl Builtin {
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
             | Self::JsonErrorField(_)
             | Self::HashRecord
@@ -483,7 +484,6 @@ impl Builtin {
             | Self::MockCallList { .. }
             | Self::JsonIsInt
             | Self::Len
-            | Self::JsonEmptyObject
             | Self::WallTime
             | Self::CacheNew
             | Self::CacheTable
@@ -964,6 +964,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_len"
                 | "imre_json_get_receiver"
                 | "imre_json_add"
+                | "imre_json_empty_object"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"

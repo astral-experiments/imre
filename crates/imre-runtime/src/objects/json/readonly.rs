@@ -554,9 +554,15 @@ fn push_node(
     let token = raw;
     let raw = token.get();
     let node = match raw.as_bytes()[0] {
-        b'{' => Node::Object(source.keys.fields(
-            serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
-        )),
+        b'{' => Node::Object(
+            source
+                .keys
+                .fields(
+                    serde_json::Deserializer::from_str(raw)
+                        .deserialize_map(Fields(nodes, source))?,
+                )
+                .map_err(|_| allocation_error::<serde_json::Error>(source.refused))?,
+        ),
         b'[' => match arrays::Deferred::new(raw, source)? {
             Some(array) => Node::Deferred(array),
             None => push_array(nodes, raw, source)?,
@@ -686,7 +692,9 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
             && let Some(fields) = root_fields(source, &mut nodes)
         {
             let index = nodes.len();
-            nodes.push(Node::Object(source.keys.fields(fields)));
+            nodes.push(Node::Object(source.keys.fields(fields).map_err(|_| {
+                allocation_error::<serde_json::Error>(source.refused)
+            })?));
             index
         } else {
             if source.refused.get() {
@@ -985,7 +993,13 @@ pub unsafe extern "C" fn imre_json_add_fields(
 /// Creates one separate read-only dictionary for a dataclass default factory.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_json_empty_object() -> *const Object {
-    View::single(Node::Object(KeyMemo::default().fields(Vec::new()))).into_handle()
+    finish(
+        KeyMemo::default()
+            .fields(Vec::new())
+            .map(|fields| View::single(Node::Object(fields)).into_handle())
+            .map_err(|_| Error::allocation()),
+        std::ptr::null(),
+    )
 }
 
 pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {

@@ -96,7 +96,11 @@ impl<'de> Visitor<'de> for &mut Elements<'_> {
             let value = map.next_value_seed(&mut *self)?;
             push(&mut fields, (key, value), self.refused)?;
         }
-        Ok(Node::Object(self.keys.fields(fields)))
+        Ok(Node::Object(
+            self.keys
+                .fields(fields)
+                .map_err(|_| allocation_error::<A::Error>(self.refused))?,
+        ))
     }
 }
 

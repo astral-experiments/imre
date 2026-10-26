@@ -53,11 +53,13 @@ impl Frame {
         }
     }
 
-    fn finish(self, keys: &KeyMemo) -> Node {
-        match self {
+    fn finish(self, keys: &KeyMemo) -> Result<Node, Problem> {
+        Ok(match self {
             Self::Array(items) => Node::Array(items),
-            Self::Object { fields, .. } => Node::Object(keys.fields(fields)),
-        }
+            Self::Object { fields, .. } => {
+                Node::Object(keys.fields(fields).map_err(|_| Problem::Memory)?)
+            }
+        })
     }
 }
 
@@ -117,7 +119,7 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
                     continue;
                 }
                 cursor.pos += 1;
-                frame.finish(&keys)
+                frame.finish(&keys)?
             }
             _ => {
                 let start = cursor.pos;
@@ -146,7 +148,7 @@ fn parse(text: &str) -> Result<(Vec<Node>, usize), Problem> {
             match cursor.peek() {
                 Some(close) if close == frame.close() => {
                     cursor.pos += 1;
-                    node = frames.pop().unwrap().finish(&keys);
+                    node = frames.pop().unwrap().finish(&keys)?;
                 }
                 Some(b',') => {
                     let comma = cursor.pos;

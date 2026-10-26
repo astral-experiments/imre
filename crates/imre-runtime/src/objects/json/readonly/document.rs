@@ -143,7 +143,11 @@ impl Value {
                         Ok::<_, Error>(())
                     })
                 }?;
-                Node::Object(KeyMemo::default().fields(fields))
+                Node::Object(
+                    KeyMemo::default()
+                        .fields(fields)
+                        .map_err(|_| Error::allocation())?,
+                )
             }
         };
         nodes.try_reserve(1).map_err(|_| Error::allocation())?;
