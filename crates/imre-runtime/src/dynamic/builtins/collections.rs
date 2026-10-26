@@ -73,6 +73,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
             kind: DictViewKind::Keys | DictViewKind::Items,
             ..
         } => Some(value),
+        Value::Slice(values) => values.iter().find_map(|&x| unhashable_part(ctx, x)),
         Value::Tuple(values) | Value::NamedTuple { values, .. } => {
             values.iter().find_map(|&x| unhashable_part(ctx, x))
         }
