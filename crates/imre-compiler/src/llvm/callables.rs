@@ -19,6 +19,8 @@ pub(super) fn adapters(
     let mut object_receiver = false;
     let mut int_list_receiver = false;
     let mut empty_partial = false;
+    let mut inspected = false;
+    let mut marked = BTreeSet::new();
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
@@ -41,7 +43,29 @@ pub(super) fn adapters(
                 ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
             );
             empty_partial |= matches!(value.kind, ExprKind::Builtin(Builtin::EmptyPartial, _));
+            if let ExprKind::Builtin(builtin, _) = &value.kind {
+                match builtin {
+                    Builtin::IsCoroutineFunction => inspected = true,
+                    Builtin::MarkCoroutine(id) => {
+                        marked.insert(*id);
+                    }
+                    _ => {}
+                }
+            }
         });
+    }
+    for id in &marked {
+        output
+            .global(
+                output.entry,
+                &format!("coroutine_mark_{id}"),
+                "global",
+                "i8",
+            )
+            .push_str("0\n");
+    }
+    if inspected {
+        coroutine_table(module, &targets, &marked, output);
     }
     if targets.is_empty() && !invoked && !empty_partial {
         return;
@@ -159,6 +183,47 @@ pub(super) fn adapters(
         writeln!(body, "  ret {returns} %result\n}}").unwrap();
         output.common().push('\n');
     }
+}
+
+/// A callback retains its two-word calling ABI. Only programs inspecting a
+/// callback emit this table of async definitions, partial frames and markers.
+fn coroutine_table(
+    module: &Module,
+    targets: &BTreeSet<(usize, bool, bool)>,
+    marked: &BTreeSet<usize>,
+    output: &mut Output,
+) {
+    use crate::types::CoroutineTarget;
+    let previous = output.current;
+    output.current = output.entry;
+    let entry = "{ ptr, i64, ptr }";
+    let mut rows = Vec::new();
+    for &(id, bound, _) in targets {
+        let slot = match module.types.coroutine_target(id) {
+            Some(CoroutineTarget::Coroutine) => "-1".to_owned(),
+            Some(CoroutineTarget::Partial(slot)) => slot.to_string(),
+            None if marked.contains(&id) => "-2".to_owned(),
+            None => continue,
+        };
+        let adapter = output.adapter_ref(id, bound);
+        let mark = if marked.contains(&id) {
+            format!("@coroutine_mark_{id}")
+        } else {
+            "null".to_owned()
+        };
+        rows.push(format!(
+            "{entry} {{ ptr @{adapter}, i64 {slot}, ptr {mark} }}"
+        ));
+    }
+    rows.push(format!("{entry} zeroinitializer"));
+    let table = output.global(
+        output.entry,
+        "coroutine_targets",
+        "constant",
+        format_args!("[{} x {entry}]", rows.len()),
+    );
+    writeln!(table, "[{}]", rows.join(", ")).unwrap();
+    output.current = previous;
 }
 
 impl Emitter<'_, '_> {
