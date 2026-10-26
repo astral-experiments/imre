@@ -97,3 +97,10 @@ def current():
                 function(*args, **kwargs)
             except TypeError as exc:
                 print(str(exc))
+
+    cursor = Cursor()
+    print(1 in cursor, cursor.calls, next(cursor, None))
+    try:
+        1 in Broken()
+    except ValueError as exc:
+        print(str(exc))
