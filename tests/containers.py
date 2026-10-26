@@ -8,6 +8,9 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import comparison_allocation
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "containers"
 ITEM = """
 class Item:
@@ -19,6 +22,7 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
     "dict_values_iteration": """
@@ -386,7 +390,6 @@ REJECTED = {
     """,
     "dict_empty_without_context": "values = {}\n",
     "dict_empty_constructor_without_context": "values = dict()\n",
-    "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
     "dict_bool_key_annotation": "values: dict[bool, int] = {}\n",
     "dict_list_key_annotation": "values: dict[list[int], int] = {}\n",
     "dict_mutable_tuple_key_annotation": "values: dict[tuple[int, list[int]], int] = {}\n",
@@ -407,9 +410,9 @@ REJECTED = {
     "dict_get_wrong_key": 'values = {"one": 1}\nvalues.get(1)\n',
     "dict_get_wrong_arity": 'values = {"one": 1}\nvalues.get("one", 2, 3)\n',
     "dict_get_keyword": 'values = {"one": 1}\nvalues.get("one", default=2)\n',
-    "dict_get_without_narrowing": 'values = {"one": 1}\nprint(values.get("one") + 1)\n',
-    "dict_get_repeated_call_narrowing": 'values = {"one": 1}\nif values.get("one") is not None:\n    print(values.get("one") + 1)\n',
-    "dict_optional_element_without_narrowing": 'values: dict[str, int | None] = {"one": 1}\nprint(values["one"] + 1)\n',
+    "dict_get_without_narrowing": 'values = {"one": 1}\nrequired: int = values.get("one")\n',
+    "dict_get_repeated_call_narrowing": 'values = {"one": 1}\nif values.get("one") is not None:\n    required: int = values.get("one")\n',
+    "dict_optional_element_without_narrowing": 'values: dict[str, int | None] = {"one": 1}\nrequired: int = values["one"]\n',
     "dict_optional_receiver": "def show(values: dict[int, int] | None) -> None:\n    print(values[1])\n",
     "dict_string_augmented_assignment": 'values = {1: "one"}\nvalues[1] += "two"\n',
     "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
@@ -476,26 +479,26 @@ REJECTED = {
         def show(value: int | None, values: list[int | None]) -> None:
             if value is not None:
                 for value in values:
-                    print(value + 1)
+                    required: int = value
     """,
     "iteration_optional_tuple_target_invalidates_fact": """
         def show(value: int | None, values: list[tuple[int | None, int]]) -> None:
             if value is not None:
                 for value, index in values:
-                    print(value + 1)
+                    required: int = value
     """,
     "iteration_optional_unpacking_backedge": """
         def show(value: int | None) -> None:
             if value is not None:
                 for index in [1, 2]:
-                    print(value + 1)
+                    required: int = value
                     value, index = (None, index)
     """,
     "iteration_optional_nested_unpacking_backedge": """
         def show(value: int | None) -> None:
             if value is not None:
                 for index in [1, 2]:
-                    print(value + 1)
+                    required: int = value
                     index, (value, again) = (index, (None, True))
     """,
     "mixed_elements": 'values = ["text", 1]\n',
@@ -546,7 +549,6 @@ show(None)
 items: list[Item | None] = [None]
 print(items[0].name)
 """,
-    "optional_arithmetic_without_narrowing": "def add(value: int | None) -> int:\n    return value + 1\n",
     "optional_wrong_argument": "def show(value: str | None) -> None:\n    pass\nshow(1)\n",
     "optional_rebind_invalidates_narrowing": ITEM
     + """
@@ -559,7 +561,7 @@ show(Item("x"))
     "optional_or_true_has_no_fact": """
         def use(value: int | None, flag: bool) -> int:
             if value is not None or flag:
-                return value + 1
+                return value
             return 0
         use(None, True)
     """,
@@ -567,20 +569,20 @@ show(Item("x"))
         def use(value: int | None, flag: bool) -> int:
             if value is None and flag:
                 return 0
-            return value + 1
+            return value
         use(None, False)
     """,
     "optional_boolean_fact_does_not_escape": """
         def use(value: int | None) -> int:
             positive = value is not None and value > 0
-            return value + 1
+            return value
         use(None)
     """,
     "optional_for_backedge": """
         def use(value: int | None) -> None:
             if value is not None:
                 for index in range(2):
-                    print(value + 1)
+                    required: int = value
                     value = None
         use(1)
     """,
@@ -589,7 +591,7 @@ show(Item("x"))
             if value is not None:
                 index = 0
                 while index < 2:
-                    print(value + 1)
+                    required: int = value
                     value = None
                     index += 1
         use(1)
@@ -605,7 +607,7 @@ show(Item("x"))
         def use(value: int | None) -> None:
             if value is not None:
                 for index in range(2):
-                    print(value + 1)
+                    required: int = value
                     if index == 0:
                         value = None
         use(1)
@@ -614,7 +616,7 @@ show(Item("x"))
         def use(value: int | None) -> None:
             if value is not None:
                 for outer in range(2):
-                    print(value + 1)
+                    required: int = value
                     for inner in range(1):
                         value = None
         use(1)
@@ -624,7 +626,7 @@ show(Item("x"))
             if value is not None:
                 for index in range(1):
                     value = None
-                return value + 1
+                return value
             return 0
         use(1)
     """,
@@ -638,7 +640,7 @@ show(Item("x"))
     "optional_guarded_subscript": """
         def use(values: list[int | None]) -> int:
             if values[0] is not None:
-                return values[0] + 1
+                return values[0]
             return 0
         use([1])
     """,
@@ -966,6 +968,20 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def check_join_under_memory_limit(command: list[str]) -> None:
+    import resource
+
+    def limit() -> None:
+        resource.setrlimit(resource.RLIMIT_AS, (96 << 20, 96 << 20))
+
+    # The private list holds repeated references to one string. Building the
+    # 256 MiB result must fail at the join, after the user's print has run.
+    result = subprocess.run(
+        [*command, "bounded"], capture_output=True, check=True, timeout=30, preexec_fn=limit
+    )
+    assert result.stdout == b"finished collecting\njoin raised MemoryError\n", result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -987,6 +1003,9 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-containers-") as directory:
         temporary = Path(directory)
+        # GNU ld's allocator wrappers run on the native Linux host; ASan supplies its own allocator.
+        if sys.platform.startswith("linux") and args.target is None and not args.sanitize:
+            passed += comparison_allocation.check(args, temporary)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
@@ -1061,6 +1080,9 @@ def main() -> None:
                     level,
                     actual.stderr,
                 )
+                if name == "private_join_memory" and sys.platform == "linux" and not args.sanitize:
+                    check_join_under_memory_limit([sys.executable, str(path)])
+                    check_join_under_memory_limit([str(binary)])
                 passed += 1
     print(
         f"Passed {passed} container checks ({len(REJECTED)} rejected programs; optimization levels {args.opt_levels}; ASan={args.sanitize})"

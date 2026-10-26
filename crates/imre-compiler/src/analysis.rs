@@ -53,12 +53,20 @@ pub(crate) struct Session {
     files: Vec<File>,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     extension_roots: Vec<PathBuf>,
-    used_hints: Cell<bool>,
+    hint_reads: Cell<usize>,
 }
 
 impl Session {
+    pub(crate) fn has_extension_roots(&self) -> bool {
+        !self.extension_roots.is_empty()
+    }
+
+    pub(crate) fn hint_reads(&self) -> usize {
+        self.hint_reads.get()
+    }
+
     pub(crate) fn new(root: &Path, extension_roots: &[PathBuf]) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
@@ -90,10 +98,7 @@ impl Session {
                 "from tomllib import load as load, loads as loads\n",
             ),
             ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
-            (
-                "unidiff",
-                "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
-            ),
+            ("unidiff", include_str!("analysis/unidiff.pyi")),
             (
                 "tomli_w",
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
@@ -108,7 +113,7 @@ impl Session {
             .fs()
             .write_file_all(
                 intrinsic.join("__init__.pyi"),
-                "from . import json as json, toml as toml\n",
+                "from . import json as json, toml as toml\nfrom typing import TypeVar, dataclass_transform\n_T = TypeVar('_T')\n@dataclass_transform(frozen_default=True)\ndef struct(cls: type[_T], /) -> type[_T]: ...\n",
             )
             .map_err(|error| error.to_string())?;
         system
@@ -133,6 +138,31 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        // CPython truth-tests any non-None debug_override and raises for conflicting
+        // optimization arguments. Preserve these catchable routes and the original
+        // unrelated frozen-importlib declarations, including their version guards.
+        let bootstrap = vendored
+            .read_to_string("stdlib/_frozen_importlib_external.pyi")
+            .map_err(|e| e.to_string())?
+            .replace(
+                "def cache_from_source(path: StrPath,",
+                "def cache_from_source(path: object,",
+            )
+            .replace(
+                "debug_override: bool, *, optimization: None = None",
+                "debug_override: object, *, optimization: object = None",
+            )
+            .replace(
+                "def source_from_cache(path: StrPath)",
+                "def source_from_cache(path: object)",
+            );
+        system
+            .fs()
+            .write_file_all(
+                SystemPathBuf::from(root).join("_frozen_importlib_external.pyi"),
+                bootstrap,
+            )
+            .map_err(|e| e.to_string())?;
         // typeshed omits inspect's private default; preserve all its public signatures.
         let inspect = vendored
             .read_to_string("stdlib/inspect.pyi")
@@ -233,7 +263,7 @@ impl Session {
             rules: Arc::new(rules),
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
-            used_hints: Cell::new(false),
+            hint_reads: Cell::new(0),
         })
     }
 
@@ -338,7 +368,7 @@ impl Session {
 
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             expression.inferred_type(&model),
@@ -356,7 +386,7 @@ impl Session {
         attr: &ruff_python_ast::ExprAttribute,
     ) -> bool {
         use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let program = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, program);
         if !matches!(attr.inferred_type(&model), Some(Ty::BoundMethod(_))) {
@@ -391,7 +421,7 @@ impl Session {
     /// a source-level narrowing. The backend must still guard mutable rereads.
     pub(crate) fn narrowed_instance(&self, module: usize, expression: &Expr) -> bool {
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let program = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, program);
         let Some(ty @ Ty::NominalInstance(_)) = expression.inferred_type(&model) else {
@@ -409,7 +439,7 @@ impl Session {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
 
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
         if !matches!(
@@ -448,7 +478,7 @@ impl Session {
     /// as declared for sys.argv in ty's vendored standard library. Equality
     /// (not assignability) rules out Any and lists with a different field ABI.
     pub(crate) fn is_string_list(&self, module: usize, value: &Expr) -> bool {
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         let Some(actual) = value.inferred_type(&model) else {
             return false;
@@ -464,7 +494,7 @@ impl Session {
     }
 
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             value.inferred_type(&model),
@@ -524,47 +554,88 @@ struct CheckedFile<'db> {
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
+    AbstractClassCall(TextRange),
+    UnboundLocalRead(TextRange),
     Decorator(TextRange),
+    RuntimeOverload(TextRange),
+    OptionalLockContext(TextRange),
     Call(TextRange),
+    NonCallable(TextRange),
+    InertReturn(TextRange),
     DictDeletion(TextRange),
+    DeferredName(TextRange),
     Keyword(TextRange),
-    TupleListRead(TextRange),
+    CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    BuiltinAttribute(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    ArgumentType(TextRange),
+    RepeatedKeyword(TextRange),
+    NonIterableSpread(TextRange),
+    CallableKey(TextRange),
 }
 
 impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
+            Self::AbstractClassCall(range) => (range, 9),
+            Self::UnboundLocalRead(range) => (range, 10),
             Self::Decorator(range) => (range, 0),
+            Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
+            Self::NonCallable(range) => (range, 12),
             Self::Keyword(range) => (range, 2),
-            Self::TupleListRead(range) => (range, 3),
+            Self::CheckedIndexRead(range) => (range, 3),
+            Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::BuiltinAttribute(range) => (range, 14),
             Self::ExcessArgument(range) => (range, 6),
+            Self::InertReturn(range) => (range, 13),
             Self::PositionalKeyword(range) => (range, 7),
+            Self::DeferredName(range) => (range, 9),
+            Self::NonIterableSpread(range) => (range, 10),
+            Self::RuntimeOverload(range) => (range, 12),
+            Self::CallableKey(range) => (range, 16),
+            Self::ArgumentType(range) => (range, 15),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
+            Self::AbstractClassCall(call) | Self::CallableKey(call) => {
+                diagnostic == "call-non-callable" && call == range
+            }
+            Self::UnboundLocalRead(read) => diagnostic == "unresolved-reference" && read == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
+            Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
+            Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
+            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::OptionalLockContext(expr) => {
+                diagnostic == "invalid-context-manager" && expr == range
+            }
             Self::Keyword(keyword) => diagnostic == "unknown-argument" && keyword == range,
+            Self::RepeatedKeyword(keyword) => {
+                diagnostic == "parameter-already-assigned" && keyword == range
+            }
             Self::PositionalKeyword(keyword) => {
                 diagnostic == "positional-only-parameter-as-kwarg" && keyword == range
             }
-            Self::TupleListRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::CheckedIndexRead(read) => diagnostic == "not-subscriptable" && read == range,
+            Self::NonIterableSpread(value) => diagnostic == "not-iterable" && value == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ArgumentType(arg) => diagnostic == "invalid-argument-type" && arg == range,
+            Self::BuiltinAttribute(name) => diagnostic == "unresolved-attribute" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }
@@ -614,8 +685,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// ty 0.0.14 counts functools.Placeholder as an occupied parameter. Imre has
-/// already checked the exact open slots before requesting these diagnostics.
+/// ty 0.0.14 counts functools.Placeholder as occupied and can leave bound
+/// tuple fields open. Imre has already checked the exact remaining signature.
 /// The zero-argument constructor also has a native runtime TypeError. Match
 /// only the diagnosed invocation; unrelated binding errors remain diagnostics.
 fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
@@ -651,7 +722,8 @@ fn native_partial_call(db: &dyn Db, file: File, range: TextRange, rule: &str) ->
         )
     };
     if is_partial(callee) {
-        return rule == "too-many-positional-arguments";
+        return rule == "too-many-positional-arguments"
+            || (rule == "missing-argument" && call.range() == range);
     }
     if !matches!(callee, Type::ClassLiteral(_)) {
         return false;
@@ -763,7 +835,7 @@ impl AnalysisCache {
         graph: &crate::modules::SourceGraph,
         lowering_succeeded: bool,
     ) {
-        if graph.session.used_hints.take() {
+        if graph.session.hint_reads.take() != 0 {
             self.hints
                 .get_or_insert_with(|| CachedSession::new(graph.session.clone(), &graph.inputs));
         } else if lowering_succeeded {

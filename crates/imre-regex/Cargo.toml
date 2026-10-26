@@ -1,0 +1,14 @@
+[package]
+name = "imre-regex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+regex.workspace = true
+regex-syntax.workspace = true
+
+[lints]
+workspace = true

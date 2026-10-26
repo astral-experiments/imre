@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "platform": "linux",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "lib_test_tree": "b4324777842d3e16d2f95dc24789b2a80486541a",
+  "sources": {
+    "Lib/test/test_os.py": {
+      "blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5",
+      "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c"
+    },
+    "Lib/test/test_posix.py": {
+      "blob": "a895d57d1ffec1526332154669c9e72dccf3fef3",
+      "sha256": "86dd7b44a1abdd6f01684b7ba9483be55961d360c232d63639b973f59eebfed8"
+    },
+    "Lib/test/test_genericpath.py": {
+      "blob": "1a44cedcd360b11f2924bf7effca09a04c5e259a",
+      "sha256": "7bd29efff32abbfaae89f57f4d6855e0c5e2940c1aae0a492707d147c8c95301"
+    },
+    "Lib/test/mapping_tests.py": {
+      "blob": "20306e1526d7b84819a6dbf2f224f6da1a0e45fd",
+      "sha256": "053c7c56373de33592407282ae46d4cba92bed1d141829d63aa838c0e6b20c5e"
+    },
+    "LICENSE": {
+      "blob": "20cf39097c68baa17cc566b64e76d34ebf034044",
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    }
+  },
+  "imre_commit": "aaf044ffc38c1c0925e37d19504e1f52546383b1",
+  "imre_tree": "c40a493d58e189e2b099707135198f9852c7d5ab",
+  "compiler_sha256": "32db76e739b9ccd3c94c6185215647b7136ff68ddea97ce5ef1b9ae30d3e8801",
+  "runtime_sha256": "378c3008d40fd9e1e1916ef4b85003a173e4d5db85f17c7b4ec0cd623e3705fa",
+  "entry_sha256": {
+    "imre_os_imports.py": "9ba69007659d30c0e9dc55c8a3d0307340c69fb6e06fffd29d8a92ff68ebcc55",
+    "imre_os_run.py": "d0c69f694023b55ee7d6275618805248785edc70c67a56853e93c75275d58392"
+  },
+  "reports_sha256": {
+    "shared-codec-consumer-linux.json": "2d55dc1aa32f63756b0e4ea087893f7a9977a225d59c76332e074481adba3f3e",
+    "suite-startup-linux.json": "aad923a1f9a1b02bafe4cb5a4031ccad2a5d81d4b4f27a40757754e6ceae7c60",
+    "whole-suite-startup-linux.json": "a2b2e870efcc7673e11aba7e7569231f8a09d1bc6ae64db7e98e0ddaf398e81f"
+  },
+  "registry_fixture": {
+    "source": "benchmarks/cpython_stdlib/full/sys/codec_device.py",
+    "source_sha256": "357b398c03051ef053e71b2fc646522cb3e2c6f3e532d853b5a52ab93e1e814a",
+    "report_sha256": "2d55dc1aa32f63756b0e4ea087893f7a9977a225d59c76332e074481adba3f3e",
+    "published_report_sha256": "2d55dc1aa32f63756b0e4ea087893f7a9977a225d59c76332e074481adba3f3e",
+    "execution": "CPython body, assertions, OS device encoding and fixtures; Imre codec lookup in terminal; upstream skip on redirected stdin"
+  },
+  "occurrences": {
+    "test.test_os": 375,
+    "test.test_posix": 179,
+    "test.test_genericpath": 25
+  },
+  "whole_suite_executed": 0,
+  "native_os_operations_in_registry_fixture": 0
+}

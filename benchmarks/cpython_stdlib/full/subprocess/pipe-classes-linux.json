@@ -1,0 +1,286 @@
+{
+  "schema": "imre.subprocess.pipe-classes/v1",
+  "platform": "linux",
+  "imre_revision": "025f9a5c73ff61263c02473bc19a6cd832cc611a",
+  "tested_tree": "b3bf29d14d2c37861a04d00552b1488f907c20bf",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "08d1b3e5231ac9ca7d48ef945e681daf525de4773e4fb1620fbf74449985cd6c",
+        "runtime": "3a6fdf53205dfca0dd7201f5ef6713e04248874e771e95c111fcd00f7db20786",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "77114b8af5aa2b1cd0075d6357dee05cef16c8cb195d3cbd5029ddebd5532b27",
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "native_class": "BufferedIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "d8512aa0aa06f8d1c603ec7779cb705bc6e35b11693a645a40e424e03dc20267",
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "native_class": "RawIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "1ad35b3db187e729e82192f023663d1160d832e11d3cf252ad4b2a8810819560",
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "native_class": "BufferedIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "a7ce52386081da3339656594e50752c2be5c27323597ce944d5a1c098eb702be",
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "native_class": "RawIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "08d1b3e5231ac9ca7d48ef945e681daf525de4773e4fb1620fbf74449985cd6c",
+        "runtime": "3a6fdf53205dfca0dd7201f5ef6713e04248874e771e95c111fcd00f7db20786",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_io_buffered_by_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "5fb135039cfe04af529175ea515e15195f99181998e7d9a00aad58bff32719e1",
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "native_class": "BufferedIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_io_unbuffered_works": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "8b1389a3a99c9ce00c0c00943af5bdb8cdb586e0f4e75c122fa745df324822df",
+            "fixture_selector": "PollSelector",
+            "observed": {
+              "native_class": "RawIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_io_buffered_by_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "fd22c6867540bbe69c730a6e3032273297db40d739173015b6f598ada6d5facb",
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "native_class": "BufferedIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_io_unbuffered_works": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:14:13: Imre: unknown class method"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "cpython"
+            },
+            "actor_sha256": "0cd179f7642b4f8501618a466e38faa0debb3ed9f481fc24e8622957f636ef97",
+            "fixture_selector": "SelectSelector",
+            "observed": {
+              "native_class": "RawIOBase",
+              "native_io_base": true,
+              "class_unchanged_after_close": true,
+              "streams": [
+                "stdin",
+                "stdout",
+                "stderr"
+              ],
+              "closed_native_descriptors": 3,
+              "successful_native_reaps": 1,
+              "native_selector_syscalls": 0,
+              "data_child_argv": [
+                "/usr/bin/true"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

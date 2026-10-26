@@ -98,6 +98,11 @@ class Group:
     def add_argument(self, *args, **kwargs):
         self.declarations.append(f"{self.name}.add_argument({arguments(args, kwargs)})")
 
+    def add_mutually_exclusive_group(self, *args, **kwargs):
+        name = f"mutex{len(self.declarations)}"
+        self.declarations.append(f"{name} = {self.name}.add_mutually_exclusive_group({arguments(args, kwargs)})")
+        return Group(self.declarations, name)
+
 
 class Parser(Group):
     def __init__(self, driver, *args, **kwargs):

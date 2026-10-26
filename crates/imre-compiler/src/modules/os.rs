@@ -2,9 +2,37 @@
 use super::Intrinsic;
 use crate::ir::FdOperation;
 
+/// Positional binding and protocol discovery use the same POSIX signature.
+pub(crate) fn credential_arity(name: &str) -> usize {
+    if name.starts_with("get") {
+        0
+    } else if name.starts_with("setres") {
+        3
+    } else if name.starts_with("setre") {
+        2
+    } else {
+        1
+    }
+}
+
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
+    if cfg!(unix) {
+        let common = [
+            "getuid", "geteuid", "getgid", "getegid", "setuid", "seteuid", "setgid", "setegid",
+            "setreuid", "setregid",
+        ];
+        let saved = ["getresuid", "getresgid", "setresuid", "setresgid"];
+        if let Some(known) = common
+            .into_iter()
+            .chain(saved.into_iter().filter(|_| cfg!(target_os = "linux")))
+            .find(|known| *known == name)
+        {
+            return Some(Intrinsic::Credential(known));
+        }
+    }
     Some(match name {
         "strerror" => Intrinsic::Strerror,
+        "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
@@ -29,6 +57,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "dup" => Intrinsic::Fd(FdOperation::Dup),
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
+        "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),
         "isatty" => Intrinsic::Fd(FdOperation::Isatty),
         "get_blocking" => Intrinsic::Fd(FdOperation::GetBlocking),
         "set_blocking" => Intrinsic::Fd(FdOperation::SetBlocking),

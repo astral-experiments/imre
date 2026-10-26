@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_str",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/test/test_str.py": "2584fbf72d3fa64275a6c1a11a2644201e6271e3"
+  },
+  "shared_fixture": {
+    "Lib/test/string_tests.py": {
+      "blob": "f66051531faaa163fda901e148bd3bea063011e7",
+      "path": "../collections/upstream/Lib/test/string_tests.py"
+    }
+  },
+  "integration_source": {
+    "Lib/importlib/_bootstrap_external.py": "6a828ae75ed34c1fb2148563d4e245dac212a3ca"
+  }
+}

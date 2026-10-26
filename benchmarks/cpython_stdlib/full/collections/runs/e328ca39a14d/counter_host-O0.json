@@ -1,0 +1,46 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "compiler_revision": "e328ca39a14d8f0243f0b50b106a17d32b1e0a2f",
+  "tests": {
+    "test.test_collections.TestCounter.test_subtract": [
+      {
+        "execution": "host-driven-native",
+        "body": "CPython",
+        "assertions": "CPython",
+        "fixture_execution": "CPython module/class/instance hooks",
+        "operation": "Imre for all Counter operations, including raised TypeErrors",
+        "native_calls": {
+          "Counter": 11,
+          "subtract": 7,
+          "Counter equality": 3,
+          "items iteration": 2,
+          "Counter.subtract (unbound)": 1
+        },
+        "method_sha256": "bb8c3199e5130145f2c8f0fe2f38fa179f95e06ec304a0bec46273169841ec01",
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "operation": "All Counter construction, subtraction, equality, items, and argument errors execute in native programs.",
+            "fixture": "The original CPython unittest module, class, and instance hooks and test body run on the host.",
+            "method_sha256": "bb8c3199e5130145f2c8f0fe2f38fa179f95e06ec304a0bec46273169841ec01",
+            "native_calls": {
+              "Counter": 11,
+              "subtract": 7,
+              "Counter equality": 3,
+              "items iteration": 2,
+              "Counter.subtract (unbound)": 1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": []
+}

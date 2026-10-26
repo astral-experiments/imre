@@ -1,0 +1,42 @@
+{
+  "0": {
+    "roles": {
+      "body": "cpython",
+      "assertions": "cpython",
+      "operation": "imre",
+      "fixture": "cpython"
+    },
+    "evidence": {
+      "operation": "persistent native overload registry, original function identity/order and metadata",
+      "fixture": "CPython function objects, unittest assertions and decorators; native callback handles tied to original code sites",
+      "method_sha256": "dd78d7b37119f453142811b48ead68b16cdbd46a4e2d91d8300199bd8503a700",
+      "opt_level": 0,
+      "native_calls": {
+        "get": 1,
+        "marker": 2,
+        "new": 3,
+        "register": 2
+      }
+    }
+  },
+  "3": {
+    "roles": {
+      "body": "cpython",
+      "assertions": "cpython",
+      "operation": "imre",
+      "fixture": "cpython"
+    },
+    "evidence": {
+      "operation": "persistent native overload registry, original function identity/order and metadata",
+      "fixture": "CPython function objects, unittest assertions and decorators; native callback handles tied to original code sites",
+      "method_sha256": "dd78d7b37119f453142811b48ead68b16cdbd46a4e2d91d8300199bd8503a700",
+      "opt_level": 3,
+      "native_calls": {
+        "get": 1,
+        "marker": 2,
+        "new": 3,
+        "register": 2
+      }
+    }
+  }
+}

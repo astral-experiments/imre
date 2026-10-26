@@ -62,6 +62,17 @@ def scoped() -> None:
         show(row)
 
 
+def optional_addition(values: list[int | None]) -> None:
+    try:
+        print([value + 1 for value in values])
+    except TypeError as exc:
+        print(str(exc))
+    try:
+        print([value + 1 for value in values if value is not None for value in values])
+    except TypeError as exc:
+        print(str(exc))
+
+
 # Entry locals must be captured by generated helpers without becoming globals.
 entry = [7, 8]
 entry_result = [entry + 1 for entry in entry]
@@ -69,3 +80,6 @@ show(entry_result)
 show(entry)
 show(offset_values())
 scoped()
+optional_addition([1, 2])
+optional_addition([1, None])
+optional_addition([None])

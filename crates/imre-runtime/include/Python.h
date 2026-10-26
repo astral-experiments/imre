@@ -48,6 +48,7 @@ void imre_py_incref(PyObject *);
 void imre_py_decref(PyObject *);
 PyObject *imre_py_long_from_unsigned_long(unsigned long);
 PyObject *imre_py_long_from_long(long);
+PyObject *imre_py_bytes_from_string_and_size(const char *, Py_ssize_t);
 PyObject *imre_py_list_get_item(PyObject *, Py_ssize_t);
 int imre_py_list_set_item(PyObject *, Py_ssize_t, PyObject *);
 int imre_py_list_append(PyObject *, PyObject *);
@@ -75,6 +76,7 @@ static inline void imre_py_clear(PyObject **slot) {
 #define Py_RETURN_NONE return Py_None
 #define PyLong_FromUnsignedLong imre_py_long_from_unsigned_long
 #define PyLong_FromLong imre_py_long_from_long
+#define PyBytes_FromStringAndSize imre_py_bytes_from_string_and_size
 #define PyList_GetItem imre_py_list_get_item
 #define PyList_SetItem imre_py_list_set_item
 #define PyList_Append imre_py_list_append

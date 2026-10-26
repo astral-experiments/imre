@@ -3,6 +3,11 @@ name: Build release binaries
 
 on:
   workflow_call:
+    inputs:
+      include_macos:
+        description: Include the macOS archive in the release and installer
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -10,16 +15,14 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: >-
+      ${{ matrix.target == 'aarch64-apple-darwin' && 'macos-15' ||
+          matrix.target == 'aarch64-unknown-linux-gnu' &&
+          (github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm') ||
+          (github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04') }}
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
-          - target: aarch64-unknown-linux-gnu
-            runner: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
-          - target: aarch64-apple-darwin
-            runner: macos-15  # Includes Xcode 26 for the CPython 3.14 SDK; our Namespace image stops at 16.4.
+        target: ${{ fromJSON(inputs.include_macos && '["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","aarch64-apple-darwin"]' || '["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu"]') }}
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -102,6 +105,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: build-github-archives-${{ matrix.target }}
+          retention-days: ${{ github.event_name == 'pull_request' && 1 || 7 }}
           if-no-files-found: error
           path: |
             *.tar.gz
@@ -127,10 +131,16 @@ jobs:
           merge-multiple: true
       - name: Build shell installer
         shell: bash
+        env:
+          INCLUDE_MACOS: ${{ inputs.include_macos }}
         run: |
           tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "imre-compiler").version')
           dist=(uv run --locked --only-dev --python 3.12 dist)
-          "${dist[@]}" manifest --tag="$tag" --artifacts=local --no-local-paths --output-format=json > "$RUNNER_TEMP/local-manifest.json"
+          targets=()
+          if [[ "$INCLUDE_MACOS" != true ]]; then
+            targets=(--target x86_64-unknown-linux-gnu --target aarch64-unknown-linux-gnu)
+          fi
+          "${dist[@]}" manifest --tag="$tag" "${targets[@]}" --artifacts=local --no-local-paths --output-format=json > "$RUNNER_TEMP/local-manifest.json"
           # Cargo-dist embeds the native archive checksums in the installer.
           mapfile -t checksums < <(jq -r '.artifacts[].checksum // empty' "$RUNNER_TEMP/local-manifest.json")
           (
@@ -142,7 +152,7 @@ jobs:
             reduce ($sums | split("\n")[] | select(length > 0) | split("  ")) as [$sha, $name]
               (.; .artifacts[$name].checksums.sha256 = $sha)
           ' "$RUNNER_TEMP/local-manifest.json" > target/distrib/local-dist-manifest.json
-          "${dist[@]}" build --tag="$tag" --artifacts=global
+          "${dist[@]}" build --tag="$tag" "${targets[@]}" --artifacts=global
           python3 scripts/prepare-shell-installer.py target/distrib/imre-installer.sh
           (cd target/distrib && sha256sum --binary imre-installer.sh >> sha256.sum)
       - name: Test shell installer
@@ -160,6 +170,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: build-github-installer
+          retention-days: ${{ github.event_name == 'pull_request' && 1 || 7 }}
           if-no-files-found: error
           path: |
             target/distrib/imre-installer.sh

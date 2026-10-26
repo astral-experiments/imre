@@ -1,6 +1,7 @@
 //! Mutable TOML/JSON views reuse native ordered dictionaries and list storage.
 //! A subscript or shallow spread retains the same nested container owner.
 
+use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -9,9 +10,7 @@ use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
     dict_set, imre_dict_contains, imre_dict_delete, imre_dict_get, imre_dict_new,
 };
-use crate::objects::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, object,
-};
+use crate::objects::{Error, Int, Kind, Object, Storage, StorageCell, Str, Words, object};
 
 #[derive(Clone)]
 pub(in crate::objects) enum Value {
@@ -19,21 +18,21 @@ pub(in crate::objects) enum Value {
     Bool(bool),
     Integer(Int),
     Float(f64),
-    String(Rc<Str>),
+    String(StrOwner),
     Datetime(Str),
-    Array(Rc<Object>),
-    Table(Rc<Object>),
+    Array(crate::ObjectOwner),
+    Table(crate::ObjectOwner),
 }
 
 impl Value {
-    pub(in crate::objects) fn object(self) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::Document(self))))
+    pub(in crate::objects) fn object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::Document(self))))
     }
     fn word(self) -> usize {
-        Rc::into_raw(self.object()) as usize
+        crate::ObjectOwner::into_raw(self.object()) as usize
     }
     fn array(
-        values: impl ExactSizeIterator<Item = Result<Rc<Object>, Error>>,
+        values: impl ExactSizeIterator<Item = Result<crate::ObjectOwner, Error>>,
     ) -> Result<Self, Error> {
         let mut storage = Words::new(5);
         storage
@@ -41,40 +40,42 @@ impl Value {
             .try_reserve_exact(values.len())
             .map_err(|_| Error::allocation())?;
         for value in values {
-            storage.values.push(Rc::into_raw(value?) as usize);
+            storage
+                .values
+                .push(crate::ObjectOwner::into_raw(value?) as usize);
         }
         Ok(Self::Array(storage.into_object()))
     }
     fn table(
-        pairs: impl Iterator<Item = Result<(Rc<Str>, Rc<Object>), Error>>,
+        pairs: impl Iterator<Item = Result<(StrOwner, crate::ObjectOwner), Error>>,
     ) -> Result<Self, Error> {
         // SAFETY: a fresh string/object dictionary transfers one owner.
-        let dict = unsafe { Rc::from_raw(imre_dict_new(3, 5)) };
+        let dict = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 5)) };
         for pair in pairs {
             let (key, value) = pair?;
             // SAFETY: the three owners root the exact mapping, string, and document.
             unsafe {
                 dict_set(
-                    Rc::as_ptr(&dict),
-                    Rc::as_ptr(&key) as usize,
-                    Rc::as_ptr(&value) as usize,
+                    crate::ObjectOwner::as_ptr(&dict),
+                    StrOwner::as_ptr(&key) as usize,
+                    crate::ObjectOwner::as_ptr(&value) as usize,
                 )?
             };
         }
         Ok(Self::Table(dict))
     }
-    pub(in crate::objects) fn items(source: &Object) -> Vec<(Rc<Str>, Rc<Object>)> {
+    pub(in crate::objects) fn items(source: &Object) -> Vec<(StrOwner, crate::ObjectOwner)> {
         // SAFETY: this operation copies all owners before traversing child values.
         unsafe { source.0.with(|v| v.dictionary().document_pairs()) }
     }
-    pub(in crate::objects) fn elements(source: &Object) -> Vec<Rc<Object>> {
+    pub(in crate::objects) fn elements(source: &Object) -> Vec<crate::ObjectOwner> {
         // SAFETY: only native list[document value] owners enter this path.
         unsafe {
             source.0.with(|s| {
                 s.sequence()
                     .values
                     .iter()
-                    .map(|&word| acquire_rc(word))
+                    .map(|&word| crate::ObjectOwner::acquire_word(word))
                     .collect()
             })
         }
@@ -93,7 +94,9 @@ impl Value {
         }
         // Including the depth keeps the nesting check valid along every incoming path.
         let identity = match self {
-            Self::Array(owner) | Self::Table(owner) => Some((Rc::as_ptr(owner), depth)),
+            Self::Array(owner) | Self::Table(owner) => {
+                Some((crate::ObjectOwner::as_ptr(owner), depth))
+            }
             _ => None,
         };
         if let Some(index) = identity.and_then(|key| shared.get(&key)) {
@@ -167,7 +170,7 @@ impl Value {
 
     fn from_json_at(view: &View, index: usize, depth: usize) -> Result<Self, Error> {
         if index == view.index
-            && let Some(root) = view.snapshot_root()
+            && let Some(root) = view.snapshot_root()?
         {
             return Self::from_json_at(&root, root.index, depth);
         }
@@ -180,7 +183,10 @@ impl Value {
             ));
         }
         Ok(match &view.nodes[index] {
-            Node::Deferred(array) => Self::from_json_at(array.view(), array.view().index, depth)?,
+            Node::Deferred(array) => {
+                let child = array.try_view()?;
+                Self::from_json_at(child, child.index, depth)?
+            }
             Node::Null => Self::Null,
             Node::Bool(x) => Self::Bool(*x),
             Node::Integer(x) => Self::Integer(x.clone()),
@@ -201,8 +207,13 @@ impl Value {
         })
     }
     fn from_toml(node: &DeValue<'_>) -> Result<Self, Error> {
+        fn string(value: &str) -> Result<StrOwner, Error> {
+            let text = Str::try_new(value).map_err(|_| Error::allocation())?;
+            StrOwner::try_new(text).map_err(|_| Error::allocation())
+        }
+
         Ok(match node {
-            DeValue::String(value) => Self::String(Rc::new(Str::new(value.as_ref()))),
+            DeValue::String(value) => Self::String(string(value.as_ref())?),
             DeValue::Integer(value) => Self::Integer(Int::new(
                 num_bigint::BigInt::parse_bytes(value.as_str().as_bytes(), value.radix())
                     .ok_or_else(|| Error::new(Kind::TomlDecodeError, "invalid integer"))?,
@@ -245,12 +256,11 @@ impl Value {
                     .iter()
                     .map(|v| Self::from_toml(v.get_ref()).map(Self::object)),
             )?,
-            DeValue::Table(table) => Self::table(table.iter().map(|(k, v)| {
-                Ok((
-                    Rc::new(Str::new(k.get_ref())),
-                    Self::from_toml(v.get_ref())?.object(),
-                ))
-            }))?,
+            DeValue::Table(table) => {
+                Self::table(table.iter().map(|(k, v)| {
+                    Ok((string(k.get_ref())?, Self::from_toml(v.get_ref())?.object()))
+                }))?
+            }
         })
     }
     pub(in crate::objects) fn read(obj: &Object) -> Self {
@@ -262,14 +272,14 @@ impl Value {
             })
         }
     }
-    fn list(&self) -> Result<Rc<Object>, Error> {
+    fn list(&self) -> Result<crate::ObjectOwner, Error> {
         if let Self::Array(v) = self {
             Ok(v.clone())
         } else {
             Err(Error::new(Kind::TypeError, "expected a document list"))
         }
     }
-    fn map(&self) -> Result<Rc<Object>, Error> {
+    fn map(&self) -> Result<crate::ObjectOwner, Error> {
         if let Self::Table(v) = self {
             Ok(v.clone())
         } else {
@@ -293,7 +303,7 @@ impl Value {
             Self::Table(t) => unsafe { t.0.with(|s| !s.dictionary().is_empty()) },
         }
     }
-    fn check_acyclic(&self, target: &Rc<Object>) -> Result<(), Error> {
+    fn check_acyclic(&self, target: &crate::ObjectOwner) -> Result<(), Error> {
         let (Self::Array(root) | Self::Table(root)) = self else {
             return Ok(());
         };
@@ -301,7 +311,7 @@ impl Value {
         let mut pending = Vec::new();
         let mut seen = HashSet::new();
         loop {
-            if Rc::ptr_eq(&current, target) {
+            if crate::ObjectOwner::ptr_eq(&current, target) {
                 return Err(Error::new(
                     Kind::ValueError,
                     "cyclic document mutation is unsupported",
@@ -317,7 +327,7 @@ impl Value {
                         else {
                             return Ok(());
                         };
-                        let id = Rc::as_ptr(&child);
+                        let id = crate::ObjectOwner::as_ptr(&child);
                         if !seen.contains(&id) {
                             seen.try_reserve(1).map_err(|_| Error::allocation())?;
                             pending.try_reserve(1).map_err(|_| Error::allocation())?;
@@ -354,12 +364,12 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
         let object = |word: usize| object(word as *const Object);
         let doc = |word| Value::read(object(word));
         let str_ = |word| &*(word as *const Str);
-        let ptr = |v: Rc<Object>| Rc::into_raw(v) as usize;
+        let ptr = |v: crate::ObjectOwner| crate::ObjectOwner::into_raw(v) as usize;
         Ok(match op {
             0 => Value::Null.word(),
             1 => Value::table(std::iter::empty())?.word(),
             2 => Value::array(std::iter::empty())?.word(),
-            3 => Value::String(acquire_rc(a)).word(),
+            3 => Value::String(crate::StrOwner::acquire_word(a)).word(),
             4 => Value::Bool(a != 0).word(),
             5 => Value::Integer((*Int::borrow(a)).clone()).word(),
             6 => Value::Float(f64::from_bits(a as u64)).word(),
@@ -369,15 +379,15 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 };
                 Value::from_json(view, view.index).map(Value::word)
             })?,
-            8 => Value::Array(acquire_rc(a)).word(),
-            9 => Value::Table(acquire_rc(a)).word(),
+            8 => Value::Array(crate::ObjectOwner::acquire_word(a)).word(),
+            9 => Value::Table(crate::ObjectOwner::acquire_word(a)).word(),
             10 => ptr(doc(a).map()?),
             11 => ptr(doc(a).list()?),
             12 => {
                 let Value::String(s) = doc(a) else {
                     return Err(Error::new(Kind::TypeError, "expected a document string"));
                 };
-                Rc::into_raw(s) as usize
+                StrOwner::into_raw(s) as usize
             }
             13 | 14 => {
                 if op == 13 {
@@ -385,7 +395,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 } else {
                     doc(a).list()?;
                 }
-                ptr(acquire_rc(a))
+                ptr(crate::ObjectOwner::acquire_word(a))
             }
             15 => usize::from(matches!(doc(a), Value::Null)),
             16 => usize::from(matches!(doc(a), Value::Table(_))),
@@ -395,9 +405,8 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let mut repr = String::new();
                 doc(a)
                     .view()?
-                    .write_repr(&mut crate::objects::values::ReprWriter(&mut repr))
-                    .map_err(|_| Error::allocation())?;
-                Rc::into_raw(Rc::new(Str::new(repr))) as usize
+                    .try_write_repr(&mut crate::objects::values::ReprWriter(&mut repr))?;
+                crate::checked_owned_str(Str::from(repr))? as usize
             }
             20 => usize::from(doc(a).truth()),
             21 => {
@@ -417,7 +426,9 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 }
                 result?;
                 if op == 22 {
-                    Rc::into_raw(Rc::new(Str::new(text))) as usize
+                    StrOwner::into_raw(
+                        StrOwner::try_new(Str::from(text)).map_err(|_| Error::allocation())?,
+                    ) as usize
                 } else {
                     0
                 }
@@ -427,21 +438,21 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                 let source = doc(b).map()?;
                 for (key, val) in Value::items(&source) {
                     dict_set(
-                        Rc::as_ptr(&target),
-                        Rc::as_ptr(&key) as usize,
-                        Rc::as_ptr(&val) as usize,
+                        crate::ObjectOwner::as_ptr(&target),
+                        StrOwner::as_ptr(&key) as usize,
+                        crate::ObjectOwner::as_ptr(&val) as usize,
                     )?;
                 }
-                ptr(acquire_rc(a))
+                ptr(crate::ObjectOwner::acquire_word(a))
             }
             24 => {
                 let target = doc(a).map()?;
-                if imre_dict_contains(Rc::as_ptr(&target), b) != 0 {
-                    let old = imre_dict_get(Rc::as_ptr(&target), b);
-                    imre_dict_delete(Rc::as_ptr(&target), b);
+                if imre_dict_contains(crate::ObjectOwner::as_ptr(&target), b) != 0 {
+                    let old = imre_dict_get(crate::ObjectOwner::as_ptr(&target), b);
+                    imre_dict_delete(crate::ObjectOwner::as_ptr(&target), b);
                     old
                 } else {
-                    ptr(acquire_rc(c))
+                    ptr(crate::ObjectOwner::acquire_word(c))
                 }
             }
             25 => {
@@ -454,21 +465,21 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                     let words = s.sequence_mut();
                     let new = values
                         .into_iter()
-                        .map(|v| Rc::into_raw(v) as usize)
+                        .map(|v| crate::ObjectOwner::into_raw(v) as usize)
                         .collect();
                     let old = std::mem::replace(&mut words.values, new);
                     words.update_header();
                     old
                 });
                 for word in old {
-                    drop(Rc::from_raw(word as *const Object));
+                    drop(crate::ObjectOwner::from_raw(word as *const Object));
                 }
                 0
             }
             26 => {
                 let target = doc(b).map()?;
                 doc(a).check_acyclic(&target)?;
-                dict_set(Rc::as_ptr(&target), c, a)?;
+                dict_set(crate::ObjectOwner::as_ptr(&target), c, a)?;
                 0
             }
             28 => Value::table(
@@ -496,8 +507,12 @@ mod tests {
         for _ in 0..8192 {
             let child = Value::Array(owners.last().unwrap().clone()).object();
             let mut parent = Words::new(5);
-            parent.values.push(Rc::into_raw(child.clone()) as usize);
-            parent.values.push(Rc::into_raw(child) as usize);
+            parent
+                .values
+                .push(crate::ObjectOwner::into_raw(child.clone()) as usize);
+            parent
+                .values
+                .push(crate::ObjectOwner::into_raw(child) as usize);
             owners.push(parent.into_object());
         }
         let root = Value::Array(owners.last().unwrap().clone());
@@ -561,7 +576,7 @@ mod tests {
         }
         assert!(value.view().is_ok());
         let too_deep = Value::table(std::iter::once(Ok((
-            Rc::new(Str::new("child")),
+            StrOwner::new(Str::new("child")),
             value.object(),
         ))))
         .ok()

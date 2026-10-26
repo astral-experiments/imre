@@ -1,0 +1,113 @@
+{
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_source": "33760f5f5f275c96998c10c59e28b5676d82f5fa",
+  "compiler_tree": "cd3809d441a32ae578a01be239fd8b5959e01ade",
+  "compiler_sha256": "00517ff9817cf515f91601587fb579b31a8eb4fbc3d4fada5774fdcbcec183d1",
+  "runtime_sha256": "0c34563f7744ab27111c0f21ad56445077180c057b547987c1b65391dce04cb3",
+  "modes": {
+    "ordinary-O0": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_string",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:7:9: Imre: decorators and type parameters are unsupported",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9",
+          "definition_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_orderdict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:7:15: Imre: an empty dictionary requires a concrete dict[K, V] context",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84",
+          "definition_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84"
+        }
+      }
+    ],
+    "ordinary-O3": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_string",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:7:9: Imre: decorators and type parameters are unsupported",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9",
+          "definition_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_orderdict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:7:15: Imre: an empty dictionary requires a concrete dict[K, V] context",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84",
+          "definition_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84"
+        }
+      }
+    ],
+    "reachable-O0": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_string",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:7:9: Imre: decorators and type parameters are unsupported",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9",
+          "definition_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_orderdict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O0)\n<case>/case.py:7:15: Imre: an empty dictionary requires a concrete dict[K, V] context",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84",
+          "definition_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84"
+        }
+      }
+    ],
+    "reachable-O3": [
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_with_string",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:7:9: Imre: decorators and type parameters are unsupported",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9",
+          "definition_sha256": "3c3921823e191e2d967c086807762e009fc82e5ce377ef0771ce3225b44d61e9"
+        }
+      },
+      {
+        "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_orderdict",
+        "occurrence": 1,
+        "outcome": "blocked",
+        "reason": "Compiling <case>/case.py (-O3)\n<case>/case.py:7:15: Imre: an empty dictionary requires a concrete dict[K, V] context",
+        "evidence": {
+          "stage": "compile",
+          "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
+          "method_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84",
+          "definition_sha256": "54ada6b978c83231c886e9e53ae1e68ea18bf9be6b5e71020b183ec4a544ff84"
+        }
+      }
+    ]
+  }
+}

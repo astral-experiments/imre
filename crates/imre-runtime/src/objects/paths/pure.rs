@@ -1,9 +1,9 @@
 //! Pure paths retain their input segments: nesting a path of the same flavor
 //! splices its raw segments, while a foreign path contributes its POSIX spelling.
 
+use crate::StrOwner;
 use std::cell::OnceCell;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
@@ -11,13 +11,13 @@ use crate::objects::text::{lowercase, lowercase_chars};
 
 pub(in crate::objects) struct PurePath {
     pub(super) windows: bool,
-    raw: Vec<Rc<Str>>,
+    raw: Vec<StrOwner>,
     pub(super) drive: Str,
     pub(super) root: Str,
     tail: Vec<Str>,
-    pub(super) text: Rc<Str>,
+    pub(super) text: StrOwner,
     folded: OnceCell<Str>,
-    name: OnceCell<Rc<Str>>,
+    name: OnceCell<StrOwner>,
 }
 
 /// Split a path with normalized backslashes into the drive, root and remainder.
@@ -87,7 +87,7 @@ fn copy_components<'a>(parts: impl Iterator<Item = &'a str>) -> Result<Vec<Str>>
     Ok(tail)
 }
 
-fn win_join(raw: &[Rc<Str>]) -> Result<Str> {
+fn win_join(raw: &[StrOwner]) -> Result<Str> {
     let (mut drive, mut root, mut tail) = ("", "", Str::default());
     for part in raw {
         let input = replace_separator(part, '/', '\\')?;
@@ -134,7 +134,7 @@ fn win_join(raw: &[Rc<Str>]) -> Result<Str> {
 }
 
 impl PurePath {
-    pub(super) fn new(windows: bool, raw: Vec<Rc<Str>>) -> Result<Self> {
+    pub(super) fn new(windows: bool, raw: Vec<StrOwner>) -> Result<Self> {
         let input = if windows {
             win_join(&raw)?
         } else {
@@ -183,7 +183,7 @@ impl PurePath {
 
     fn parsed(
         windows: bool,
-        raw: Vec<Rc<Str>>,
+        raw: Vec<StrOwner>,
         drive: Str,
         root: Str,
         tail: Vec<Str>,
@@ -206,13 +206,13 @@ impl PurePath {
             drive,
             root,
             tail,
-            text: Rc::new(text),
+            text: StrOwner::new(text),
             folded: OnceCell::new(),
             name: OnceCell::new(),
         })
     }
 
-    pub(super) fn join(&self, extra: impl ExactSizeIterator<Item = Rc<Str>>) -> Result<Self> {
+    pub(super) fn join(&self, extra: impl ExactSizeIterator<Item = StrOwner>) -> Result<Self> {
         let mut raw = Vec::new();
         raw.try_reserve_exact(self.raw.len().saturating_add(extra.len()))
             .map_err(|_| Error::allocation())?;
@@ -229,7 +229,7 @@ impl PurePath {
             self.root.clone(),
             tail,
         )?;
-        p.raw.push(Rc::clone(&p.text));
+        p.raw.push(StrOwner::clone(&p.text));
         Ok(p)
     }
 
@@ -410,13 +410,13 @@ impl PurePath {
                 .chain(self.tail.iter().skip(common).map(Str::as_str)),
         )?;
         let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail)?;
-        path.raw.push(Rc::clone(&path.text));
+        path.raw.push(StrOwner::clone(&path.text));
         Ok(path)
     }
 
-    pub(super) fn name(&self) -> &Rc<Str> {
+    pub(super) fn name(&self) -> &StrOwner {
         self.name
-            .get_or_init(|| Rc::new(self.tail.last().cloned().unwrap_or_default()))
+            .get_or_init(|| StrOwner::new(self.tail.last().cloned().unwrap_or_default()))
     }
 
     pub(super) fn basename(&self) -> &str {
@@ -463,11 +463,11 @@ impl PurePath {
         Ok(self.with_tail(tail)?.into_object())
     }
 
-    pub(super) fn as_posix(&self) -> Result<Rc<Str>> {
+    pub(super) fn as_posix(&self) -> Result<StrOwner> {
         if self.windows && self.text.contains('\\') {
-            Ok(Rc::new(replace_separator(&self.text, '\\', '/')?))
+            Ok(StrOwner::new(replace_separator(&self.text, '\\', '/')?))
         } else {
-            Ok(Rc::clone(&self.text))
+            Ok(StrOwner::clone(&self.text))
         }
     }
     pub(in crate::objects) fn write_posix_repr(
@@ -489,9 +489,9 @@ impl PurePath {
         }
     }
     pub(super) fn into_object(self) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::PurePath(
-            Box::new(self),
-        )))))
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::PurePath(Box::new(self)),
+        ))))
     }
 }
 
@@ -515,10 +515,10 @@ impl Storage {
     pub(super) fn windows_path(&self) -> bool {
         matches!(self, Self::PurePath(p) if p.windows)
     }
-    pub(in crate::objects) fn posix_spelling(&self) -> Result<Rc<Str>> {
+    pub(in crate::objects) fn posix_spelling(&self) -> Result<StrOwner> {
         match self {
             Self::PurePath(p) => p.as_posix(),
-            _ => Ok(Rc::clone(self.path_text())),
+            _ => Ok(StrOwner::clone(self.path_text())),
         }
     }
     pub(super) fn drive_root(&self) -> (&str, &str) {
@@ -558,7 +558,7 @@ pub unsafe extern "C" fn imre_path_join_object(
                 _ => {
                     let child = b.posix_spelling()?;
                     // SAFETY: the local Rc roots the spelling while the original path stays live.
-                    Ok(super::imre_path_join(left, Rc::as_ptr(&child)))
+                    Ok(super::imre_path_join(left, StrOwner::as_ptr(&child)))
                 }
             })
         })
@@ -572,7 +572,7 @@ pub unsafe extern "C" fn imre_path_join_object(
 pub unsafe extern "C" fn imre_path_as_posix(path: *const Object) -> *const Str {
     // SAFETY: only an owned immutable spelling escapes.
     let spelling = unsafe { object(path).0.with(Storage::posix_spelling) };
-    super::finish(spelling.map(Rc::into_raw), std::ptr::null())
+    super::finish(spelling.map(StrOwner::into_raw), std::ptr::null())
 }
 
 /// # Safety
@@ -594,7 +594,7 @@ pub unsafe extern "C" fn imre_path_prefix(path: *const Object, part: u32) -> *co
                 }
                 _ => unreachable!(),
             };
-            Rc::into_raw(Rc::new(text))
+            StrOwner::into_raw(StrOwner::new(text))
         })
     }
 }
@@ -620,7 +620,7 @@ mod tests {
     fn cached_and_streamed_windows_hashes_use_the_same_byte_boundaries() {
         for prefix in [254, 255, 256, 257] {
             let text = format!("{}İ𐐀\0AΣ", "Z".repeat(prefix));
-            let Ok(path) = PurePath::new(true, vec![Rc::new(text.into())]) else {
+            let Ok(path) = PurePath::new(true, vec![StrOwner::new(text.into())]) else {
                 panic!("test path allocation failed")
             };
             let mut cached = Writes::default();

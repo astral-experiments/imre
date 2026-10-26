@@ -1,0 +1,13 @@
+{
+  "revision": "e328ca39a14d8f0243f0b50b106a17d32b1e0a2f",
+  "fixture": "tests/fixtures/iterables/math_product.py",
+  "blob": "4e33ec1e209d7f6607efe2bd4335b1e4f54235dd",
+  "output_lines": 16,
+  "reference_sha256": "c6b199f35a87c316a6e527e03b80122dc0750a30f0ada3e574ac1ec261179be8",
+  "modes": {
+    "O0-whole": "c6b199f35a87c316a6e527e03b80122dc0750a30f0ada3e574ac1ec261179be8",
+    "O0-reachable": "c6b199f35a87c316a6e527e03b80122dc0750a30f0ada3e574ac1ec261179be8",
+    "O3-whole": "c6b199f35a87c316a6e527e03b80122dc0750a30f0ada3e574ac1ec261179be8",
+    "O3-reachable": "c6b199f35a87c316a6e527e03b80122dc0750a30f0ada3e574ac1ec261179be8"
+  }
+}

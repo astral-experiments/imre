@@ -1,5 +1,6 @@
-//! Native warning filters for resource finalizers. Display and filtering do
-//! not run Python or interfere with the exception already being unwound.
+//! Native warning filtering and display for explicit calls, subprocess launch, and finalizers.
+//! A warning raised during finalization must preserve the exception being unwound.
+mod display;
 use super::{Error, Int, Kind, Str, exceptions, finish};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
@@ -96,23 +97,42 @@ impl Rule {
     }
 }
 
-struct Filters {
-    rules: Vec<Rule>,
-    displayed: HashSet<String>,
+#[derive(Eq, Hash, PartialEq)]
+enum Scope {
+    Line(&'static str, isize),
+    Module(&'static str),
+    Process,
 }
 
-// ResourceWarning is initially ignored on a release interpreter. It must be
-// an ordinary rule: resetwarnings removes it, and append cannot supersede it.
+struct Filters {
+    rules: Vec<Rule>,
+    displayed: HashSet<(u32, String, Scope)>,
+}
+
+// Release defaults, in CPython order. These are ordinary rules: reset removes
+// them, and appending a rule cannot supersede an earlier match.
 static FILTERS: LazyLock<Mutex<Filters>> = LazyLock::new(|| {
+    let mut rules = vec![Rule {
+        name: "default".into(),
+        action: Action::Default,
+        category: 4,
+        message: None,
+        module: Some(Pattern {
+            original: "__main__".into(),
+            regex: Regex::new(r"__main__\z").expect("fixed main module name"),
+        }),
+        lineno: BigInt::ZERO,
+    }];
+    rules.extend([4, 5, 8, 1].map(|category| Rule {
+        name: "ignore".into(),
+        action: Action::Ignore,
+        category,
+        message: None,
+        module: None,
+        lineno: BigInt::ZERO,
+    }));
     Mutex::new(Filters {
-        rules: vec![Rule {
-            name: "ignore".into(),
-            action: Action::Ignore,
-            category: 1,
-            message: None,
-            module: None,
-            lineno: BigInt::ZERO,
-        }],
+        rules,
         displayed: HashSet::new(),
     })
 });
@@ -214,52 +234,102 @@ pub unsafe extern "C" fn imre_warning_simplefilter(action: *const Str, category:
     }
 }
 
-/// Report the unreaped handle before the destructor performs its own poll.
-pub(super) fn unobserved_child(pid: libc::pid_t) {
+/// Decide whether to display or raise a warning. Every visited rule converts
+/// its line number to Py_ssize_t, even when the category would not match.
+fn filtered(
+    category: u32,
+    module: &'static str,
+    line: isize,
+    describe: impl Fn() -> String,
+) -> Result<Option<(Action, String)>, ()> {
     let mut message = None;
-    let describe = || format!("subprocess {pid} is still running");
-    // The equivalent Python warning originates in subprocess.Popen.__del__.
-    const SOURCE_LINE: isize = 1139;
     let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
     let mut action = Action::Default;
     for rule in &filters.rules {
         let text = if rule.message.is_some() {
-            message.get_or_insert_with(describe).as_str()
+            message.get_or_insert_with(&describe).as_str()
         } else {
             ""
         };
-        match rule.matches(text, 1, "subprocess", SOURCE_LINE) {
-            Some(true) => {
-                action = rule.action;
-                break;
-            }
-            Some(false) => {}
-            None => {
-                drop(filters);
-                let _ = crate::sys::write_stderr(
-                    "Exception ignored in Popen.__del__:\nOverflowError: Python int too large to convert to C ssize_t",
-                    true,
-                );
-                return;
-            }
+        if rule.matches(text, category, module, line).ok_or(())? {
+            action = rule.action;
+            break;
         }
     }
     if action == Action::Ignore {
-        return;
+        return Ok(None);
     }
     let message = message.unwrap_or_else(describe);
-    // These warnings come from one module, category and line. Only the text
-    // distinguishes locations for the default, module and once filters here.
-    if matches!(action, Action::Default | Action::Module | Action::Once)
-        && !filters.displayed.insert(message.clone())
+    let scope = match action {
+        Action::Default => Some(Scope::Line(module, line)),
+        Action::Module => Some(Scope::Module(module)),
+        Action::Once => Some(Scope::Process),
+        _ => None,
+    };
+    if let Some(scope) = scope
+        && !filters.displayed.insert((category, message.clone(), scope))
     {
-        return;
+        return Ok(None);
     }
-    drop(filters);
-    let diagnostic = if action == Action::Error {
-        format!("Exception ignored in Popen.__del__:\nResourceWarning: {message}")
-    } else {
-        format!("subprocess.py:{SOURCE_LINE}: ResourceWarning: {message}")
+    Ok(Some((action, message)))
+}
+
+const LINE_OVERFLOW: &str = "Python int too large to convert to C ssize_t";
+
+/// Report the unreaped handle before the destructor performs its own poll.
+pub(super) fn unobserved_child(pid: libc::pid_t) {
+    const LINE: isize = 1139; // subprocess.Popen.__del__
+    let diagnostic = match filtered(1, "subprocess", LINE, || {
+        format!("subprocess {pid} is still running")
+    }) {
+        Ok(None) => return,
+        Ok(Some((Action::Error, message))) => {
+            format!("Exception ignored in Popen.__del__:\nResourceWarning: {message}")
+        }
+        Ok(Some((_, message))) => format!("subprocess.py:{LINE}: ResourceWarning: {message}"),
+        Err(()) => format!("Exception ignored in Popen.__del__:\nOverflowError: {LINE_OVERFLOW}"),
     };
     let _ = crate::sys::write_stderr(&diagnostic, true);
+}
+
+/// CPython checks this argument combination before obtaining the stdio handles.
+pub(super) fn pass_fds_override() -> crate::Result<()> {
+    const LINE: isize = 862; // subprocess.Popen.__init__
+    match filtered(2, "subprocess", LINE, || {
+        "pass_fds overriding close_fds.".into()
+    })
+    .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
+    {
+        Some((Action::Error, message)) => return Err(Error::new(Kind::RuntimeWarning, message)),
+        Some((_, message)) => {
+            let _ = crate::sys::write_stderr(
+                &format!("subprocess.py:{LINE}: RuntimeWarning: {message}"),
+                true,
+            );
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// A checked non-finalizer warning issued from an internal standard-library frame.
+pub(super) fn deprecation(
+    module: &'static str,
+    filename: &str,
+    line: isize,
+    message: &str,
+) -> crate::Result<()> {
+    match filtered(4, module, line, || message.into())
+        .map_err(|()| Error::new(Kind::OverflowError, LINE_OVERFLOW))?
+    {
+        Some((Action::Error, message)) => Err(Error::new(Kind::DeprecationWarning, message)),
+        Some((_, message)) => {
+            let _ = crate::sys::write_stderr(
+                &format!("{filename}:{line}: DeprecationWarning: {message}"),
+                true,
+            );
+            Ok(())
+        }
+        None => Ok(()),
+    }
 }

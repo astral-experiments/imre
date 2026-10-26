@@ -1,0 +1,40 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "42c229cbc6ab20f6a65c773d22b502e488651083c718ef3e253c2d6fa35913bb",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "git",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class"
+    },
+    {
+      "suite": "test.test_pathlib",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/test/support/__init__.py:1613:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass"
+    }
+  ],
+  "imre_commit": "d7fc14f2004fd6b3c494c4e46c9eae2b2354066b",
+  "artifact_run": 40228241550
+}

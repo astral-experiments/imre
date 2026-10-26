@@ -21,7 +21,21 @@ async def maybe_row(name: str) -> Row | None:
     return Row(name)
 
 
+async def stopped(error: Exception) -> Row:
+    raise error
+
+
 async def main() -> None:
+    stop = StopIteration("inside coroutine")
+    try:
+        await stopped(stop)
+    except RuntimeError as error:
+        print(str(error))
+        print(error.__cause__ is stop)
+    for item in await asyncio.gather(stopped(stop), return_exceptions=True):
+        if isinstance(item, BaseException):
+            print(repr(item))
+            print(item.__cause__ is stop)
     entries: list[BaseException | Row] = await asyncio.gather(
         *[row(name, name == "b") for name in ["a", "b", "c"]],
         return_exceptions=True,

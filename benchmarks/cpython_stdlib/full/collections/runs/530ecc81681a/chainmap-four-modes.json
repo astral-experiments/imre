@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "5272146020806176b75016b26030ca7cd1b9f0b3dede8c47c94b8de3f9ee62c3",
+  "imre_sha256": "1a7f5911e298244dafc38c897ba9795b166b7593f1b91ab35760d6829f805e67",
+  "runtime_sha256": "03985642a3f13c976ba949fbbc8c39a109d576c9e6da227ea98c2ebff150a58e",
+  "reference": "[{}]\nFalse\nFalse\nFalse\n[{'a': 2}]\n[{}]\nTrue\nFalse\nTrue\nTrue\nChainMap({}, {1: 10}, {2: 20})\nTrue\nFalse\nTrue\nTrue\nTrue\n[{4: 40}, {1: 10, 3: 30}, {2: 20}]\n[{4: 40}, {1: 10, 3: 30}]\n{2: 20}\n[]\n[{4: 40}, {1: 10, 3: 30}]\nFalse\nChainMap()\nTrue\nTrue\n[1, 2]\n[{1: 10}, {}, {2: 20}]\n[1, 2, 4, 5]\n[{9: 90}]\n[{1: 11}]\n[{2: 'two'}]\nChainMap(Counter({'b': 7, 'a': 2}))\n7\n0\nFalse\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "[{}]\nFalse\nFalse\nFalse\n[{'a': 2}]\n[{}]\nTrue\nFalse\nTrue\nTrue\nChainMap({}, {1: 10}, {2: 20})\nTrue\nFalse\nTrue\nTrue\nTrue\n[{4: 40}, {1: 10, 3: 30}, {2: 20}]\n[{4: 40}, {1: 10, 3: 30}]\n{2: 20}\n[]\n[{4: 40}, {1: 10, 3: 30}]\nFalse\nChainMap()\nTrue\nTrue\n[1, 2]\n[{1: 10}, {}, {2: 20}]\n[1, 2, 4, 5]\n[{9: 90}]\n[{1: 11}]\n[{2: 'two'}]\nChainMap(Counter({'b': 7, 'a': 2}))\n7\n0\nFalse\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "[{}]\nFalse\nFalse\nFalse\n[{'a': 2}]\n[{}]\nTrue\nFalse\nTrue\nTrue\nChainMap({}, {1: 10}, {2: 20})\nTrue\nFalse\nTrue\nTrue\nTrue\n[{4: 40}, {1: 10, 3: 30}, {2: 20}]\n[{4: 40}, {1: 10, 3: 30}]\n{2: 20}\n[]\n[{4: 40}, {1: 10, 3: 30}]\nFalse\nChainMap()\nTrue\nTrue\n[1, 2]\n[{1: 10}, {}, {2: 20}]\n[1, 2, 4, 5]\n[{9: 90}]\n[{1: 11}]\n[{2: 'two'}]\nChainMap(Counter({'b': 7, 'a': 2}))\n7\n0\nFalse\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "[{}]\nFalse\nFalse\nFalse\n[{'a': 2}]\n[{}]\nTrue\nFalse\nTrue\nTrue\nChainMap({}, {1: 10}, {2: 20})\nTrue\nFalse\nTrue\nTrue\nTrue\n[{4: 40}, {1: 10, 3: 30}, {2: 20}]\n[{4: 40}, {1: 10, 3: 30}]\n{2: 20}\n[]\n[{4: 40}, {1: 10, 3: 30}]\nFalse\nChainMap()\nTrue\nTrue\n[1, 2]\n[{1: 10}, {}, {2: 20}]\n[1, 2, 4, 5]\n[{9: 90}]\n[{1: 11}]\n[{2: 'two'}]\nChainMap(Counter({'b': 7, 'a': 2}))\n7\n0\nFalse\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "[{}]\nFalse\nFalse\nFalse\n[{'a': 2}]\n[{}]\nTrue\nFalse\nTrue\nTrue\nChainMap({}, {1: 10}, {2: 20})\nTrue\nFalse\nTrue\nTrue\nTrue\n[{4: 40}, {1: 10, 3: 30}, {2: 20}]\n[{4: 40}, {1: 10, 3: 30}]\n{2: 20}\n[]\n[{4: 40}, {1: 10, 3: 30}]\nFalse\nChainMap()\nTrue\nTrue\n[1, 2]\n[{1: 10}, {}, {2: 20}]\n[1, 2, 4, 5]\n[{9: 90}]\n[{1: 11}]\n[{2: 'two'}]\nChainMap(Counter({'b': 7, 'a': 2}))\n7\n0\nFalse\n",
+      "stderr": ""
+    }
+  }
+}

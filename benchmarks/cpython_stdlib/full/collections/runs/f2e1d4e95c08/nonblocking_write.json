@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "a2bdb3dac3ec56d39e73f5aad0c9d73a54adc79a2bf918446aaaddd6af99f0a1",
+  "imre_sha256": "e79bc979eb382176dea9ca0a601e903292830556467ef2642986ae66b2a9c341",
+  "runtime_sha256": "3e6c9e9f95a980a945958bc4daeede23c72a969264e69598298e47e96c29d9fa",
+  "reference": "blocked\nTrue\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "blocked\nTrue\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "blocked\nTrue\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "blocked\nTrue\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "blocked\nTrue\n",
+      "stderr": ""
+    }
+  }
+}

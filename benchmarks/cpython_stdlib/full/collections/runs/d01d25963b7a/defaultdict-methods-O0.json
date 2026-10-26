@@ -1,0 +1,99 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "d01d25963b7a90697f764afb4f0b6cc1ce2fe234",
+  "opt_level": 0,
+  "reference_denominator": 659,
+  "routines": {
+    "test.test_defaultdict.TestDefaultDict.test_basic": {
+      "source": "Lib/test/test_defaultdict.py:14",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:15:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_callable_arg": {
+      "source": "Lib/test/test_defaultdict.py:140",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:141:51",
+      "reason": "Imre: an empty dictionary requires a concrete dict[K, V] context"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_copy": {
+      "source": "Lib/test/test_defaultdict.py:73",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:74:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_deep_copy": {
+      "source": "Lib/test/test_defaultdict.py:108",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:109:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_factory_conflict_with_set_value": {
+      "source": "Lib/test/test_defaultdict.py:189",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:193:9",
+      "reason": "Imre: local functions require annotated parameters and return types"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_keyerror_without_factory": {
+      "source": "Lib/test/test_defaultdict.py:119",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:120:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_missing": {
+      "source": "Lib/test/test_defaultdict.py:50",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:51:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_pickling": {
+      "source": "Lib/test/test_defaultdict.py:143",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    "test.test_defaultdict.TestDefaultDict.test_recursive_repr": {
+      "source": "Lib/test/test_defaultdict.py:128",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:130:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_repr": {
+      "source": "Lib/test/test_defaultdict.py:56",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:57:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_repr_recursive_factory": {
+      "source": "Lib/test/test_defaultdict.py:207",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:210:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_shallow_copy": {
+      "source": "Lib/test/test_defaultdict.py:98",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:99:14",
+      "reason": "Imre: a module is not callable"
+    },
+    "test.test_defaultdict.TestDefaultDict.test_union": {
+      "source": "Lib/test/test_defaultdict.py:151",
+      "variant": "test.test_defaultdict.TestDefaultDict",
+      "result": "compile-blocked",
+      "location": "upstream:152:13",
+      "reason": "Imre: a module is not callable"
+    }
+  }
+}

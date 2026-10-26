@@ -1,0 +1,514 @@
+{
+  "schema": "imre.subprocess.fd-table/v1",
+  "platform": "linux",
+  "imre_revision": "467c296f060a8942dee13a3b638f796f6576fa77",
+  "tested_tree": "07616971f7cc09fe698fe9a6027fdada4ea5a804",
+  "base_revision": "c51e9e9976da79e9b159200fbf691169f3b6d363",
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "608993e0471e5dd3a402b0e65fa364b504d621759772c567ad61e68ed2de949b",
+        "runtime": "eb6352b6e2aa4802c8b91209f096ed7c01ad6e0d65362cc93a92aea152da3fe9",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "3ffca63ad4377d5057ab8884f357ca384156ed8f6666109eb1e9afe5df9ab7a6",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": false,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "57029be7fb4c390fb0c8393fa355d1ed98793ed16b0594bae3dc22702dbf4e8b",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "9d3294a0e8707d7f5bb8115ccb036b73417f6462f724840fcceb85c5a217124a",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "set",
+                "kept_descriptors": 8,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "2f3e8df8aaaa343ce5377a8f16bf6c6f60f62cb7c80b747c765fab5daf83b972",
+                "original_open_fds": 2,
+                "original_cloexec_fds": 1,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 2,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "61d2a8eec34524e64cc529caf4a741de264b0b7436f7a7a1c0d408b1083215dd",
+                "original_open_fds": 4,
+                "original_cloexec_fds": 4,
+                "close_fds": true,
+                "pass_fds_collection": "list",
+                "kept_descriptors": 3,
+                "borrowed_stdio": 3,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "608993e0471e5dd3a402b0e65fa364b504d621759772c567ad61e68ed2de949b",
+        "runtime": "eb6352b6e2aa4802c8b91209f096ed7c01ad6e0d65362cc93a92aea152da3fe9",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "a1d93b90ffa0261b72f27d8dfffd70bc432b5e6b6de0e241d9634bd6dcdcecec",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": false,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": false,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "32dca5640ae84d8a7312b616a72e8c0edd40c5ec5493e9360de96ec9ad4cb556",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": null,
+                "kept_descriptors": 0,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              },
+              {
+                "native_parent_sha256": "b118288be4be7b784e8eed0ce6289a7b6fe0edea37f9e775739ba475f924d5be",
+                "original_open_fds": 11,
+                "original_cloexec_fds": 0,
+                "close_fds": true,
+                "pass_fds_collection": "set",
+                "kept_descriptors": 8,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "c1fbc2c56540b042ac05ff11a585cb54fbdb86892b86c987bc091ea2ff27a178",
+                "original_open_fds": 2,
+                "original_cloexec_fds": 1,
+                "close_fds": true,
+                "pass_fds_collection": "tuple",
+                "kept_descriptors": 2,
+                "borrowed_stdio": 0,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ],
+        "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "fixture": "cpython",
+              "operation": "imre"
+            },
+            "launches": [
+              {
+                "native_parent_sha256": "9297fb0c59db41a5157e6ca2d745e2ad50f8e295a30a252e528a479e1f39bd6e",
+                "original_open_fds": 4,
+                "original_cloexec_fds": 4,
+                "close_fds": true,
+                "pass_fds_collection": "list",
+                "kept_descriptors": 3,
+                "borrowed_stdio": 3,
+                "child_bulk_cloexec": true,
+                "parent_table_unchanged": true,
+                "data_child": "original CPython fd_status.py",
+                "native_reaps": 1
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "prospective_merge": {
+    "schema": "imre.subprocess.fd-table/v1",
+    "platform": "linux",
+    "imre_revision": "56b4653097aed1087c6efeed5be86ea761421ba4",
+    "tested_tree": "8821253d986697d1945460cb1029d6ad1437640c",
+    "base_revision": "b69d36ad83836f55638feb8990139470c4791b59",
+    "reports": [
+      {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 0,
+        "toolchain": {
+          "imre": "b78cc356c1d7a68e333b923438e1efd174ad64df2fd4ed8e4e0b0687ffa7da2c",
+          "runtime": "ac2f8126dd35f1882b10331a2891d60d3a9b2187dddbd32d0b50fce81491347d",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "7d50ce719988704adfdc85579de1198fa438b422470572291044c3454276f633",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": false,
+                  "pass_fds_collection": null,
+                  "kept_descriptors": 0,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": false,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                },
+                {
+                  "native_parent_sha256": "baa423dea57d85d7feda09e3e6af433d1669cda70c0809c5093de15c47c71b69",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": true,
+                  "pass_fds_collection": null,
+                  "kept_descriptors": 0,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                },
+                {
+                  "native_parent_sha256": "4e9f21bb7d0a2c63acc1643bcbd80fa448146c6f2d4354f721ac717f705f334c",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": true,
+                  "pass_fds_collection": "set",
+                  "kept_descriptors": 8,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "4ecbd52d251e87eb2b5a50a9bc73e6c5f62d2f29495f2162ccb54e1f97631570",
+                  "original_open_fds": 2,
+                  "original_cloexec_fds": 1,
+                  "close_fds": true,
+                  "pass_fds_collection": "tuple",
+                  "kept_descriptors": 2,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "2da1005116440026a7d76d44a01762791a0126535759558d316fd4937ba3509f",
+                  "original_open_fds": 4,
+                  "original_cloexec_fds": 4,
+                  "close_fds": true,
+                  "pass_fds_collection": "list",
+                  "kept_descriptors": 3,
+                  "borrowed_stdio": 3,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "opt_level": 3,
+        "toolchain": {
+          "imre": "b78cc356c1d7a68e333b923438e1efd174ad64df2fd4ed8e4e0b0687ffa7da2c",
+          "runtime": "ac2f8126dd35f1882b10331a2891d60d3a9b2187dddbd32d0b50fce81491347d",
+          "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+        },
+        "rows": {
+          "test.test_subprocess.POSIXProcessTestCase.test_close_fds": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "49e354046900d8ab3a79e039ebea11ddc5c3e3df1ef3aa2b609bcb794eeabd50",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": false,
+                  "pass_fds_collection": null,
+                  "kept_descriptors": 0,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": false,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                },
+                {
+                  "native_parent_sha256": "65ca38b700bb9b6096cbaa3a3627cd805e81c4f432919be4a01e38b1a92c1d4d",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": true,
+                  "pass_fds_collection": null,
+                  "kept_descriptors": 0,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                },
+                {
+                  "native_parent_sha256": "9ac170916df7eac0320b0823563a410356aab47c71ad54ed844dafb57e2b53d9",
+                  "original_open_fds": 11,
+                  "original_cloexec_fds": 0,
+                  "close_fds": true,
+                  "pass_fds_collection": "set",
+                  "kept_descriptors": 8,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_inheritable": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "b78ddfc8944931b5b56cd85a1b97fe0ca0ccc72742ef219772115e7b311ec5b1",
+                  "original_open_fds": 2,
+                  "original_cloexec_fds": 1,
+                  "close_fds": true,
+                  "pass_fds_collection": "tuple",
+                  "kept_descriptors": 2,
+                  "borrowed_stdio": 0,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ],
+          "test.test_subprocess.POSIXProcessTestCase.test_pass_fds_redirected": [
+            {
+              "body_attempt": {
+                "status": "blocked",
+                "reason": "<case>/case.py:1:1: Imre: cannot resolve first-party module \"test\" under <case>; external and namespace-package imports are unsupported"
+              },
+              "roles": {
+                "body": "cpython",
+                "assertions": "cpython",
+                "fixture": "cpython",
+                "operation": "imre"
+              },
+              "launches": [
+                {
+                  "native_parent_sha256": "bc2d59a8fcbfa8ce2eca61080fcbb224c33846272732d3fe9d6e3ea42ed487b7",
+                  "original_open_fds": 4,
+                  "original_cloexec_fds": 4,
+                  "close_fds": true,
+                  "pass_fds_collection": "list",
+                  "kept_descriptors": 3,
+                  "borrowed_stdio": 3,
+                  "child_bulk_cloexec": true,
+                  "parent_table_unchanged": true,
+                  "data_child": "original CPython fd_status.py",
+                  "native_reaps": 1
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
