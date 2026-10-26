@@ -187,20 +187,6 @@ enum Storage {
     JsonDecoder(crate::ObjectOwner),
 }
 
-/// Acquires a reference without consuming the caller's live Rc handle.
-#[cfg(test)]
-unsafe fn acquire_rc<T>(word: usize) -> Rc<T> {
-    if word == 0 {
-        fail("TypeError", "unexpected null runtime handle");
-    }
-    let pointer = word as *const T;
-    // SAFETY: the caller supplies a rooted allocation of the exact type.
-    unsafe {
-        Rc::increment_strong_count(pointer);
-        Rc::from_raw(pointer)
-    }
-}
-
 /// Borrows a rooted object for one nonreentrant operation.
 unsafe fn object<'a>(pointer: *const Object) -> &'a Object {
     if pointer.is_null() {
@@ -1504,6 +1490,7 @@ fn split_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::Shared;
 
     #[test]
     fn partial_split_releases_earlier_string_owners() {
@@ -1658,8 +1645,8 @@ mod tests {
             } else {
                 // SAFETY: the integer owns this exact BigInt allocation. The
                 // temporary acquired reference is released before formatting.
-                let owner = unsafe { acquire_rc::<BigInt>(integer.0) };
-                Some(Rc::downgrade(&owner))
+                let owner = unsafe { Shared::<BigInt>::acquire_word(integer.0) };
+                Some(Shared::downgrade(&owner))
             };
             let mut buffer = [0xcc_u8; 22];
             let scratch = buffer[1..21].as_mut_ptr();
@@ -2281,16 +2268,16 @@ mod tests {
         use num_bigint::BigInt;
 
         let text = StrOwner::new(Str::from("borrowed sequence word"));
-        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let big = Shared::new(BigInt::from(1_u128 << 100));
         let float = Rc::new(-0.0_f64);
         let text_weak = StrOwner::downgrade(&text);
-        let big_weak = Rc::downgrade(&big);
+        let big_weak = Shared::downgrade(&big);
         let float_weak = Rc::downgrade(&float);
         let cases = [
             (0, vec![0]),
             (1, vec![0, 1]),
             (257, vec![0, 1, 2]),
-            (258, vec![0, 1, Rc::as_ptr(&big) as usize]),
+            (258, vec![0, 1, Shared::as_ptr(&big) as usize]),
             (259, vec![0, StrOwner::as_ptr(&text) as usize]),
             (263, vec![0, Rc::as_ptr(&float) as usize]),
             (
@@ -2319,7 +2306,7 @@ mod tests {
             }
         }
         assert_eq!(StrOwner::strong_count(&text), 1);
-        assert_eq!(Rc::strong_count(&big), 1);
+        assert_eq!(Shared::strong_count(&big), 1);
         assert_eq!(Rc::strong_count(&float), 1);
         drop((text, big, float));
         assert!(text_weak.upgrade().is_none());
@@ -2430,9 +2417,9 @@ mod tests {
     #[test]
     fn optional_bigint_sequence_replacement_releases_only_displaced_owners() {
         use num_bigint::BigInt;
-        let integer = Rc::new(BigInt::from(1_u128 << 120));
-        let weak = Rc::downgrade(&integer);
-        let word = Rc::as_ptr(&integer) as usize;
+        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let weak = Shared::downgrade(&integer);
+        let word = Shared::as_ptr(&integer) as usize;
         // SAFETY: nullable Int word0 and canonical nonzero words are distinct;
         // every returned BigInt owner is adopted exactly once.
         unsafe {

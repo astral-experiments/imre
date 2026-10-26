@@ -2523,6 +2523,7 @@ mod tests {
     use crate::objects::{
         imre_seq_append, imre_seq_get_index, imre_seq_new, imre_seq_pop, imre_seq_set_index,
     };
+    use crate::shared::Shared;
     use crate::{
         Int, imre_int_binary, imre_int_parse, imre_list_append, imre_list_copy_index,
         imre_list_get_index, imre_list_new, imre_list_pop, imre_list_repeat,
@@ -2874,9 +2875,9 @@ mod tests {
 
     #[test]
     fn caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery() {
-        let big = Rc::new(BigInt::from(1_u8) << 120_u32);
-        let weak = Rc::downgrade(&big);
-        let integer = Int(Rc::into_raw(big) as usize);
+        let big = Shared::new(BigInt::from(1_u8) << 120_u32);
+        let weak = Shared::downgrade(&big);
+        let integer = Int(Shared::into_raw(big) as usize);
         // SAFETY: the constructor transfers one owned list reference.
         let list = unsafe { Rc::from_raw(imre_list_new()) };
         let zero = Int::small(0).unwrap();

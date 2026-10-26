@@ -530,6 +530,7 @@ mod tests {
     };
     use crate::objects::mappings::imre_mapping_iter_next;
     use crate::objects::{imre_seq_append, imre_seq_get_index, imre_seq_new};
+    use crate::shared::Shared;
     use crate::{
         imre_list_append, imre_list_get_index, imre_list_len, imre_list_new, imre_list_set_index,
     };
@@ -874,13 +875,13 @@ mod tests {
 
     #[test]
     fn integer_list_slices_own_selected_values_after_source_mutation() {
-        let big = Rc::new(BigInt::from(1_u8) << 400_u32);
-        let weak = Rc::downgrade(&big);
+        let big = Shared::new(BigInt::from(1_u8) << 400_u32);
+        let weak = Shared::downgrade(&big);
         // SAFETY: source and slice are distinct owned lists. Every selected
         // BigInt gains an independent reference, as does each successful read.
         unsafe {
             let source = Rc::from_raw(imre_list_new());
-            imre_list_append(Rc::as_ptr(&source), Rc::as_ptr(&big) as usize);
+            imre_list_append(Rc::as_ptr(&source), Shared::as_ptr(&big) as usize);
             imre_list_append(Rc::as_ptr(&source), integer(7));
             let slice = Rc::from_raw(imre_list_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
             let subtotal = Int(imre_list_slice_sum(Rc::as_ptr(&source), 0, 0, integer(-1)));

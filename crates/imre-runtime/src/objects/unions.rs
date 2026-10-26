@@ -1,12 +1,12 @@
-//! Closed unions use three alignment bits of their exact Rc payload.
+//! Closed unions use three alignment bits of their exact heap payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
 //! Words one and two represent the bool singletons; other nonzero words carry a member tag.
 
 use super::words::WordKind;
 use super::{Bytes, Int, Object, Str, object};
+use crate::shared::Shared;
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero};
-use std::rc::Rc;
 
 const _: () = assert!(
     align_of::<Str>() >= 8
@@ -30,7 +30,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
         5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
-        7 => 2, // aligned Rc<BigInt>, even for an ordinary immediate integer
+        7 => 2, // aligned Shared<BigInt>, even for an ordinary immediate integer
         _ => unreachable!(),
     };
     (value & !7, WordKind::new(kind))
@@ -40,7 +40,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
 /// inside the union; an existing large integer transfers its allocation.
 pub(super) fn integer(value: Int) -> usize {
     let word = match value.as_small() {
-        Some(small) => Rc::into_raw(Rc::new(BigInt::from(small))) as usize,
+        Some(small) => Shared::into_raw(Shared::new(BigInt::from(small))) as usize,
         None => value.into_raw(),
     };
     word | 7
