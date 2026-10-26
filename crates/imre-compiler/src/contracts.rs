@@ -138,6 +138,7 @@ impl Builtin {
                     | TextOperation::Split(_)
                     | TextOperation::Partition
                     | TextOperation::Translate
+                    | TextOperation::UrlSplit | TextOperation::UrlProperty(_) | TextOperation::UrlGetUrl
                     | TextOperation::Unquote
                     | TextOperation::ShlexSplit
                     | TextOperation::ShlexQuote => true,

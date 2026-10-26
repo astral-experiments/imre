@@ -4,6 +4,7 @@ use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
 mod translate;
+mod urlsplit;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};

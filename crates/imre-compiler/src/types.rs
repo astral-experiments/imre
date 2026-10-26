@@ -104,6 +104,12 @@ pub(crate) enum TupleOrigin {
     LibraryNamedTuple(&'static str, &'static [&'static str]),
 }
 
+const URL_FIELDS: &[&str] = &["scheme", "netloc", "path", "query", "fragment"];
+pub(crate) const SPLIT_RESULT: TupleOrigin =
+    TupleOrigin::LibraryNamedTuple("SplitResult", URL_FIELDS);
+pub(crate) const SPLIT_RESULT_BYTES: TupleOrigin =
+    TupleOrigin::LibraryNamedTuple("SplitResultBytes", URL_FIELDS);
+
 pub(crate) const CACHE_INFO: TupleOrigin =
     TupleOrigin::LibraryNamedTuple("CacheInfo", &["hits", "misses", "maxsize", "currsize"]);
 
@@ -1096,6 +1102,15 @@ impl Types {
     ) -> Type {
         assert_eq!(names.len(), fields.len());
         self.namedtuple_layout(TupleOrigin::StructSequence(name, names), fields)
+    }
+
+    pub(crate) fn url_split_result(&self, bytes: bool) -> Type {
+        let (origin, field) = if bytes {
+            (SPLIT_RESULT_BYTES, Type::Bytes)
+        } else {
+            (SPLIT_RESULT, Type::Str)
+        };
+        self.namedtuple_layout(origin, vec![field; URL_FIELDS.len()])
     }
 
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {

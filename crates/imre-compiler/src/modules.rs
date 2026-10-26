@@ -422,6 +422,8 @@ pub(crate) enum Intrinsic {
     PosixPath(PosixPathOperation),
     Fnmatch(FnmatchOperation),
     Unquote,
+    UrlSplit,
+    SplitResult { bytes: bool },
 }
 
 impl Intrinsic {
@@ -966,6 +968,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
+            (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
+            (Self::UrllibParse, "SplitResultBytes") => Intrinsic::SplitResult { bytes: true },
             _ => return declarations::symbol(self, name),
         };
         Some(Binding::Intrinsic(symbol))
