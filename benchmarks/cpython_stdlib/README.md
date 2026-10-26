@@ -31,7 +31,7 @@ line counts, Unicode, input mutation and incremental consumption with CPython.
 
 `native_zipfile.py` runs four unchanged constructor error tests from CPython's ZIP suite. CPython owns the file setup and assertions; a native child opens the files and reports the exception. Separate successful opens check directory order, duplicate names and access after close. Pass the same arguments as the JSON runner, optionally with `--opt-level 0` or `3`.
 
-`native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
+`native_hashlib.py` takes the same arguments as the JSON runner. CPython’s eight SHA-1 and SHA-256 vector tests check the hex digest, raw digest and size from native hash objects. Alternate constructors and `file_digest` run on CPython. The original `test_large_update` method checks native SHA-1 updates and independent copies. Pass `--reachable-only` to test that compiler mode and `--wheelhouse` with the pinned Flask wheels to compare the unchanged Werkzeug `generate_etag` function with CPython.
 
 The runner also compiles the unchanged `test_sha256_gil`, `test_sha256_update_over_4gb`, and `test_new_upper_to_lower` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
 

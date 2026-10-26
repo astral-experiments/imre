@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_hashlib",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/hashlib.py": "0e9bd98aa1fc31b5dccef0d34780b86ae05f6ab3",
+    "Lib/test/test_hashlib.py": "c7d7b801ac732a34f887460fb61b382787dd116e",
+    "Lib/test/support/hashlib_helper.py": "7032257b06877a62f48ab1a674a2e7b6fc3d70df"
+  }
+}

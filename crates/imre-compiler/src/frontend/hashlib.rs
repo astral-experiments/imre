@@ -1,11 +1,11 @@
-//! The sealed SHA-256 object owns its state. Reading a digest leaves it usable.
+//! A sealed hash object owns its state. Reading a digest leaves it usable.
 use super::*;
 
 impl Checker<'_> {
-    pub(super) fn sha256_constructor(
+    pub(super) fn hash_constructor(
         &mut self,
         call: &ast::ExprCall,
-        named: bool,
+        constructor: Intrinsic,
     ) -> Result<Expr, String> {
         let mut params = vec![
             Parameter {
@@ -29,9 +29,9 @@ impl Checker<'_> {
                 sign_only: false,
             },
         ];
-        // Both boolean values select SHA-256 here; still evaluate an explicit
+        // Both security flags select the same provider. Evaluate an explicit
         // flag and the input bytes in the caller's order.
-        let op = if named {
+        let op = if constructor == Intrinsic::HashNew {
             params.insert(
                 0,
                 Parameter {
@@ -43,14 +43,16 @@ impl Checker<'_> {
                 },
             );
             Builtin::HashNew
+        } else if constructor == Intrinsic::Sha1 {
+            Builtin::Sha1New
         } else {
             Builtin::Sha256New
         };
         let args = self.arguments(call, &params, None)?;
-        Ok(self.ordered_builtin(op, Type::Sha256, args))
+        Ok(self.ordered_builtin(op, Type::Hash, args))
     }
 
-    pub(super) fn sha256_method(
+    pub(super) fn hash_method(
         &mut self,
         receiver: Expr,
         attr: &ast::ExprAttribute,
@@ -59,28 +61,36 @@ impl Checker<'_> {
         self.reject_builtin_keywords(call)?;
         if attr.attr.as_str() == "hexdigest"
             && call.arguments.args.is_empty()
-            && let ExprKind::Builtin(Builtin::Sha256New, inputs) = receiver.kind
+            && let ExprKind::Builtin(constructor @ (Builtin::Sha1New | Builtin::Sha256New), inputs) =
+                receiver.kind
         {
             // An immediately consumed constructor needs no mutable state object.
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Sha256Hex, inputs),
+                kind: ExprKind::Builtin(
+                    if matches!(constructor, Builtin::Sha1New) {
+                        Builtin::Sha1Hex
+                    } else {
+                        Builtin::Sha256Hex
+                    },
+                    inputs,
+                ),
             });
         }
         let mut args = vec![receiver];
         let (op, ty) = match (attr.attr.as_str(), call.arguments.args.as_ref()) {
             ("update", [data]) => {
                 args.push(self.expr_expected(data, Type::Bytes)?);
-                (Builtin::Sha256Update, Type::None)
+                (Builtin::HashUpdate, Type::None)
             }
-            ("hexdigest", []) => (Builtin::Sha256Digest { hex: true }, Type::Str),
-            ("digest", []) => (Builtin::Sha256Digest { hex: false }, Type::Bytes),
-            ("copy", []) => (Builtin::Sha256Copy, Type::Sha256),
+            ("hexdigest", []) => (Builtin::HashDigest { hex: true }, Type::Str),
+            ("digest", []) => (Builtin::HashDigest { hex: false }, Type::Bytes),
+            ("copy", []) => (Builtin::HashCopy, Type::Hash),
             _ => {
                 return Err(error(
                     self.source,
                     call,
-                    "SHA-256 supports update(bytes), digest(), hexdigest(), and copy()",
+                    "hash objects support update(bytes), digest(), hexdigest(), and copy()",
                 ));
             }
         };
@@ -90,39 +100,38 @@ impl Checker<'_> {
         })
     }
 
-    pub(super) fn sha256_attribute(
+    pub(super) fn hash_attribute(
         &self,
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let value = match attr.attr.as_str() {
-            "name" => Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str("sha256".into()),
-            },
-            "digest_size" => Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("32".into()),
-            },
-            "block_size" => Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("64".into()),
-            },
+        let (op, ty) = match attr.attr.as_str() {
+            "name" => (Builtin::HashName, Type::Str),
+            "digest_size" => (Builtin::HashDigestSize, Type::Int),
+            "block_size" => {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(receiver)],
+                        value: Box::new(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("64".into()),
+                        }),
+                        clear: Vec::new(),
+                    },
+                });
+            }
             _ => {
                 return Err(error(
                     self.source,
                     attr,
-                    "SHA-256 exposes name, digest_size, and block_size",
+                    "hash objects expose name, digest_size, and block_size",
                 ));
             }
         };
         Ok(Expr {
-            ty: value.ty,
-            kind: ExprKind::Scope {
-                body: vec![Statement::Expr(receiver)],
-                value: Box::new(value),
-                clear: Vec::new(),
-            },
+            ty,
+            kind: ExprKind::Builtin(op, vec![receiver]),
         })
     }
 }

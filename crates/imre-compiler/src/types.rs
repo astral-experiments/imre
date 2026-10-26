@@ -324,7 +324,7 @@ impl Types {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::TextOutput
-            | Type::Sha256
+            | Type::Hash
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
@@ -861,7 +861,7 @@ impl Types {
             | Type::CodecWriterClass
             | Type::CodecWriter
             | Type::TextOutput
-            | Type::Sha256
+            | Type::Hash
             | Type::JsonDecoder
             | Type::ZipFile
             | Type::ZipInfo
