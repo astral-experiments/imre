@@ -10,6 +10,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify import HERE, manifests, options, toolchains
 from hosted import hosted
+import server_cases
 from suite_evidence import ROLES, build_report, occurrence_keys, reference_cases, roles, write_reports
 from suite_inventory import cases, load_suite, verify_interpreter_tests
 from suite_native import NativeCompileError, NativeDefaultMethod, method_bytes
@@ -80,9 +81,13 @@ def measure(args, work, output):
                     if suite == "httplib" and type(case).__name__ == "BasicTest" and case._testMethodName in STATUS}
         if suite == "httplib" and selected.keys() != STATUS.keys():
             raise ValueError("did not discover all four original BasicTest HTTPStatus methods")
+        if suite == "httpservers":
+            server_cases.reference(work)
         for tool in toolchains(args):
             attempt = {"opt_level": tool.level, "reachable_only": tool.reachable_only,
                        "suite_startup": startup(tool, module, staged / "Lib"), "methods": {}, "hosted": {}}
+            if suite == "httpservers":
+                attempt["server"] = server_cases.measure(tool, work)
             for name, case in selected.items():
                 runner = NativeDefaultMethod(tool, work, source, manifest["files"][path], ("imre", STATUS[name]))
                 attempt["methods"][name] = runner.run(case)
@@ -98,7 +103,9 @@ def measure(args, work, output):
                     exceptions[(*key, tool.level)] = skip_exception(case, refs[key], path, reference["platform"], variant)
                     continue
                 name = case._testMethodName
-                if name in selected and case.id() == selected[name].id():
+                if suite == "httpservers" and (server := server_cases.observation(case, ordinary["server"], reachable["server"])):
+                    observations[key] = server
+                elif name in selected and case.id() == selected[name].id():
                     candidates = [r["methods"][name] for r in (ordinary, reachable)]
                     if all(obs["outcome"] == "pass" for obs in candidates):
                         observations[key] = candidates[1]
