@@ -32,6 +32,7 @@ impl Context {
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
             Value::DictView { dict, .. } => self.truth(*dict),
+            Value::Context(bindings) => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
@@ -104,6 +105,26 @@ impl Context {
     }
     pub(super) fn display(&self, id: Id) -> String {
         match self.heap.get(id) {
+            Value::ContextVar {
+                name,
+                default,
+                repr_active,
+            } => {
+                if repr_active.replace(true) {
+                    return "...".to_owned();
+                }
+                let default =
+                    default.map_or_else(String::new, |v| format!(" default={}", self.repr(v)));
+                let repr = format!("<ContextVar name={}{default} at {id:#x}>", self.repr(*name));
+                repr_active.set(false);
+                repr
+            }
+            Value::ContextToken { variable, used, .. } => {
+                let state = if *used { " used" } else { "" };
+                format!("<Token{state} var={} at {id:#x}>", self.repr(*variable))
+            }
+            Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
+            Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::None => "None".into(),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
@@ -157,6 +178,13 @@ impl Context {
         }
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Value::Context(bindings) = self.heap.get(obj) {
+            self.context_key(key)?;
+            return bindings
+                .get(&key)
+                .copied()
+                .ok_or_else(|| self.context_lookup_error("KeyError", key));
+        }
         if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
             if !builtins::hashable(self, key) {
                 return Err(Error::new("TypeError", "unhashable dictionary key"));
@@ -218,6 +246,10 @@ impl Context {
         Ok(())
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
+        if let Value::Context(bindings) = self.heap.get(container) {
+            self.context_key(item)?;
+            return Ok(bindings.contains_key(&item));
+        }
         if let Value::Str(hay) = self.heap.get(container) {
             return Ok(hay.contains(self.str_value(item)?));
         }

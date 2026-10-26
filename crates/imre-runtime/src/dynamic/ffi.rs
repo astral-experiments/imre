@@ -296,6 +296,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         executable,
         argv: NONE,
         sys_path: NONE,
+        contexts: Vec::new(),
+        token_missing: NONE,
         modules: HashMap::new(),
         classes: HashMap::new(),
         sources: HashMap::new(),
@@ -314,6 +316,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
     let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
+    let current = ctx.alloc(Value::Context(Default::default()));
+    ctx.contexts.push(current);
+    ctx.token_missing = ctx.alloc(Value::TokenMissing);
     Box::into_raw(Box::new(ctx))
 }
 
@@ -474,7 +479,15 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
             .values()
             .chain(ctx.classes.values())
             .copied()
-            .chain([ctx.argv, ctx.sys_path]),
+            .chain(ctx.contexts.iter().copied())
+            .chain(
+                ctx.pending
+                    .iter()
+                    .filter_map(|e| e.args.as_ref())
+                    .flatten()
+                    .copied(),
+            )
+            .chain([ctx.argv, ctx.sys_path, ctx.token_missing]),
         live,
         value::Location { file, line },
     );

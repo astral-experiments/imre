@@ -22,6 +22,7 @@ pub(super) struct Location {
 pub(super) struct Error {
     pub kind: String,
     pub message: String,
+    pub args: Option<Vec<Id>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -31,6 +32,7 @@ impl Error {
         Self {
             kind: kind.to_owned(),
             message: message.into(),
+            args: None,
             trace: Vec::new(),
             exit_status: None,
         }
@@ -48,6 +50,7 @@ impl Context {
             }
         };
         let mut error = Error::new(kind, message);
+        error.args = Some(args.to_vec());
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -165,6 +168,19 @@ pub(super) enum Value {
         groups: Vec<Option<String>>,
         names: HashMap<String, usize>,
     },
+    Context(std::rc::Rc<HashMap<Id, Id>>),
+    ContextVar {
+        name: Id,
+        default: Option<Id>,
+        repr_active: std::cell::Cell<bool>,
+    },
+    ContextToken {
+        context: Id,
+        variable: Id,
+        old: Option<Id>,
+        used: bool,
+    },
+    TokenMissing,
 }
 
 #[derive(Clone)]
@@ -188,6 +204,24 @@ impl Value {
                 }
             }
             Self::DictView { dict, .. } => visit.push(*dict),
+            Self::Context(bindings) => {
+                for (key, value) in bindings.iter() {
+                    visit.extend([*key, *value]);
+                }
+            }
+            Self::ContextVar { name, default, .. } => {
+                visit.push(*name);
+                visit.extend(default);
+            }
+            Self::ContextToken {
+                context,
+                variable,
+                old,
+                ..
+            } => {
+                visit.extend([*context, *variable]);
+                visit.extend(old);
+            }
             Self::Range { .. } => {}
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
@@ -224,13 +258,14 @@ impl Value {
                     visit.push(call.result);
                 }
             }
+            Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::None
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::Native(_)
-            | Self::Raised(_)
+            | Self::TokenMissing
             | Self::File(_)
             | Self::RegexPattern(_)
             | Self::RegexMatch { .. } => {}
