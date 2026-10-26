@@ -417,7 +417,13 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
+            Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Zip { .. } => {
+                // A zip input can itself be a zip, so advancing a row can descend many native frames.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_zip_or_map(id)
+                });
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
                 // Delegated generators resume their children on the native stack.
