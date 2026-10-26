@@ -7,7 +7,6 @@ ActiveExceptionTests.test_sys_exception_with_exception_type	blocked	The complete
 DisplayHookTest.test_custom_displayhook	blocked	Assigning a Python callable to sys.displayhook must affect eval of code compiled in single mode.
 DisplayHookTest.test_gh130163	blocked	The hook must hold the active output stream while an object's __repr__ replaces sys.stdout and forces collection.
 DisplayHookTest.test_lost_displayhook	blocked	Deleting the displayhook must cause single-mode eval to raise RuntimeError; neither mutable sys hooks nor single-mode eval exist.
-DisplayHookTest.test_original_displayhook	blocked	The native default hook must write to a swappable stdout, update builtins._, ignore None, and report a deleted stdout.
 ExceptHookTest.test_excepthook	blocked	Calling the default hook with invalid exception data must route an unraisable diagnostic to a captured stderr.
 ExceptHookTest.test_excepthook_bytes_filename	blocked	Rendering a SyntaxError with a bytes filename needs structured exception args, line data and a replaceable stderr.
 ExceptHookTest.test_original_excepthook	blocked	Formatted frames, sys.exc_info unpacking, and the callable original hook must work in the captured-stderr fixture.

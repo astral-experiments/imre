@@ -783,12 +783,16 @@ impl Checker<'_> {
             self.utf8_encoding_keyword(encoding)?;
         }
         let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
+        let mut args = vec![path];
+        if let Some(encoding) = encoding {
+            args.push(self.expr(&encoding.value)?);
+        }
         if let Some(newline) = newline {
             builtin = self.text_newline(newline, builtin)?;
         }
         Ok(Expr {
             ty,
-            kind: ExprKind::Builtin(builtin, vec![path]),
+            kind: ExprKind::Builtin(builtin, args),
         })
     }
 

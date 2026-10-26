@@ -141,15 +141,16 @@ pub unsafe extern "C" fn imre_sys_displayhook(kind: u32, word: usize) {
     }
     // SAFETY: (0, 0) is the native representation of None.
     unsafe { imre_builtins_set_last(0, 0) };
-    // SAFETY: repr returns an owned string or NULL with a pending Python error.
-    let rendered =
-        unsafe { exceptions::imre_exception_field_repr(crate::ObjectOwner::as_ptr(&view)) };
-    if rendered.is_null() {
-        return;
-    }
-    // SAFETY: the runtime returned one owned reference.
-    let rendered = unsafe { StrOwner::from_raw(rendered) };
-    if crate::sys::write_display_line(&rendered) {
+    if super::stdio::display(|| {
+        // SAFETY: the owner keeps the displayed value live during formatting callbacks.
+        let raw =
+            unsafe { exceptions::imre_exception_field_repr(crate::ObjectOwner::as_ptr(&view)) };
+        if raw.is_null() {
+            return None;
+        }
+        // SAFETY: a successful repr transfers one string owner.
+        Some(unsafe { StrOwner::from_raw(raw) })
+    }) {
         drop(LAST.replace(Some(view)));
     }
 }

@@ -90,6 +90,8 @@ impl FileState {
             fd: None,
             raw: false,
             name: None,
+            encoding: None,
+            errors: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
         }
@@ -101,6 +103,8 @@ impl FileState {
             fd: None,
             raw: false,
             name: Some(member.name().clone()),
+            encoding: None,
+            errors: None,
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
         }
@@ -187,9 +191,10 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::UnreadGzip { .. } | Stream::Write(_) | Stream::TextMemory(_) => {
-                Err(Error::new(Kind::UnsupportedOperation, "seek"))
-            }
+            Stream::UnreadGzip { .. }
+            | Stream::Standard(_)
+            | Stream::Write(_)
+            | Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
         }
     }
 
@@ -209,7 +214,7 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Write(_) | Stream::TextMemory(_) => {
+            Stream::Standard(_) | Stream::Write(_) | Stream::TextMemory(_) => {
                 Err(Error::new(Kind::UnsupportedOperation, "read"))
             }
         }

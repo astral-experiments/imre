@@ -11,6 +11,27 @@
       "fixture_execution": "CPython module/class/instance hooks; native instance in child",
       "method_sha256": "e9ae316ea5c7f6dcc265f3be947387d10898624e8534aaa215d750a46d69e351"
     },
+    "test.test_sys.DisplayHookTest.test_original_displayhook": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython unittest fixture and support.captured_stdout contexts",
+      "calls": [
+        "display-int",
+        "get-last",
+        "delete-last",
+        "display-none",
+        "get-last",
+        "display-no-args",
+        "save-stdout",
+        "delete-stdout",
+        "display-int",
+        "restore-stdout"
+      ],
+      "fixture": "original CPython unittest fixture and support.captured_stdout contexts",
+      "operation": "one Imre process displays the object, reads and deletes builtins._, and deletes and restores its actual sys.stdout"
+    },
     "test.test_sys.SysModuleTest.test_43581": {
       "status": "pass",
       "execution": "native-body",
@@ -274,6 +295,20 @@
           "launch": "compile the original -c source directly"
         }
       ]
+    }
+  },
+  "stream_controls": {
+    "stdout_binding": {
+      "matches_pinned_cpython": true,
+      "stdout_hex": "310a547275650a6f726967696e616c0a274e6f6e655479706527206f626a65637420686173206e6f2061747472696275746520277772697465270a6c6f7374207379732e7374646f75740a276d6f64756c6527206f626a65637420686173206e6f2061747472696275746520277374646f7574270a492f4f206f7065726174696f6e206f6e20636c6f7365642066696c650a22e99baa5c6e302e355c6e62275c5c786666275c6e27c3a9275c6e656e64220a726573746f7265640a",
+      "stderr_hex": "",
+      "redirected_hex": "726564697265637465640a27c3a9270a7265636569766572206576616c7561746564206265666f726520617267756d656e740a"
+    },
+    "stdout_metadata": {
+      "matches_pinned_cpython": true,
+      "stdout_hex": "7574662d380a547275650a547275650a4e6f6e650a4e6f6e650a7574662d380a547275650a547275650a547275650a7574662d380a7574662d380a547275650a5554462d380a6d697373696e67206578706c696369742d656e636f64696e672066696c650a274e6f6e655479706527206f626a65637420686173206e6f206174747269627574652027656e636f64696e67270a6d6f64756c6520277379732720686173206e6f2061747472696275746520277374646f7574270a547275650a",
+      "stderr_hex": "",
+      "redirected_hex": "7772697474656e20746f206469736b0a"
     }
   }
 }

@@ -4,6 +4,7 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -25,6 +26,8 @@ import jit_case
 import locale_case
 import recursion_case
 import thread_case
+from display_case import CASE_ID as DISPLAY_ID, display_observer
+from import_snapshots import check_import_snapshots
 from filesystem_case import filesystem_method
 from metadata import metadata_observer
 import module_names_case
@@ -135,6 +138,37 @@ def select(toolchain, work, source, module):
         if output(binary) != (ref.stdout, ref.stderr):
             raise AssertionError(f"{filename}: native output differs from CPython")
 
+    display = toolchain.build((HERE / "display_driver.py").read_bytes(), directory(work, "display-driver"))
+    executions[DISPLAY_ID] = display_observer(module, display, work, toolchain.level)
+    check_import_snapshots(toolchain, directory(work, "import-snapshots"))
+
+    stream_controls = {}
+    for filename in ("stdout_binding.py", "stdout_metadata.py"):
+        exercise = HERE / filename
+        binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
+        redirected = work / "redirected"
+        observations = []
+        for command in ([sys.executable, exercise], [binary]):
+            run = subprocess.run([*command, redirected], capture_output=True, check=True, timeout=15)
+            observations.append((run.stdout, run.stderr, redirected.read_bytes()))
+            redirected.unlink()
+        if observations[0] != observations[1]:
+            raise AssertionError((filename, observations))
+        stdout, stderr, disk = observations[1]
+        stream_controls[exercise.stem] = {
+            "matches_pinned_cpython": True,
+            "stdout_hex": stdout.hex(), "stderr_hex": stderr.hex(), "redirected_hex": disk.hex(),
+        }
+
+    codec = HERE / "stdout_binding_codec.py"
+    binary = toolchain.build(codec.read_bytes(), directory(work, codec.stem))
+    for policy in ("ascii:strict", "ascii:replace", "ascii:backslashreplace", "latin1:strict", "utf-8", "utf-8-sig"):
+        env = dict(os.environ, PYTHONIOENCODING=policy)
+        runs = [subprocess.run([*cmd, "雪"], env=env, capture_output=True, check=True, timeout=15)
+                for cmd in ([sys.executable, codec], [binary])]
+        if (runs[0].stdout, runs[0].stderr) != (runs[1].stdout, runs[1].stderr):
+            raise AssertionError((codec.name, policy, runs))
+
     exercise = HERE / "intern_values.py"
     ref = subprocess.run([sys.executable, "-B", exercise], capture_output=True, check=True, timeout=15)
     binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
@@ -200,7 +234,7 @@ def select(toolchain, work, source, module):
     jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit
-    return executions, frame_control
+    return executions, frame_control, stream_controls
 
 
 def main():
@@ -250,7 +284,7 @@ def main():
             if (config["LC_CTYPE"], config["utf8_mode"], config["filesystem_encoding"],
                     config["preferred_encoding"]) != ("C.UTF-8", 0, "utf-8", "UTF-8"):
                 parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
-        executions, frame_control = select(toolchain, Path(tmp), source, test_sys)
+        executions, frame_control, stream_controls = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
             preflight[SYS + "test_getframemodulename", 1]["evidence"]["module_name_control"] = frame_control
@@ -285,7 +319,7 @@ def main():
         raise ValueError("missing execution outcome")
     args.result.write_text(json.dumps({"cpython_commit": manifest["commit"],
                                        "opt_level": args.opt_level, "denominator": len(ids),
-                                       "tests": dict(sorted(results.items()))}, indent=2) + "\n")
+                                       "tests": dict(sorted(results.items())), "stream_controls": stream_controls}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

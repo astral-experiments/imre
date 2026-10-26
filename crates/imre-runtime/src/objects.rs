@@ -59,6 +59,7 @@ mod sequences;
 mod shutil;
 mod socket;
 mod source_modules;
+pub(crate) mod stdio;
 mod stdlib;
 mod string_enums;
 mod structs;

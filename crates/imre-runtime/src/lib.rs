@@ -697,7 +697,7 @@ pub unsafe extern "C" fn imre_stderr_line(text: *const Str) {
 
 /// Raise encoding and descriptor errors after releasing the stdout lock.
 fn output_text(value: &str) {
-    if let Err(error) = sys::write_stdout(value, true) {
+    if let Err(error) = objects::stdio::write_line(value, || sys::error_text(value)) {
         error.raise();
     }
 }
@@ -1036,7 +1036,7 @@ pub unsafe extern "C" fn imre_str_release(value: *const Str) {
 pub unsafe extern "C" fn imre_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
     let text = unsafe { &*value };
-    if let Err(error) = sys::write_stdout_with(text, true, || {
+    if let Err(error) = objects::stdio::write_line(text, || {
         // SAFETY: the caller roots this same string until the write returns.
         Ok(unsafe { StrOwner::acquire_word(value as usize) })
     }) {

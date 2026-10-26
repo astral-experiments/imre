@@ -110,6 +110,118 @@ impl Checker<'_> {
         Ok(Some(pipelines::integer(i64::from(setting))))
     }
 
+    pub(super) fn stdout_value(&self) -> Expr {
+        Expr {
+            ty: self.types.optional(Type::TextIO),
+            kind: ExprKind::Builtin(Builtin::SysStdout, vec![]),
+        }
+    }
+
+    /// A missing from-import constructs the same structured ImportError as a Python call.
+    pub(super) fn import_sys_value(&self, symbol: Intrinsic) -> Expr {
+        let (module, name, present, value) = match symbol {
+            Intrinsic::Stdout => ("sys", "stdout", Builtin::SysHasStdout, self.stdout_value()),
+            Intrinsic::BuiltinsLast => (
+                "builtins",
+                "_",
+                Builtin::BuiltinsHasLast,
+                Expr {
+                    ty: Type::ObjectValue,
+                    kind: ExprKind::Builtin(Builtin::BuiltinsLast, vec![]),
+                },
+            ),
+            _ => unreachable!("only mutable sys and builtins exports need an import snapshot"),
+        };
+        let error = self.import_error_value(
+            exception_kind("ImportError").unwrap(),
+            vec![unpacking::string(format!(
+                "cannot import name '{name}' from '{module}' (unknown location)"
+            ))],
+            vec![unpacking::string(module), unpacking::string(name)],
+            [Some(1), None, Some(2)],
+        );
+        let missing = Expr {
+            ty: value.ty,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![error]),
+        };
+        Expr {
+            ty: value.ty,
+            kind: ExprKind::Conditional(
+                Box::new(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(present, vec![]),
+                }),
+                Box::new(value),
+                Box::new(missing),
+            ),
+        }
+    }
+
+    /// Bind a mutable export at the local import statement, inside any active handler.
+    pub(super) fn local_sys_import(
+        &mut self,
+        import: &ast::StmtImportFrom,
+    ) -> Result<Option<Vec<Statement>>, String> {
+        let Some(module) = &import.module else {
+            return Ok(None);
+        };
+        if import.level != 0 || import.is_lazy || !matches!(module.as_str(), "sys" | "builtins") {
+            return Ok(None);
+        }
+        let mut bindings = Vec::new();
+        for alias in &import.names {
+            let symbol = match (module.as_str(), alias.name.as_str()) {
+                ("sys", "stdout") => Intrinsic::Stdout,
+                ("builtins", "_") => Intrinsic::BuiltinsLast,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        alias,
+                        "unsupported local import from this native module",
+                    ));
+                }
+            };
+            let value = self.import_sys_value(symbol);
+            let name = alias.asname.as_ref().unwrap_or(&alias.name);
+            let slot = self.declare(name.as_str(), value.ty, alias)?;
+            if symbol == Intrinsic::BuiltinsLast {
+                self.graph
+                    .checked_builtin_import(self.module, alias.range());
+            }
+            self.assigned_value(slot, &value);
+            bindings.push(Statement::Assign(slot, value));
+        }
+        Ok(Some(bindings))
+    }
+
+    /// Preserve lookup of an optional text stream before evaluating method arguments.
+    pub(super) fn optional_stream(&self, value: Expr, name: &str) -> Expr {
+        if self.types.payload(value.ty) == Some(Type::TextIO)
+            && matches!(
+                name,
+                "write"
+                    | "flush"
+                    | "close"
+                    | "read"
+                    | "readline"
+                    | "encoding"
+                    | "errors"
+                    | "closed"
+                    | "fileno"
+            )
+        {
+            Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(
+                    Builtin::TextOptionalReceiver,
+                    vec![value, unpacking::string(name)],
+                ),
+            }
+        } else {
+            value
+        }
+    }
+
     fn sys_no_args(
         &mut self,
         call: &ast::ExprCall,
@@ -424,7 +536,10 @@ impl Checker<'_> {
             return Ok(None);
         };
         let stderr = match self.resolve(&attribute.value) {
-            Some(Binding::Intrinsic(Intrinsic::Stdout)) => false,
+            Some(Binding::Intrinsic(Intrinsic::Stdout | Intrinsic::OriginalStdout)) => {
+                // The ordinary TextIO method path evaluates and retains the receiver first.
+                return Ok(None);
+            }
             Some(Binding::Intrinsic(Intrinsic::Stderr)) => true,
             _ => return Ok(None),
         };

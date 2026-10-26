@@ -310,6 +310,22 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
                     }));
                 }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                    if !matches!(
+                        self.types.payload(value.ty).unwrap_or(value.ty),
+                        Type::TextIO | Type::StringIO | Type::None
+                    ) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "sys.stdout requires None or a native text stream",
+                        ));
+                    }
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
+                    }));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(

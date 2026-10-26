@@ -504,6 +504,18 @@ pub(crate) enum JsonDefault {
 }
 
 impl Module {
+    pub(crate) fn changes_stdout(&self) -> bool {
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |e| {
+                used |= matches!(
+                    e.kind,
+                    ExprKind::Builtin(Builtin::SysStdoutSet | Builtin::SysStdoutDelete, _)
+                );
+            });
+        }
+        used
+    }
     /// Release the rooted namespace bindings at shutdown if this program uses them.
     pub(crate) fn uses_builtins_last(&self) -> bool {
         let mut used = false;
@@ -826,6 +838,17 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    SysStdout,
+    SysHasStdout,
+    SysOriginalOutput {
+        stderr: bool,
+    },
+    SysStdoutSet,
+    SysStdoutDelete,
+    TextOptionalReceiver,
+    TextMetadata {
+        errors: bool,
+    },
     SysDisplayHook,
     BuiltinsLast,
     BuiltinsLen,
