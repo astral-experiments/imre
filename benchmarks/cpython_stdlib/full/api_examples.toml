@@ -29,6 +29,7 @@ functools = ["Selected `partial`, caching decorators and dispatch operations.","
 genericpath = ["The genericpath companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/README.md"]
 gzip = ["Read text lines and binary chunks from gzip files.","tests/fixtures/files/stream_reads.py"]
 hashlib = ["SHA-256 construction, incremental updates, digest and hexdigest.","benchmarks/cpython_stdlib/native_hashlib.py"]
+http = ["Look up `HTTPStatus(404).phrase`, inspect status categories and iterate canonical status and method members.","benchmarks/cpython_stdlib/full/http/README.md"]
 importlib = ["Construct and mutate `machinery.ModuleSpec`; with a configured cache tag, convert paths using `util.cache_from_source` and `util.source_from_cache`.","benchmarks/cpython_stdlib/full/importlib/README.md"]
 inspect = ["`getattr_static` for selected owners and literal attribute names.","benchmarks/cpython_stdlib/full/inspect/README.md"]
 io = ["In-memory `StringIO` and `BytesIO` streams.","benchmarks/cpython_stdlib/full/doctest/stringio/README.md"]

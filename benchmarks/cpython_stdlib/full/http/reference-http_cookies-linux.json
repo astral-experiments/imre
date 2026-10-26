@@ -1,0 +1,43 @@
+{
+  "module": "test.test_http_cookies",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 33,
+  "reference": {
+    "http.cookies": "pass",
+    "test.test_http_cookies.CookieTests.test_basic": "pass",
+    "test.test_http_cookies.CookieTests.test_comment_quoting": "pass",
+    "test.test_http_cookies.CookieTests.test_extended_encode": "pass",
+    "test.test_http_cookies.CookieTests.test_extra_spaces": "pass",
+    "test.test_http_cookies.CookieTests.test_illegal_chars": "pass",
+    "test.test_http_cookies.CookieTests.test_invalid_cookies": "pass",
+    "test.test_http_cookies.CookieTests.test_load": "pass",
+    "test.test_http_cookies.CookieTests.test_obsolete_rfc850_date_format": "pass",
+    "test.test_http_cookies.CookieTests.test_pickle": "pass",
+    "test.test_http_cookies.CookieTests.test_quoted_meta": "pass",
+    "test.test_http_cookies.CookieTests.test_samesite_attrs": "pass",
+    "test.test_http_cookies.CookieTests.test_secure_httponly_false_if_not_present": "pass",
+    "test.test_http_cookies.CookieTests.test_secure_httponly_true_if_have_value": "pass",
+    "test.test_http_cookies.CookieTests.test_secure_httponly_true_if_present": "pass",
+    "test.test_http_cookies.CookieTests.test_set_secure_httponly_attrs": "pass",
+    "test.test_http_cookies.CookieTests.test_set_secure_httponly_partitioned_attrs": "pass",
+    "test.test_http_cookies.CookieTests.test_special_attrs": "pass",
+    "test.test_http_cookies.CookieTests.test_unquote": "pass",
+    "test.test_http_cookies.CookieTests.test_unquote_large": {
+      "skipped": "resource 'cpu' is not enabled"
+    },
+    "test.test_http_cookies.MorselTests.test_control_characters": "pass",
+    "test.test_http_cookies.MorselTests.test_control_characters_output": "pass",
+    "test.test_http_cookies.MorselTests.test_copy": "pass",
+    "test.test_http_cookies.MorselTests.test_defaults": "pass",
+    "test.test_http_cookies.MorselTests.test_eq": "pass",
+    "test.test_http_cookies.MorselTests.test_pickle": "pass",
+    "test.test_http_cookies.MorselTests.test_repr": "pass",
+    "test.test_http_cookies.MorselTests.test_reserved_keys": "pass",
+    "test.test_http_cookies.MorselTests.test_set_properties": "pass",
+    "test.test_http_cookies.MorselTests.test_setdefault": "pass",
+    "test.test_http_cookies.MorselTests.test_setitem": "pass",
+    "test.test_http_cookies.MorselTests.test_setter": "pass",
+    "test.test_http_cookies.MorselTests.test_update": "pass"
+  }
+}

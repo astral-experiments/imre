@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_http_cookies",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/http/__init__.py": "691b4a9a367bd0fb432b7aafa7c57b348509ae00",
+    "Lib/http/cookies.py": "5c5b14788dc2f09bf20a779ddbab8391da1af4dd",
+    "Lib/test/test_http_cookies.py": "4884b07c95b9c50a29831316842be14a48e325f9"
+  }
+}

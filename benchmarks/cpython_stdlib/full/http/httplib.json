@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_httplib",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/http/__init__.py": "691b4a9a367bd0fb432b7aafa7c57b348509ae00",
+    "Lib/http/client.py": "6fb7d254ea9c27349123b2551602c91175687d54",
+    "Lib/test/test_httplib.py": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+  }
+}
