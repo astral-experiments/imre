@@ -32,6 +32,9 @@
     # doctest: +SKIP
     >>> print("# doctest: +UNKNOWN")  # doctest: +ELLIPSIS
     # doctest: +...
+    >>> from io import StringIO  # see doctest: a marker looks like '# doctest: +SKIP'
+    >>> print(StringIO("worked").read())
+    worked
     >>> raise ValueError("should not run")  # doctest: +SKIP
 """
 

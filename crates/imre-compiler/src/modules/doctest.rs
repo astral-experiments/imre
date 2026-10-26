@@ -323,6 +323,18 @@ fn prompt_import(stmt: &ast::Stmt) -> Result<Vec<String>, String> {
     })
 }
 
+/// Recognize option comments using the bundled doctest parser's quote rule.
+/// A candidate followed by a quote on the same line is ignored.
+fn has_option_directive(source: &str) -> bool {
+    source.lines().any(|line| {
+        let suffix = line.rsplit_once(['\'', '"']).map_or(line, |(_, tail)| tail);
+        suffix
+            .split('#')
+            .skip(1)
+            .any(|comment| comment.trim_start().starts_with("doctest:"))
+    })
+}
+
 /// Write one native function for a docstring: its examples share locals, and
 /// the next invocation starts with a fresh frame. No expected output is used
 /// to choose how to compile an expression.
@@ -344,6 +356,7 @@ fn case_program(
     for (i, source) in sources.iter().enumerate() {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("doctest {name}, example {}: {err}", i + 1))?;
+        let has_directive = has_option_directive(source);
         let mut interp = Interactive {
             text: source,
             edits: Vec::new(),
@@ -360,7 +373,7 @@ fn case_program(
                     "compound doctest import requires a runtime namespace".into(),
                 ));
             };
-            if source.contains("doctest:") {
+            if has_directive {
                 return Err(issue(
                     "option-dependent doctest import requires a runtime namespace".into(),
                 ));
@@ -407,7 +420,7 @@ fn case_program(
             serde_json::to_string(source).unwrap()
         )
         .unwrap();
-        let pad = if source.contains("doctest:") {
+        let pad = if has_directive {
             body.push_str("    if not _optionflags(_imre_ex) & 16:\n");
             "        "
         } else {
