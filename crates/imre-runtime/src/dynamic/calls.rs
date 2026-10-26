@@ -13,7 +13,7 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
@@ -131,8 +131,9 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                    ) || name == "list.pop"
-                        || name.starts_with("dict.")
+                            | "int.to_bytes"
+                            | "list.pop"
+                    ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -724,11 +725,16 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "bool" && name == "to_bytes" => {
+                return Ok(self.builtin("int.to_bytes"));
+            }
             Value::Native(class) if class == "list" && name == "pop" => {
                 return Ok(self.builtin("list.pop"));
             }
             Value::Native(class)
-                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                if class == "dict"
+                    || (class == "int" && name == "to_bytes")
+                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
@@ -1122,6 +1128,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "set"
+                                | "int"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"

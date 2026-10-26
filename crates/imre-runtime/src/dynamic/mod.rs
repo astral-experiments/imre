@@ -472,6 +472,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
+            "int" => &["to_bytes"],
             "str" => builtins::STR_METHODS,
             _ => &[],
         };
