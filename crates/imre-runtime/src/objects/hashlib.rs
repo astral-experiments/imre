@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
-use crate::{BytesOwner, Int, ObjectOwner, StrOwner};
+use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
 pub(super) enum State {
@@ -64,22 +64,17 @@ thread_local! { static AVAILABLE: RefCell<Option<ObjectOwner>> = const { RefCell
 /// The public algorithms set has a stable identity. Changing it does not enable a provider.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_hash_algorithms_available() -> *const Object {
-    use super::mappings::{imre_set_add, imre_set_new};
-    AVAILABLE.with_borrow_mut(|slot| {
-        let set = slot.get_or_insert_with(|| {
-            // SAFETY: the fresh string-keyed set transfers one reference to this slot.
-            let set = unsafe { ObjectOwner::from_raw(imre_set_new(3)) };
-            for name in ["sha1", "sha256"] {
-                let name = StrOwner::new(Str::from(name));
-                // SAFETY: both exact inputs are rooted; the set acquires its own key.
-                unsafe {
-                    imre_set_add(ObjectOwner::as_ptr(&set), StrOwner::as_ptr(&name) as usize)
-                };
-            }
-            set
-        });
-        ObjectOwner::into_raw(ObjectOwner::clone(set))
-    })
+    let result = AVAILABLE.with_borrow_mut(|slot| {
+        let set = match slot {
+            Some(set) => set,
+            None => slot.insert(super::mappings::Set::names(
+                ["sha1", "sha256"].into_iter(),
+                false,
+            )?),
+        };
+        Ok(ObjectOwner::into_raw(ObjectOwner::clone(set)))
+    });
+    finish(result, ptr::null())
 }
 
 pub(super) fn clear_algorithms() {

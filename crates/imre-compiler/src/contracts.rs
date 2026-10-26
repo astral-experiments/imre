@@ -401,6 +401,7 @@ impl Builtin {
             | Self::BytesIoValue
             | Self::CodecWriter(_)
             | Self::HashNew
+            | Self::HashAvailable
             | Self::Sha1Hex
             | Self::Sha1New
             | Self::Sha256Hex
@@ -486,7 +487,6 @@ impl Builtin {
             | Self::InspectSentinel
             | Self::JsonDecoderNew
             | Self::JsonDecoderMemo
-            | Self::HashAvailable
             | Self::HashUpdate
             | Self::HashDigestSize
             | Self::ActiveException
