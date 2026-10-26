@@ -1694,6 +1694,21 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn enter_frame(&mut self, name: Option<&str>) -> &'static str {
+        if let Some(name) = name {
+            let name = self.pooled_literal(name.as_bytes(), Type::Str);
+            // The frame takes this reference, including on rejected entry.
+            self.checked_line(format!(
+                "call void @imre_named_frame_enter(ptr {})",
+                name.operand
+            ));
+            "call void @imre_named_frame_leave()"
+        } else {
+            self.checked_line("call void @imre_recursion_enter()");
+            "call void @imre_recursion_leave()"
+        }
+    }
+
     /// Only errors from the try body enter these handlers. Handler and else
     /// failures first execute finally, then continue to an enclosing handler.
     fn try_statement(
@@ -1703,6 +1718,21 @@ impl Emitter<'_, '_> {
         orelse: &[Statement],
         finalbody: &[Statement],
     ) {
+        if handlers.is_empty()
+            && orelse.is_empty()
+            && finalbody.iter().all(|statement| {
+                matches!(
+                    statement,
+                    Statement::Expr(Expr {
+                        kind: ExprKind::None,
+                        ..
+                    })
+                )
+            })
+        {
+            self.block(body);
+            return;
+        }
         if self.try_nesting == 0 {
             self.cleanup_bytes = 0;
         }
@@ -1955,19 +1985,8 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_args_init(i32 %argc, ptr %argv)");
         }
         let leave_frame = match frame {
-            Some(ir::SourceFrame::Module(name)) => {
-                let name = self.pooled_literal(name.as_bytes(), Type::Str);
-                // The frame takes this reference, including on a rejected entry.
-                self.checked_line(format!(
-                    "call void @imre_named_frame_enter(ptr {})",
-                    name.operand
-                ));
-                Some("call void @imre_named_frame_leave()")
-            }
-            Some(ir::SourceFrame::Depth) => {
-                self.checked_line("call void @imre_recursion_enter()");
-                Some("call void @imre_recursion_leave()")
-            }
+            Some(ir::SourceFrame::Module(name)) => Some(self.enter_frame(Some(name))),
+            Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
         self.block(&function.body);
@@ -5104,6 +5123,28 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
+            }
+            Builtin::GeneratorFrameEnter(name) => {
+                match self.module.source_frames.iter().flatten().next() {
+                    Some(ir::SourceFrame::Module(_)) => {
+                        self.enter_frame(Some(name));
+                    }
+                    Some(ir::SourceFrame::Depth) => {
+                        self.enter_frame(None);
+                    }
+                    None => unreachable!("unused generator frames were removed"),
+                }
+                none()
+            }
+            Builtin::GeneratorFrameLeave => {
+                match self.module.source_frames.iter().flatten().next() {
+                    Some(ir::SourceFrame::Module(_)) => {
+                        self.line("call void @imre_named_frame_leave()")
+                    }
+                    Some(ir::SourceFrame::Depth) => self.line("call void @imre_recursion_leave()"),
+                    None => unreachable!("unused generator frames were removed"),
+                }
+                none()
             }
             Builtin::SysGetRecursionLimit => {
                 self.call("imre_sys_getrecursionlimit", Type::Int, &[])
