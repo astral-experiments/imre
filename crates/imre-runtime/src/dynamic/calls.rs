@@ -165,6 +165,7 @@ impl Context {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
+                    || (name == "RuntimeError" && kind == "RecursionError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (name == "OSError"
