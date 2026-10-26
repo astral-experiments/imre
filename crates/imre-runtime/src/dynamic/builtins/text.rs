@@ -419,35 +419,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
-fn bytes_rsplit_args(args: &[Id], kwargs: &[(String, Id)]) -> Result<[Option<Id>; 2]> {
-    let count = args.len() + kwargs.len();
-    if count > 2 {
-        let kind = if args.is_empty() { "keyword " } else { "" };
-        return Err(type_error(format!(
-            "rsplit() takes at most 2 {kind}arguments ({count} given)"
-        )));
-    }
-    let mut values = [args.first().copied(), args.get(1).copied()];
-    for (key, value) in kwargs {
-        let index = match key.as_str() {
-            "sep" => 0,
-            "maxsplit" => 1,
-            _ => {
-                return Err(type_error(format!(
-                    "rsplit() got an unexpected keyword argument '{key}'"
-                )));
-            }
-        };
-        if values[index].replace(*value).is_some() {
-            return Err(type_error(format!(
-                "argument for rsplit() given by name ('{key}') and position ({})",
-                index + 1
-            )));
-        }
-    }
-    Ok(values)
-}
-
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -535,7 +506,7 @@ pub(super) fn method(
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] = bytes_rsplit_args(args, kwargs)?;
+        let [sep, max] = optional_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = match max {
             None => usize::MAX,
             Some(id) => {

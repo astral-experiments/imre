@@ -9,6 +9,7 @@ use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
@@ -149,6 +150,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
@@ -278,6 +280,47 @@ fn positional(name: &str, kwargs: &[(String, Id)]) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Bind a method with optional arguments using Python's Argument Clinic diagnostics.
+fn optional_arguments<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+    max_positional: usize,
+) -> Result<[Option<Id>; N]> {
+    let count = args.len() + kwargs.len();
+    if count > N {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(type_error(format!(
+            "{name}() takes at most {N} {kind}arguments ({count} given)"
+        )));
+    }
+    if args.len() > max_positional {
+        return Err(type_error(format!(
+            "{name}() takes at most {max_positional} positional arguments ({} given)",
+            args.len()
+        )));
+    }
+    for (i, key) in names[..args.len()].iter().enumerate() {
+        if kwargs.iter().any(|(provided, _)| provided == key) {
+            return Err(type_error(format!(
+                "argument for {name}() given by name ('{key}') and position ({})",
+                i + 1
+            )));
+        }
+    }
+    let mut values = std::array::from_fn(|i| args.get(i).copied());
+    for (key, value) in kwargs {
+        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
+            type_error(format!(
+                "{name}() got an unexpected keyword argument '{key}'"
+            ))
+        })?;
+        values[index] = Some(*value);
+    }
+    Ok(values)
 }
 
 pub(super) fn bind<const N: usize>(
@@ -425,6 +468,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;

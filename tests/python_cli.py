@@ -357,6 +357,7 @@ def report(text):
             "boxed_request_strings.py",
             "boxed_module_globals.py",
             "boxed_frozenset.py",
+            "boxed_int_to_bytes.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
