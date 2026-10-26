@@ -63,6 +63,7 @@ pub(crate) struct Context {
     typing: typing::Registry,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
 }
 

@@ -1530,7 +1530,17 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                let value = self.execute(code, local)?;
+                if self.call_depth >= 1000 {
+                    return Err(Error::new(
+                        "RecursionError",
+                        "maximum recursion depth exceeded",
+                    ));
+                }
+                self.call_depth += 1;
+                let result =
+                    stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || self.execute(code, local));
+                self.call_depth -= 1;
+                let value = result?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
