@@ -21,6 +21,14 @@ def stamp(value: float) -> None:
         print(str(error))
 
 
+def optional_float(value: float | None) -> str:
+    return formatdate(value, usegmt=True)
+
+
+def optional_int(value: int | None) -> str:
+    return formatdate(value, usegmt=True)
+
+
 for value in ("Sun, 23 Sep 2001 20:10:55 -0700", "Sun,23 Sep 2001 20:10:55 +0000",
               "23 September 2001 20:10 -0000", "Friday, 19-Nov-82 16:14:55 EST",
               "Wed Feb  5 13:47:26 2003", "5 Feb 2003 13.47.26", "5 Feb 2003 13.47+0800",
@@ -39,7 +47,8 @@ for date in (datetime(2001, 1, 7), datetime(2001, 1, 7, tzinfo=timezone(timedelt
     except ValueError as error:
         print(str(error))
 for ts in (-0.0000005, -1.9999995, 0.0, 0.9999995, 1000000000.5, 1609459199.9999998,
-           1710053999.0, 1710054000.0, 1730613599.0, 1730613600.0):
+           1710053999.0, 1710054000.0, 1730613599.0, 1730613600.0,
+           -62135596801.0, 253402300800.0, float("nan"), float("inf")):
     stamp(ts)
 try:
     print(formatdate(2**127))
@@ -48,3 +57,10 @@ except OverflowError as error:
 print(formatdate(0, True))
 print(formatdate(0, False, True))
 print(formatdate().endswith(" -0000"))
+print(formatdate(True, usegmt=True))
+
+
+print(optional_float(0.0))
+print(optional_int(0))
+print(optional_float(None).endswith(" GMT"))
+print(optional_int(None).endswith(" GMT"))

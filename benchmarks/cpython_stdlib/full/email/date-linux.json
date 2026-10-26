@@ -1,0 +1,58 @@
+{
+  "host_original_methods": 13,
+  "outside_linux_discovery": [
+    "FormatDateTests.test_formatdate",
+    "FormatDateTests.test_formatdate_with_localtime"
+  ],
+  "modes": {
+    "normal-O0": {
+      "datetime": 8,
+      "float": 10,
+      "int": 1,
+      "parse": 18
+    },
+    "normal-O3": {
+      "datetime": 8,
+      "float": 10,
+      "int": 1,
+      "parse": 18
+    },
+    "reachable-O0": {
+      "datetime": 8,
+      "float": 10,
+      "int": 1,
+      "parse": 18
+    },
+    "reachable-O3": {
+      "datetime": 8,
+      "float": 10,
+      "int": 1,
+      "parse": 18
+    }
+  },
+  "werkzeug_http_sha256": "e0720a5fef9f54b4d478f76f1f88ec0e6ba2519737f17ce20cf0608542456f4a",
+  "werkzeug": {
+    "parse_date": [
+      null,
+      null,
+      null,
+      "1970-01-01T00:00:00+00:00",
+      "1982-11-19T16:14:55-05:00",
+      "2003-02-05T13:47:00+00:00"
+    ],
+    "http_date": [
+      "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Tue, 29 Feb 2000 00:00:00 GMT",
+      "Sun, 23 Sep 2001 20:10:00 GMT",
+      "Sun, 10 Mar 2024 02:00:00 GMT",
+      "Sun, 01 Jan 2023 00:00:00 GMT"
+    ]
+  },
+  "native_bodies_host_fixture": [
+    "test_naive_datetime",
+    "test_aware_datetime",
+    "test_usegmt_with_naive_datetime_raises",
+    "test_usegmt_with_non_utc_datetime_raises"
+  ]
+}

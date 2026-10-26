@@ -7,7 +7,6 @@ use super::{Binding, Intrinsic, IntrinsicModule};
 pub(super) fn module(name: &str) -> Option<&'static str> {
     [
         "configparser",
-        "email",
         "email.message",
         "email.parser",
         "email.policy",
@@ -21,9 +20,9 @@ pub(super) fn module(name: &str) -> Option<&'static str> {
 pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
     use IntrinsicModule as M;
     let child = match (owner, name) {
-        (M::Declaration("email"), "message") => Some("email.message"),
-        (M::Declaration("email"), "parser") => Some("email.parser"),
-        (M::Declaration("email"), "policy") => Some("email.policy"),
+        (M::Email, "message") => Some("email.message"),
+        (M::Email, "parser") => Some("email.parser"),
+        (M::Email, "policy") => Some("email.policy"),
         (M::Declaration("importlib"), "resources") => Some("importlib.resources"),
         _ => None,
     };

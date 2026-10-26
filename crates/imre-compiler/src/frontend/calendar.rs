@@ -238,8 +238,11 @@ impl Checker<'_> {
                     if i != 0 {
                         return c.expr_expected(node, Type::Bool);
                     }
-                    let value = c.expr(node)?;
-                    if !matches!(value.ty, Type::None | Type::Int | Type::Float) {
+                    let value = powers::integer(c.expr(node)?);
+                    if !matches!(
+                        c.types.payload(value.ty).unwrap_or(value.ty),
+                        Type::None | Type::Int | Type::Float
+                    ) {
                         return Err(error(
                             c.source,
                             node,

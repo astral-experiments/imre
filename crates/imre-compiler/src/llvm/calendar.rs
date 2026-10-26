@@ -26,6 +26,8 @@ impl Emitter<'_, '_> {
                     Type::None => 0,
                     Type::Int => 1,
                     Type::Float => 2,
+                    ty if self.module.types.payload(ty) == Some(Type::Int) => 3,
+                    ty if self.module.types.payload(ty) == Some(Type::Float) => 4,
                     _ => unreachable!(),
                 };
                 let timestamp = self.word(get(0));

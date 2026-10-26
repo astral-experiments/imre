@@ -238,7 +238,14 @@ pub unsafe extern "C" fn imre_email_formatdate(
 ) -> *const Str {
     finish(
         (|| {
-            let sec = match kind {
+            // None is the zero word in each optional calendar input. Raw binary64
+            // positive zero also has zero bits, but denotes the Unix epoch.
+            let present_kind = if matches!(kind, 3 | 4) && word == 0 {
+                0
+            } else {
+                kind
+            };
+            let sec = match present_kind {
                 0 => {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -246,11 +253,13 @@ pub unsafe extern "C" fn imre_email_formatdate(
                     timestamp(now.as_secs_f64())?
                 }
                 // SAFETY: the generated integer arm keeps its tagged word rooted.
-                1 => unsafe { Int::borrow(word) }
+                1 | 3 => unsafe { Int::borrow(word) }
                     .big()
                     .to_i64()
                     .ok_or_else(timed::overflow)?,
                 2 => timestamp(f64::from_bits(word as u64))?,
+                // SAFETY: the optional-float arm keeps a present payload rooted.
+                4 => timestamp(unsafe { crate::floats::imre_float_unbox(word) })?,
                 _ => unreachable!(),
             };
             let utc = timed::civil(sec, true)?;
