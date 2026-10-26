@@ -285,7 +285,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps" | "loads")
-        | ("hashlib", "sha1")
+        | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
@@ -366,7 +366,7 @@ pub(super) fn call(
             1,
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
-        "hashlib.sha1" => (1, &["data"]),
+        "hashlib.sha1" | "hashlib.sha256" => (1, &["data"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -411,6 +411,7 @@ pub(super) fn call(
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
+        "hashlib.sha256" => return hashlib::sha256(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);
         }
