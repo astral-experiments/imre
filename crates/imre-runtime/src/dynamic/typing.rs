@@ -449,6 +449,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.alloc(Value::Method {
                 callable,
                 receiver: value,
+                explicit: false,
             })
         }
         Value::Native(class)

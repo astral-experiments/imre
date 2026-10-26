@@ -1,6 +1,7 @@
 //! Object operations for native Python functions with dynamically loaded modules.
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
+mod abstract_class;
 mod builtins;
 mod calls;
 mod enums;
@@ -458,6 +459,7 @@ impl Context {
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
+            is_abstract: false,
             class_cell: None,
             class_lineage: None,
             first_argument: None,
@@ -644,7 +646,15 @@ impl Context {
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
             }
-            None
+            // A sealed namespace may have both native operations and bundled Python classes.
+            // Only its bundled initializer may extend it, never a same-named file on sys.path.
+            self.sources.get(name).and_then(|sources| {
+                let root = std::path::Path::new(self.config["bundled_root"].as_str()?);
+                sources
+                    .iter()
+                    .find(|source| source.path.starts_with(root))
+                    .map(|source| (source.path.clone(), source.code))
+            })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (
