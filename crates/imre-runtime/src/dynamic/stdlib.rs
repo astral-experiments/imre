@@ -352,7 +352,7 @@ pub(super) fn call(
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.dumps" => (1, &["ensure_ascii"]),
-        "hashlib.sha1" => (1, &["data"]),
+        "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
         "hash.update" => (2, &[]),
         "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
