@@ -180,6 +180,8 @@ pub(crate) enum CalendarOp {
     Date,
     DateTime,
     Combine,
+    Replace { timezone_supplied: bool },
+    Astimezone,
     Delta,
     Zone,
     Utc,

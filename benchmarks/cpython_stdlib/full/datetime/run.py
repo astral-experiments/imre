@@ -18,6 +18,7 @@ from suite_inventory import (
     verify_interpreter_tests,
 )
 from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
+from full.datetime import replace_fixture
 
 CANDIDATES = {
     "TestDateOnly": ["test_delta_non_days_ignored"],
@@ -179,6 +180,12 @@ def main():
                                 executions[key] = execute
                             else:
                                 preflight[(key, 1)] = blocker
+                work = Path(tmp) / "TestDateTime.test_replace"
+                work.mkdir()
+                original = method_bytes(SOURCE, "TestDateTime", "test_replace")
+                execute = replace_fixture.prepare(tools, work, hashlib.sha256(original).hexdigest())
+                for variant in ("Pure", "Fast"):
+                    executions[f"test.datetimetester.TestDateTime_{variant}.test_replace"] = execute
                 report = run_evidence(
                     load_suite(spec["module"]),
                     executions,
@@ -204,6 +211,10 @@ def main():
                     if case["classification"] == "native-body-host-fixture"}
         if required - observed or report["counts"].get("failed"):
             raise SystemExit(f"O{report['opt_level']} missing required native bodies: {sorted(required - observed)}")
+        expected_mixed = {f"test.datetimetester.TestDateTime_{variant}.test_replace" for variant in ("Pure", "Fast")}
+        mixed = {case["id"] for case in report["records"] if case["classification"] == "mixed"}
+        if expected_mixed - mixed:
+            raise SystemExit(f"O{report['opt_level']} missing original replacement registrations: {sorted(expected_mixed - mixed)}")
 
 
 if __name__ == "__main__":

@@ -333,6 +333,53 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
+        if kind == C::DateTime && name == "replace" {
+            let integer = self.types.optional(Type::Int);
+            let zone = self.types.optional(Type::Calendar(C::Zone));
+            let mut params = [
+                "year",
+                "month",
+                "day",
+                "hour",
+                "minute",
+                "second",
+                "microsecond",
+                "tzinfo",
+                "fold",
+            ]
+            .map(|name| {
+                let ty = if name == "tzinfo" { zone } else { integer };
+                par(name, ty, Some(absent(ty)))
+            });
+            params[8].kind = ParameterKind::KeywordOnly;
+            let mut timezone_supplied = false;
+            let args = self.arguments_with(call, &params, Some(recv), |c, i, e| {
+                if i == 7 {
+                    timezone_supplied = true;
+                    return c.expr_expected(e, zone);
+                }
+                let value = powers::integer(c.expr(e)?);
+                c.expect(Type::Int, value.ty, e)?;
+                Ok(value)
+            })?;
+            return Ok(self.ordered_builtin(
+                Builtin::Calendar(Op::Replace { timezone_supplied }),
+                Type::Calendar(C::DateTime),
+                args,
+            ));
+        }
+        if kind == C::DateTime && name == "astimezone" {
+            let args = self.arguments(
+                call,
+                &[par("tz", Type::Calendar(C::Zone), None)],
+                Some(recv),
+            )?;
+            return Ok(self.ordered_builtin(
+                Builtin::Calendar(Op::Astimezone),
+                Type::Calendar(C::DateTime),
+                args,
+            ));
+        }
         if kind == C::Zone && matches!(name, "utcoffset" | "tzname") {
             let [e] = call.arguments.args.as_ref() else {
                 return Err(error(
