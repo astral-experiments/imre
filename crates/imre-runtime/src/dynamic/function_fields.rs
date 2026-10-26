@@ -92,9 +92,7 @@ impl Context {
                 annotations
             }
             _ => {
-                let Value::Dict(entries) = self.heap.get(fields.dict) else {
-                    unreachable!()
-                };
+                let entries = self.dict_entries(fields.dict).expect("function namespace");
                 return Ok(entries.iter().find_map(|&(key, value)| {
                     matches!(self.heap.get(key), Value::Str(s) if s == name).then_some(value)
                 }));
@@ -109,7 +107,7 @@ impl Context {
             "__name__" | "__qualname__" if !matches!(object, Value::Str(_)) => {
                 Some(format!("{name} must be set to a string object"))
             }
-            "__dict__" if !matches!(object, Value::Dict(_)) => Some(format!(
+            "__dict__" if self.dict_storage(value).is_none() => Some(format!(
                 "__dict__ must be set to a dictionary, not a '{}'",
                 self.type_name(value)
             )),
@@ -149,8 +147,9 @@ impl Context {
             }
             _ => {
                 let dict = fields.dict;
+                let storage = self.dict_storage(dict).expect("function namespace");
                 let key = self.text(name);
-                self.put_item(dict, key, value)?;
+                self.put_item(storage, key, value)?;
             }
         }
         Ok(())
