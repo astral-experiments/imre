@@ -244,16 +244,11 @@ impl Context {
                 Ok(self.text(s))
             }
             "take_error" => {
-                let mut e = self
+                let error = self
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
-                if let Some(instance) = e.trace.as_mut().and_then(|trace| trace.instance.take()) {
-                    *self.heap.get_mut(instance) = Value::Raised(e);
-                    Ok(instance)
-                } else {
-                    Ok(self.alloc(Value::Raised(e)))
-                }
+                Ok(self.raised_instance(error))
             }
             "matches" => {
                 if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
@@ -561,6 +556,29 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
         annotate,
         annotation_scope,
     )
+}
+
+/// Attach the original generator suite to the code object before applying Python decorators.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_generator_body(
+    ctx: *mut Context,
+    function: Id,
+    source: *const c_char,
+    body_line: u32,
+) {
+    // SAFETY: the generated call provides the live context that owns the function.
+    let ctx = unsafe { &mut *ctx };
+    let Value::Function { code, .. } = *ctx.heap.get(function) else {
+        unreachable!("compiled Python function");
+    };
+    let Value::Code(code) = ctx.heap.get_mut(code) else {
+        unreachable!("compiled code object");
+    };
+    if matches!(code.body, value::Body::Native(_)) {
+        // SAFETY: the UTF-8 constant is embedded in the executable and outlives all code objects.
+        let source = unsafe { cstr(source) };
+        code.body = value::Body::PendingGenerator { source, body_line };
+    }
 }
 
 /// Static per-definition record emitted beside its native entry point.
