@@ -224,9 +224,11 @@ impl Checker<'_> {
             for bound in [start, stop, step] {
                 let value = match bound {
                     Some(node) => {
-                        let value = Self::enum_integer(self.expr(node)?);
+                        let value = self.expr(node)?;
+                        let value = self.optional_enum_integer(value, node)?;
                         match value.ty {
                             Type::Int | Type::None => value,
+                            ty if self.types.payload(ty) == Some(Type::Int) => value,
                             Type::Bool => Expr {
                                 ty: Type::Int,
                                 kind: ExprKind::Builtin(Builtin::Int, vec![value]),

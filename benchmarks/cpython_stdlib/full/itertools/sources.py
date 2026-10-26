@@ -1,4 +1,5 @@
 """Supplemental differential checks for source position, mutation and exceptions."""
+from http import HTTPStatus
 from itertools import count, cycle, islice
 from operator import length_hint
 
@@ -19,9 +20,17 @@ def grow(mapping: dict[str, int]) -> int:
     return 2
 
 
+def nullable_bounds(start: int | None, stop: HTTPStatus | None, step: int | None) -> None:
+    source = iter(range(210))
+    section = islice(source, start, stop, step)
+    print((next(section), len(list(section)), next(source, -1)))
+
+
 def main() -> None:
     consume(0)
     consume(1)
+    nullable_bounds(None, HTTPStatus.OK, 3)
+    nullable_bounds(7, None, None)
     source = [1, 2]
     c = cycle(source)
     print(next(c))
