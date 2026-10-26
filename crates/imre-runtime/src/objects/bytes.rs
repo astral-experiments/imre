@@ -250,7 +250,7 @@ pub unsafe extern "C" fn imre_bytes_str(value: *const Bytes) -> *const Str {
 pub unsafe extern "C" fn imre_print_bytes(value: *const Bytes) {
     // SAFETY: the rooted input is immutable and repr retains no borrowed data.
     match repr(unsafe { &*value }) {
-        Ok(text) => crate::output_bytes(text.as_bytes()),
+        Ok(text) => crate::output_text(&text),
         Err(error) => error.raise(),
     }
 }

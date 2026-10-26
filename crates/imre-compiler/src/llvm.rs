@@ -1923,7 +1923,15 @@ impl Emitter<'_, '_> {
                 u32::from(self.module.ignore_python_environment)
             ));
             self.line("call void @imre_record_error_init()");
-            self.line("call void @imre_stdio_init()");
+            if let Some(utf8) = self.module.command_utf8_mode {
+                self.line(format!(
+                    "call void @imre_stdio_command_init(i32 {}, i32 {})",
+                    u32::from(self.module.ignore_python_environment),
+                    u32::from(utf8)
+                ));
+            } else {
+                self.line("call void @imre_stdio_init()");
+            }
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_cache_paths {
@@ -5086,6 +5094,14 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_sys_setrecursionlimit", &[&args[0].value]);
                 none()
             }
+            Builtin::SysStreamText { descriptor, errors } => Value {
+                ty: Type::Str,
+                operand: self.instruction(format!(
+                    "call ptr @imre_sys_stream_text(i32 {descriptor}, i32 {})",
+                    u32::from(*errors)
+                )),
+                small_integer: false,
+            },
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
@@ -8890,6 +8906,8 @@ declare void @imre_integer_digits_init(i32)
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
+declare void @imre_stdio_command_init(i32, i32)
+declare ptr @imre_sys_stream_text(i32, i32)
 declare ptr @imre_record_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)

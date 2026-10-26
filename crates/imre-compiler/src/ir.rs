@@ -411,6 +411,8 @@ pub(crate) enum SourceFrame {
 pub(crate) struct Module {
     /// Interpreter-style -I commands ignore Python process environment variables at startup.
     pub ignore_python_environment: bool,
+    /// Effective UTF-8 mode of an interpreter-style command.
+    pub command_utf8_mode: Option<bool>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -880,6 +882,10 @@ pub(crate) enum Builtin {
         version: bool,
     },
     SysImplementation,
+    SysStreamText {
+        descriptor: u8,
+        errors: bool,
+    },
     SysVersionInfo {
         implementation: bool,
     },

@@ -84,6 +84,7 @@ mod tests {
             class_fields: Vec::new(),
             list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),

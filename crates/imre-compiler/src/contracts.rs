@@ -614,6 +614,7 @@ impl Builtin {
             | Self::SysThreadText { .. }
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
+            | Self::SysStreamText { .. }
             | Self::OsName
             | Self::OptionalStrConcat
             | Self::SysOrigArgv

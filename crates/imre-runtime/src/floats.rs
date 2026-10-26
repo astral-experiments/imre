@@ -11,7 +11,7 @@ use std::rc::Rc;
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
-use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_bytes};
+use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_text};
 use crate::integer_text::decimal_digit;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
@@ -55,7 +55,7 @@ pub extern "C" fn imre_float_str(value: f64) -> *const Str {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_float(value: f64) {
-    output_bytes(render(value).as_bytes());
+    output_text(&render(value));
 }
 
 /// Ryu chooses shortest digits with ties to even; Rust's formatter, currently

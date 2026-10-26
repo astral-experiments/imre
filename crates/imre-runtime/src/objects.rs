@@ -19,6 +19,7 @@ mod calendar;
 mod chainmap;
 mod charmaps;
 mod codecs;
+pub(crate) use codecs::Codec;
 mod contexts;
 mod contextvars;
 mod copying;
