@@ -342,7 +342,7 @@ pub(super) enum Value {
     },
     File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
     TextFile(crate::objects::TextFile),
-    RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
+    RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
         groups: Vec<Option<String>>,
         names: HashMap<String, usize>,
