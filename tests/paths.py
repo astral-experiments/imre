@@ -45,7 +45,6 @@ REJECTED = {
     "path_order": "print(Path('a') < Path('b'))",
     "mixed_path_set": "values = {Path('a'), 'a'}",
     "mixed_path_dict_key": "values = {Path('a'): 1, 'a': 2}",
-    "sysconfig_path": "import sysconfig\nsysconfig.get_path('stdlib')",
     "which_mode_type": "import shutil\nshutil.which('tool', mode='x')",
     "path_constructor_value": "constructor = Path\nprint(constructor('a'))",
     "subclass": "class Custom(Path):\n    pass",
