@@ -160,7 +160,11 @@ impl Registry {
 
     fn set_level(&self, logger: &Logger, value: &Int) {
         logger.level.replace(value.clone());
-        self.clear_enabled();
+        if logger.standalone {
+            logger.enabled.clear();
+        } else {
+            self.clear_enabled();
+        }
     }
 
     fn entry(&mut self, name: &str) -> &Entry {
