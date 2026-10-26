@@ -1,6 +1,7 @@
 //! Resolve one concrete layout lineage and infer straight-line constructor fields.
 
 use super::*;
+use ruff_text_size::Ranged;
 
 pub(super) fn resolve(
     graph: &SourceGraph,
@@ -125,6 +126,38 @@ pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
     super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
 }
 
+/// Infer storage from an exact builtin value. The constructor still evaluates
+/// the original expression, including every format argument and its errors.
+fn literal_field_annotation(
+    graph: &SourceGraph,
+    module: usize,
+    value: &ast::Expr,
+) -> Option<ast::Expr> {
+    let name = match value {
+        ast::Expr::BooleanLiteral(_) => "bool",
+        ast::Expr::StringLiteral(_) => "str",
+        ast::Expr::Call(call)
+            if let ast::Expr::Attribute(method) = &*call.func
+                && method.attr.as_str() == "format"
+                && matches!(&*method.value, ast::Expr::StringLiteral(_)) =>
+        {
+            "str"
+        }
+        _ => return None,
+    };
+    let annotation = ast::Expr::Name(ast::ExprName {
+        node_index: ast::AtomicNodeIndex::NONE,
+        range: value.range(),
+        id: name.into(),
+        ctx: ast::ExprContext::Load,
+    });
+    // An inferred builtin must not resolve to a user-defined class or type alias.
+    graph
+        .resolve_type(module, &annotation)
+        .is_none()
+        .then_some(annotation)
+}
+
 pub(super) fn infer_fields(
     graph: &SourceGraph,
     module: usize,
@@ -194,7 +227,7 @@ pub(super) fn infer_fields(
                         && matches!(&*list.slice, ast::Expr::Name(ty) if matches!(ty.id.as_str(), "str" | "bytes")));
                 preserving.then(|| field.annotation.clone())
             }
-            _ => None,
+            value => literal_field_annotation(graph, module, value),
         };
         if let Some(annotation) = ann {
             fields.push(Field {
