@@ -249,6 +249,7 @@ pub(crate) enum Intrinsic {
     Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
+    InspectCoroutine { mark: bool },
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
@@ -731,6 +732,8 @@ impl IntrinsicModule {
             }),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
+            (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
+            (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
@@ -1606,7 +1609,7 @@ impl SourceGraph {
     /// Entry segments preserve globals, platform import checks, and definition-time effects.
     pub(crate) fn initializers(
         &self,
-        class_globals: bool,
+        entry_declarations: bool,
     ) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
@@ -1614,7 +1617,7 @@ impl SourceGraph {
                 let module = &self.modules[*id];
                 *id != self.entry
                     || !module.snapshots.is_empty()
-                    || class_globals
+                    || entry_declarations
                     || !module.entry_globals.is_empty()
                     || !module.overloads.is_empty()
                     || (!segment.is_empty()

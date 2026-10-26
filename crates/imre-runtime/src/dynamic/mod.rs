@@ -12,6 +12,7 @@ mod static_method;
 mod stdlib;
 mod super_object;
 mod value;
+mod zip;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,14 +28,16 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
+    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
-    /// Counts positions without allocating boxed integers for bytes.
+    /// Counts positions without allocating boxed integer elements.
     fn len(&self) -> usize {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
+            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -169,6 +172,10 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
+            Value::Range { start, stop, step } => IteratorSlice::Range {
+                value: i128::from(*start) + i128::from(*step) * *offset as i128,
+                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
+            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -177,6 +184,9 @@ impl Context {
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
+        }
+        if matches!(self.heap.get(id), Value::Zip { .. }) {
+            return self.zip_has_item(id);
         }
         if !matches!(self.heap.get(id), Value::Iterator { .. }) {
             return self.iterator_more(id);
@@ -193,7 +203,10 @@ impl Context {
         if matches!(self.heap.get(id), Value::AstWalk(_)) {
             return stdlib::ast::advance(self, id);
         }
-        if !matches!(self.heap.get(id), Value::Iterator { .. }) {
+        if !matches!(
+            self.heap.get(id),
+            Value::Iterator { .. } | Value::Zip { .. }
+        ) {
             return match self.iterator_next(id) {
                 Ok(item) => Ok(Some(item)),
                 Err(error) if error.kind == "StopIteration" => Ok(None),
@@ -203,10 +216,14 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
+        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
+            return Ok(pending.take());
+        }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator {
             offset, reverse, ..
@@ -222,7 +239,13 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+        if matches!(
+            self.heap.get(id),
+            Value::AstWalk(_)
+                | Value::Zip { .. }
+                | Value::Generator { .. }
+                | Value::PythonIterator { .. }
+        ) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);
@@ -244,23 +267,17 @@ impl Context {
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
-            Value::Generator { .. }
-            | Value::RangeIterator { .. }
-            | Value::PythonIterator { .. } => {
-                let mut items = Vec::new();
-                while let Some(item) = self.next_item(id)? {
-                    items.push(item);
-                }
-                Ok(items)
-            }
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    IteratorSlice::Bytes(bytes) => {
-                        let mut values = Vec::with_capacity(bytes.len());
-                        while let Some(byte) = self.next_item(id)? {
-                            values.push(byte);
+                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                        let mut values = Vec::new();
+                        values.try_reserve_exact(remaining.len()).map_err(|_| {
+                            Error::new("MemoryError", "iterator is too large to materialize")
+                        })?;
+                        while let Some(item) = self.next_item(id)? {
+                            values.push(item);
                         }
                         return Ok(values);
                     }
@@ -614,6 +631,7 @@ impl Context {
                 filename,
                 first_line: 1,
                 module_definition: true,
+                coroutine: false,
             }));
             if let Err(error) = self.execute(code, scope) {
                 self.modules.remove(name);

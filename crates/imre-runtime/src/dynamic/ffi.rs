@@ -158,6 +158,16 @@ impl Context {
                 self.call(a, args, kwargs)
             }
             "class" => self.class(a, b, c),
+            "coroutine_function" => {
+                let Value::Function { code, .. } = *self.heap.get(a) else {
+                    return Err(Error::new("SystemError", "invalid coroutine definition"));
+                };
+                let Value::Code(code) = self.heap.get_mut(code) else {
+                    unreachable!("function code")
+                };
+                code.coroutine = true;
+                Ok(a)
+            }
             "annotate" => {
                 if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
@@ -624,6 +634,7 @@ impl Context {
             filename,
             first_line: location.line,
             module_definition,
+            coroutine: false,
         }))
     }
 

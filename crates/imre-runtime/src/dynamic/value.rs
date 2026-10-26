@@ -18,6 +18,7 @@ pub(super) struct CodeObject {
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
+    pub coroutine: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -147,6 +148,7 @@ impl Context {
             Value::Float(_) => "float",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Zip { .. } => "zip",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -158,7 +160,6 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
-            Value::RangeIterator { .. } => "range_iterator",
             Value::Generator { .. } => "generator",
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
@@ -370,6 +371,7 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
+        coroutine_marker: Option<Id>,
     },
     Cached {
         function: Id,
@@ -383,16 +385,16 @@ pub(super) enum Value {
         exhausted: bool,
     },
     Yielded(Id),
-    RangeIterator {
-        next: i64,
-        step: i64,
-        remaining: usize,
-    },
     PythonIterator {
         source: Id,
         buffered: Option<Id>,
     },
     AstWalk(std::collections::VecDeque<Id>),
+    Zip {
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
+        pending: Option<Id>,
+    },
     Iterator {
         kind: &'static str,
         sequence: Option<Id>,
@@ -437,6 +439,12 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Zip {
+                inputs, pending, ..
+            } => {
+                visit.extend(inputs.iter());
+                visit.extend(pending);
+            }
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -482,7 +490,7 @@ impl Value {
                 visit.extend(buffered);
             }
             Self::Yielded(item) => visit.push(*item),
-            Self::Range { .. } | Self::RangeIterator { .. } => {}
+            Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -545,7 +553,11 @@ impl Value {
                 function,
                 args,
                 keywords,
-            } => visit.extend([*function, *args, *keywords]),
+                coroutine_marker,
+            } => {
+                visit.extend([*function, *args, *keywords]);
+                visit.extend(coroutine_marker);
+            }
             Self::Cached { function, entries } => {
                 visit.push(*function);
                 for call in entries {

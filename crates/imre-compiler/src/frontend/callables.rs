@@ -246,6 +246,10 @@ impl Checker<'_> {
             ));
         }
         let skip = usize::from(receiver.is_some());
+        if signature.asynchronous {
+            self.types
+                .set_coroutine_target(signature.id, crate::types::CoroutineTarget::Coroutine);
+        }
         if signature.params[skip..].iter().any(|parameter| {
             matches!(
                 parameter.kind,

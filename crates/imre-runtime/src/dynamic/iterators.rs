@@ -21,17 +21,10 @@ impl Context {
         if self.is_native_iterator(value) {
             return Ok(value);
         }
-        if let Value::Range { start, stop, step } = *self.heap.get(value) {
-            let remaining = super::builtins::range_len(start, stop, step)?;
-            return Ok(self.alloc(Value::RangeIterator {
-                next: start,
-                step,
-                remaining,
-            }));
-        }
         let (sequence, kind) = match self.heap.get(value) {
             Value::List(_) => (value, "list_iterator"),
             Value::Tuple(_) => (value, "tuple_iterator"),
+            Value::Range { .. } => (value, "range_iterator"),
             Value::Bytes(_) => (value, "bytes_iterator"),
             Value::ByteArray(_) => (value, "bytearray_iterator"),
             _ => {
@@ -52,7 +45,7 @@ impl Context {
             self.heap.get(value),
             Value::Generator { .. }
                 | Value::AstWalk(_)
-                | Value::RangeIterator { .. }
+                | Value::Zip { .. }
                 | Value::PythonIterator { .. }
                 | Value::Iterator { .. }
         )
@@ -107,8 +100,9 @@ impl Context {
 
     pub(super) fn iterator_more(&mut self, iter: Id) -> Result<bool> {
         let (code, scope) = match *self.heap.get(iter) {
-            Value::Iterator { .. } | Value::AstWalk(_) => return self.iterator_has_item(iter),
-            Value::RangeIterator { remaining, .. } => return Ok(remaining != 0),
+            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => {
+                return self.iterator_has_item(iter);
+            }
             Value::PythonIterator {
                 buffered: Some(_), ..
             } => return Ok(true),
@@ -173,7 +167,7 @@ impl Context {
         }
         if matches!(
             self.heap.get(iter),
-            Value::Iterator { .. } | Value::AstWalk(_)
+            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. }
         ) {
             return self
                 .next_item(iter)?
@@ -185,18 +179,6 @@ impl Context {
         match self.heap.get_mut(iter) {
             Value::Generator { buffered, .. } | Value::PythonIterator { buffered, .. } => {
                 Ok(buffered.take().unwrap())
-            }
-            Value::RangeIterator {
-                next,
-                step,
-                remaining,
-            } => {
-                let item = *next;
-                *remaining -= 1;
-                if *remaining > 0 {
-                    *next += *step;
-                }
-                Ok(self.int(item))
             }
             _ => unreachable!("checked iterator"),
         }

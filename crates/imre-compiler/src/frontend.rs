@@ -631,7 +631,7 @@ pub(crate) fn lower_with_caller_cache(
                         graph.runtime_overload(module_id, function.name.range());
                         typing::strip_overload(&mut function);
                     }
-                    if cached.is_some() {
+                    if cached.is_some() || inspect::marks_function(graph, module_id, &function) {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
@@ -899,12 +899,15 @@ pub(crate) fn lower_with_caller_cache(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.has_class_values(graph.entry);
-    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
+    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
+            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
+        });
+    let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers(class_globals) {
+    for (module_id, range) in graph.initializers(entry_declarations) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -8886,6 +8889,9 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark })) => {
+                return self.inspect_coroutine(call, mark);
             }
             Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
                 return self.static_attribute(call);

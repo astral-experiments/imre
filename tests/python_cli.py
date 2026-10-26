@@ -88,9 +88,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0):
+        def compare(*args, extra=None, status=0, native_args=None):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *args, extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -111,6 +111,11 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
+        (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
+        inspect_entry = root / "inspect_views.py"
+        inspect_entry.write_text("import view_inspection\n")
+        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
@@ -379,6 +384,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
+            "boxed_zip.py",
             "boxed_bytes_separators.py",
             "boxed_reversed_list.py",
         ):
