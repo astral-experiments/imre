@@ -283,9 +283,10 @@ jobs:
           python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --manifest benchmarks/cpython_stdlib/full/errno/UPSTREAM.json --upstream-source benchmarks/cpython_stdlib/full/errno/upstream/Lib/test/test_errno.py --clang /usr/bin/clang-18
           python3 benchmarks/cpython_stdlib/full/unittest/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-unittest.json"
           python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/unittest/reference-linux.json "$RUNNER_TEMP/cpython-unittest.json"
-      - name: Compare static inspect lookups with the pinned CPython suite
+      - name: Compare inspect string cleaning and static lookups with the pinned CPython suite
         run: |
           python3 benchmarks/cpython_stdlib/full/inspect/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-inspect.json"
+          cmp benchmarks/cpython_stdlib/full/inspect/native-linux.json "$RUNNER_TEMP/cpython-inspect.json"
       - name: Check typing overloads against the original CPython typing and warnings fixtures
         run: |
           python3 benchmarks/cpython_stdlib/full/typing/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-typing-overloads.json"
