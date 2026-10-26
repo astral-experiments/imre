@@ -26,14 +26,16 @@ struct SourceModule {
 enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Bytes(&'a [u8]),
+    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
-    /// Counts positions without allocating boxed integers for bytes.
+    /// Counts positions without allocating boxed integer elements.
     fn len(&self) -> usize {
         match self {
             Self::Values(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
+            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -140,7 +142,11 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
             Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => return Ok(id),
-            Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
+            Value::List(_)
+            | Value::Tuple(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Range { .. } => id,
             Value::Instance {
                 dictionary: Some(_),
                 ..
@@ -190,6 +196,10 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
+            Value::Range { start, stop, step } => IteratorSlice::Range {
+                value: i128::from(*start) + i128::from(*step) * *offset as i128,
+                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
+            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -223,6 +233,7 @@ impl Context {
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
             *offset += 1;
@@ -256,10 +267,13 @@ impl Context {
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
-                    IteratorSlice::Bytes(bytes) => {
-                        let mut values = Vec::with_capacity(bytes.len());
-                        while let Some(byte) = self.next_item(id)? {
-                            values.push(byte);
+                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                        let mut values = Vec::new();
+                        values.try_reserve_exact(remaining.len()).map_err(|_| {
+                            Error::new("MemoryError", "iterator is too large to materialize")
+                        })?;
+                        while let Some(item) = self.next_item(id)? {
+                            values.push(item);
                         }
                         return Ok(values);
                     }

@@ -7,6 +7,11 @@ def current():
         if label == "b":
             break
     print(rows, list(zip()), list(zip([1, 2], [3])))
+    huge = range(-4611686018427387904, 4611686018427387904)
+    for first in huge:
+        print(first)
+        break
+    print(list(zip([3], huge)))
 
     for lengths in ((2, 1, 2), (1, 1, 2), (2, 2, 2)):
         seen = []
