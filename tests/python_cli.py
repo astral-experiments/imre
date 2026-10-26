@@ -366,6 +366,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
             "boxed_bytes_separators.py",
+            "boxed_string_new.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

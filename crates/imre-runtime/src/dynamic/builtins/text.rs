@@ -100,6 +100,20 @@ pub(super) fn construct(
         "str" => {
             let [value, encoding, errors] =
                 bind(name, args, kwargs, ["object", "encoding", "errors"])?;
+            if encoding.is_none()
+                && errors.is_none()
+                && let Some(value) = value
+            {
+                if let Some(to_str) = ctx.bound_slot(value, "__str__")? {
+                    let result = ctx.call(to_str, vec![], vec![])?;
+                    ctx.str_value(result)
+                        .map_err(|_| type_error("__str__ returned non-string"))?;
+                    return Ok(result);
+                }
+                if matches!(ctx.heap.get(value), Value::Str(_)) {
+                    return Ok(value);
+                }
+            }
             let rendered = if encoding.is_some() || errors.is_some() {
                 decode(
                     ctx,
@@ -456,12 +470,17 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if owner == "str" {
+        if name == "__new__" {
+            type_error("str.__new__(): not enough arguments")
+        } else if owner == "str" {
             type_error(format!("unbound method str.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
     })?;
+    if name == "__new__" {
+        return ctx.new_str(receiver, args, kwargs);
+    }
     if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
