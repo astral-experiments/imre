@@ -272,10 +272,13 @@ impl Checker<'_> {
         self.helpers.finish(
             id,
             comprehensions::Helper {
-                module: self.module,
+                // functools.update_wrapper copies the wrapped function's __module__.
+                module: text
+                    .as_ref()
+                    .map_or(self.module, |metadata| metadata.module),
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
-                source_frame: false,
+                source_frame: true,
                 recursion_error: self.graph.modules[self.module]
                     .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
@@ -466,7 +469,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         match decorator {
             LocalDecorator::Dispatch => {
-                self.new_dispatcher(target, Some(self.function_text(def)), def)
+                self.new_dispatcher(target, Some(self.function_text(self.module, def)), def)
             }
             LocalDecorator::Register(selection) => selection.apply(self, target, def),
         }
