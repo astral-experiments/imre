@@ -257,7 +257,7 @@ impl Context {
             }
             "matches" => {
                 if let Value::Raised(error) = self.heap.get(a) {
-                    Ok(flag(self.error_matches(error, b)))
+                    Ok(flag(self.raised_error_matches(error, b)))
                 } else {
                     Ok(FALSE)
                 }

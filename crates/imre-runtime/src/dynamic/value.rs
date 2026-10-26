@@ -197,9 +197,8 @@ impl Context {
         error
     }
 
-    pub(super) fn exception(&mut self, kind: &str, args: &[Id], class: Option<Id>) -> Error {
+    pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
-        error.class = class;
         error.args = Some(args.to_vec());
         error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
