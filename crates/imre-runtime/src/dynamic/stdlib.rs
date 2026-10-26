@@ -16,6 +16,7 @@ mod hmac;
 pub(super) mod io;
 mod json;
 mod operator;
+pub(super) mod readiness;
 mod regex;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -29,6 +30,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "operator"
             | "platform"
             | "site"
+            | "selectors"
             | "struct"
             | "json"
             | "datetime"
@@ -192,6 +194,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("selectors", "EVENT_READ") => ctx.int(1),
+        ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
@@ -323,6 +327,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if name == "operator.attrgetter" {
         return operator::attrgetter(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("selectors.") {
+        return readiness::call(ctx, method, args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("datetime.") {

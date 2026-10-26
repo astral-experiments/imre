@@ -26,7 +26,8 @@ impl Function<'_, '_> {
             ast::Expr::BooleanLiteral(v) => if v.value { "2" } else { "1" }.into(),
             ast::Expr::NumberLiteral(v) => match &v.value {
                 ast::Number::Int(n) => self.integer(n),
-                _ => self.unsupported("non-integer numeric literal"),
+                ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
+                _ => self.unsupported("complex numeric literal"),
             },
             ast::Expr::StringLiteral(v) => self.text(&v.value.to_string()),
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),

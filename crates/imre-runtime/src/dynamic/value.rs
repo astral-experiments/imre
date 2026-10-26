@@ -151,6 +151,7 @@ pub(super) enum Value {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
+    Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Range {
         start: i64,
         stop: i64,
@@ -295,6 +296,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
+            Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.parent);
                 visit.extend(scope.names.values());
