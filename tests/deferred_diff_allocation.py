@@ -17,6 +17,7 @@ def check(args, directory):
     source = fixtures / "retry.py"
     modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
+    cases.append(("join-owner", "short", "A", "B"))
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
     passed = 0
     for level in args.opt_levels:
@@ -34,6 +35,8 @@ def check(args, directory):
             # repr's output buffer is covered separately; target its first row allocation.
             if argv[0] in ("repr", "frozen"):
                 indices = (1,)
+            elif argv[0] == "join-owner":
+                indices = (count,)
             elif argv[0] in ("pack-project", "restore"):
                 indices = {1, count // 2, count}
             else:
