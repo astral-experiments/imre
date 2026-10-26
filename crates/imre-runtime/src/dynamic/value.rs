@@ -52,6 +52,9 @@ impl Context {
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
             Value::List(_) => "list",
+            Value::NamedTuple {
+                class: Some(class), ..
+            } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
             Value::Set(_) => "set",
@@ -151,6 +154,7 @@ pub(super) enum Value {
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
+        class: Option<&'static str>,
         names: Vec<String>,
         values: Vec<Id>,
     },

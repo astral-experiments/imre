@@ -249,6 +249,19 @@ impl Context {
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Calendar { value, .. } => value.text(),
+            Value::NamedTuple {
+                class: Some(class),
+                names,
+                values,
+            } => {
+                let fields = names
+                    .iter()
+                    .zip(values)
+                    .map(|(k, v)| format!("{k}={}", self.repr(*v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{class}({fields})")
+            }
             Value::Str(s) => s.clone(),
             Value::Bytes(bytes) => format!(
                 "b'{}'",

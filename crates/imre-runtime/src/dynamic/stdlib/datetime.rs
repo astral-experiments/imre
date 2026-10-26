@@ -89,7 +89,8 @@ pub(in crate::dynamic) fn attribute(
     let class = value.class();
     match (class, name) {
         ("datetime", "tzinfo") => return Ok(tzinfo),
-        ("date" | "datetime", "timetuple") | ("timedelta", "total_seconds") => {
+        ("date" | "datetime", "timetuple" | "toordinal" | "weekday")
+        | ("timedelta", "total_seconds") => {
             let callable = ctx.builtin(&format!("datetime.{class}.{name}"));
             return Ok(ctx.alloc(Value::Method { callable, receiver }));
         }
@@ -246,15 +247,7 @@ pub(super) fn call(
                             ),
                         )
                     })?;
-                    fields[i] =
-                        n.to_i64()
-                            .and_then(|n| i32::try_from(n).ok())
-                            .ok_or_else(|| {
-                                Error::new(
-                                    "OverflowError",
-                                    "Python int too large to convert to C int",
-                                )
-                            })?;
+                    fields[i] = Calendar::component(&n)?;
                 }
             }
             let tz = values[7].unwrap_or(NONE);
@@ -265,7 +258,13 @@ pub(super) fn call(
             };
             Ok(store(ctx, result, tz))
         }
-        "datetime.timetuple" | "date.timetuple" | "timedelta.total_seconds" => {
+        "datetime.timetuple"
+        | "date.timetuple"
+        | "date.toordinal"
+        | "datetime.toordinal"
+        | "date.weekday"
+        | "datetime.weekday"
+        | "timedelta.total_seconds" => {
             if args.len() != 1 || !kwargs.is_empty() {
                 return Err(Error::new(
                     "TypeError",
@@ -278,14 +277,20 @@ pub(super) fn call(
             let (class, operation) = method.split_once('.').unwrap();
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
-            if operation == "total_seconds" {
-                return Ok(ctx.alloc(Value::Float(value.seconds())));
-            }
-            let values = value.timetuple().map(|n| ctx.int(n));
-            Ok(record(
-                ctx,
-                &std::array::from_fn::<_, 9, _>(|i| (TM[i], values[i])),
-            ))
+            Ok(match operation {
+                "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
+                "toordinal" => ctx.int(value.ordinal()),
+                "weekday" => ctx.int((value.ordinal() - 1) % 7),
+                "timetuple" => {
+                    let values = value.timetuple().map(|n| ctx.int(n)).into();
+                    ctx.alloc(Value::NamedTuple {
+                        class: Some("time.struct_time"),
+                        names: TM.map(str::to_owned).into(),
+                        values,
+                    })
+                }
+                _ => unreachable!(),
+            })
         }
         _ => Err(Error::new(
             "AttributeError",

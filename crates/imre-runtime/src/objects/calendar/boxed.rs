@@ -35,6 +35,10 @@ impl CalendarNumber {
 }
 
 impl Calendar {
+    pub(crate) fn component(n: &Int) -> Result<i32, Error> {
+        c_component(n.0)
+    }
+
     pub(crate) fn class(&self) -> &'static str {
         with(&self.0, |value| match value {
             Value::DateOnly(_) => "date",
@@ -95,7 +99,11 @@ impl Calendar {
             tm.tm_min,
             tm.tm_sec.min(59),
             micros,
-            0,
+            if zone.is_none() {
+                conversion::local_fold(seconds)?
+            } else {
+                0
+            },
         ];
         let value = Self::datetime(fields, zone)?;
         if let Some(zone) = zone {
@@ -122,7 +130,7 @@ impl Calendar {
 
     pub(crate) fn timetuple(&self) -> [i64; 9] {
         let [y, m, d, h, minute, s, _, _] = self.fields().map(|n| n as i64);
-        let ord = ordinal(y as i32, m as i32, d as i32) as i64;
+        let ord = self.ordinal();
         [
             y,
             m,
@@ -134,6 +142,14 @@ impl Calendar {
             ord - i64::from(days_before_year(y as i32)),
             -1,
         ]
+    }
+
+    pub(crate) fn ordinal(&self) -> i64 {
+        with(&self.0, |v| match v {
+            Value::DateOnly(ord) => *ord as i64,
+            Value::Date { local, .. } => (local.div_euclid(DAY) + 1) as i64,
+            _ => unreachable!(),
+        })
     }
 
     pub(crate) fn delta_parts(&self) -> (i128, i128, i128) {

@@ -71,6 +71,7 @@ fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Res
 
 fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::NamedTuple {
+        class: None,
         names: fields.iter().map(|(name, _)| (*name).to_owned()).collect(),
         values: fields.iter().map(|&(_, value)| value).collect(),
     })

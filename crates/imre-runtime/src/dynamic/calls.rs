@@ -277,9 +277,16 @@ impl Context {
             Value::Instance { class, fields } => {
                 return self.instance_attribute(obj, class, fields.get(name).copied(), name);
             }
-            Value::NamedTuple { names, values } => {
+            Value::NamedTuple {
+                class,
+                names,
+                values,
+            } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
+                }
+                if class == Some("time.struct_time") && matches!(name, "tm_zone" | "tm_gmtoff") {
+                    return Ok(NONE);
                 }
             }
             _ => {}
