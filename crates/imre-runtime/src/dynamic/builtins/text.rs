@@ -100,20 +100,6 @@ pub(super) fn construct(
         "str" => {
             let [value, encoding, errors] =
                 bind(name, args, kwargs, ["object", "encoding", "errors"])?;
-            if encoding.is_none()
-                && errors.is_none()
-                && let Some(value) = value
-            {
-                if let Some(to_str) = ctx.bound_slot(value, "__str__")? {
-                    let result = ctx.call(to_str, vec![], vec![])?;
-                    ctx.str_value(result)
-                        .map_err(|_| type_error("__str__ returned non-string"))?;
-                    return Ok(result);
-                }
-                if matches!(ctx.heap.get(value), Value::Str(_)) {
-                    return Ok(value);
-                }
-            }
             let rendered = if encoding.is_some() || errors.is_some() {
                 decode(
                     ctx,
@@ -122,10 +108,14 @@ pub(super) fn construct(
                     errors,
                 )?
             } else if let Some(value) = value
+                && matches!(ctx.heap.get(value), Value::Str(_))
+            {
+                return Ok(value);
+            } else if let Some(value) = value
                 && let Some(method) = ctx.bound_slot(value, "__str__")?
             {
                 let result = ctx.call(method, Vec::new(), Vec::new())?;
-                if !matches!(ctx.heap.get(result), Value::Str(_)) {
+                if ctx.string_storage(result).is_none() {
                     return Err(type_error(format!(
                         "__str__ returned non-string (type {})",
                         ctx.type_name(result)
