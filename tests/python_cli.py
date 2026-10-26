@@ -63,6 +63,20 @@ def main():
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
+        exit_stack = Path(__file__).with_name("fixtures") / "boxed_exit_stack.py"
+        expected = run(sys.executable, "-B", exit_stack)
+        actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack_import = root / "stack.py"
+        exit_stack_import.write_text("from contextlib import ExitStack\n"
+                                     "s = ExitStack()\nprint(isinstance(s, ExitStack))\n"
+                                     "print(s.__enter__() is s)\n")
+        for mode in ([], ["--reachable-only"]):
+            actual = run(imre, "run", exit_stack_import, *mode, "--quiet")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, b"True\nTrue\n", b""), actual.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -357,8 +371,10 @@ def report(text):
         for fixture in (
             "boxed_ast.py",
             "boxed_code_objects.py",
+            "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_int_to_bytes.py",
+            "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
@@ -393,6 +409,7 @@ def report(text):
             "boxed_struct.py",
             "boxed_reversed_list.py",
             "boxed_string_new.py",
+            "boxed_string_repeat.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -10,113 +10,134 @@ mod collections;
 mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
-pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
+pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
-pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
-    use crate::objects::exceptions::Kind;
-    macro_rules! kinds {
-        ($($kind:ident),* $(,)?) => {
-            match name { $(stringify!($kind) => Some(Kind::$kind),)* _ => None }
-        };
-    }
-    kinds!(
-        BaseException,
-        Exception,
-        RuntimeError,
-        RecursionError,
-        NotImplementedError,
-        TypeError,
-        ValueError,
-        EOFError,
-        UnicodeError,
-        UnicodeDecodeError,
-        UnicodeEncodeError,
-        ArithmeticError,
-        OverflowError,
-        ZeroDivisionError,
-        LookupError,
-        IndexError,
-        KeyError,
-        NameError,
-        AttributeError,
-        ImportError,
-        ModuleNotFoundError,
-        OSError,
-        UnsupportedOperation,
-        ConnectionError,
-        ConnectionRefusedError,
-        ConnectionResetError,
-        ConnectionAbortedError,
-        BrokenPipeError,
-        BlockingIOError,
-        TimeoutError,
-        FileNotFoundError,
-        IsADirectoryError,
-        NotADirectoryError,
-        PermissionError,
-        AssertionError,
-        MemoryError,
-        SystemExit,
-        StopIteration,
-        Warning,
-        RuntimeWarning,
-    )
+macro_rules! exception_kinds {
+    ($($kind:ident),* $(,)?) => {
+        const EXCEPTIONS: &[&str] = &[$(stringify!($kind)),*];
+        pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+            use crate::objects::exceptions::Kind;
+            match name {
+                $(stringify!($kind) => Some(Kind::$kind),)*
+                "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+                _ => None,
+            }
+        }
+    };
+}
+
+exception_kinds!(
+    BaseException,
+    Exception,
+    RuntimeError,
+    RecursionError,
+    NotImplementedError,
+    TypeError,
+    ValueError,
+    EOFError,
+    UnicodeError,
+    UnicodeDecodeError,
+    UnicodeEncodeError,
+    ArithmeticError,
+    OverflowError,
+    ZeroDivisionError,
+    LookupError,
+    IndexError,
+    KeyError,
+    NameError,
+    UnboundLocalError,
+    AttributeError,
+    ImportError,
+    ModuleNotFoundError,
+    OSError,
+    ConnectionError,
+    ConnectionRefusedError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    BrokenPipeError,
+    BlockingIOError,
+    TimeoutError,
+    FileNotFoundError,
+    FileExistsError,
+    IsADirectoryError,
+    NotADirectoryError,
+    PermissionError,
+    AssertionError,
+    MemoryError,
+    SystemExit,
+    StopIteration,
+    Warning,
+    RuntimeWarning,
+);
+
+const FUNCTIONS: &[&str] = &[
+    "len",
+    "reversed",
+    "ord",
+    "callable",
+    "any",
+    "isinstance",
+    "issubclass",
+    "getattr",
+    "globals",
+    "setattr",
+    "delattr",
+    "hasattr",
+    "open",
+    "print",
+    "__import__",
+    "repr",
+    "format",
+    "compile",
+    "exec",
+    "iter",
+    "next",
+];
+
+const TYPES: &[&str] = &[
+    "bool",
+    "bytearray",
+    "bytes",
+    "dict",
+    "frozenset",
+    "int",
+    "list",
+    "object",
+    "property",
+    "staticmethod",
+    "range",
+    "set",
+    "str",
+    "tuple",
+    "type",
+    "super",
+    "zip",
+];
+
+pub(super) fn names() -> impl Iterator<Item = &'static str> {
+    FUNCTIONS.iter().chain(TYPES).chain(EXCEPTIONS).copied()
 }
 
 pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+/// Consult the native hierarchy when both names denote known exception types.
+pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
+    Some(crate::objects::exceptions::imre_builtin_exception_subclass(
+        exception_kind(child)? as u32,
+        exception_kind(parent)? as u32,
+    ))
+}
+
 pub(super) fn is_builtin(name: &str) -> bool {
-    (name != "UnsupportedOperation" && is_builtin_type(name))
-        || matches!(
-            name,
-            "len"
-                | "iter"
-                | "next"
-                | "reversed"
-                | "ord"
-                | "callable"
-                | "any"
-                | "isinstance"
-                | "issubclass"
-                | "getattr"
-                | "globals"
-                | "setattr"
-                | "delattr"
-                | "hasattr"
-                | "open"
-                | "print"
-                | "__import__"
-                | "repr"
-                | "format"
-        )
+    (name != "UnsupportedOperation" && is_builtin_type(name)) || FUNCTIONS.contains(&name)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    matches!(
-        name,
-        "bool"
-            | "bytearray"
-            | "bytes"
-            | "dict"
-            | "frozenset"
-            | "enum.Enum"
-            | "enum.IntEnum"
-            | "enum.StrEnum"
-            | "int"
-            | "list"
-            | "object"
-            | "property"
-            | "staticmethod"
-            | "range"
-            | "set"
-            | "str"
-            | "tuple"
-            | "type"
-            | "super"
-            | "zip"
-    ) || is_exception(name)
+    TYPES.contains(&name)
+        || is_exception(name)
+        || matches!(name, "enum.Enum" | "enum.IntEnum" | "enum.StrEnum")
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -567,6 +588,28 @@ pub(super) fn call(
         };
     }
     match name {
+        "method" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("method() takes no keyword arguments"));
+            }
+            let &[callable, receiver] = args else {
+                return Err(type_error(format!(
+                    "method expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            if !ctx.callable(callable) {
+                return Err(type_error("first argument must be callable"));
+            }
+            if receiver == NONE {
+                return Err(type_error("instance must not be None"));
+            }
+            Ok(ctx.alloc(Value::Method {
+                callable,
+                receiver,
+                explicit: true,
+            }))
+        }
         "object" => {
             if !args.is_empty() || !kwargs.is_empty() {
                 return Err(type_error("object() takes no arguments"));
@@ -595,6 +638,16 @@ pub(super) fn call(
                 return Err(type_error("super() takes no keyword arguments"));
             }
             ctx.make_super(args)
+        }
+        "compile" => {
+            positional(name, kwargs)?;
+            arity(name, args, 3, 3)?;
+            ctx.compile_source(args[0], args[1], args[2])
+        }
+        "exec" => {
+            positional(name, kwargs)?;
+            arity(name, args, 2, 3)?;
+            ctx.exec_source(args[0], args[1], args.get(2).copied())
         }
         "callable" => {
             positional(name, kwargs)?;
