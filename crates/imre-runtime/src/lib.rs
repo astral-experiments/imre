@@ -1145,7 +1145,10 @@ fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
     } else {
-        let mut normalized = String::with_capacity(source.len());
+        let mut normalized = String::new();
+        normalized
+            .try_reserve_exact(source.len())
+            .map_err(|_| Error::allocation())?;
         for character in source.chars() {
             if character.is_ascii() {
                 normalized.push(character);
@@ -1172,7 +1175,7 @@ fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
     {
         return Ok(None);
     }
-    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
+    BigInt::parse_bytes(source.as_bytes(), 10)
         .map(Int::try_new)
         .transpose()
         .map_err(|_| Error::allocation())
