@@ -33,6 +33,12 @@ def current():
               isinstance(sample, alias))
         by_type[alias] = name
     print(len(by_type), [by_type[type(sample)] for name, sample in samples])
+    for cls, instance in ((int, 43), (str, "report")):
+        new = cls.__new__
+        print(type(new) is type(len), isinstance(new, types.BuiltinFunctionType),
+              new.__self__ is cls, instance.__new__ is new, new(cls, instance) == instance)
+    print(int.__new__ is str.__new__,
+          isinstance(dict.get, types.BuiltinFunctionType), isinstance(object.__init__, types.BuiltinFunctionType))
     for obj in (len, [].append, Reporter.render, report.render, attrgetter, attrgetter("render")):
         print(isinstance(obj, types.BuiltinFunctionType), isinstance(obj, types.FunctionType),
               isinstance(obj, types.MethodType))

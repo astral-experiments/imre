@@ -354,7 +354,8 @@ impl Context {
                     )
                 {
                     "type"
-                } else if builtins::is_builtin(name) {
+                } else if builtins::is_builtin(name) || builtins::constructor_owner(name).is_some()
+                {
                     "builtin_function_or_method"
                 } else {
                     return None;
@@ -706,6 +707,12 @@ impl Context {
             {
                 return self.lookup_attr(dict, name);
             }
+            Value::Native(symbol)
+                if name == "__self__"
+                    && let Some(owner) = builtins::constructor_owner(&symbol) =>
+            {
+                return Ok(self.builtin(owner));
+            }
             Value::Native(class) if class == "int" && name == "__new__" => {
                 return Ok(self.builtin("int.__new__"));
             }
@@ -896,6 +903,13 @@ impl Context {
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
         let base = self.string_storage(obj).unwrap_or(obj);
+        if name == "__new__" {
+            match self.heap.get(base) {
+                Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Str(_) => return Ok(self.builtin("str.__new__")),
+                _ => {}
+            }
+        }
         if let Some(method) = builtins::method_name(self.heap.get(base), name) {
             let fun = self.alloc(Value::Native(method));
             return Ok(self.alloc(Value::Method {

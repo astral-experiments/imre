@@ -123,6 +123,15 @@ pub(super) fn is_builtin(name: &str) -> bool {
     is_builtin_type(name) || FUNCTIONS.contains(&name)
 }
 
+/// Static constructors retain their declaring type as `__self__` even on instances.
+pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
+    match name {
+        "int.__new__" => Some("int"),
+        "str.__new__" => Some("str"),
+        _ => None,
+    }
+}
+
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || is_exception(name)
