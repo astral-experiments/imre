@@ -26,3 +26,19 @@ git archive 820c40311a6a176698e34b29a25b03c8d84e97c1 -- benchmarks/cpython_stdli
     --stage-script /tmp/imre-support-fixture-source/benchmarks/cpython_stdlib/full/stage_tests.py \
     --imre "$IMRE" --runtime "$RUNTIME" --clang "$CLANG" --result /tmp/unittest-support.json
 ```
+
+## The explicit builtin object base
+
+In a declaration such as `class Matcher(object)`, Imre resolves the class bound to `object` at the base expression. A sole builtin root uses the same fixed layout as an implicit root. A source class named `object` keeps its methods and fields. A non-type binding, duplicate bases and a builtin root before its subclass still prevent the declaration from succeeding, including when the class is unused. CPython raises `TypeError` during class construction for these invalid examples. Imre rejects them during compilation.
+
+| Unmodified fixture or consumer | Before | After |
+| --- | --- | --- |
+| 20 unittest consumers and the separate logging fixture, ordinary O0/O3 | `Matcher(object)`, 1543:15 | `if sys.platform == "win32"` in `PythonSymlink`, 1613:5 |
+| Same entries, reachable O0/O3 | `PythonSymlink`, 1613:5 | Same diagnostic |
+| Complete `test.support.Matcher` in isolation, with positive and negative lookups | Rejected its base at 1543:15 | Rejected the unannotated `**kwargs` of `matches` at 1547:26 |
+| Complete `test_logging.BadStream` in isolation | Rejected its base at 803:17 | Native `write` raises `RuntimeError("deliberate mistake")` |
+| Complete `test_unittest.testmock.testasync.NormalClass` in isolation | Rejected its base at 42:19 | Native `a()` returns `None` |
+
+The same 20 unittest cases and the separately wrapped `BasicConfigTest.test_strformatstyle` remain blocked in each of the four configurations. The two executed fixture methods use native operations with a standalone driver. No complete test was promoted. Ordinary import of the whole logging test module still encounters `configparser` at line 27, and reachable import encounters `pickle` at line 32.
+
+The [per-occurrence evidence](support-object-base-linux.json.gz) records the original method and fixture hashes, roles, CPython outcomes, and exact before/after diagnostics. Across the same 416 blob-verified files, 258 classes in 39 files have `object` as their only positional base. Of these, 37 are directly in a module body and three additionally specify a class keyword. The record retains all 258 source locations independently of execution. It includes the shadowing and error checks plus the exact primary occurrence of `PatchTest.test_patch_dict_decorator_resolution`. The fixture reproduction command above works for both compiler revisions.

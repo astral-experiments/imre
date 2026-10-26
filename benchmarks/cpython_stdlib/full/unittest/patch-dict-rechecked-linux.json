@@ -1,9 +1,9 @@
 {
   "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
-  "compiler_source": "40ff9bfe997f0a1a2f30cd85740a98768bc61f22",
-  "compiler_tree": "029ece2727418b6a288cdfad2d43caf7c3b97754",
-  "compiler_sha256": "07a4f75f67d499ae9e4cd4267cf37d2dc2fc5735d32c534f595ac4f040291b48",
-  "runtime_sha256": "ae94349adce4f0436c2b58679e9a80a4254c3634668be546d68adc1c99d063d2",
+  "compiler_source": "cbebf92fa76041f01edb8a086389b3fb6cd071ab",
+  "compiler_tree": "bb8dddcd1081a45e3b6e203248f74af5a95831f5",
+  "compiler_sha256": "7ee141aceb89bd71b081e3f03318e3024ccbcf6e69f889129f6bc26674293c0f",
+  "runtime_sha256": "8cc70cc7a22bdf22b731f9ded835060fc82eab7e1c4b05b8a1d4746573f7fc1e",
   "checks_per_mode": [
     "different diagnostic",
     "different occurrence",
@@ -12,8 +12,7 @@
     "different original method hash"
   ],
   "full_reports": {
-    "ordinary": "36b611abc02e6fc6029c1d9d8e5af6482636dd41607e0291d66246852d421113",
-    "reachable": "3b99fc82c4d8a2158f225283a82cc994679fe1b6ebfd295bf6aeda5fbb3c9388"
+    "ordinary": "8d4c9244b14f3c18f8c4ce5c1ba4e973f186d4a2a9003a9d5f616bb62e9dbf6d"
   },
   "modes": {
     "ordinary-O0": [
@@ -21,7 +20,7 @@
         "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_decorator_resolution",
         "occurrence": 1,
         "outcome": "blocked",
-        "reason": "Compiling <case>/case.py (-O0)\n<root>/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class",
+        "reason": "Compiling <case>/case.py (-O0)\n<root>/test/support/__init__.py:1613:5: Imre: class bodies support field declarations, plain data assignments, methods, pass, and docstrings; annotated field defaults require @dataclass",
         "evidence": {
           "stage": "compile",
           "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
@@ -34,7 +33,7 @@
         "id": "test.test_unittest.testmock.testpatch.PatchTest.test_patch_dict_decorator_resolution",
         "occurrence": 1,
         "outcome": "blocked",
-        "reason": "Compiling <case>/case.py (-O3)\n<root>/test/support/__init__.py:1155:9: Imre: field \"procfile\" is not declared in the class",
+        "reason": "Compiling <case>/case.py (-O3)\n<root>/test/support/__init__.py:1613:5: Imre: class bodies support field declarations, plain data assignments, methods, pass, and docstrings; annotated field defaults require @dataclass",
         "evidence": {
           "stage": "compile",
           "source_blob": "bd85fdcfc472a615e3cb15c678ddeea499962113",
