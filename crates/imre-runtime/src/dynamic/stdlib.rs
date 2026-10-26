@@ -246,7 +246,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
-        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
