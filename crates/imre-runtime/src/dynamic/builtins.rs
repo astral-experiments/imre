@@ -260,6 +260,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {

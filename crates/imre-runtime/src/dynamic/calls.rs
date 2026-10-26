@@ -272,6 +272,7 @@ impl Context {
         Some(match self.heap.get(obj) {
             Value::None
             | Value::Ellipsis
+            | Value::NotImplemented
             | Value::Bool(_)
             | Value::Float(_)
             | Value::Int(_)
@@ -292,6 +293,7 @@ impl Context {
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "itertools.count",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -315,6 +317,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "NoneType"
+                            | "NotImplementedType"
                             | "ellipsis"
                             | "float"
                             | "code"
@@ -330,6 +333,7 @@ impl Context {
                             | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
+                            | "itertools.count"
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -426,6 +430,7 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | ("itertools.count", Value::Count { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -678,6 +683,11 @@ impl Context {
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == "itertools.count" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("count")),
+                "__module__" => return Ok(self.text("itertools")),
                 _ => {}
             },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {

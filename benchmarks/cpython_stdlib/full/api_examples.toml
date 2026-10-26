@@ -29,6 +29,7 @@ errno = ["Named errno constants, aliases and the `errorcode` registry.","benchma
 fnmatch = ["`fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`.","benchmarks/cpython_stdlib/full/fnmatch/README.md"]
 functools = ["Selected `partial`, caching decorators and dispatch operations.","benchmarks/cpython_stdlib/full/functools/EVIDENCE.md"]
 genericpath = ["The genericpath companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/README.md"]
+gettext = ["Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback.", "tests/fixtures/text/gettext_catalog.py"]
 gzip = ["Read text lines and binary chunks from gzip files.","tests/fixtures/files/stream_reads.py"]
 hashlib = ["SHA-1 and SHA-256 construction, incremental updates, copy, digest and hexdigest.","benchmarks/cpython_stdlib/full/hashlib/README.md"]
 http = ["Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass.","benchmarks/cpython_stdlib/full/http/README.md"]

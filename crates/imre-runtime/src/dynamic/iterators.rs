@@ -31,6 +31,7 @@ impl Context {
         Ok(self.alloc(Value::Generator {
             code,
             scope,
+            iterators: Vec::new(),
             running: false,
             offset: Some(0),
         }))
@@ -43,6 +44,7 @@ impl Context {
             scope,
             running,
             offset,
+            ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
@@ -70,11 +72,19 @@ impl Context {
         if !matches!(result, Ok(Some(_))) {
             *offset = None;
         }
-        match result {
-            Err(e) if self.is_stop_iteration(&e) => {
-                Err(Error::new("RuntimeError", "generator raised StopIteration"))
-            }
-            result => result,
+        result.map_err(|error| self.generator_error(error))
+    }
+
+    /// Preserve an escaping StopIteration as the cause and context of the generator's RuntimeError.
+    pub(super) fn generator_error(&mut self, error: Error) -> Error {
+        if !self.is_stop_iteration(&error) {
+            return error;
         }
+        let cause = self.raised_instance(error);
+        let mut error = Error::new("RuntimeError", "generator raised StopIteration");
+        let trace = error.tracing();
+        trace.cause = Some(cause);
+        trace.context = Some(cause);
+        error
     }
 }
