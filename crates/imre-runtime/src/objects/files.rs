@@ -1073,7 +1073,12 @@ mod tests {
             let name = crate::BytesOwner::new(name);
             // SAFETY: the bytes and descriptor stay rooted across unlinkat.
             unsafe {
-                super::super::os::imre_os_unlink(crate::BytesOwner::as_ptr(&name).cast(), 1, fd.0, 0)
+                super::super::os::imre_os_unlink(
+                    crate::BytesOwner::as_ptr(&name).cast(),
+                    1,
+                    fd.0,
+                    0,
+                )
             };
             if let Some(errno) = expected_errno {
                 assert_eq!(imre_error_pending(), 1);
