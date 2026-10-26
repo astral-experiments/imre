@@ -89,6 +89,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "list"
             | "object"
             | "property"
+            | "staticmethod"
             | "range"
             | "set"
             | "str"
@@ -139,6 +140,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
+        Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
@@ -419,9 +421,17 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
-            "function" if method == "__get__" => {
+            "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
+                if owner == "staticmethod"
+                    && !matches!(ctx.heap.get(args[0]), Value::StaticMethod { .. })
+                {
+                    return Err(type_error(format!(
+                        "descriptor '__get__' requires a 'staticmethod' object but received a '{}'",
+                        ctx.type_name(args[0])
+                    )));
+                }
                 let owner = args.get(2).copied().unwrap_or(NONE);
                 if args[1] == NONE && owner == NONE {
                     return Err(type_error("__get__(None, None) is invalid"));
@@ -568,6 +578,18 @@ pub(super) fn call(
                 .to_owned();
             let value = format_value(ctx, args[0], &spec)?;
             Ok(ctx.text(value))
+        }
+        "staticmethod" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("staticmethod() takes no keyword arguments"));
+            }
+            let [callable] = args else {
+                return Err(type_error(format!(
+                    "staticmethod expected 1 argument, got {}",
+                    args.len()
+                )));
+            };
+            super::static_method::construct(ctx, *callable)
         }
         "property" => {
             let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
