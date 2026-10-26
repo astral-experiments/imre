@@ -512,7 +512,30 @@ impl Context {
             return self.exact_type(obj);
         }
         match self.heap.get(obj).clone() {
-            Value::Raised(_) if name == "__traceback__" => return self.exception_traceback(obj),
+            Value::Raised(error)
+                if matches!(
+                    name,
+                    "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
+                ) =>
+            {
+                match name {
+                    "__traceback__" => return self.exception_traceback(obj),
+                    "__context__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                    }
+                    "__cause__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
+                    }
+                    "__suppress_context__" => {
+                        return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
+                            TRUE
+                        } else {
+                            FALSE
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Value::Traceback {
                 frame,
                 next,

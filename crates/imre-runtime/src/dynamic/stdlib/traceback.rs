@@ -1,7 +1,6 @@
 //! Render native exception objects through Python's traceback.print_exception interface.
 
 use std::fmt::Write as _;
-use std::io::Write as _;
 
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
 
@@ -69,10 +68,19 @@ impl FrameLine<'_> {
 }
 
 pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.iter().any(|(name, _)| name == "colorize")
+        && let Some(colorize) = option(args, 6, kwargs, "colorize")?
+        && ctx.truth(colorize)?
+    {
+        return Err(Error::new(
+            "NotImplementedError",
+            "colored tracebacks are not supported",
+        ));
+    }
     let exc = argument(args, 0)?;
     let value = option(args, 1, kwargs, "value")?;
     let tb = option(args, 2, kwargs, "tb")?;
-    let (value, mut tb) = match (value, tb) {
+    let (value, tb) = match (value, tb) {
         (None, None) if exc == NONE => (NONE, NONE),
         (None, None) if matches!(ctx.heap.get(exc), Value::Raised(_)) => {
             (exc, ctx.exception_traceback(exc)?)
@@ -91,6 +99,80 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ));
         }
     };
+    let limit = match option(args, 3, kwargs, "limit")?.filter(|&l| l != NONE) {
+        Some(l) => Some(ctx.as_integer(l)?),
+        None => {
+            let sys = ctx.module("sys")?;
+            match ctx.lookup_attr(sys, "tracebacklimit") {
+                Ok(l) if l != NONE => Some(ctx.as_integer(l)?.max(0)),
+                Ok(_) => None,
+                Err(error) if error.kind == "AttributeError" => None,
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    let chain = option(args, 5, kwargs, "chain")?
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(true);
+    let mut causes = vec![(value, tb, None)];
+    if chain {
+        let mut seen = std::collections::HashSet::from([value]);
+        let mut child = value;
+        while let Value::Raised(error) = ctx.heap.get(child) {
+            let Some(trace) = &error.trace else { break };
+            let (prior, message) = if let Some(cause) = trace.cause {
+                (
+                    cause,
+                    "\nThe above exception was the direct cause of the following exception:\n\n",
+                )
+            } else if let Some(context) = trace.context {
+                (
+                    context,
+                    "\nDuring handling of the above exception, another exception occurred:\n\n",
+                )
+            } else {
+                break;
+            };
+            if prior == NONE || !seen.insert(prior) {
+                break;
+            }
+            causes.push((prior, ctx.exception_traceback(prior)?, Some(message)));
+            child = prior;
+        }
+    }
+    let mut lines = Vec::new();
+    for (value, tb, separator) in causes.into_iter().rev() {
+        format_exception(ctx, value, tb, limit, &mut lines)?;
+        if let Some(separator) = separator {
+            lines.push(separator.to_owned());
+        }
+    }
+    let file = match option(args, 4, kwargs, "file")?.filter(|&f| f != NONE) {
+        Some(file) => file,
+        None => {
+            let sys = ctx.module("sys")?;
+            ctx.lookup_attr(sys, "stderr")?
+        }
+    };
+    for line in lines {
+        let write = ctx.lookup_attr(file, "write")?;
+        let line = ctx.text(line);
+        ctx.call(write, vec![line], Vec::new())?;
+        let write = ctx.lookup_attr(file, "write")?;
+        let end = ctx.text("");
+        ctx.call(write, vec![end], Vec::new())?;
+    }
+    Ok(NONE)
+}
+
+fn format_exception(
+    ctx: &Context,
+    value: Id,
+    mut tb: Id,
+    limit: Option<i64>,
+    lines: &mut Vec<String>,
+) -> Result<()> {
     let mut stack = Vec::new();
     while tb != NONE {
         let Value::Traceback {
@@ -114,8 +196,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         });
         tb = next;
     }
-    if let Some(limit) = option(args, 3, kwargs, "limit")?.filter(|&n| n != NONE) {
-        let n = ctx.as_integer(limit)?;
+    if let Some(n) = limit {
         if n >= 0 {
             stack.truncate(usize::try_from(n).unwrap_or(usize::MAX));
         } else {
@@ -125,7 +206,6 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             stack.drain(..skip);
         }
     }
-    let mut lines = Vec::new();
     if !stack.is_empty() {
         lines.push("Traceback (most recent call last):\n".to_owned());
         let mut i = 0;
@@ -149,11 +229,10 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     }
     let name = ctx.type_name(value);
     let text = match ctx.heap.get(value) {
-        Value::Raised(error)
-            if error.kind == "KeyError" && matches!(error.args.as_deref(), Some([_])) =>
-        {
-            ctx.repr(error.args.as_ref().unwrap()[0])
-        }
+        Value::Raised(error) if error.kind == "KeyError" => match error.args.as_deref() {
+            Some([key]) => ctx.repr(*key),
+            _ => ctx.display(value),
+        },
         _ => ctx.display(value),
     };
     lines.push(if text.is_empty() {
@@ -161,31 +240,5 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     } else {
         format!("{name}: {text}\n")
     });
-    let destination = match option(args, 4, kwargs, "file")?.filter(|&f| f != NONE) {
-        Some(file) => Some(file),
-        None => {
-            let sys = ctx.module("sys")?;
-            match ctx.lookup_attr(sys, "stderr") {
-                Ok(file) => Some(file),
-                Err(error) if error.kind == "AttributeError" => None,
-                Err(error) => return Err(error),
-            }
-        }
-    };
-    if let Some(file) = destination {
-        for line in lines {
-            let write = ctx.lookup_attr(file, "write")?;
-            let line = ctx.text(line);
-            ctx.call(write, vec![line], Vec::new())?;
-            let write = ctx.lookup_attr(file, "write")?;
-            let end = ctx.text("");
-            ctx.call(write, vec![end], Vec::new())?;
-        }
-    } else {
-        let mut dst = crate::sys::stderr_writer();
-        for line in lines {
-            dst.write_all(line.as_bytes()).map_err(super::os_error)?;
-        }
-    }
-    Ok(NONE)
+    Ok(())
 }

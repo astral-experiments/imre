@@ -289,7 +289,29 @@ impl Context {
                     ));
                 };
                 let mut error = e.clone();
-                error.tracing().instance = Some(exception);
+                let trace = error.tracing();
+                trace.instance = Some(exception);
+                if op == "raise" {
+                    let active = self.heap.active_exception();
+                    if active != NONE && active != exception {
+                        trace.context = Some(active);
+                    }
+                    if c == TRUE {
+                        let cause =
+                            if matches!(self.heap.get(b), Value::Native(_) | Value::Class { .. }) {
+                                self.call(b, Vec::new(), Vec::new())?
+                            } else {
+                                b
+                            };
+                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                            return Err(Error::new(
+                                "TypeError",
+                                "exception causes must derive from BaseException",
+                            ));
+                        }
+                        trace.cause = Some(cause);
+                    }
+                }
                 Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
@@ -406,13 +428,7 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
             id
         }
         Err(mut error) => {
-            if let Some((mut loc, frame)) = ctx.heap.trace_location() {
-                if let Some(&[line, start, split, end]) = span {
-                    loc.line = line;
-                    loc.span = Some([start, split, end]);
-                }
-                error.tracing().frames.push((loc, frame));
-            }
+            ctx.record_exception_frame(&mut error, span);
             ctx.pending = Some(error);
             NONE
         }

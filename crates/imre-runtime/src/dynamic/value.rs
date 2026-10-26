@@ -44,6 +44,8 @@ pub(super) struct Location {
 pub(super) struct Trace {
     pub frames: Vec<(Location, Id)>,
     pub instance: Option<Id>,
+    pub context: Option<Id>,
+    pub cause: Option<Id>,
     cached: Option<(usize, Id)>,
 }
 
@@ -80,6 +82,8 @@ impl Error {
                     .iter()
                     .map(|&(_, frame)| frame)
                     .chain(trace.instance)
+                    .chain(trace.context)
+                    .chain(trace.cause)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
     }
@@ -90,6 +94,21 @@ impl Error {
 }
 
 impl Context {
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        if let Some((mut loc, frame)) = self.heap.trace_location() {
+            if let Some(&[line, start, split, end]) = span {
+                loc.line = line;
+                loc.span = Some([start, split, end]);
+            }
+            let trace = error.tracing();
+            let active = self.heap.active_exception();
+            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
+                trace.context = Some(active);
+            }
+            trace.frames.push((loc, frame));
+        }
+    }
+
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
     pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
         let Value::Raised(error) = self.heap.get(exception) else {
