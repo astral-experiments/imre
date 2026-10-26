@@ -59,6 +59,24 @@ def current():
     assert next(cursor) == 2 and list(cursor) == []
     print(next(cursor, "done"))
 
+    values = [0, 1, 2, None]
+    cursor = iter(lambda: values.pop(0), None)
+    gen = (item for item in cursor)
+    assert any(gen) and next(cursor) == 2 and list(gen) == []
+
+    class Finished(StopIteration):
+        pass
+
+    def stop_in_body(item):
+        raise Finished(item)
+
+    gen = (stop_in_body(item) for item in [1])
+    try:
+        next(gen)
+    except RuntimeError as error:
+        print(str(error))
+    assert next(gen, "closed") == "closed"
+
     pairs = (pair for pair in [("first", 1), ("bad",), ("later", 2)])
     copied = {}
     try:

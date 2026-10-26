@@ -177,7 +177,7 @@ impl Context {
             "truth" => Ok(flag(self.truth(a)?)),
             "generator" => self.generator(a, b),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
-            "iter" => self.iterator(a),
+            "iter" => self.loop_iterator(a),
             "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?

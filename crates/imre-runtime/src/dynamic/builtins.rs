@@ -1,7 +1,6 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use std::cell::RefCell;
-use std::fs::File;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -9,6 +8,7 @@ use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
@@ -72,11 +72,11 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "iter"
+                | "next"
                 | "reversed"
                 | "ord"
                 | "callable"
-                | "iter"
-                | "next"
                 | "any"
                 | "isinstance"
                 | "issubclass"
@@ -155,6 +155,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
@@ -164,6 +165,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
         } if attr == "geturl" => "urllib.parse.SplitResult",
+        Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::Socket(_)
@@ -192,7 +194,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "socket.socket"
         }
         Value::TextFile(_)
-            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+            if matches!(
+                attr,
+                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+            ) =>
         {
             "TextIOWrapper"
         }
@@ -242,7 +247,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
             "pattern"
         }
-        Value::RegexMatch { .. } if attr == "group" => "match",
+        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {
@@ -318,6 +323,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
     args: &[Id],
     kwargs: &[(String, Id)],
     names: [&str; N],
+    max_positional: usize,
 ) -> Result<[Option<Id>; N]> {
     let count = args.len() + kwargs.len();
     if count > N {
@@ -326,25 +332,28 @@ pub(super) fn bind_method_arguments<const N: usize>(
             "{name}() takes at most {N} {kind}arguments ({count} given)"
         )));
     }
-    let mut values = [None; N];
-    for (slot, &arg) in values.iter_mut().zip(args) {
-        *slot = Some(arg);
+    if args.len() > max_positional {
+        return Err(type_error(format!(
+            "{name}() takes at most {max_positional} positional arguments ({} given)",
+            args.len()
+        )));
     }
-    for (key, value) in kwargs {
-        let index = names
-            .iter()
-            .position(|param| *param == key)
-            .ok_or_else(|| {
-                type_error(format!(
-                    "{name}() got an unexpected keyword argument '{key}'"
-                ))
-            })?;
-        if values[index].replace(*value).is_some() {
+    for (i, key) in names[..args.len()].iter().enumerate() {
+        if kwargs.iter().any(|(provided, _)| provided == key) {
             return Err(type_error(format!(
                 "argument for {name}() given by name ('{key}') and position ({})",
-                index + 1
+                i + 1
             )));
         }
+    }
+    let mut values = std::array::from_fn(|i| args.get(i).copied());
+    for (key, value) in kwargs {
+        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
+            type_error(format!(
+                "{name}() got an unexpected keyword argument '{key}'"
+            ))
+        })?;
+        values[index] = Some(*value);
     }
     Ok(values)
 }
@@ -511,6 +520,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
@@ -639,6 +649,31 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
+        "iter" | "next" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            match args {
+                [] => Err(type_error(format!(
+                    "{name} expected at least 1 argument, got 0"
+                ))),
+                [iterable] if name == "iter" => ctx.iterator(*iterable),
+                [iterator] => ctx
+                    .next_result(*iterator)?
+                    .ok_or_else(|| Error::new("StopIteration", "")),
+                [callable, sentinel] if name == "iter" => {
+                    if !ctx.callable(*callable) {
+                        return Err(type_error("iter(v, w): v must be callable"));
+                    }
+                    Ok(ctx.alloc(Value::CallableIterator(Some([*callable, *sentinel]))))
+                }
+                [iterator, default] => Ok(ctx.next_item(*iterator)?.unwrap_or(*default)),
+                _ => Err(type_error(format!(
+                    "{name} expected at most 2 arguments, got {}",
+                    args.len()
+                ))),
+            }
+        }
         "reversed" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -751,11 +786,35 @@ pub(super) fn call(
             super::property::construct(ctx, fields)
         }
         "open" => {
-            let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
+            arity(name, args, 0, 2)?;
+            let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if matches!(mode, "w" | "wt" | "tw") {
-                let file = crate::objects::TextFile::create(path)?;
+            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
+                if mode.contains('b') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "binary mode doesn't take an encoding argument",
+                    ));
+                }
+                let encoding = ctx.str_value(encoding)?;
+                if !matches!(
+                    crate::objects::Codec::lookup(encoding)?,
+                    crate::objects::Codec::Utf8 { signature: false }
+                ) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "text files require UTF-8 encoding",
+                    ));
+                }
+            }
+            let text_mode = match mode {
+                "r" | "rt" | "tr" => Some(0),
+                "w" | "wt" | "tw" => Some(1),
+                _ => None,
+            };
+            if let Some(text_mode) = text_mode {
+                let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             if mode != "rb" {
@@ -764,14 +823,7 @@ pub(super) fn call(
                     "unsupported mode for dynamic files",
                 ));
             }
-            let file = File::open(path).map_err(|e| {
-                let kind = match e.kind() {
-                    io::ErrorKind::NotFound => "FileNotFoundError",
-                    io::ErrorKind::PermissionDenied => "PermissionError",
-                    _ => "OSError",
-                };
-                Error::new(kind, format!("{path}: {e}"))
-            })?;
+            let (file, _) = crate::objects::open_file(path, 0)?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
                 io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))
@@ -798,12 +850,9 @@ pub(super) fn call(
             }
             ctx.module(name.split('.').next().unwrap())
         }
-        "iter" | "any" => {
+        "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if name == "iter" {
-                return ctx.python_iter(args[0]);
-            }
             let iter = ctx.iterator(args[0])?;
             while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? {
@@ -811,14 +860,6 @@ pub(super) fn call(
                 }
             }
             Ok(FALSE)
-        }
-        "next" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 2)?;
-            match ctx.iterator_next(args[0]) {
-                Err(e) if e.kind == "StopIteration" && args.len() == 2 => Ok(args[1]),
-                result => result,
-            }
         }
         "print" => {
             let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;

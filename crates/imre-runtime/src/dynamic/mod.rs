@@ -112,13 +112,15 @@ impl Context {
             .collect()
     }
 
-    fn str_value(&self, id: Id) -> Result<&str> {
-        if let Value::Str(value) = self.heap.get(id) {
-            Ok(value)
-        } else {
-            Err(Error::new("TypeError", "expected str"))
+    /// The immutable text backing an exact string or a Python subclass of str.
+    fn string_storage(&self, id: Id) -> Option<Id> {
+        match self.heap.get(id) {
+            Value::Str(_) => Some(id),
+            Value::Instance { text, .. } => *text,
+            _ => None,
         }
     }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.heap.get(id) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
@@ -130,6 +132,16 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    fn str_value(&self, id: Id) -> Result<&str> {
+        let id = self
+            .string_storage(id)
+            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+        let Value::Str(value) = self.heap.get(id) else {
+            unreachable!()
+        };
+        Ok(value)
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
@@ -148,6 +160,78 @@ impl Context {
             )
         })
     }
+    fn is_native_iterator(&self, id: Id) -> bool {
+        matches!(
+            self.heap.get(id),
+            Value::Iterator { .. }
+                | Value::AstWalk(_)
+                | Value::Zip { .. }
+                | Value::CallableIterator(_)
+                | Value::Generator { .. }
+        )
+    }
+
+    /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
+    fn iterator(&mut self, id: Id) -> Result<Id> {
+        if self.is_native_iterator(id) {
+            return Ok(id);
+        }
+        let (sequence, kind) = match *self.heap.get(id) {
+            Value::List(_) => (id, "list_iterator"),
+            Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::Bytes(_) => (id, "bytes_iterator"),
+            Value::ByteArray(_) => (id, "bytearray_iterator"),
+            Value::Range { .. } => (id, "range_iterator"),
+            Value::Instance { class, .. }
+                if let Some(slot) = self.class_attr(class, "__iter__") =>
+            {
+                if slot == NONE {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("'{}' object is not iterable", self.type_name(id)),
+                    ));
+                }
+                let method = self.bind_attribute(slot, id, class)?;
+                let result = self.call(method, Vec::new(), Vec::new())?;
+                if self.is_native_iterator(result) || self.slot(result, "__next__").is_some() {
+                    return Ok(result);
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "iter() returned non-iterator of type '{}'",
+                        self.type_name(result)
+                    ),
+                ));
+            }
+            _ => {
+                let values = self.items(id)?;
+                (self.alloc(Value::Tuple(values)), "iterator")
+            }
+        };
+        Ok(self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+            reverse: false,
+            kind,
+        }))
+    }
+
+    /// Compiled loops test for an item before consuming it. User code must advance only once.
+    fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
+        let source = self.iterator(iterable)?;
+        if matches!(
+            self.heap.get(source),
+            Value::Instance { .. } | Value::CallableIterator(_) | Value::Generator { .. }
+        ) {
+            return Ok(self.alloc(Value::LoopIterator {
+                source,
+                peeked: None,
+            }));
+        }
+        Ok(source)
+    }
+
     /// Borrows the unconsumed part of the iterator's current sequence.
     fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
         let Value::Iterator {
@@ -182,14 +266,22 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::LoopIterator { source, peeked } = *self.heap.get(id) {
+            if peeked.is_some() {
+                return Ok(true);
+            }
+            let item = self.next_item(source)?;
+            *self.heap.get_mut(id) = Value::LoopIterator {
+                source,
+                peeked: item,
+            };
+            return Ok(item.is_some());
+        }
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
         if matches!(self.heap.get(id), Value::Zip { .. }) {
             return self.zip_has_item(id);
-        }
-        if !matches!(self.heap.get(id), Value::Iterator { .. }) {
-            return self.iterator_more(id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -198,20 +290,61 @@ impl Context {
         Ok(more)
     }
 
-    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    /// Discard StopIteration's payload only for consumers that treat it as exhaustion.
     fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_)) {
-            return stdlib::ast::advance(self, id);
+        match self.next_result(id) {
+            Err(error) if self.is_stop_iteration(&error) => Ok(None),
+            result => result,
         }
-        if !matches!(
-            self.heap.get(id),
-            Value::Iterator { .. } | Value::Zip { .. }
-        ) {
-            return match self.iterator_next(id) {
-                Ok(item) => Ok(Some(item)),
-                Err(error) if error.kind == "StopIteration" => Ok(None),
-                Err(error) => Err(error),
-            };
+    }
+
+    fn is_stop_iteration(&mut self, error: &Error) -> bool {
+        let stop = self.builtin("StopIteration");
+        self.error_matches(&error.kind, stop)
+    }
+
+    fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
+        match self.call(callable, Vec::new(), Vec::new()) {
+            Ok(item) => {
+                // A recursive call can exhaust the same iterator inside the callable.
+                if matches!(self.heap.get(id), Value::CallableIterator(None)) {
+                    return Ok(None);
+                }
+                if item != sentinel {
+                    let equal = self.binary("==", sentinel, item)?;
+                    if !self.truth(equal)? {
+                        return Ok(Some(item));
+                    }
+                }
+            }
+            Err(error) if self.is_stop_iteration(&error) => {}
+            Err(error) => return Err(error),
+        }
+        *self.heap.get_mut(id) = Value::CallableIterator(None);
+        Ok(None)
+    }
+
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        match self.heap.get_mut(id) {
+            Value::Iterator { .. } | Value::Zip { .. } => {}
+            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::Generator { .. } => return self.next_generator_item(id),
+            Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
+            Value::CallableIterator(None) => return Ok(None),
+            Value::CallableIterator(Some(state)) => {
+                let [callable, sentinel] = *state;
+                return self.next_callable_item(id, callable, sentinel);
+            }
+            _ => {
+                if let Some(method) = self.bound_slot(id, "__next__")? {
+                    return self.call(method, Vec::new(), Vec::new()).map(Some);
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not an iterator", self.type_name(id)),
+                ));
+            }
         }
         if !self.iterator_has_item(id)? {
             return Ok(None);
@@ -243,11 +376,13 @@ impl Context {
             self.heap.get(id),
             Value::AstWalk(_)
                 | Value::Zip { .. }
+                | Value::CallableIterator(_)
                 | Value::Generator { .. }
-                | Value::PythonIterator { .. }
-        ) {
+        ) || self.slot(id, "__iter__").is_some()
+        {
+            let iter = self.iterator(id)?;
             let mut items = Vec::new();
-            while let Some(item) = self.next_item(id)? {
+            while let Some(item) = self.next_item(iter)? {
                 items.push(item);
             }
             return Ok(items);
@@ -286,13 +421,6 @@ impl Context {
                     *sequence = None;
                 }
                 Ok(values)
-            }
-            Value::Instance {
-                dictionary: Some(_),
-                ..
-            } => {
-                let iterator = self.iterator(id)?;
-                self.items(iterator)
             }
             Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self
@@ -453,6 +581,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
+            "int" => &["to_bytes"],
             "str" => builtins::STR_METHODS,
             _ => &[],
         };

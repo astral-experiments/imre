@@ -734,7 +734,7 @@ fn open_state_with_encoding(
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(crate) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     open_file_with(path, mode, |error| errno_with_filename(error, Some(path)))
 }
 

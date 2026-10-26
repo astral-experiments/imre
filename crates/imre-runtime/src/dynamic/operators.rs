@@ -63,7 +63,9 @@ impl Context {
 
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
-            return Ok(None);
+            return Ok(self
+                .string_storage(id)
+                .map(|text| self.str_value(text).unwrap().chars().count()));
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
         let length = self.index_integer(value)?;
@@ -163,6 +165,8 @@ impl Context {
             *exhausted = true;
             return false;
         }
+        let a = self.string_storage(a).unwrap_or(a);
+        let b = self.string_storage(b).unwrap_or(b);
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
@@ -261,7 +265,50 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        match self.heap.get(id) {
+        self.format_value(id, false, &mut Vec::new())
+    }
+
+    pub(super) fn repr(&self, id: Id) -> String {
+        self.format_value(id, true, &mut Vec::new())
+    }
+
+    /// Renders positional values inside tuples and exception representations.
+    fn format_elements(&self, values: &[Id], active: &mut Vec<Id>) -> String {
+        values
+            .iter()
+            .map(|&arg| self.format_value(arg, true, active))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Formats the current arguments, preserving native diagnostic text when present.
+    pub(super) fn exception_message(&self, error: &Error, active: &mut Vec<Id>) -> String {
+        match error.args.as_deref() {
+            None => error.message.clone(),
+            Some([]) => String::new(),
+            Some([arg]) => {
+                self.format_value(*arg, self.is_builtin_error(error, "KeyError"), active)
+            }
+            Some(args) => format!("({})", self.format_elements(args, active)),
+        }
+    }
+
+    /// Keeps recursive container arguments on the same formatting stack.
+    fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
+        let value = self.heap.get(id);
+        let recursive = match value {
+            Value::List(_) => Some("[...]"),
+            Value::Tuple(_) => Some("(...)"),
+            Value::Dict(_) => Some("{...}"),
+            _ => None,
+        };
+        if let Some(placeholder) = recursive {
+            if active.contains(&id) {
+                return placeholder.to_owned();
+            }
+            active.push(id);
+        }
+        let result = match value {
             Value::ContextVar {
                 name,
                 default,
@@ -289,6 +336,7 @@ impl Context {
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
+            Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
                 class: Some(class),
@@ -299,12 +347,16 @@ impl Context {
                 let fields = names
                     .iter()
                     .zip(values)
-                    .map(|(k, v)| format!("{k}={}", self.repr(*v)))
+                    .map(|(k, v)| format!("{k}={}", self.format_value(*v, true, active)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{class}({fields})")
             }
+            Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
+            Value::Instance {
+                text: Some(text), ..
+            } => self.display(*text),
             Value::Bytes(bytes) => format!(
                 "b'{}'",
                 bytes
@@ -334,21 +386,21 @@ impl Context {
             Value::Instance {
                 dictionary: Some(backing),
                 ..
-            } => self.display(*backing),
+            } => self.format_value(*backing, repr, active),
             Value::Dict(entries) => format!(
                 "{{{}}}",
                 entries
                     .iter()
-                    .map(|(k, v)| format!("{}: {}", self.repr(*k), self.repr(*v)))
+                    .map(|(k, v)| format!(
+                        "{}: {}",
+                        self.format_value(*k, true, active),
+                        self.format_value(*v, true, active)
+                    ))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
             Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => {
-                let body = v
-                    .iter()
-                    .map(|&v| self.repr(v))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let body = self.format_elements(v, active);
                 match self.heap.get(id) {
                     Value::List(_) => format!("[{body}]"),
                     Value::Set { frozen: true, .. } if v.is_empty() => "frozenset()".into(),
@@ -359,7 +411,24 @@ impl Context {
                     _ => format!("({body})"),
                 }
             }
-            Value::Raised(Error { message, .. }) => message.clone(),
+            Value::Raised(error) if repr => {
+                let kind = error.kind.rsplit('.').next().unwrap_or(&error.kind);
+                let args = if let Some(os) = &error.os_args {
+                    format!(
+                        "{}, {}",
+                        os.errno,
+                        crate::objects::exceptions::string_repr(&os.description)
+                    )
+                } else if let Some(args) = &error.args {
+                    self.format_elements(args, active)
+                } else if error.message.is_empty() {
+                    String::new()
+                } else {
+                    crate::objects::exceptions::string_repr(&error.message).into_string()
+                };
+                format!("{kind}({args})")
+            }
+            Value::Raised(error) => self.exception_message(error, active),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
@@ -382,20 +451,11 @@ impl Context {
                 format!("operator.attrgetter({arguments})")
             }
             _ => "<object>".to_owned(),
+        };
+        if recursive.is_some() {
+            active.pop();
         }
-    }
-    pub(super) fn repr(&self, id: Id) -> String {
-        if let Value::Calendar { value, .. } = self.heap.get(id) {
-            return value.repr();
-        }
-        if let Value::Str(s) = self.heap.get(id) {
-            let mut quoted = String::new();
-            crate::objects::exceptions::write_string_repr(s, &mut quoted)
-                .expect("writing into a string cannot fail");
-            quoted
-        } else {
-            self.display(id)
-        }
+        result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
