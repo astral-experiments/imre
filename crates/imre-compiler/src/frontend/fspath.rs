@@ -1,4 +1,4 @@
-//! POSIX normcase delegates to the same path protocol as os.fspath.
+//! Native path protocol used by os.fspath, filesystem codecs, and POSIX normcase.
 
 use super::*;
 
@@ -6,22 +6,28 @@ mod descriptor;
 pub(super) use descriptor::protocol_call;
 
 impl Checker<'_> {
-    /// POSIX normcase(s) returns exactly os.fspath(s), with its own keyword signature.
+    /// Bind the public function before running the user's path protocol.
     pub(super) fn public_fspath(
         &mut self,
         call: &ast::ExprCall,
-        normcase: bool,
+        operation: Intrinsic,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let args = call.arguments.args.as_ref();
         let keywords = call.arguments.keywords.as_ref();
-        let parameter = if normcase { "s" } else { "path" };
+        let (name, parameter, result_type) = match operation {
+            Intrinsic::FsPath => ("fspath", "path", Type::Str),
+            Intrinsic::PosixNormcase => ("normcase", "s", Type::Str),
+            Intrinsic::FsDecode => ("_fscodec.<locals>.fsdecode", "filename", Type::Str),
+            Intrinsic::FsEncode => ("_fscodec.<locals>.fsencode", "filename", Type::Bytes),
+            _ => unreachable!(),
+        };
         let path = match (args, keywords) {
             ([path], []) => path,
             ([], [kw]) if kw.arg.as_ref().is_some_and(|n| n.as_str() == parameter) => &kw.value,
             _ => {
                 let count = args.len() + keywords.len();
-                let message = if !normcase {
+                let message = if operation == Intrinsic::FsPath {
                     match (args.is_empty(), count) {
                         (true, 0 | 1) => {
                             "fspath() missing required argument 'path' (pos 1)".to_owned()
@@ -31,25 +37,43 @@ impl Checker<'_> {
                         }
                         _ => format!("fspath() takes at most 1 argument ({count} given)"),
                     }
-                } else if let Some(name) = keywords
+                } else if let Some(key) = keywords
                     .iter()
                     .filter_map(|kw| kw.arg.as_ref())
-                    .find(|n| n.as_str() != "s" || !args.is_empty())
+                    .find(|n| n.as_str() != parameter || !args.is_empty())
                 {
-                    if name.as_str() == "s" {
-                        "normcase() got multiple values for argument 's'".to_owned()
+                    if key.as_str() == parameter {
+                        format!("{name}() got multiple values for argument '{parameter}'")
                     } else {
-                        format!("normcase() got an unexpected keyword argument '{name}'")
+                        format!("{name}() got an unexpected keyword argument '{key}'")
                     }
                 } else if args.is_empty() {
-                    "normcase() missing 1 required positional argument: 's'".to_owned()
+                    format!("{name}() missing 1 required positional argument: '{parameter}'")
                 } else {
                     format!(
-                        "normcase() takes 1 positional argument but {} were given",
+                        "{name}() takes 1 positional argument but {} were given",
                         args.len()
                     )
                 };
-                return self.sys_type_error(call, Type::Str, message);
+                self.graph.checked_overload(self.module, call.range());
+                if args.is_empty() && !keywords.iter().any(|k| k.arg.as_deref() == Some(parameter))
+                {
+                    self.graph
+                        .checked_missing_argument(self.module, call.range());
+                }
+                for arg in args.iter().skip(1) {
+                    self.graph.checked_excess_argument(self.module, arg.range());
+                }
+                for key in keywords {
+                    if key.arg.as_deref() == Some(parameter) {
+                        self.graph
+                            .checked_repeated_keyword(self.module, key.range());
+                    } else {
+                        self.graph
+                            .checked_keywords(self.module, std::iter::once(key.range()));
+                    }
+                }
+                return self.sys_type_error(call, result_type, message);
             }
         };
         let value = self.expr(path)?;
@@ -57,7 +81,68 @@ impl Checker<'_> {
         // The stubs omit invalid descriptors. The native operation above checks
         // their binding and return type, so its own outer overload is accounted for.
         self.graph.checked_overload(self.module, call.range());
-        Ok(result)
+        if matches!(operation, Intrinsic::FsDecode | Intrinsic::FsEncode) {
+            self.graph.checked_argument_type(self.module, path.range());
+            self.filesystem_codec(result, path, result_type)
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// Preserve a matching path owner and convert the other arm with Python's startup codec.
+    fn filesystem_codec(
+        &mut self,
+        mut path: Expr,
+        at: &ast::Expr,
+        result: Type,
+    ) -> Result<Expr, String> {
+        if matches!(path.kind, ExprKind::Builtin(Builtin::RaiseException, _)) {
+            path.ty = result;
+            return Ok(path);
+        }
+        if let Some(selected) = self.map_path_protocol_arms(&path, at, |checker, arm| {
+            checker.filesystem_codec(arm, at, result)
+        })? {
+            return Ok(selected);
+        }
+        let op = match (path.ty, result) {
+            (Type::Bytes, Type::Str) => Builtin::CodecDecode,
+            (Type::Str | Type::StrLiteral(_) | Type::StrEnum(_), Type::Bytes) => {
+                Builtin::CodecEncode
+            }
+            _ => return Ok(path),
+        };
+        let path = Self::string_value(path);
+        let slot = self.hidden(path.ty);
+        let setting = |query| Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::SysEncoding(query), vec![]),
+        };
+        let codec = Expr {
+            ty: Type::CodecInfo,
+            kind: ExprKind::Builtin(
+                Builtin::CodecLookup,
+                vec![setting(ir::SysEncoding::Filesystem)],
+            ),
+        };
+        Ok(Expr {
+            ty: result,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, path)],
+                value: Box::new(Expr {
+                    ty: result,
+                    kind: ExprKind::Builtin(
+                        op,
+                        vec![
+                            codec,
+                            self.local(slot),
+                            setting(ir::SysEncoding::FilesystemErrors),
+                        ],
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        })
     }
 
     /// Resolve one path-like value, preserving its return type and any user exception.

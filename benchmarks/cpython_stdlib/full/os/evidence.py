@@ -22,8 +22,11 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 BODY_OPERATIONS = {
     "MiscTests.test_getcwd": "os.getcwd",
     "EnvironTests.test_items": "os.environ.get",
+    "FSEncodingTests.test_nop": "os.fsencode and os.fsdecode",
+    "FSEncodingTests.test_identity": "os.fsencode and os.fsdecode",
     "TestPEP519.test_return_string": "os.fspath",
     "TestPEP519.test_return_bytes": "os.fspath",
+    "TestPEP519.test_argument_required": "os.fspath",
     "BlockingTests.test_blocking": "os.get_blocking and os.set_blocking",
     "FDInheritanceTests.test_open": "os.open and os.get_inheritable",
     "FDInheritanceTests.test_dup": "os.dup and os.get_inheritable",
@@ -68,8 +71,12 @@ def proof_for(name, row, path, sources, level):
     proof = {"fixture": "; ".join(hooks), "artifact": path.name, "opt_level": level}
     short_name = ".".join(name.split(".")[-2:])
     if "method_sha256" in row:
+        # Inherited occurrences execute the original declaring class's method bytes.
+        module, owner, method = name.rsplit(".", 2)
+        source_method = short_name if short_name in sources else getattr(
+            getattr(sys.modules[module], owner), method).__qualname__
         digest = row["method_sha256"]
-        if digest not in sources.get(short_name, {}):
+        if digest not in sources.get(source_method, {}):
             raise ValueError(f"{name}: method hash does not match the complete release definition")
     if row.get("status") in {"native_body_host_operation", "native_body_host_fixture"}:
         child = row.get("child_operation")
@@ -84,7 +91,7 @@ def proof_for(name, row, path, sources, level):
         if n != "Imre" and n != "imre" and (type(n) is not int or n < 0):
             raise ValueError(f"{name}: invalid assertion evidence")
         proof.update(operation=BODY_OPERATIONS[short_name], method_sha256=row["method_sha256"],
-                     source=sources[short_name][row["method_sha256"]])
+                     source=sources[source_method][row["method_sha256"]])
         if type(n) is int:
             proof["native_assertion_count"] = n
         location = roles(body="imre", assertions="none" if n == 0 else "imre",
@@ -107,7 +114,7 @@ def proof_for(name, row, path, sources, level):
             raise ValueError(f"{name}: operation locations do not match the call trace")
         proof.update(operation="POSIX operations: " + ", ".join(sorted(calls)), native_calls=dict(calls))
         if "method_sha256" in row:
-            proof.update(method_sha256=digest, source=sources[short_name][digest])
+            proof.update(method_sha256=digest, source=sources[source_method][digest])
         if host:
             proof["observed_host_operations"] = host
         if row.get("host_operations"):

@@ -8655,8 +8655,13 @@ impl<'a> Checker<'a> {
                 return self.shutil_ignore_patterns(call);
             }
             Some(Binding::Intrinsic(Intrinsic::Copy(op))) => return self.shutil_copy(op, call),
-            Some(Binding::Intrinsic(symbol @ (Intrinsic::FsPath | Intrinsic::PosixNormcase))) => {
-                return self.public_fspath(call, symbol == Intrinsic::PosixNormcase);
+            Some(Binding::Intrinsic(
+                symbol @ (Intrinsic::FsPath
+                | Intrinsic::FsDecode
+                | Intrinsic::FsEncode
+                | Intrinsic::PosixNormcase),
+            )) => {
+                return self.public_fspath(call, symbol);
             }
             Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return self.log_formatter(call),
             Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => {

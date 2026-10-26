@@ -31,6 +31,62 @@
         3
       ]
     },
+    "test.test_os.FSEncodingTests.test_identity": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "e073353c06098ee995954ae05375c4ed5c653f1a30fdf0c23fdb91010f6ae3fe",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.fsencode and os.fsdecode",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "e073353c06098ee995954ae05375c4ed5c653f1a30fdf0c23fdb91010f6ae3fe"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.FSEncodingTests.test_nop": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "691a1f63b30e35020d6741ef2d9bf2c19189f597451a2591befda91c4d12ffd5",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.fsencode and os.fsdecode",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "691a1f63b30e35020d6741ef2d9bf2c19189f597451a2591befda91c4d12ffd5"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
     "test.test_os.MiscTests.test_getcwd": {
       "status": "host_driven_native",
       "native_getcwd_calls": 1,
@@ -92,6 +148,57 @@
         3
       ]
     },
+    "test.test_os.TestPEP519.test_argument_required": {
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "2fe4951e533d2a424f203a177a595d127303bf16eed58591cbb4e2469aa073df",
+      "observation": {
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "mixed"
+        },
+        "evidence": {
+          "operation": "os.fspath",
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "2fe4951e533d2a424f203a177a595d127303bf16eed58591cbb4e2469aa073df"
+        }
+      },
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestPEP519.test_fsencode_fsdecode": {
+      "status": "mixed",
+      "native_calls": [
+        "fsencode",
+        "fsdecode",
+        "fsencode",
+        "fsdecode"
+      ],
+      "host_calls": {
+        "os.fspath": 2,
+        "FakePath.__fspath__": 6
+      },
+      "method_sha256": "bf254091172531e41208971ae2801ab8c0ae51c60f5e2724d75c9b174110a38a",
+      "host_fixtures": [
+        "test_os.tearDownModule",
+        "original FakePath, self.fspath, loop and assertions"
+      ],
+      "native_body_blocker": "FakePath references BaseException in its descriptor; the method iterates a heterogeneous str/bytes tuple.",
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
     "test.test_os.TestPEP519.test_return_bytes": {
       "execution": "native-body",
       "body": "Imre",
@@ -143,6 +250,29 @@
       "host_fixtures": [
         "test_os.tearDownModule"
       ],
+      "opt_levels": [
+        0,
+        3
+      ]
+    },
+    "test.test_os.TestPEP519PurePython.test_fsencode_fsdecode": {
+      "status": "mixed",
+      "native_calls": [
+        "fsencode",
+        "fsdecode",
+        "fsencode",
+        "fsdecode"
+      ],
+      "host_calls": {
+        "os._fspath": 2,
+        "FakePath.__fspath__": 6
+      },
+      "method_sha256": "bf254091172531e41208971ae2801ab8c0ae51c60f5e2724d75c9b174110a38a",
+      "host_fixtures": [
+        "test_os.tearDownModule",
+        "original FakePath, self.fspath, loop and assertions"
+      ],
+      "native_body_blocker": "FakePath references BaseException in its descriptor; the method iterates a heterogeneous str/bytes tuple.",
       "opt_levels": [
         0,
         3

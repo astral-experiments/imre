@@ -45,7 +45,9 @@ The four public fields use the same stored errno and strerror arguments as excep
 
 ## Environment and path values
 
-[Five unique OS IDs](values-linux.json) were run at `-O0` and `-O3` with [the shared fixture runner](../../SUITE_RUNNER.md). The complete unchanged bodies for `TestPEP519.test_return_bytes`, `test_return_string` and `EnvironTests.test_items` run native OS operations and assertions under CPython's hooks. The latter inherits the real environment set up by upstream. `MiscTests.test_getcwd` is host-driven; its [shared assertion prerequisite](https://github.com/astral-sh/imre/pull/508#issuecomment-6392091565) is tracked separately. The long-path method uses native `getcwd` and host `mkdir`, `chdir` and path joining, so its result is mixed.
+The shared fixture runner exercises ten OS occurrences at `-O0` and `-O3`. Both `FSEncodingTests` methods, three public `TestPEP519` methods (returning bytes, returning text, and checking the missing argument), and `EnvironTests.test_items` run their complete bodies and assertions in Imre under CPython's hooks. The public and inherited `test_fsencode_fsdecode` methods use their original `FakePath`, loop and assertions in CPython. Each calls native `fsencode` twice and native `fsdecode` twice on the spellings returned by the original descriptor. [Per-method results](values-linux.json) and [filesystem codec limits](FS_CODEC.md).
+
+`MiscTests.test_getcwd` is host-driven. The long-path method uses native `getcwd` and host `mkdir`, `chdir` and path joining. [Shared assertion prerequisite](https://github.com/astral-sh/imre/pull/508#issuecomment-6392091565).
 
 Run `value_cases.py` with the release interpreter and `--imre`, `--runtime`, `--clang`, `--opt-level 0|3`, `--result`, and optionally `--cpython-source`. This evidence supersedes the execution modes for the four IDs in the older `native_os.py` gate. They count once.
 
@@ -92,13 +94,13 @@ work](https://github.com/astral-sh/imre/pull/587#issuecomment-6392803799) covers
 that fixture requirement. Other first errors belong to upstream case helpers,
 such as `WalkTests.walk`, or to a product import such as `posix`. A compiler
 diagnostic describes the first failed build step, not the result of running the
-method. The [canonical rollup](../native_report.py) counts 27 native bodies with
-host fixtures, 15 host-driven native operations, two mixed bodies, 439 blockers,
+method. The [canonical rollup](../native_report.py) counts 30 native bodies with
+host fixtures, 15 host-driven native operations, four mixed cases, 434 blockers,
 five private reference-only cases, and 91 upstream skips at each level.
 
 To refresh these diagnostics, run `method_preflight.py` twice with the same
 `--imre`, `--runtime`, `--clang` and `--cpython-source`, once with each
 `--opt-level 0|3` and a distinct `--result`. Pass both files to
 `evidence.py --method-results O0.json O3.json --compiler-commit FULL_SHA`.
-CI independently reruns the 44 exercised methods at both levels and
+CI independently reruns the 49 exercised occurrences at both levels and
 compares their results with the denominator reports.
