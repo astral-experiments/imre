@@ -343,6 +343,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
+            "boxed_code_objects.py",
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
@@ -356,6 +357,7 @@ def report(text):
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_module_globals.py",
+            "boxed_frozenset.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -367,12 +369,27 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_zip.py",
             "boxed_bytes_separators.py",
+            "boxed_reversed_list.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
+        for first_import in ("import collections", "import _collections_abc"):
+            plugin.write_text(f"""{first_import}
+import collections
+print(collections.abc.__name__, collections.__package__, bool(collections.__path__))
+import collections.abc as dotted
+from collections import abc
+import _collections_abc
+print(abc is dotted, abc is _collections_abc, repr(abc.__package__))
+try:
+    import collections.unknown_child
+except ImportError:
+    print('missing child')
+""")
+            compare("-IB", "-c", imports)
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",

@@ -9,6 +9,17 @@ use crate::objects::exceptions::ExitStatus;
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
+/// Immutable executable and argument layout shared by functions from one Python definition.
+#[derive(Clone, Copy)]
+pub(super) struct CodeObject {
+    pub entry: Code,
+    pub parameters: Id,
+    pub name: Id,
+    pub filename: Id,
+    pub first_line: u32,
+    pub module_definition: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Hmac {
     pub inner: Id,
@@ -121,15 +132,18 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
+            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
-            Value::Set(_) => "set",
+            Value::Set { frozen: true, .. } => "frozenset",
+            Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::Code(_) => "code",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
@@ -258,7 +272,10 @@ pub(super) enum Value {
         values: Vec<Id>,
         extras: Vec<(&'static str, Id)>,
     },
-    Set(Vec<Id>),
+    Set {
+        items: Vec<Id>,
+        frozen: bool,
+    },
     Dict(Vec<(Id, Id)>),
     DictView {
         dict: Id,
@@ -281,12 +298,12 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
-        code: Code,
+        code: Id,
         scope: Id,
         class_cell: Option<Id>,
-        parameters: Id,
         defaults: Id,
     },
+    Code(CodeObject),
     Class {
         name: String,
         scope: Id,
@@ -341,6 +358,7 @@ pub(super) enum Value {
     Iterator {
         sequence: Option<Id>,
         offset: usize,
+        reverse: bool,
     },
     IoMethod {
         owner: Id,
@@ -378,7 +396,7 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::Zip {
                 inputs, pending, ..
@@ -443,15 +461,16 @@ impl Value {
             Self::Function {
                 scope,
                 class_cell,
-                parameters,
+                code,
                 defaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *parameters, *defaults]);
+                visit.extend([*scope, *code, *defaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
+            Self::Code(code) => visit.extend([code.parameters, code.name, code.filename]),
             Self::Class {
                 scope, ancestors, ..
             } => {
@@ -628,6 +647,10 @@ impl Heap {
 
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    pub fn current_location(&self) -> Option<Location> {
+        self.frames.last()?.location
     }
 
     pub fn statement(

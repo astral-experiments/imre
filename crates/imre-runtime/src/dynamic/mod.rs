@@ -25,6 +25,7 @@ struct SourceModule {
 
 enum IteratorSlice<'a> {
     Values(&'a [Id]),
+    Reversed(&'a [Id]),
     Bytes(&'a [u8]),
     Range { value: i128, len: usize },
 }
@@ -33,7 +34,7 @@ impl IteratorSlice<'_> {
     /// Counts positions without allocating boxed integer elements.
     fn len(&self) -> usize {
         match self {
-            Self::Values(values) => values.len(),
+            Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
             Self::Range { len, .. } => *len,
         }
@@ -49,6 +50,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    native_code_objects: HashMap<usize, Id>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
@@ -58,6 +60,13 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    fn code_object(&self, id: Id) -> value::CodeObject {
+        let Value::Code(code) = self.heap.get(id) else {
+            unreachable!("function must retain its code object")
+        };
+        *code
+    }
+
     fn alloc(&mut self, value: Value) -> Id {
         self.heap.alloc(value)
     }
@@ -178,18 +187,27 @@ impl Context {
         Ok(self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
+            reverse: false,
         }))
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
     fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
-        let Value::Iterator { sequence, offset } = self.heap.get(id) else {
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+        } = self.heap.get(id)
+        else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
         let Some(sequence) = sequence else {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
+            Value::List(values) if *reverse => {
+                IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
+            }
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
@@ -232,11 +250,19 @@ impl Context {
         }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
             IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
-        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-            *offset += 1;
+        if let Value::Iterator {
+            offset, reverse, ..
+        } = self.heap.get_mut(id)
+        {
+            if *reverse {
+                *offset -= 1;
+            } else {
+                *offset += 1;
+            }
         }
         Ok(Some(item))
     }
@@ -252,7 +278,7 @@ impl Context {
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
-            | Value::Set(items)
+            | Value::Set { items, .. }
             | Value::NamedTuple { values: items, .. } => Ok(items),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
@@ -267,6 +293,7 @@ impl Context {
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
                     remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
@@ -458,6 +485,8 @@ impl Context {
         } else if stdlib::is_module(name) {
             if matches!(name, "email" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
+            } else if name == "collections" {
+                locations.push(stdlib::package_path(self, name)?);
             }
             None
         } else {
@@ -522,7 +551,12 @@ impl Context {
             ));
         }
         let scope = self.scope(name, None);
-        let name_id = self.text(name);
+        // CPython's private module publishes its ABCs under the public name.
+        let name_id = self.text(if name == "_collections_abc" {
+            "collections.abc"
+        } else {
+            name
+        });
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
@@ -562,6 +596,11 @@ impl Context {
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
                 }
+            }
+            "collections" => {
+                let abc = self.module("_collections_abc")?;
+                self.bind(scope, "abc", abc);
+                self.modules.insert("collections.abc".to_owned(), abc);
             }
             _ => {}
         }

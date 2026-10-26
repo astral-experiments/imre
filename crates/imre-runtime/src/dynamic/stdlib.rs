@@ -1,6 +1,6 @@
 //! Python system modules available to native functions with runtime-selected imports.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
     Context,
@@ -62,6 +62,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib.machinery"
             | "functools"
             | "collections"
+            | "_collections_abc"
             | "enum"
             | "errno"
             | "typing"
@@ -141,6 +142,14 @@ fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
     system::InterpreterLayout::new(&ctx.executable, language_version(ctx)?).map_err(os_error)
 }
 
+/// Resolve a native package's search directory relative to this executable's installation.
+pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
+    let stdlib = layout(ctx)?
+        .path("posix_prefix", "stdlib", true)
+        .expect("the default scheme defines the standard library path");
+    Ok(Path::new(&stdlib).join(name))
+}
+
 fn full_version(ctx: &Context) -> Result<String> {
     let (major, minor) = language_version(ctx)?;
     Ok(format!("{major}.{minor}.0"))
@@ -203,11 +212,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "CodeType") => ctx.builtin("code"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
-        ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
+        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
         ("socket", name) => return socket::attribute(ctx, name),
