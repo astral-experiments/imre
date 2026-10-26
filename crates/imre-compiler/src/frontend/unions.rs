@@ -132,6 +132,18 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::AnnotationMember(layout), vec![value]),
             };
         }
+        if value.ty == Type::BinaryIO && ty == Type::BytesIO {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
+        if value.ty == Type::ObjectValue && matches!(ty, Type::BytesIO | Type::StringIO) {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectStreamProject, vec![value]),
+            };
+        }
         if value.ty == Type::ObjectValue
             && let Type::Class(class) = ty
         {
@@ -292,6 +304,10 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
         match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(vec![Exact(Type::BytesIO)]),
+            Some(Binding::Intrinsic(Intrinsic::StringIo)) => {
+                return Ok(vec![Exact(Type::StringIO)]);
+            }
             Some(Binding::Intrinsic(Intrinsic::Calendar(CalendarType::Date))) => {
                 return Ok(vec![
                     Exact(Type::Calendar(CalendarType::Date)),
@@ -606,6 +622,14 @@ impl Checker<'_> {
                 unknown = true;
                 continue;
             }
+            if matches!(
+                (ty, class),
+                (Type::BinaryIO, InstanceType::Exact(Type::BytesIO))
+                    | (Type::TextIO, InstanceType::Exact(Type::StringIO))
+            ) {
+                unknown = true;
+                continue;
+            }
             if let InstanceType::IoBase(base) = class {
                 match base.matches(ty) {
                     Some(true) => return Some(true),
@@ -770,6 +794,12 @@ impl Checker<'_> {
                 .unwrap_or(self.locals[slot]);
             if current == Type::ObjectValue {
                 for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(ty @ (Type::BytesIO | Type::StringIO))] =
+                            classes.as_slice()
+                    {
+                        self.narrowed.insert_mut(slot, *ty);
+                    }
                     if *truth
                         && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
                         && self.boxed_dataclass(*class)

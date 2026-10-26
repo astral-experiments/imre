@@ -148,6 +148,42 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     ))))
 }
 
+/// Borrow the original memory stream for a concrete class check or checked projection.
+///
+/// # Safety
+/// The caller roots a file or an erased object view throughout the borrow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_memory_stream_payload(
+    value: *const Object,
+    boxed: bool,
+    text: bool,
+) -> *const Object {
+    // SAFETY: the erased owner, when present, retains the nested native object.
+    unsafe {
+        let payload = if boxed {
+            let Some((kind, word)) = object(value).0.with(super::exceptions::projected_word) else {
+                return std::ptr::null();
+            };
+            if kind.raw() != 5 {
+                return std::ptr::null();
+            }
+            word as *const Object
+        } else {
+            value
+        };
+        object(payload).0.with(|storage| match storage {
+            Storage::File(file)
+                if file
+                    .memory_class()
+                    .is_some_and(|(_, kind)| kind == if text { 20 } else { 19 }) =>
+            {
+                payload
+            }
+            _ => std::ptr::null(),
+        })
+    }
+}
+
 /// Borrow the payload of an erased instance with the requested exact class.
 ///
 /// # Safety

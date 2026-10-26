@@ -119,6 +119,7 @@ impl Builtin {
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
+            | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
             | Self::ExceptionKeywordSuggestion

@@ -91,6 +91,7 @@ pub(crate) enum Type {
     HandlerLock,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
+    BytesIO,
     /// One live imported module from the closed source graph.
     SourceModule,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
@@ -351,6 +352,7 @@ impl std::fmt::Display for Type {
             Self::StringIO => "io.StringIO",
             Self::HandlerLock => "_thread.RLock",
             Self::BinaryIO => "typing.BinaryIO",
+            Self::BytesIO => "io.BytesIO",
             Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
             Self::PathInfo => "pathlib.types.PathInfo",
@@ -1048,6 +1050,7 @@ pub(crate) enum Builtin {
     ImportErrorRejectReset,
     BoxValue,
     ObjectRecordProject(usize),
+    ObjectStreamProject,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -2134,7 +2137,8 @@ impl IoBase {
     pub(crate) fn matches(self, ty: Type) -> Option<bool> {
         match (self, ty) {
             (Self::Raw | Self::Buffered, Type::BinaryIO) => None,
-            (Self::Any, Type::TextIO | Type::StringIO | Type::BinaryIO)
+            (Self::Buffered, Type::BytesIO)
+            | (Self::Any, Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO)
             | (Self::Text, Type::TextIO | Type::StringIO) => Some(true),
             _ => Some(false),
         }

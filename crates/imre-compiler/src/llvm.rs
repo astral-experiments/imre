@@ -141,6 +141,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::SourceModule
+            | Self::BytesIO
             | Self::BinaryIO
             | Self::VarTuple(_)
             | Self::Tuple(_) => "ptr",
@@ -238,6 +239,7 @@ impl Type {
             | Self::JsonObject
             | Self::RegexMatch
             | Self::SourceModule
+            | Self::BytesIO
             | Self::BinaryIO
             | Self::VarTuple(_)
             | Self::Tuple(_) => "null",
@@ -935,6 +937,7 @@ impl Emitter<'_, '_> {
             | Type::JsonObject
             | Type::RegexMatch
             | Type::SourceModule
+            | Type::BytesIO
             | Type::BinaryIO => "object",
             Type::Float
             | Type::Bool
@@ -3757,6 +3760,7 @@ impl Emitter<'_, '_> {
                 | Type::SysImplementation
                 | Type::CompletedProcess(..)
                 | Type::SourceModule
+                | Type::BytesIO
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -5462,7 +5466,10 @@ impl Emitter<'_, '_> {
                 let i = usize::from(*reversed);
                 let other = &args[1 - i].value;
                 // Kind 5 denotes another object view in this ABI.
-                let kind = if self.module.types.mapping(other.ty).is_some() {
+                let concrete_object = self.module.types.mapping(other.ty).is_some()
+                    || matches!(builtin, Builtin::SystemExitCodeEqual { .. })
+                        && matches!(other.ty, Type::BytesIO | Type::StringIO);
+                let kind = if concrete_object {
                     17
                 } else if matches!(builtin, Builtin::SystemExitCodeEqual { .. })
                     && matches!(other.ty, Type::List(_))
@@ -6120,6 +6127,19 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectStreamProject => {
+                let result = Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_memory_stream_payload(ptr {}, i1 true, i1 {})",
+                        args[0].value.operand,
+                        returns == Type::StringIO
+                    )),
+                    small_integer: false,
+                };
+                self.retain(&result);
+                result
+            }
             Builtin::ObjectRecordProject(class) => {
                 let operand = self.boxed_record(&args[0].value, *class);
                 let record = Value {
@@ -7577,6 +7597,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::SourceModule
+                    | Type::BytesIO
                     | Type::BinaryIO
                     | Type::ModuleSpec(_)
                     | Type::SysImplementation
@@ -7846,6 +7867,7 @@ impl Emitter<'_, '_> {
             | Type::StringIO
             | Type::HandlerLock
             | Type::SourceModule
+            | Type::BytesIO
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -7958,6 +7980,7 @@ impl Emitter<'_, '_> {
             | Type::StringIO
             | Type::HandlerLock
             | Type::SourceModule
+            | Type::BytesIO
             | Type::BinaryIO
             | Type::EventLoop
             | Type::Coroutine(_)
@@ -8672,6 +8695,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::JsonObject
         | Type::RegexMatch
         | Type::SourceModule
+        | Type::BytesIO
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
@@ -9641,6 +9665,7 @@ declare void @imre_sys_stream_flush(i32)
 declare ptr @imre_system_exit_new(i32, i64)
 declare ptr @imre_system_exit_code(ptr)
 declare i32 @imre_system_exit_code_kind(ptr)
+declare ptr @imre_memory_stream_payload(ptr, i1, i1)
 declare ptr @imre_system_exit_code_text(ptr)
 declare i32 @imre_system_exit_code_equal(ptr, i32, i64)
 declare i32 @imre_exception_field_identity(ptr, i32, i64)

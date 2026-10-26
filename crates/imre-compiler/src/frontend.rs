@@ -1800,7 +1800,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
-        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(Type::BytesIO),
         Some(Binding::Intrinsic(Intrinsic::StringIo)) => return Ok(Type::StringIO),
         Some(Binding::Intrinsic(Intrinsic::Context)) => return Ok(Type::Context),
         Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
@@ -2606,6 +2606,19 @@ impl<'a> Checker<'a> {
         Ok((receiver, field, self.classes.fields[class][field]))
     }
 
+    /// Inferred writable storage keeps its established BinaryIO contract.
+    /// Local assignments separately remember when the current owner is an exact BytesIO.
+    fn inferred_stream(value: Expr) -> Expr {
+        if value.ty == Type::BytesIO {
+            Expr {
+                ty: Type::BinaryIO,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            }
+        } else {
+            value
+        }
+    }
+
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == Type::FunctionRef && matches!(expected, Type::Callable(_)) {
@@ -2624,6 +2637,19 @@ impl<'a> Checker<'a> {
         }
         if value.ty == expected {
             return Ok(value);
+        }
+        if value.ty == Type::BytesIO
+            && self.types.payload(expected).unwrap_or(expected) == Type::BinaryIO
+        {
+            return self.coerce(Self::inferred_stream(value), expected, node);
+        }
+        if self.types.payload(value.ty) == Some(Type::BytesIO)
+            && self.types.payload(expected) == Some(Type::BinaryIO)
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
         }
         if let (Some(source), Some(target)) =
             (self.types.members(value.ty), self.types.members(expected))
@@ -3487,6 +3513,7 @@ impl<'a> Checker<'a> {
         if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
             && ((self.locals[slot] == documents::ANY
                 && matches!(args[0].ty, documents::LIST | documents::MAP))
+                || (value.ty == Type::BinaryIO && args[0].ty == Type::BytesIO)
                 || (value.ty == Type::Calendar(ir::CalendarType::Date)
                     && args[0].ty == Type::Calendar(ir::CalendarType::DateTime))
                 || self
@@ -3543,7 +3570,7 @@ impl<'a> Checker<'a> {
                         "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
-                let value = self.expr(&item.value)?;
+                let value = Self::inferred_stream(self.expr(&item.value)?);
                 types = Some((key_value.ty, value.ty));
                 (key_value, value)
             };
@@ -3934,7 +3961,7 @@ impl<'a> Checker<'a> {
         };
         if matches!(
             iterable.ty,
-            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO | Type::CsvReader
         ) {
             let input = if iterable.ty == Type::CsvReader {
                 self.prepare_csv_reader(iterable)
@@ -4957,7 +4984,10 @@ impl<'a> Checker<'a> {
             && server.is_none()
             && !popen
             && selector_close.is_none()
-            && !matches!(manager.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
+            && !matches!(
+                manager.ty,
+                Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
+            )
         {
             return Err(error(
                 self.source,
@@ -5546,7 +5576,7 @@ impl<'a> Checker<'a> {
         } else if let Some(signature) = self.types.index_callable_signature(value.ty) {
             self.coerce(value, signature, target)?
         } else {
-            value
+            Self::inferred_stream(value)
         };
         let slot = self.declare(name.id.as_str(), value.ty, target)?;
         self.assigned_value(slot, &value);
@@ -6220,7 +6250,7 @@ impl<'a> Checker<'a> {
                 let mut element = Type::Int;
                 let mut mixed = false;
                 for value in &list.elts {
-                    let item = self.expr(value)?;
+                    let item = Self::inferred_stream(self.expr(value)?);
                     if values.is_empty() {
                         element = item.ty;
                     }
@@ -6880,6 +6910,7 @@ impl<'a> Checker<'a> {
                         | Type::HandlerLock
                         | Type::CompletedProcess(..)
                         | Type::SourceModule
+                        | Type::BytesIO
                         | Type::BinaryIO => true,
                         _ => {
                             return Err(error(
@@ -7669,8 +7700,10 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![file]),
                     });
                 }
-                if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
-                    && attribute.attr.as_str() == "closed"
+                if matches!(
+                    receiver.ty,
+                    Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
+                ) && attribute.attr.as_str() == "closed"
                 {
                     return Ok(Expr {
                         ty: Type::Bool,
@@ -8415,6 +8448,15 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CmpToKey)) => return self.cmp_to_key(call),
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
+                if let [target, value] = call.arguments.args.as_ref()
+                    && matches!(
+                        self.resolve(target),
+                        Some(Binding::Intrinsic(Intrinsic::BytesIo | Intrinsic::StringIo))
+                    )
+                {
+                    // Python cast() returns its operand, including on a wrong assertion.
+                    return self.typed_expr(value);
+                }
                 let [ast::Expr::StringLiteral(target), value] = call.arguments.args.as_ref() else {
                     return Err(error(
                         self.source,
@@ -8492,7 +8534,7 @@ impl<'a> Checker<'a> {
                     }],
                     None,
                 )?;
-                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BinaryIO, args));
+                return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BytesIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
@@ -9257,8 +9299,11 @@ impl<'a> Checker<'a> {
             {
                 return Ok(value);
             }
-            if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO) {
-                let binary = receiver.ty == Type::BinaryIO;
+            if matches!(
+                receiver.ty,
+                Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
+            ) {
+                let binary = matches!(receiver.ty, Type::BinaryIO | Type::BytesIO);
                 let data_type = if binary { Type::Bytes } else { Type::Str };
                 if binary
                     && attribute.attr.as_str() == "seek"
@@ -9451,6 +9496,18 @@ impl<'a> Checker<'a> {
                     ty: Type::None,
                     kind: ExprKind::Builtin(builtin, vec![receiver, value]),
                 });
+            }
+            if receiver.ty == Type::ObjectValue
+                && matches!(
+                    attribute.attr.as_str(),
+                    "read" | "write" | "seek" | "tell" | "close" | "getvalue"
+                )
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "stream methods on an object value require an isinstance guard for io.BytesIO or io.StringIO",
+                ));
             }
             let element = self.types.element(receiver.ty).ok_or_else(|| {
                 error(

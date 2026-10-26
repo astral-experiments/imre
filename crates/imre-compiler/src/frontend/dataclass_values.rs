@@ -31,8 +31,12 @@ impl Checker<'_> {
         if self.boxable_value(ty) {
             return true;
         }
+        // Only exact memory streams can enter this view. A BinaryIO may own a
+        // descriptor whose final release would have observable filesystem effects.
         match ty {
             Type::Exception
+            | Type::BytesIO
+            | Type::StringIO
             | Type::Float
             | Type::ListInt
             | Type::Path
@@ -155,6 +159,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::TextIO
         | Type::StringIO
         | Type::HandlerLock
+        | Type::BytesIO
         | Type::BinaryIO
         | Type::Iterator
         | Type::Callable(_) => false,

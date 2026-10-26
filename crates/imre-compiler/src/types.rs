@@ -294,6 +294,7 @@ impl Types {
             | Type::StringIO
             | Type::HandlerLock
             | Type::SourceModule
+            | Type::BytesIO
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
@@ -882,6 +883,7 @@ impl Types {
             | Type::ContextToken(_)
             | Type::ContextMissing
             | Type::SourceModule
+            | Type::BytesIO
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)
@@ -1725,6 +1727,7 @@ impl Types {
                 | Type::TextIO
                 | Type::StringIO
                 | Type::HandlerLock
+                | Type::BytesIO
                 | Type::BinaryIO
                 | Type::CsvReader
                 | Type::ZipFile

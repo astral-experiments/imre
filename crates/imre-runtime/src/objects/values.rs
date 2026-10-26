@@ -538,6 +538,10 @@ unsafe fn write_repr_with(
                         | Storage::TokenMissing => Ok(Some(ReprTask::Context(
                             super::contextvars::repr_view(owner, storage),
                         ))),
+                        Storage::File(file) if let Some((name, _)) = file.memory_class() => {
+                            write!(output, "<{name} object at {owner:p}>")?;
+                            Ok(None)
+                        }
                         Storage::Calendar(value) => {
                             super::calendar::write_repr(value, output)?;
                             Ok(None)

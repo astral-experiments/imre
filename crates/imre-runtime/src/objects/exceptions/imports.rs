@@ -100,7 +100,7 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     ))))
 }
 
-/// Test identity against the None singleton or a list with a stable native owner.
+/// Test identity against the None singleton, a list, or a stream with a stable native owner.
 ///
 /// # Safety
 /// Both the retained view and the compiler-checked comparison operand are rooted.
@@ -332,6 +332,7 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
                     Storage::Sequence(_) => "list".into(),
                     Storage::Dictionary(_) => "dict".into(),
                     Storage::Set(_) => "set".into(),
+                    Storage::File(file) if let Some((name, _)) = file.memory_class() => name.into(),
                     Storage::Path { .. } => if cfg!(windows) {
                         "WindowsPath"
                     } else {
