@@ -31,29 +31,12 @@ impl Context {
             }
             "delname" | "clearname" => {
                 let name = self.str_value(b)?.to_owned();
-                let a = self.binding_scope(a, &name);
-                if let Some(namespace) = self.scope_data(a).namespace {
-                    if self.scope_name(a, &name).is_some() {
-                        self.delete_item(namespace, b)?;
-                    } else if op == "delname" {
-                        return Err(Error::new(
-                            "NameError",
-                            format!("name '{name}' is not defined"),
-                        ));
-                    }
-                    return Ok(NONE);
-                }
-                let Value::Scope(s) = self.heap.get_mut(a) else {
-                    unreachable!()
-                };
-                if s.names.shift_remove(&name).is_none() && op == "delname" {
+                let scope = self.binding_scope(a, &name);
+                if !self.remove_binding(scope, &name, b)? && op == "delname" {
                     return Err(Error::new(
                         "NameError",
                         format!("name '{name}' is not defined"),
                     ));
-                }
-                if let Some(order) = &mut s.class_body {
-                    order.retain(|member| member != &name);
                 }
                 Ok(NONE)
             }
@@ -81,6 +64,11 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 self.set_attr(a, &name, c)?;
                 Ok(c)
+            }
+            "delattr" => {
+                let name = self.str_value(b)?.to_owned();
+                self.delete_attr(a, &name)?;
+                Ok(NONE)
             }
             "get" => self.get_item(a, b),
             "delitem" => {

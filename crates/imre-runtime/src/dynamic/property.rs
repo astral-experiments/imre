@@ -52,6 +52,14 @@ impl Property {
         Ok(())
     }
 
+    pub(super) fn remove(self, ctx: &mut Context, object: Id) -> Result<()> {
+        if self.delete == NONE {
+            return Err(self.missing(ctx, object, "deleter"));
+        }
+        ctx.call(self.delete, vec![object], Vec::new())?;
+        Ok(())
+    }
+
     pub(super) fn attribute(self, ctx: &mut Context, name: &str) -> Result<Option<Id>> {
         Ok(Some(match name {
             "fget" => self.get,
