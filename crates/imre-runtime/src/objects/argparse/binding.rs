@@ -260,7 +260,8 @@ impl OptionSpec {
                     Scalar::Int(n) => n,
                     _ => unreachable!(),
                 }));
-                crate::new_list(ints) as usize
+                let list = crate::try_new_list(ints).map_err(|_| Error::allocation())?;
+                crate::ListOwner::into_raw(list) as usize
             }
             Bound::List(values) => {
                 let mut words = Words::new(match self.kind {
