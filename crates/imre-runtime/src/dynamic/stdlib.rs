@@ -32,6 +32,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "functools"
             | "collections"
             | "enum"
+            | "errno"
             | "typing"
             | "contextlib"
             | "contextvars"
@@ -157,6 +158,27 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("errno", "__doc__") => ctx.text(crate::objects::ERRNO_DOC),
+        ("errno", "errorcode") => {
+            let dict = ctx.dict(Vec::new());
+            for (symbol, value) in crate::objects::errno_entries() {
+                let key = ctx.int(i64::from(value));
+                let symbol = ctx.text(symbol);
+                ctx.put_item(dict, key, symbol)?;
+            }
+            dict
+        }
+        ("errno", name) => {
+            let value = crate::objects::errno_entries()
+                .find_map(|(symbol, value)| (symbol == name).then_some(value))
+                .ok_or_else(|| {
+                    Error::new(
+                        "AttributeError",
+                        format!("module 'errno' has no attribute '{name}'"),
+                    )
+                })?;
+            ctx.int(i64::from(value))
+        }
         ("sys", "argv") => ctx.argv,
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
