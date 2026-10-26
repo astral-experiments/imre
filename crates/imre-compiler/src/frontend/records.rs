@@ -694,9 +694,11 @@ impl Checker<'_> {
             root = &attribute.value;
         }
         if self.is_class_receiver(root)
-            || root
-                .as_name_expr()
-                .is_some_and(|n| self.class_lexical.contains(n.id.as_str()))
+            || root.as_name_expr().is_some_and(|n| {
+                self.class_lexical.contains(n.id.as_str())
+                    || (self.names.contains_key(n.id.as_str())
+                        && self.mapping_class_import(n.id.as_str()))
+            })
         {
             None
         } else {

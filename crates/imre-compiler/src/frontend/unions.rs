@@ -173,6 +173,7 @@ impl Checker<'_> {
         use InstanceType::{Deque, Exact, List, Tuple};
         match self.collection_class_name(expression) {
             Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
             Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
             Some("collections.abc.Sequence") => {
                 return Ok(vec![
@@ -220,7 +221,7 @@ impl Checker<'_> {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
         if matches!(
-            self.resolve(expression),
+            self.collection_binding(expression),
             Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
         ) {
             let mut classes = vec![InstanceType::Dict];
@@ -419,6 +420,16 @@ impl Checker<'_> {
         };
         let first = self.expr(first)?;
         let second = self.expr(second)?;
+        self.builtin_subclass_values(first, second, call)
+    }
+
+    /// Compare evaluated class operands or raise for an invalid Python argument.
+    pub(super) fn builtin_subclass_values(
+        &self,
+        first: Expr,
+        second: Expr,
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
             (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
                 ty: Type::Bool,
@@ -439,7 +450,7 @@ impl Checker<'_> {
             )),
             _ => Err(error(
                 self.source,
-                call,
+                at,
                 "issubclass requires supported native class objects",
             )),
         }

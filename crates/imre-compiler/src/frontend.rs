@@ -2379,7 +2379,10 @@ impl<'a> Checker<'a> {
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if (name != "__doc__" && reserved(name))
-            || self.graph.modules[self.module].bindings.contains_key(name)
+            || (self.graph.modules[self.module].bindings.contains_key(name)
+                && (self.module_scope
+                    || !self.mapping_class_import(name)
+                    || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.local_classes.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
@@ -4106,11 +4109,18 @@ impl<'a> Checker<'a> {
             }
             self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
-            let mut names: Vec<_> = unbound_locals::candidates(statements, self.interactive_names)
+            let mut names: Vec<_> =
+                unbound_locals::candidates(statements, self.interactive_names, &|name| {
+                    self.mapping_class_import(name)
+                })
                 .into_iter()
                 .collect();
             names.sort_unstable();
             for name in names {
+                // A later assignment shadows the imported ABC throughout this function.
+                if self.mapping_class_import(&name) && !self.names.contains_key(&name) {
+                    self.declare(&name, Type::BuiltinClass, &statements[0])?;
+                }
                 // Arguments enter already bound; deletion and nonordinary stores were excluded.
                 if self
                     .names
@@ -5954,6 +5964,8 @@ impl<'a> Checker<'a> {
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
                     if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
+                        self.graph
+                            .checked_unbound_local_read(self.module, expression.range());
                         return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
                     }
                     return Err(error(
