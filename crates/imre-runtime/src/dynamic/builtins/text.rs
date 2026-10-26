@@ -502,11 +502,80 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::Bytes(b)))
         };
     }
+    if name == "find" {
+        if !kwargs.is_empty() {
+            return Err(type_error("str.find() takes no keyword arguments"));
+        }
+        let Some(&needle) = args.first() else {
+            return Err(type_error("find expected at least 1 argument, got 0"));
+        };
+        if args.len() > 3 {
+            return Err(type_error(format!(
+                "find expected at most 3 arguments, got {}",
+                args.len()
+            )));
+        }
+        if ctx.str_value(needle).is_err() {
+            let kind = if needle == NONE {
+                "None"
+            } else {
+                ctx.type_name(needle)
+            };
+            return Err(type_error(format!(
+                "find() argument 1 must be str, not {kind}"
+            )));
+        }
+        let mut bound = |arg: Option<&Id>| match arg {
+            None | Some(&NONE) => Ok(None),
+            Some(&arg) => ctx.index_integer(arg)?.map(Some).ok_or_else(|| {
+                type_error("slice indices must be integers or None or have an __index__ method")
+            }),
+        };
+        let start = bound(args.get(1))?;
+        let end = bound(args.get(2))?;
+        let found = crate::objects::find_text(
+            ctx.str_value(receiver)?,
+            ctx.str_value(needle)?,
+            start.as_ref(),
+            end.as_ref(),
+        );
+        return Ok(ctx.alloc(Value::Int(found)));
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
         "format" => {
             let result = format_string(ctx, &source, args, kwargs)?;
             Ok(ctx.text(result))
+        }
+        "partition" | "rpartition" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!(
+                    "str.{name}() takes no keyword arguments"
+                )));
+            }
+            let [separator] = args else {
+                return Err(type_error(format!(
+                    "str.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let sep = ctx.str_value(*separator).map_err(|_| {
+                type_error(format!("must be str, not {}", ctx.type_name(*separator)))
+            })?;
+            let reverse = name == "rpartition";
+            let fields = if let Some((before, after)) =
+                crate::objects::partition_text(&source, sep, reverse)?
+            {
+                vec![ctx.text(before), *separator, ctx.text(after)]
+            } else {
+                let empty = ctx.text("");
+                if reverse {
+                    vec![empty, empty, receiver]
+                } else {
+                    vec![receiver, empty, empty]
+                }
+            };
+            Ok(ctx.alloc(Value::Tuple(fields)))
         }
         "split" | "rsplit" => {
             let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;

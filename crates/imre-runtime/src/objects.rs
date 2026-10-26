@@ -73,7 +73,7 @@ mod structs;
 mod tempdirs;
 mod text;
 mod time;
-pub(crate) use text::split_parts;
+pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
 mod unions;

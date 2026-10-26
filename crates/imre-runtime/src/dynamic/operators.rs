@@ -29,33 +29,39 @@ impl Context {
         value.map_or(Ok(default), |id| self.truth(id))
     }
 
+    pub(super) fn index_integer(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        if let Ok(integer) = self.as_int(value) {
+            return Ok(Some(integer));
+        }
+        let Some(index) = self.bound_slot(value, "__index__")? else {
+            return Ok(None);
+        };
+        let result = self.call(index, Vec::new(), Vec::new())?;
+        self.as_int(result).map(Some).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "__index__ returned non-int (type {})",
+                    self.type_name(result)
+                ),
+            )
+        })
+    }
+
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
             return Ok(None);
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
-        let length = if let Ok(integer) = self.as_int(value) {
-            integer
-        } else if let Some(index) = self.bound_slot(value, "__index__")? {
-            let result = self.call(index, Vec::new(), Vec::new())?;
-            self.as_int(result).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "__index__ returned non-int (type {})",
-                        self.type_name(result)
-                    ),
-                )
-            })?
-        } else {
-            return Err(Error::new(
+        let length = self.index_integer(value)?.ok_or_else(|| {
+            Error::new(
                 "TypeError",
                 format!(
                     "'{}' object cannot be interpreted as an integer",
                     self.type_name(value)
                 ),
-            ));
-        };
+            )
+        })?;
         let length = length
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())

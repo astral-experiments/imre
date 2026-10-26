@@ -53,6 +53,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "ord"
                 | "callable"
                 | "isinstance"
                 | "getattr"
@@ -91,6 +92,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "format"
+                    | "find"
+                    | "partition"
+                    | "rpartition"
                     | "split"
                     | "rsplit"
                     | "splitlines"
@@ -364,6 +368,30 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.instance_of(args[0], args[1])))
+        }
+        "ord" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("ord() takes no keyword arguments"));
+            }
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "ord() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let code = match ctx.heap.get(*value) {
+                Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
+                _ => {
+                    let text = ctx.str_value(*value).map_err(|_| {
+                        type_error(format!(
+                            "ord() expected string of length 1, but {} found",
+                            ctx.type_name(*value)
+                        ))
+                    })?;
+                    crate::objects::ord_char(text)?
+                }
+            };
+            Ok(ctx.int(i64::from(code)))
         }
         "len" => {
             positional(name, kwargs)?;
