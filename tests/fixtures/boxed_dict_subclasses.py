@@ -100,6 +100,17 @@ def current():
     pending.extend([FirstPair(), ("original", 4)])
     print(dict(pending))
 
+    class BrokenPair(dict):
+        def __iter__(self):
+            raise TypeError("from pair iterator")
+
+    for pair in (42, BrokenPair()):
+        partial = {"kept": 1}
+        try:
+            partial.update([("good", 4), pair, ("late", 9)], tail=1)
+        except TypeError as error:
+            print(error.args, partial)
+
     pairs = dict.__iter__({("first", 1): None, ("bad",): None, ("later", 2): None})
     copied = {}
     try:
