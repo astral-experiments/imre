@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 use super::super::codecs::Codec;
 use super::gzip::{GzipError, GzipReader};
-use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error, os_error};
+use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error};
 use crate::{BinaryOutput, StrOwner};
 
 struct TextEncoder {
@@ -341,7 +341,7 @@ impl Input {
     }
 
     pub(super) fn read_into(&mut self, bytes: &mut [u8]) -> Result<usize> {
-        self.raw.read(bytes).map_err(os_error)
+        self.raw.read(bytes).map_err(errno_error)
     }
 
     pub(super) fn read_bytes(&mut self, size: Option<usize>) -> Result<Bytes> {
@@ -361,11 +361,11 @@ impl Input {
                     .get_mut()
                     .get_mut()
                     .read_uninit(&mut bytes.spare_capacity_mut()[..limit])
-                    .map_err(os_error)?;
+                    .map_err(errno_error)?;
                 // SAFETY: read_uninit initialized exactly this many reserved bytes.
                 unsafe { bytes.set_len(n) };
             } else {
-                self.read_sized(&mut bytes, limit).map_err(os_error)?;
+                self.read_sized(&mut bytes, limit).map_err(errno_error)?;
             }
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
@@ -373,7 +373,7 @@ impl Input {
                 bytes.shrink_to_fit();
             }
         } else {
-            self.raw.read_to_end(&mut bytes).map_err(os_error)?;
+            self.raw.read_to_end(&mut bytes).map_err(errno_error)?;
         }
         Ok(bytes)
     }
@@ -423,13 +423,13 @@ impl Input {
 
     pub(super) fn binary_line(&mut self) -> Result<Bytes> {
         let mut bytes = Vec::new();
-        self.raw.read_until(b'\n', &mut bytes).map_err(os_error)?;
+        self.raw.read_until(b'\n', &mut bytes).map_err(errno_error)?;
         Ok(bytes)
     }
 
     pub(super) fn read_text(&mut self) -> Result<Str> {
         let mut bytes = self.text.carry.to_vec();
-        self.raw.read_to_end(&mut bytes).map_err(os_error)?;
+        self.raw.read_to_end(&mut bytes).map_err(errno_error)?;
         let remaining = decode_text(bytes, self.text.preserve_newlines)?;
         self.text.carry.clear();
         let prefix = &self.text.decoded[self.text.pos..];
@@ -470,7 +470,7 @@ impl Input {
             }
             line.push_str(available);
             self.text.pos = self.text.decoded.len();
-            let chunk = self.raw.fill_buf().map_err(os_error)?;
+            let chunk = self.raw.fill_buf().map_err(errno_error)?;
             let length = chunk.len();
             let result = self.text.decode(chunk);
             self.raw.consume(length);
