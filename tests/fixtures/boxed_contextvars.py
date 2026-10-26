@@ -80,3 +80,12 @@ def current():
     kept.reset(older)
     kept.reset(token)
     print(kept.get().tag)
+
+    another = ContextVar("request")
+    saved.run(another.set, None)
+    mapping = dict(saved)
+    assert list(mapping) == list(saved) and mapping[var] is req and mapping[another] is None
+    mapping[missing] = "keep"
+    mapping[var] = None
+    mapping.update(saved)
+    assert len(mapping) == 3 and mapping[var] is req and mapping[missing] == "keep"
