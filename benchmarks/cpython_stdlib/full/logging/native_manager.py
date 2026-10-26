@@ -9,6 +9,7 @@ import selectors
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -23,24 +24,25 @@ CASES = {
     "test_is_enabled_for": (6172, "self.addCleanup(setattr, self.logger.manager, 'disable', old_disable)"),
     "test_is_enabled_for_disabled_logger": (6182, "self.addCleanup(setattr, self.logger, 'disabled', old_disabled)"),
 }
-PREFIX = "test.test_logging.LoggerTest."
+ADAPTER_CASE = (5850, "self.addCleanup(setattr, self.adapter.logger.manager, 'disable',")
 
 
 class WithCleanups:
-    def __init__(self, tools, initial):
+    def __init__(self, tools, initial, logger="case.logger"):
         self.tools = tools
         self.level = tools.level
         self.initial = initial
+        self.logger = logger
 
     def build(self, source, work):
         limit, disabled = self.initial
         # Append to the shared runner's entry point; the upstream method is unchanged.
         return self.tools.build(source + (
-            f"assert case.doCleanups()\nassert case.logger.manager.disable == {limit!r}\n"
-            f"assert case.logger.disabled is {disabled!r}\n").encode(), work)
+            f"assert case.doCleanups()\nassert {self.logger}.manager.disable == {limit!r}\n"
+            f"assert {self.logger}.disabled is {disabled!r}\n").encode(), work)
 
 
-def host_body(binary, case, method, name, initial, evidence):
+def host_body(binary, case, method, name, initial, evidence, *, adapter=False):
     stack = ExitStack()
     child = stack.enter_context(subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                 stderr=subprocess.PIPE, text=True, encoding="utf-8"))
@@ -121,7 +123,9 @@ def host_body(binary, case, method, name, initial, evidence):
     case.addCleanup(finish)
     assert (int(ask("limit")), boolean(ask("disabled"))) == initial
     start = len(calls)
-    with patch.object(case, "logger", Logger()):
+    logger = Logger()
+    receiver = SimpleNamespace(logger=logger, isEnabledFor=logger.isEnabledFor) if adapter else logger
+    with patch.object(case, "adapter" if adapter else "logger", receiver):
         method()
     evidence["body_calls"] = calls[start:]
     evidence["_body_end"] = len(calls)
@@ -129,39 +133,54 @@ def host_body(binary, case, method, name, initial, evidence):
             "evidence": evidence}
 
 
-def manager_cases(tools, work):
+def manager_cases(tools, work, *, adapter_fixture=None):
+    adapter = adapter_fixture is not None
+    owner = "LoggerAdapterTest" if adapter else "LoggerTest"
+    selected = {"test_is_enabled_for": ADAPTER_CASE} if adapter else CASES
+    prefix = f"test.test_logging.{owner}."
+    subject = "case.adapter" if adapter else "case.logger"
+    logger = "case.adapter.logger" if adapter else "case.logger"
+    # These functions resolve the original receiver in the native process.
+    access = (f"\ndef checked_logger(case: NativeCase) -> logging.Logger:\n    return {logger}\n"
+              f"\ndef checked_enabled(case: NativeCase, level: int) -> bool:\n    return {subject}.isEnabledFor(level)\n")
+    fixture_for = adapter_fixture or standalone_fixture
+
     def callback(name, directory):
         def execute(case, method):
-            fixture = standalone_fixture(case)
-            initial = (case.logger.manager.disable, case.logger.disabled)
-            detail = "Logger and manager reads, writes, enablement and registered cleanup"
+            fixture = fixture_for(case)
+            original_logger = case.adapter.logger if adapter else case.logger
+            initial = (original_logger.manager.disable, original_logger.disabled)
+            detail = ("LoggerAdapter and manager reads, writes, enablement and registered cleanup" if adapter else
+                      "Logger and manager reads, writes, enablement and registered cleanup")
             try:
-                run = native_method(WithCleanups(tools, initial), directory, SOURCE, "LoggerTest",
-                                    PREFIX + name, fixture, operation=("imre", detail))
+                run = native_method(WithCleanups(tools, initial, logger), directory, SOURCE, owner,
+                                    prefix + name, fixture, operation=("imre", detail))
             except NativeCompileError as exc:
-                line, expected = CASES[name]
+                line, expected = selected[name]
                 observed = re.search(r"case\.py:(\d+):\d+: Imre: (unknown class method)$", str(exc), re.MULTILINE)
                 if (not observed or (directory / "case.py").read_text().splitlines()[int(observed[1]) - 1].strip() != expected
                         or SOURCE.read_text().splitlines()[line - 1].strip() != expected):
                     raise
-                binary = tools.build(fixture.encode() + b"\n" + (HERE / "manager_driver.py").read_bytes(), directory)
+                binary = tools.build((fixture + access + "\n").encode() + (HERE / "manager_driver.py").read_bytes(), directory)
                 return host_body(binary, case, method, name, initial, {
                     "operation": detail, "opt_level": tools.level,
-                    "method_sha256": hashlib.sha256(method_bytes(SOURCE, "LoggerTest", name)).hexdigest(),
-                    "fixture": "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, "
-                               "detached logger, recording handler, manager and cleanup writes",
+                    "method_sha256": hashlib.sha256(method_bytes(SOURCE, owner, name)).hexdigest(),
+                    "fixture": ("Original CPython LoggerAdapterTest and unittest cleanup stack; native root logger, "
+                                "adapter, recording handler, manager and cleanup writes" if adapter else
+                                "Original CPython LoggerTest/BaseTest and unittest cleanup stack; native root stream, "
+                                "detached logger, recording handler, manager and cleanup writes"),
                     "native_body_blocker": {"source": f"Lib/test/test_logging.py:{line}", "statement": expected,
-                                            "diagnostic": observed[2]}})
+                                            "diagnostic": observed[2]}}, adapter=adapter)
             result = run(case, method)
             result["observation"]["evidence"]["cleanup"] = "Native doCleanups and both restored attributes checked"
             return result
         return execute
 
     callbacks = {}
-    for name in CASES:
+    for name in selected:
         directory = work / name
         directory.mkdir()
-        callbacks[PREFIX + name] = callback(name, directory)
+        callbacks[prefix + name] = callback(name, directory)
     return callbacks
 
 
