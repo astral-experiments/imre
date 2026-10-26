@@ -523,6 +523,7 @@ impl Context {
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
@@ -1013,11 +1014,11 @@ impl Context {
                 code,
                 defaults,
             } => {
-                let code = self.code_object(code);
+                let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
-                let sig: serde_json::Value = serde_json::from_str(self.str_value(code.parameters)?)
+                let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {
                     sig[key]
@@ -1095,7 +1096,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                let value = self.execute(code.entry, local)?;
+                let value = self.execute(code, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
@@ -1156,7 +1157,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(self.code_object(code).entry, scope)?;
+        self.execute(code, scope)?;
         let ancestors = self.linearized_bases(&bases)?;
         let class = self.alloc(Value::Class {
             name: name.clone(),

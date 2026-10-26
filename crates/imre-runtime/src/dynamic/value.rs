@@ -322,6 +322,7 @@ pub(super) enum Value {
     },
     PythonFrame {
         scope: Id,
+        code: Id,
         lineno: u32,
     },
     Method {
@@ -494,7 +495,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
-            Self::PythonFrame { scope, .. } => visit.push(*scope),
+            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
@@ -538,6 +539,7 @@ pub(super) struct Heap {
 
 struct Frame {
     scope: Id,
+    code: Id,
     live: Vec<Id>,
     location: Option<Location>,
     object: Option<Id>,
@@ -546,9 +548,10 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(scope: Id, inherited: Id) -> Self {
+    fn new(scope: Id, code: Id, inherited: Id) -> Self {
         Self {
             scope,
+            code,
             live: Vec::new(),
             location: None,
             object: None,
@@ -569,7 +572,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
-            frames: vec![Frame::new(NONE, NONE)],
+            frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
         }
     }
@@ -597,8 +600,9 @@ impl Heap {
             .as_mut()
             .expect("live native handle")
     }
-    pub fn enter(&mut self, scope: Id) {
-        self.frames.push(Frame::new(scope, self.active_exception()));
+    pub fn enter(&mut self, scope: Id, code: Id) {
+        self.frames
+            .push(Frame::new(scope, code, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         self.frames.pop();
@@ -625,6 +629,7 @@ impl Heap {
         }
         let object = self.alloc(Value::PythonFrame {
             scope: frame.scope,
+            code: frame.code,
             lineno: location.line,
         });
         self.frames.last_mut().unwrap().object = Some(object);
@@ -666,7 +671,7 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.extend([frame.scope, frame.active, frame.inherited]);
+            pending.extend([frame.scope, frame.code, frame.active, frame.inherited]);
             pending.extend(frame.object);
             pending.extend(&frame.live);
         }
