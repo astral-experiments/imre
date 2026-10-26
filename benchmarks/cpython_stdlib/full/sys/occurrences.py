@@ -9,7 +9,7 @@ from ioencoding_case import observe as ioencoding_observation
 from locale_stream_cases import observe as locale_stream_observations
 from suite_evidence import roles
 from suite_inventory import load_suite
-from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, method_bytes, native_method, run_in_fixtures, testcase_fixture
 
 MODULE = "test.test_sys"
 UNOBSERVED = roles(body="unobserved", assertions="unobserved", operation="unobserved",
@@ -113,8 +113,11 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
                     raise AssertionError((name, "unreconciled fixture skip", skips))
                 outcome = "error"
                 locations = roles(body="unknown", assertions="unknown", operation="unknown", fixture="cpython")
-                reason = str(failures).replace(str(folder), "[case]")
-                proof.update(stage="native execution under original fixture", diagnostic=reason)
+                # native_method includes the child status, stdout and stderr in its exception.
+                reason = "\n".join(f"{case_id}: {trace.splitlines()[-1]}" for case_id, trace in failures)
+                reason = reason.replace(str(folder), "[case]")
+                proof.update(stage="native execution under original fixture", diagnostic=reason,
+                             method_sha256=hashlib.sha256(method_bytes(source, cls, method)).hexdigest())
         if state == "proposed":
             proof["exception_proposal"] = "unreviewed; still in the denominator"
         results[key] = {"outcome": outcome, "roles": locations, "reason": reason, "evidence": proof}
