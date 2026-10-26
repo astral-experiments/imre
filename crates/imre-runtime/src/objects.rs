@@ -90,7 +90,7 @@ mod words;
 mod zipfile;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::errno_error;
+pub(crate) use files::{errno_error, open_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
