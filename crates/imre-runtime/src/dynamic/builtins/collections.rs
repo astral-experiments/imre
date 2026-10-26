@@ -23,21 +23,21 @@ pub(in super::super) fn view_items(
 }
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
-    if let Some(input) = input {
-        if !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))? {
-            for (index, pair) in ctx.items(input)?.into_iter().enumerate() {
-                let pair = ctx.items(pair)?;
-                let [key, value] = pair.as_slice() else {
-                    return Err(Error::new(
-                        "ValueError",
-                        format!(
-                            "dictionary update sequence element #{index} has length {}; 2 is required",
-                            pair.len()
-                        ),
-                    ));
-                };
-                ctx.put_item(dict, *key, *value)?;
-            }
+    if let Some(input) = input
+        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+    {
+        for (index, pair) in ctx.items(input)?.into_iter().enumerate() {
+            let pair = ctx.items(pair)?;
+            let [key, value] = pair.as_slice() else {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "dictionary update sequence element #{index} has length {}; 2 is required",
+                        pair.len()
+                    ),
+                ));
+            };
+            ctx.put_item(dict, *key, *value)?;
         }
     }
     for (key, value) in kwargs {

@@ -32,9 +32,9 @@ impl Context {
     ) -> Result<bool> {
         if self.slot(input, "__iter__").is_none_or(
             |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(entries) = self.dict_entries(input)
+        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
         {
-            for (key, value) in entries.to_vec() {
+            for (key, value) in entries {
                 visit(self, key, value)?;
             }
             return Ok(true);
