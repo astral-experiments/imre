@@ -513,9 +513,8 @@ impl Reachable {
                                 || unittest_method
                                 || assertion_exit
                                 || mock_dispatch
-                                || (source.is_bundled("selectors")
-                                    && class.name.as_str() == "PollSelector"
-                                    && name == "close")
+                                || (source.closes_context(class.name.as_str())
+                                    && matches!(name, "__enter__" | "close"))
                                 || (refs.found.http_commands
                                     && (name.starts_with("do_") || name == "__getattr__")
                                     && graph.is_http_handler(id))

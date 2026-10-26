@@ -284,7 +284,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
-        | ("functools", "lru_cache")
+        | ("functools", "lru_cache" | "partial")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -309,6 +309,45 @@ pub(super) fn call(
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
+    }
+    if name == "functools.partial" {
+        let Some((&function, bound)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "type 'partial' takes at least one argument",
+            ));
+        };
+        if !ctx.callable(function) {
+            return Err(Error::new(
+                "TypeError",
+                "the first argument must be callable",
+            ));
+        }
+        let (function, mut args, keywords) = match ctx.heap.get(function).clone() {
+            Value::Partial {
+                function,
+                args,
+                keywords,
+            } => {
+                let Value::Dict(entries) = ctx.heap.get(keywords) else {
+                    unreachable!()
+                };
+                let keywords = ctx.dict(entries.clone());
+                (function, ctx.items(args)?, keywords)
+            }
+            _ => (function, Vec::new(), ctx.dict(Vec::new())),
+        };
+        args.extend(bound);
+        let args = ctx.alloc(Value::Tuple(args));
+        for (name, value) in kwargs {
+            let name = ctx.text(name);
+            ctx.put_item(keywords, name, *value)?;
+        }
+        return Ok(ctx.alloc(Value::Partial {
+            function,
+            args,
+            keywords,
+        }));
     }
     let (max_args, keywords): (usize, &[&str]) = match name {
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
@@ -436,7 +475,7 @@ pub(super) fn call(
                     "custom installation variables are unsupported",
                 ));
             }
-            let expand = option(args, index + 2, kwargs, "expand")?.is_none_or(|id| ctx.truth(id));
+            let expand = ctx.optional_truth(option(args, index + 2, kwargs, "expand")?, true)?;
             let layout = layout(ctx)?;
             let get = |name| {
                 layout.path(&scheme, name, expand).ok_or_else(|| {

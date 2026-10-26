@@ -20,12 +20,22 @@ impl Context {
         self.class_attr(*class, name)
     }
 
+    pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
+        let Value::Instance { class, .. } = *self.heap.get(object) else {
+            return Ok(None);
+        };
+        self.class_attr(class, name)
+            .map(|slot| self.bind_attribute(slot, object, class))
+            .transpose()
+    }
+
     pub(super) fn callable(&self, value: Id) -> bool {
         matches!(
             self.heap.get(value),
             Value::Class { .. }
                 | Value::Function { .. }
                 | Value::Cached { .. }
+                | Value::Partial { .. }
                 | Value::Native(_)
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
@@ -44,7 +54,7 @@ impl Context {
         if receiver != NONE {
             match self.heap.get(value) {
                 Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } => {
+                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => {
                     return Ok(self.alloc(Value::Method {
                         callable: value,
                         receiver,
@@ -151,6 +161,7 @@ impl Context {
             | ("range", Value::Range { .. })
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
+            | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
@@ -184,6 +195,16 @@ impl Context {
     }
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         match self.heap.get(obj).clone() {
+            Value::Partial {
+                function,
+                args,
+                keywords,
+            } => match name {
+                "func" => return Ok(function),
+                "args" => return Ok(args),
+                "keywords" => return Ok(keywords),
+                _ => {}
+            },
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -321,6 +342,23 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::Partial {
+                function,
+                args: bound,
+                keywords,
+            } => {
+                let mut positional = self.items(bound)?;
+                positional.extend(args);
+                let mut merged = self.keyword_args(keywords)?;
+                for (key, value) in kwargs {
+                    if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
+                        *previous = value;
+                    } else {
+                        merged.push((key, value));
+                    }
+                }
+                self.call(function, positional, merged)
+            }
             Value::Method { callable, receiver } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);
@@ -509,11 +547,10 @@ impl Context {
                 }
                 Ok(value)
             }
-            Value::Instance { class, .. } => {
-                let Some(method) = self.class_attr(class, "__call__") else {
+            Value::Instance { .. } => {
+                let Some(method) = self.bound_slot(callable, "__call__")? else {
                     return Err(Error::new("TypeError", "object is not callable"));
                 };
-                let method = self.bind_attribute(method, callable, class)?;
                 self.call(method, args, kwargs)
             }
             _ => Err(Error::new("TypeError", "object is not callable")),

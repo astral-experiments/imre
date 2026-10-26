@@ -288,7 +288,7 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
-        for fixture in ("boxed_contextvars.py", "boxed_descriptors.py"):
+        for fixture in ("boxed_contextvars.py", "boxed_descriptors.py", "boxed_proxy_truth.py"):
             plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
@@ -373,6 +373,17 @@ defaults = {"present": None}
 print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
 cache = (Ellipsis, Ellipsis)
 print(cache[False] is ..., cache[True] is Ellipsis, repr(cache[False]))
+class BrokenFlag:
+    def __bool__(self):
+        raise ValueError("invalid JSON option")
+try:
+    json.dumps({"ok": True}, sort_keys=BrokenFlag())
+except ValueError as err:
+    print(str(err))
+try:
+    json.loads(Ellipsis)
+except TypeError as err:
+    print(str(err))
 data = json.loads('{"k": 1, "other": [true], "k": 2}')
 data["other"].append(False)
 print(json.dumps(data))

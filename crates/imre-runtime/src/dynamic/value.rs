@@ -41,6 +41,35 @@ impl Error {
 }
 
 impl Context {
+    pub(super) fn type_name(&self, value: Id) -> &str {
+        match self.heap.get(value) {
+            Value::None => "NoneType",
+            Value::Ellipsis => "ellipsis",
+            Value::Bool(_) => "bool",
+            Value::Int(_) => "int",
+            Value::Float(_) => "float",
+            Value::Str(_) => "str",
+            Value::Bytes(_) => "bytes",
+            Value::List(_) => "list",
+            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Range { .. } => "range",
+            Value::Set(_) => "set",
+            Value::Dict(_) => "dict",
+            Value::DefaultDict { .. } => "defaultdict",
+            Value::Function { .. } => "function",
+            Value::Class { .. } => "type",
+            Value::Method { .. } => "method",
+            Value::Partial { .. } => "partial",
+            Value::Raised(error) => &error.kind,
+            Value::Module { .. } => "module",
+            Value::Instance { class, .. } => match self.heap.get(*class) {
+                Value::Class { name, .. } | Value::Native(name) => name,
+                _ => "object",
+            },
+            _ => "object",
+        }
+    }
+
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let message = match args {
             [] => String::new(),
@@ -158,6 +187,11 @@ pub(super) enum Value {
         receiver: Id,
     },
     Property(Id),
+    Partial {
+        function: Id,
+        args: Id,
+        keywords: Id,
+    },
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
@@ -254,6 +288,11 @@ impl Value {
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::Property(val) => visit.push(*val),
+            Self::Partial {
+                function,
+                args,
+                keywords,
+            } => visit.extend([*function, *args, *keywords]),
             Self::Cached { function, entries } => {
                 visit.push(*function);
                 for call in entries {

@@ -21,7 +21,10 @@ pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
         }
         _ => Err(Error::new(
             "TypeError",
-            "the JSON object must be str, bytes or bytearray",
+            format!(
+                "the JSON object must be str, bytes or bytearray, not {}",
+                ctx.type_name(input)
+            ),
         )),
     }
 }
@@ -99,8 +102,8 @@ pub(super) fn dumps(ctx: &mut Context, id: Id, kwargs: &[(String, Id)]) -> Resul
         }
     };
     let mut encoder = Encoder {
-        ascii: option("ensure_ascii").is_none_or(|v| ctx.truth(v)),
-        sort_keys: option("sort_keys").is_some_and(|v| ctx.truth(v)),
+        ascii: ctx.optional_truth(option("ensure_ascii"), true)?,
+        sort_keys: ctx.optional_truth(option("sort_keys"), false)?,
         item_separator,
         key_separator,
         default: option("default").filter(|v| *v != NONE),
@@ -154,7 +157,13 @@ impl Encoder {
                     }
                     _ => {
                         let default = self.default.ok_or_else(|| {
-                            Error::new("TypeError", "object is not JSON serializable")
+                            Error::new(
+                                "TypeError",
+                                format!(
+                                    "Object of type {} is not JSON serializable",
+                                    ctx.type_name(id)
+                                ),
+                            )
                         })?;
                         let result = ctx.call(default, vec![id], Vec::new())?;
                         self.value(ctx, result)?;
