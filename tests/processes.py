@@ -281,7 +281,11 @@ def main() -> None:
                     assert b"closed\n" in reference.stdout and reference.stdout.endswith(b"-13\n"), reference.stdout
                 for level in args.opt_levels:
                     binary = project / f"native-O{level}"
-                    built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
+                    built = files.run(
+                        [compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags],
+                        temporary,
+                        timeout=120 if args.lto_linker and not args.sanitize else 60,
+                    )
                     files.check_result(built, None, f"build {name} O{level}")
                     native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)

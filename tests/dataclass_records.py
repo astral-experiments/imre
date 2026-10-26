@@ -219,6 +219,7 @@ def run_suite(fixtures: Path) -> None:
         errors=ERRORS,
         label="dataclass and descriptor",
         description=__doc__,
+        thinlto_build_timeout=120,
     )
 
 
