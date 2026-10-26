@@ -126,7 +126,11 @@ impl Context {
                 .dict_entries(*dict)
                 .expect("dict view backing")
                 .is_empty(),
-            Value::Context(bindings) => !bindings.is_empty(),
+            Value::Context(bindings)
+            | Value::Iterator {
+                context: Some(bindings),
+                ..
+            } => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
