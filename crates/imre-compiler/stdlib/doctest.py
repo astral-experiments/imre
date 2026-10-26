@@ -95,7 +95,7 @@ def _flags(source: str, name: str, lineno: int, options: dict[int, bool]) -> Non
         pos = line.find("#")
         while pos >= 0:
             comment = line[pos + 1:].lstrip()
-            if comment.startswith("doctest:"):
+            if comment.startswith("doctest:") and "'" not in comment and '"' not in comment:
                 for option in comment[8:].replace(",", " ").split():
                     n = 0
                     while n < len(names) and names[n] != option[1:]:
