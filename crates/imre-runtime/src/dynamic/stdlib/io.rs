@@ -1,9 +1,14 @@
 //! Native base classes for binary input streams defined by runtime-loaded modules.
 
+use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+
+const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let size = ctx.int(DEFAULT_BUFFER_SIZE);
+    ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
     let object = ctx.alloc(Value::Native("object".into()));
     let io = class(
         ctx,
@@ -21,7 +26,13 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             "__exit__",
         ],
     );
-    class(ctx, module, "RawIOBase", io, &["readinto"]);
+    class(
+        ctx,
+        module,
+        "RawIOBase",
+        io,
+        &["read", "readall", "readinto"],
+    );
 }
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
@@ -53,11 +64,12 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let arity = match name {
-        "readinto" => 2,
-        "__exit__" => 4,
-        _ => 1,
+        "read" => 1..=2,
+        "readinto" => 2..=2,
+        "__exit__" => 4..=4,
+        _ => 1..=1,
     };
-    if args.len() != arity || !kwargs.is_empty() || !ctx.instance_of(args[0], owner) {
+    if !arity.contains(&args.len()) || !kwargs.is_empty() || !ctx.instance_of(args[0], owner) {
         return Err(Error::new(
             "TypeError",
             format!("invalid arguments to {name}"),
@@ -73,8 +85,9 @@ pub(in super::super) fn call(
         "readable" | "writable" | "seekable" => Ok(FALSE),
         "close" if closed => Ok(NONE),
         "close" => {
-            let flush = ctx.lookup_attr(receiver, "flush")?;
-            let result = ctx.call(flush, Vec::new(), Vec::new());
+            let result = ctx
+                .lookup_attr(receiver, "flush")
+                .and_then(|f| ctx.call(f, Vec::new(), Vec::new()));
             ctx.set_attr(receiver, "__IOBase_closed", TRUE)?;
             result.map(|_| NONE)
         }
@@ -86,6 +99,58 @@ pub(in super::super) fn call(
         "__exit__" => {
             let close = ctx.lookup_attr(receiver, "close")?;
             ctx.call(close, Vec::new(), Vec::new())
+        }
+        "read" => {
+            let size = args
+                .get(1)
+                .map(|&id| ctx.as_integer(id))
+                .transpose()?
+                .unwrap_or(-1);
+            if size < 0 {
+                let readall = ctx.lookup_attr(receiver, "readall")?;
+                return ctx.call(readall, Vec::new(), Vec::new());
+            }
+            let buffer = ctx.alloc(Value::ByteArray(zeroed_bytes(size)?));
+            let readinto = ctx.lookup_attr(receiver, "readinto")?;
+            let count = ctx.call(readinto, vec![buffer], Vec::new())?;
+            if count == NONE {
+                return Ok(NONE);
+            }
+            let count = ctx.as_integer(count)?;
+            let Value::ByteArray(data) = ctx.heap.get(buffer) else {
+                unreachable!()
+            };
+            if count < 0 || count > size || count as usize > data.len() {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("readinto returned {count} outside buffer size {size}"),
+                ));
+            }
+            Ok(ctx.alloc(Value::Bytes(data[..count as usize].to_vec())))
+        }
+        "readall" => {
+            let mut out = Vec::new();
+            let size = ctx.int(DEFAULT_BUFFER_SIZE);
+            loop {
+                let read = ctx.lookup_attr(receiver, "read")?;
+                let data = ctx.call(read, vec![size], Vec::new())?;
+                if data == NONE {
+                    if out.is_empty() {
+                        return Ok(NONE);
+                    }
+                    break;
+                }
+                let Value::Bytes(data) = ctx.heap.get(data) else {
+                    return Err(Error::new("TypeError", "read() should return bytes"));
+                };
+                if data.is_empty() {
+                    break;
+                }
+                out.try_reserve(data.len())
+                    .map_err(|_| Error::new("MemoryError", "read result is too large"))?;
+                out.extend_from_slice(data);
+            }
+            Ok(ctx.alloc(Value::Bytes(out)))
         }
         "readinto" => Err(Error::new("NotImplementedError", "")),
         _ => unreachable!("registered IOBase method"),

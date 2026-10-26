@@ -133,6 +133,10 @@ impl Context {
                 }
             }
             "slice" => self.slice(a, b),
+            "setslice" => {
+                self.set_slice(a, b, c)?;
+                Ok(c)
+            }
             "call" => {
                 let args = self.items(b)?;
                 let Value::Dict(entries) = self.heap.get(c) else {

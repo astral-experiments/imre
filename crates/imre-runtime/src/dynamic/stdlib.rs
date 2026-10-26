@@ -316,7 +316,7 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
-        | "file.readline" | "warnings.warn" => (2, &[]),
+        | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exit"
         | "sysconfig.get_config_var"

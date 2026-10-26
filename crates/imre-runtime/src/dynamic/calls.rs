@@ -146,6 +146,7 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("bytearray", Value::ByteArray(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -306,6 +307,7 @@ impl Context {
                                 | "set"
                                 | "tuple"
                                 | "bytes"
+                                | "bytearray"
                                 | "range"
                                 | "function"
                         )
@@ -314,9 +316,7 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
-            Value::IoMethod { owner, name } => {
-                stdlib::io::call(self, owner, name, &args, &kwargs)
-            }
+            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Method { callable, receiver } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);

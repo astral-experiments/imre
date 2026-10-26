@@ -110,6 +110,7 @@ pub(super) enum Value {
     },
     Str(String),
     Bytes(Vec<u8>),
+    ByteArray(Vec<u8>),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -269,6 +270,7 @@ impl Value {
             | Self::Int(_)
             | Self::Str(_)
             | Self::Bytes(_)
+            | Self::ByteArray(_)
             | Self::Native(_)
             | Self::TokenMissing
             | Self::File(_)

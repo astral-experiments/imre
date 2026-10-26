@@ -17,12 +17,35 @@ class ChunkReader(RawIOBase):
         return int(self.stream.readline().decode("latin1").strip(), 16)
 
 
+class BufferedInput(RawIOBase):
+    def __init__(self, stream):
+        self.stream = stream
+
+    def readinto(self, buffer):
+        return self.stream.readinto(buffer)
+
+
+class ReadCount(RawIOBase):
+    def __init__(self, count):
+        self.count = count
+
+    def readinto(self, buffer):
+        for i in range(1600):
+            _ = [i]
+        return self.count
+
+
 def exercise(path):
     with open(path, "rb") as stream:
         reader = ChunkReader(stream)
         with reader as entered:
             print(entered is reader, isinstance(reader, io.IOBase), RawIOBase is io.RawIOBase)
             print(reader.closed, reader.readable(), reader.writable(), reader.seekable())
+            print(callable(io.RawIOBase.readinto), io.IOBase.readable(reader))
+            try:
+                reader.closed = True
+            except AttributeError:
+                print("closed is read-only")
             print(reader.chunk_length(), stream.tell())
             print(stream.readline(0), stream.readline(2).decode("latin1"), stream.tell())
             print(stream.read(1), stream.readline(), stream.readline())
@@ -38,3 +61,34 @@ def exercise(path):
         raw.flush()
     except ValueError:
         print("flush on closed stream")
+    print(ReadCount(None).read(2) is None, ReadCount(None).readall() is None)
+    for count in (-1, 3):
+        try:
+            ReadCount(count).read(2)
+        except ValueError as error:
+            print(error)
+
+    with open(path, "rb") as stream:
+        source = BufferedInput(stream)
+        print(source.read(2), source.read(), source.read(1))
+        stream.seek(0)
+        target = bytearray(b"......")
+        alias = target
+        short = bytearray(2)
+        target[:stream.readinto(short)] = short
+        print(bytes(alias), stream.readinto(target), bytes(alias))
+        try:
+            stream.readinto(b"")
+        except TypeError:
+            print("writable buffer required")
+        target[::-2] = [65, 66, 67]
+        target[2:1] = b"x"
+        target[-1] = 42
+        target.extend(target)
+        print(bytes(target), target == bytearray(target))
+        try:
+            target[::2] = b"x"
+        except ValueError:
+            print("extended slice length mismatch")
+        target[::-2] = b""
+        print(repr(target), repr(bytearray(b"'")), io.DEFAULT_BUFFER_SIZE)

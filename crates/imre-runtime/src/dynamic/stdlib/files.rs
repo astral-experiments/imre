@@ -185,6 +185,24 @@ pub(super) fn call(
             };
             Ok(ctx.int(f.seek(pos).map_err(os_error)? as i64))
         }
+        "file.readinto" => {
+            let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
+                return Err(Error::new(
+                    "TypeError",
+                    "readinto() requires a writable bytes-like object",
+                ));
+            };
+            let mut count = 0;
+            while count < buffer.len() {
+                match f.read(&mut buffer[count..]) {
+                    Ok(0) => break,
+                    Ok(n) => count += n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(os_error(e)),
+                }
+            }
+            Ok(ctx.int(count as i64))
+        }
         "file.read" | "file.readline" => {
             let length = args
                 .get(1)
