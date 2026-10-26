@@ -259,6 +259,7 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    AstWalk(std::collections::VecDeque<Id>),
     Iterator {
         sequence: Option<Id>,
         offset: usize,
@@ -332,6 +333,7 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Range { .. } => {}
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {

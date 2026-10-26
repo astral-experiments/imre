@@ -110,7 +110,7 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } => return Ok(id),
+            Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
             Value::List(_) | Value::Tuple(_) => id,
             Value::Instance {
                 dictionary: Some(_),
@@ -120,7 +120,10 @@ impl Context {
                     .bound_slot(id, "__iter__")?
                     .expect("dict iterator slot");
                 let result = self.call(method, Vec::new(), Vec::new())?;
-                return if matches!(self.heap.get(result), Value::Iterator { .. }) {
+                return if matches!(
+                    self.heap.get(result),
+                    Value::Iterator { .. } | Value::AstWalk(_)
+                ) {
                     Ok(result)
                 } else {
                     Err(Error::new(
@@ -159,6 +162,9 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Value::AstWalk(queue) = self.heap.get(id) {
+            return Ok(queue.front().copied());
+        }
         let item = self.iterator_remaining(id)?.first().copied();
         if item.is_none()
             && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
@@ -170,6 +176,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+            return stdlib::ast::advance(self, id);
+        }
         let item = self.peek_item(id)?;
         if item.is_some()
             && let Value::Iterator { offset, .. } = self.heap.get_mut(id)
@@ -180,6 +189,13 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+            let mut items = Vec::new();
+            while let Some(item) = self.next_item(id)? {
+                items.push(item);
+            }
+            return Ok(items);
+        }
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
@@ -416,6 +432,7 @@ impl Context {
         self.modules.insert(name.to_owned(), module);
         match name {
             "io" => stdlib::io::install(self, scope),
+            "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
             _ => {}
         }

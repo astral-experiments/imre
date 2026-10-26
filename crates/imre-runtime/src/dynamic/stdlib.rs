@@ -8,6 +8,7 @@ use super::{
 };
 use crate::objects::interpreter_stdlib as system;
 
+pub(super) mod ast;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
@@ -32,6 +33,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "codecs"
             | "io"
             | "sysconfig"
+            | "ast"
             | "os"
             | "os.path"
             | "operator"
@@ -357,6 +359,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
+    }
+    if let Some(name) = name.strip_prefix("ast.") {
+        return ast::call(ctx, name, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
