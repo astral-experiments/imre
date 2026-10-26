@@ -576,6 +576,20 @@ for turn in range(3):
     except EOFError:
         print("eof")
 """,
+    "context_recursive_default": """
+from contextvars import Context, ContextVar
+
+data: list[object] = []
+key = ContextVar("guard", default=data)
+ctx = Context()
+try:
+    ctx[key]
+except KeyError as error:
+    data.append(error.args[0])
+    print("default=[<ContextVar name=" in repr(error.args[0]))
+    data.clear()
+    print("default=[]" in repr(error.args[0]))
+""",
     "dictionary_errors": """
 values: dict[str, int] = {"present": 10}
 numbers: dict[int, str] = {1: "one"}
