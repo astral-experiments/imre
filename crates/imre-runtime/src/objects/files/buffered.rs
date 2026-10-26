@@ -423,7 +423,9 @@ impl Input {
 
     pub(super) fn binary_line(&mut self) -> Result<Bytes> {
         let mut bytes = Vec::new();
-        self.raw.read_until(b'\n', &mut bytes).map_err(errno_error)?;
+        self.raw
+            .read_until(b'\n', &mut bytes)
+            .map_err(errno_error)?;
         Ok(bytes)
     }
 
