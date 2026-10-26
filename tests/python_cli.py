@@ -317,6 +317,7 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
+            "boxed_class_attribute.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
