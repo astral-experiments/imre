@@ -48,3 +48,9 @@ except Error:
     print("caught wrong exception")
 except Exception as exc:
     print(repr(exc))
+try:
+    a2b_base64("AA")
+except Exception as exc:
+    print((isinstance(exc, Error), isinstance(exc, ValueError),
+           isinstance(exc, Incomplete), isinstance(exc, TypeError)))
+    print(exc.args)

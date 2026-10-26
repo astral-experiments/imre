@@ -8918,10 +8918,7 @@ impl<'a> Checker<'a> {
             {
                 return Ok(Expr {
                     ty: Type::Bool,
-                    kind: ExprKind::Builtin(
-                        Builtin::ExceptionSubclass(child, parent),
-                        vec![],
-                    ),
+                    kind: ExprKind::Builtin(Builtin::ExceptionSubclass(child, parent), vec![]),
                 });
             }
             if call.arguments.keywords.is_empty()
