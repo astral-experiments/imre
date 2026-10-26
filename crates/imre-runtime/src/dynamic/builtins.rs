@@ -169,6 +169,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 pub(super) const STR_METHODS: &[&str] = &[
     "encode",
     "endswith",
+    "expandtabs",
     "find",
     "format",
     "join",

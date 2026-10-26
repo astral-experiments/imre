@@ -30,6 +30,15 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        self.index_value_with_bool_result(value, true)
+    }
+
+    /// Some native operations reject a boolean returned by a user-defined index hook.
+    pub(super) fn index_value_with_bool_result(
+        &mut self,
+        value: Id,
+        allow_bool_result: bool,
+    ) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }
@@ -37,6 +46,12 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
+        if !allow_bool_result && matches!(self.heap.get(result), Value::Bool(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "__index__ returned non-int (type bool)",
+            ));
+        }
         self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",

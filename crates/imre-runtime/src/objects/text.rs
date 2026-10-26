@@ -8,6 +8,7 @@ mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
 
+pub(crate) use expandtabs::expand_tabs;
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
