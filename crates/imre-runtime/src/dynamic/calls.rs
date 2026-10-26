@@ -25,6 +25,7 @@ impl Context {
             self.heap.get(value),
             Value::Class { .. }
                 | Value::Function { .. }
+                | Value::AttrGetter(_)
                 | Value::Cached { .. }
                 | Value::Native(_)
                 | Value::Method { .. }

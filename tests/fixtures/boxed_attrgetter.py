@@ -26,7 +26,7 @@ def current():
     ctx = Context()
     ctx.request = Request(3)
     get_json = attrgetter("request.get_json")
-    print(isinstance(get_json, attrgetter), get_json(ctx)())
+    print(isinstance(get_json, attrgetter), callable(get_json), get_json(ctx)())
     ctx.request = Request(7)
     print(get_json(ctx)(), attrgetter("request.value", "request.value")(ctx))
     saved, replaced = attrgetter("request", "replace")(ctx)
