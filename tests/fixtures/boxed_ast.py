@@ -19,6 +19,14 @@ def current():
             print(node.id)
     expression = ast.parse("é", mode="eval").body
     print(isinstance(expression, ast.expr), expression.end_col_offset)
+
+    for newline in ("\r", "\n", "\r\n"):
+        tree = ast.parse("first = 1" + newline + "second = 2")
+        second = tree.body[1]
+        assert (second.lineno, second.col_offset, second.end_lineno, second.end_col_offset) == (
+            2, 0, 2, 10
+        )
+
     print(expression.ctx is ast.parse("x", mode="eval").body.ctx)
     walk = ast.walk(ast.parse("x", mode="eval"))
     for node in walk:

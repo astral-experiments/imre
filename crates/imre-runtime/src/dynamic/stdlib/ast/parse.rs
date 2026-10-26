@@ -287,7 +287,12 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         .unwrap_or("exec")
         .to_owned();
     let mut lines = vec![0];
-    lines.extend(source.match_indices('\n').map(|(i, _)| i + 1));
+    let bytes = source.as_bytes();
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n')) {
+            lines.push(i + 1);
+        }
+    }
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
