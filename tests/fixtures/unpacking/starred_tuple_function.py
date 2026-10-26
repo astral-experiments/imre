@@ -51,3 +51,13 @@ print(len(module_range))
 print(module_range[1])
 print(events[-2])
 print(events[-1])
+
+unsafe = bytes((*range(0x21), 0x25, 0x7F)).decode()
+print(len(unsafe))
+print(ord(unsafe[-1]))
+print(bytes((0, 255)) == b"\x00\xff")
+print(bytes(()) == b"")
+try:
+    print(bytes((1, 1 << 65)))
+except ValueError as error:
+    print(str(error))

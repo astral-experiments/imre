@@ -9786,15 +9786,26 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "bytes accepts zero arguments or one int, list[int], or bytes argument",
+                        "bytes accepts zero arguments or one int, bytes, integer list, or integer tuple argument",
                     ));
                 }
+            };
+            let value = if self.types.var_tuple_element(value.ty) == Some(Type::Int)
+                || self
+                    .types
+                    .fields(value.ty)
+                    .is_some_and(|fields| fields.iter().all(|&f| f == Type::Int))
+            {
+                let input = self.iteration_value(value, false, call)?;
+                self.collect_list(input, false, Some(Type::Int), call)?
+            } else {
+                value
             };
             if !matches!(value.ty, Type::Int | Type::ListInt | Type::Bytes) {
                 return Err(error(
                     self.source,
                     call,
-                    "bytes accepts exactly int, list[int], or bytes",
+                    "bytes expects an int, bytes, integer list, or integer tuple",
                 ));
             }
             return Ok(Expr {
