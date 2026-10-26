@@ -109,6 +109,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "tuple"
             | "type"
             | "super"
+            | "zip"
     ) || is_exception(name)
 }
 
@@ -680,6 +681,19 @@ pub(super) fn call(
                 Error::new("OverflowError", "length does not fit in a Python index")
             })?;
             Ok(ctx.int(size))
+        }
+        "zip" => {
+            let [strict] = bind(name, &[], kwargs, ["strict"])?;
+            let strict = ctx.truth(strict.unwrap_or(FALSE))?;
+            let inputs = args
+                .iter()
+                .map(|&argument| ctx.iterator(argument))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(ctx.alloc(Value::Zip {
+                inputs: inputs.into(),
+                strict,
+                pending: None,
+            }))
         }
         "range" => {
             positional(name, kwargs)?;

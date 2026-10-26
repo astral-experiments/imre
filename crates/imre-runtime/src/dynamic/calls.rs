@@ -281,6 +281,7 @@ impl Context {
             | Value::Code(_)
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::Zip { .. } => "zip",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",

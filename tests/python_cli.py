@@ -382,6 +382,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
+            "boxed_zip.py",
             "boxed_bytes_separators.py",
             "boxed_reversed_list.py",
         ):
