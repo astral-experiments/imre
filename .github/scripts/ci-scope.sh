@@ -23,7 +23,8 @@ if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
       LICENSE-*|licenses/*|examples/conformance_report/upstream/LICENSE|crates/imre-runtime-jemalloc/*)
         RELEASE_ARTIFACTS=true ;;
       # module_values also imports helpers from assignments, comprehensions and imports.
-      tests/lto.py|tests/programs/short_strings.py|tests/run_suites.py|tests/module_values.py|\
+      .github/scripts/ci-thinlto-ld.lld|tests/lto.py|tests/programs/short_strings.py|\
+      tests/run_suites.py|tests/run_suites_children.py|tests/module_values.py|\
       tests/fixtures/module_values/*|tests/assignments.py|tests/comprehensions.py|tests/imports.py)
         thinlto=true ;;
     esac
