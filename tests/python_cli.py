@@ -110,6 +110,23 @@ def main():
         )
         compare("-I", "-B", "-c", args_code, "--help", "--", "two words", "π")
         compare("-IBc" + flags_code)
+        for first_import in ("import collections", "import _collections_abc"):
+            compare(
+                "-IB",
+                "-c",
+                f"""{first_import}
+import collections
+print(collections.abc.__name__, collections.__package__, bool(collections.__path__))
+import collections.abc as dotted
+from collections import abc
+import _collections_abc
+print(abc is dotted, abc is _collections_abc, repr(abc.__package__))
+try:
+    import collections.unknown_child
+except ImportError:
+    print('missing child')
+""",
+            )
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
             "-c",

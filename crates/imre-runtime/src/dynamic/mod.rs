@@ -391,8 +391,10 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if name == "urllib" {
-                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            match name {
+                "urllib" => locations.push(PathBuf::from("<imre stdlib>/urllib")),
+                "collections" => locations.push(stdlib::package_path(self, name)?),
+                _ => {}
             }
             None
         } else {
@@ -457,7 +459,12 @@ impl Context {
             ));
         }
         let scope = self.scope(name, None);
-        let name_id = self.text(name);
+        // CPython's private module publishes its ABCs under the public name.
+        let name_id = self.text(if name == "_collections_abc" {
+            "collections.abc"
+        } else {
+            name
+        });
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
@@ -487,6 +494,11 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "collections" => {
+                let abc = self.module("_collections_abc")?;
+                self.bind(scope, "abc", abc);
+                self.modules.insert("collections.abc".to_owned(), abc);
+            }
             _ => {}
         }
         if let Some((path, code)) = source {
