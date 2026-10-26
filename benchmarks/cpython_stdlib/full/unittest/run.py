@@ -41,7 +41,7 @@ LOADER_BLOCKERS = {
     "test_getTestCaseNames__not_a_TestCase": "5:23: Imre: local class base requires supported native class metadata",
     "test_getTestCaseNames__testNamePatterns__attribute_access_regression":
         "6:13: Imre: local class body requires plain methods without defaults or inert class attributes",
-    "test_partial_functions": "6:9: Imre: local functions require annotated parameters and return types",
+    "test_partial_functions": "12:17: Imre: name is not a local value; globals and first-class functions are unsupported",
     "test_sortTestMethodsUsing__None": "10:9: Imre: unknown field; dynamic attributes and first-class methods are unsupported",
     "test_sortTestMethodsUsing__getTestCaseNames": "5:9: Imre: local functions require annotated parameters and return types",
 }

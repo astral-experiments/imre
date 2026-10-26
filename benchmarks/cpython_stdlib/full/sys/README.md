@@ -39,6 +39,7 @@ python3 benchmarks/cpython_stdlib/full/sys/coverage.py --result /tmp/sys-coverag
 - `test_getfilesystemencoding`: the unchanged method and its unchanged `check_fsencoding` helper run in the native binary. The helper calls native `codecs.lookup`, and its assertions run there too. The pinned CPython suite retains its original instance lifecycle and `SysModuleTest.tearDown`.
 - `test_jit_is_available` and `test_jit_is_enabled`: Imre answers the parent capability query and executes both original child assertions under `PYTHON_JIT=0` and `=1`. CPython runs the parent, fixtures and child-status assertions. The fixture builds the original child source directly; its automatic `-X faulthandler` option is outside this check.
 - `test_thread_info`: the original CPython body and assertions read the native thread record, length, name, lock and target platform. A separate operation check verifies the singleton, slice, field names and library version. On glibc the target reads the pthread version through `confstr`; separate controls cover a changed version, an unavailable version and a truncated result, and require only one query per process. Imre reports `lock=None` because it exposes neither of CPython’s named thread-lock backends. The full body still needs native `TestCase.assertIn` and membership over string/None tuple elements.
+- `test_implementation`: the original parent reads the five PEP 421 fields, the version components and the version slice in Imre. The 30 native operations include the implementation name used by the original CPython-only branch guard. The pinned CPython parent owns the assertions and fixture. Imre reports its own release, no bytecode cache tag, and no isolated interpreters.
 - `test_ioencoding_nonascii`: the canonical reference and native gate both skip under the unchanged locale decorator. See the separate UTF-8-mode run below.
 
 The existing [stream and exit smoke runner](../../native_sys.py) exercises four
@@ -63,6 +64,8 @@ The [Linux CI run](https://github.com/astral-sh/imre/actions/runs/40173735073) e
 The [combined encoding run](https://github.com/astral-sh/imre/actions/runs/40223343057/job/121259456818) ran both original encoding methods and their assertions natively. CPython supplied their fixtures.
 The blocked `test_intern` rows retain the [intern run](https://github.com/astral-sh/imre/actions/runs/40179084540) on source `d583f2dd2cc78051c053d93d9765135dafaeb049`.
 The recursion-limit getter and setter also ran as complete native bodies under their original CPython fixtures. [Earlier Linux run](https://github.com/astral-sh/imre/actions/runs/40184296027)
+
+The 30 native operations in `test_implementation` were measured at `dc0ea48199b4afbef27eeeca5aeb4f85224acabe`. The metadata record exposes five PEP 421 fields with distinct native types. Arbitrary namespace attributes and the Python dictionary interface are not measured here.
 
 At each level the two JIT capability methods add two mixed results. `test_jit_is_active` made one native availability query in the parent; its first original child stopped at line 2 on `import _testcapi` before any `is_active` call or child assertion. The second child was not reached. Its individual private-API proposal remains unapproved.
 

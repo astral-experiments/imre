@@ -82,6 +82,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
             }
             loader(types.module_spec_fields(id)[1], types)
         }
+        Type::SysImplementation => true,
         Type::Exception
         | Type::CmpKey(..)
         | Type::NamedException(_)

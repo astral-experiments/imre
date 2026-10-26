@@ -24,6 +24,7 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
     def __init__(self, value, *rest):
@@ -1175,7 +1176,6 @@ print(Report("message"))
         print(Problem("shadow"))
     """,
     "import_error_unsupported_argument": "ImportError([1, 2])",
-    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
     "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
@@ -1239,14 +1239,14 @@ try:
     value = None
     raise ValueError()
 except ValueError:
-    print(value + 1)
+    number: int = value
 """,
     "finally_optional_fact": """
 value: int | None = 1
 try:
     value = None
 finally:
-    print(value + 1)
+    number: int = value
 """,
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',

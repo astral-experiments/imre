@@ -5,15 +5,15 @@ and includes every upstream ID at both optimization levels.
 
 ## Latest complete Linux measurement
 
-[Compiler and binary hashes](observations/8656b43/source.json) identify the exact
-source used for both optimization levels. The unchanged `TestSingleDispatch.test_simple_overloads` now registers and calls native implementations for a string, integer, and list and makes its three assertions in Imre. CPython runs the module, class,
+[Compiler and binary hashes](observations/ab891d1/source.json) identify the exact
+source used for both optimization levels. The unchanged `TestSingleDispatch.test_wrapping_attributes` now compares the copied name and docstring in Imre. The parent already runs both C and Python live `builtins.len` reentrancy method bodies. CPython runs the module, class,
 and instance hooks; the compiled child creates its own native test instance.
-Compare the [parent measurement](observations/308a1e8/evidence-linux.json) to check which individual occurrences changed.
+Compare the [parent measurement](observations/e0b6b46/evidence-linux.json) to check which individual occurrences changed.
 
 | Unchanged suite | Occurrences | Fully native | Native body, host fixture | Host-driven native operation | Mixed | Failed | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| [Primary](observations/8656b43/evidence-linux.json) | 325 | 0 | 9 | 17 | 9 | 0 | 290 |
-| [Free-threading](observations/8656b43/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
+| [Primary](observations/ab891d1/evidence-linux.json) | 325 | 0 | 12 | 17 | 7 | 0 | 289 |
+| [Free-threading](observations/ab891d1/evidence-free-threading-linux.json) | 4 | 0 | 0 | 0 | 0 | 4 |
 
 ## Canonical main at `56731b6`
 

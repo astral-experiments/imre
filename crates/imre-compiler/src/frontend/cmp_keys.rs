@@ -1,5 +1,66 @@
 //! functools comparator keys retain the callback and invoke it on comparison.
 use super::*;
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+
+pub(super) fn can_specialize(definition: &ast::StmtFunctionDef) -> bool {
+    let params = &definition.parameters;
+    !definition.is_async
+        && definition.decorator_list.is_empty()
+        && definition.type_params.is_none()
+        && definition.returns.is_none()
+        && params.len() == 2
+        && params.posonlyargs.len() + params.args.len() == 2
+        && params
+            .iter_non_variadic_params()
+            .all(|p| p.annotation().is_none() && p.default.is_none())
+}
+
+/// Find local functions passed to the resolved functools operation in this scope.
+pub(super) fn local_comparators(
+    body: &[ast::Stmt],
+    is_factory: impl Fn(&ast::Expr) -> bool,
+) -> HashSet<String> {
+    struct Find<F> {
+        factory: F,
+        names: HashSet<String>,
+    }
+    impl<'a, F: Fn(&ast::Expr) -> bool> Visitor<'a> for Find<F> {
+        fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+            if !matches!(
+                statement,
+                ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)
+            ) {
+                walk_stmt(self, statement);
+            }
+        }
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if let ast::Expr::Call(call) = expr
+                && (self.factory)(&call.func)
+            {
+                let arg = match (
+                    call.arguments.args.as_ref(),
+                    call.arguments.keywords.as_ref(),
+                ) {
+                    ([one], []) => Some(one),
+                    ([], [kw]) if kw.arg.as_deref() == Some("mycmp") => Some(&kw.value),
+                    _ => None,
+                };
+                if let Some(ast::Expr::Name(name)) = arg {
+                    self.names.insert(name.id.to_string());
+                }
+            }
+            if !matches!(expr, ast::Expr::Lambda(_)) {
+                walk_expr(self, expr);
+            }
+        }
+    }
+    let mut find = Find {
+        factory: is_factory,
+        names: HashSet::new(),
+    };
+    find.visit_body(body);
+    find.names
+}
 
 fn view(value: Expr, ty: Type) -> Expr {
     Expr {
@@ -78,12 +139,17 @@ impl Checker<'_> {
             .args
             .iter()
             .chain(args.keywords.iter().map(|kw| &kw.value))
-            .map(|arg| self.expr(arg))
+            .map(|arg| self.cmp_callback_value(arg).map(|(value, _)| value))
             .collect::<Result<_, _>>()?;
         Ok(Err(raised(ty, "TypeError", &message, used)))
     }
 
-    fn new_cmp_key(&self, comparator: Expr, value: Option<Expr>) -> Expr {
+    fn new_cmp_key(
+        &self,
+        comparator: Expr,
+        value: Option<Expr>,
+        source: Option<(usize, u32)>,
+    ) -> Expr {
         let bound = value.is_some();
         let mut fields = vec![comparator];
         if let Some(value) = value {
@@ -94,7 +160,7 @@ impl Checker<'_> {
         }
         let frame = self
             .types
-            .partial_frame(fields.iter().map(|field| field.ty).collect());
+            .cmp_frame(fields.iter().map(|field| field.ty).collect(), source);
         let Type::Tuple(id) = frame else {
             unreachable!()
         };
@@ -107,13 +173,26 @@ impl Checker<'_> {
         )
     }
 
+    fn cmp_callback_value(
+        &mut self,
+        arg: &ast::Expr,
+    ) -> Result<(Expr, Option<(usize, u32)>), String> {
+        let source = self.deferred_comparator(arg);
+        let comparator = if let Some((_, start)) = source {
+            pipelines::integer(i64::from(start))
+        } else {
+            self.expr(arg)?
+        };
+        Ok((comparator, source))
+    }
+
     pub(super) fn cmp_to_key(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let arg = match self.cmp_argument(call, "cmp_to_key", "mycmp", Type::None)? {
             Ok(arg) => arg,
             Err(error) => return Ok(error),
         };
-        let comparator = self.expr(arg)?;
-        Ok(self.new_cmp_key(comparator, None))
+        let (comparator, source) = self.cmp_callback_value(arg)?;
+        Ok(self.new_cmp_key(comparator, None, source))
     }
 
     pub(super) fn cmp_field(&self, key: Expr, frame: usize, field: usize) -> Expr {
@@ -140,7 +219,11 @@ impl Checker<'_> {
             Err(error) => return Ok(scope.finish(error)),
         };
         let value = self.expr(arg)?;
-        Ok(scope.finish(self.new_cmp_key(self.cmp_field(key, frame, 0), Some(value))))
+        Ok(scope.finish(self.new_cmp_key(
+            self.cmp_field(key, frame, 0),
+            Some(value),
+            self.types.deferred_cmp_source(frame),
+        )))
     }
 
     pub(super) fn cmp_key_obj(&self, key: Expr, frame: usize, bound: bool) -> Expr {
@@ -208,6 +291,61 @@ impl Checker<'_> {
         }))
     }
 
+    /// Sorting calls the saved comparator only when there are two objects to order.
+    pub(super) fn sort_cmp_key(
+        &mut self,
+        values: Expr,
+        key: Expr,
+        frame: usize,
+        element: Type,
+        reverse: Expr,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let comparator = if let Some(source) = self.types.deferred_cmp_source(frame) {
+            self.specialize_comparator(source, element, element, site)?
+        } else {
+            self.cmp_field(key, frame, 0)
+        };
+        let Some((params, returns)) = self.types.signature(comparator.ty) else {
+            let name = functools::noncallable_type(comparator.ty)
+                .ok_or_else(|| error(self.source, site, "unsupported sort comparator"))?;
+            let length = Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Len, vec![values]),
+            };
+            let test = pipelines::compare(Compare::Greater, length, pipelines::integer(1));
+            let fail = raised(
+                Type::None,
+                "TypeError",
+                &format!("'{name}' object is not callable"),
+                vec![comparator],
+            );
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Conditional(
+                    Box::new(test),
+                    Box::new(fail),
+                    Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    }),
+                ),
+            });
+        };
+        if params != [element, element] || !matches!(returns, Type::Bool | Type::Int | Type::Float)
+        {
+            return Err(error(
+                self.source,
+                site,
+                "sort comparator needs two element arguments and a numeric result",
+            ));
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::SortByComparator, vec![values, comparator, reverse]),
+        })
+    }
+
     /// Only the left key supplies the comparator, even when two factories are involved.
     fn compare_cmp_keys(
         &mut self,
@@ -247,7 +385,13 @@ impl Checker<'_> {
                 vec![left, right],
             ));
         }
-        let comparator = self.cmp_field(left.clone(), l, 0);
+        let a = self.cmp_key_obj(left.clone(), l, true);
+        let b = self.cmp_key_obj(right, r, true);
+        let comparator = if let Some(source) = self.types.deferred_cmp_source(l) {
+            self.specialize_comparator(source, a.ty, b.ty, site)?
+        } else {
+            self.cmp_field(left, l, 0)
+        };
         let Some((params, returns)) = self.types.signature(comparator.ty) else {
             let name = functools::noncallable_type(comparator.ty)
                 .ok_or_else(|| error(self.source, site, "unsupported comparator callback type"))?;
@@ -258,7 +402,7 @@ impl Checker<'_> {
                 vec![comparator],
             ));
         };
-        let [a, b] = params.as_slice() else {
+        let [expected_a, expected_b] = params.as_slice() else {
             return Err(error(
                 self.source,
                 site,
@@ -266,8 +410,8 @@ impl Checker<'_> {
             ));
         };
         let args = vec![
-            self.coerce(self.cmp_key_obj(left, l, true), *a, site)?,
-            self.coerce(self.cmp_key_obj(right, r, true), *b, site)?,
+            self.coerce(a, *expected_a, site)?,
+            self.coerce(b, *expected_b, site)?,
         ];
         let comparison = Expr {
             ty: returns,
@@ -276,7 +420,8 @@ impl Checker<'_> {
                 args: ir::CallArgs::positional(args),
             },
         };
-        let zero = match returns {
+        let comparison = powers::integer(comparison);
+        let zero = match comparison.ty {
             Type::Int => pipelines::integer(0),
             Type::Float => Expr {
                 ty: Type::Float,

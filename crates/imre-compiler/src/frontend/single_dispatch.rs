@@ -155,8 +155,12 @@ impl Registration {
 impl Checker<'_> {
     /// Store the class alongside the original owned value. Its concrete record
     /// descriptor releases the payload after the caller and callback finish.
-    pub(super) fn unread_argument(&mut self, arg: &ast::Expr, ty: Type) -> Result<Expr, String> {
-        let value = self.expr(arg)?;
+    pub(super) fn pack_unread_value(
+        &mut self,
+        value: Expr,
+        arg: &ast::Expr,
+        ty: Type,
+    ) -> Result<Expr, String> {
         if value.ty == ty {
             return Ok(value);
         }
@@ -465,11 +469,9 @@ impl Checker<'_> {
         def: &ast::StmtFunctionDef,
     ) -> Result<Expr, String> {
         match decorator {
-            LocalDecorator::Dispatch => self.new_dispatcher(
-                target,
-                Some(function_text::FunctionText::from_definition(def)),
-                def,
-            ),
+            LocalDecorator::Dispatch => {
+                self.new_dispatcher(target, Some(self.function_text(def)), def)
+            }
             LocalDecorator::Register(selection) => selection.apply(self, target, def),
         }
     }

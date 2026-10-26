@@ -324,14 +324,32 @@ impl Checker<'_> {
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {
-                if let Ok(target) = self.expr(classes)
-                    && matches!(target.ty, Type::ForwardRef(_))
-                {
-                    return Ok(Self::class_check_error(
-                        value,
-                        target,
-                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
-                    ));
+                if let Ok(target) = self.expr(classes) {
+                    match target.ty {
+                        Type::Placeholder(ir::PlaceholderKind::Class) => {
+                            // Looking up either operand can run Python code.
+                            let mut scope = calls::ArgumentScope::default();
+                            let value = scope.hold(self, value);
+                            scope.hold(self, target);
+                            let class =
+                                InstanceType::Exact(Type::Placeholder(ir::PlaceholderKind::Value));
+                            return Ok(scope.finish(Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Builtin(
+                                    Builtin::IsInstance(vec![class]),
+                                    vec![value],
+                                ),
+                            }));
+                        }
+                        Type::ForwardRef(_) | Type::Placeholder(ir::PlaceholderKind::Value) => {
+                            return Ok(Self::class_check_error(
+                                value,
+                                target,
+                                "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
                 return Err(diagnostic);
             }

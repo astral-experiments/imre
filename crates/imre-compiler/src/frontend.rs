@@ -2737,6 +2737,17 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        self.expr_expected_or(expression, expected, None)
+    }
+
+    /// A partial can accept a sentinel in place of a parameter. Preserve its type
+    /// while checking ordinary operands in the declared parameter's context.
+    fn expr_expected_or(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: Option<Type>,
+    ) -> Result<Expr, String> {
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -2756,11 +2767,17 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) {
-            return self.pack_len_argument(expression);
-        }
-        if self.types.is_unread_argument(expected) {
-            return self.unread_argument(expression, expected);
+        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+            let value = self.expr(expression)?;
+            // A partial consumes its marker before the target's own argument ABI.
+            // Keep the evaluated value so a lookup or callback runs exactly once.
+            return if alternative == Some(value.ty) {
+                Ok(value)
+            } else if self.types.is_len_argument(expected) {
+                self.pack_len_value(value, expression)
+            } else {
+                self.pack_unread_value(value, expression, expected)
+            };
         }
         // A record can carry user fields with distinct types. An expected scalar type
         // permits reading such a field; the runtime checks its actual representation.
@@ -3114,6 +3131,9 @@ impl<'a> Checker<'a> {
             }
             _ => self.typed_expr(expression)?,
         };
+        if alternative == Some(value.ty) {
+            return Ok(value);
+        }
         self.coerce(value, expected, expression)
     }
 
@@ -5774,6 +5794,9 @@ impl<'a> Checker<'a> {
                     return Ok(self.linecache_mapping());
                 }
                 Intrinsic::InspectSentinel => return Ok(inspect::sentinel()),
+                Intrinsic::Placeholder => {
+                    return Ok(partials::singleton(ir::PlaceholderKind::Value));
+                }
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
@@ -5792,6 +5815,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysImplementation => {
+                    return Ok(Expr {
+                        ty: Type::SysImplementation,
+                        kind: ExprKind::Builtin(Builtin::SysImplementation, vec![]),
+                    });
+                }
                 Intrinsic::SysVersionInfo => return Ok(self.sys_version_info(false)),
                 Intrinsic::SysThreadInfo => return Ok(self.sys_thread_info()),
                 Intrinsic::SysHexversion => {
@@ -6961,6 +6990,30 @@ impl<'a> Checker<'a> {
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return Ok(wrapped);
                 }
+                if let Type::Placeholder(kind) = receiver.ty {
+                    let result = match (kind, attribute.attr.as_str()) {
+                        (ir::PlaceholderKind::Value, "__class__") => {
+                            partials::singleton(ir::PlaceholderKind::Class)
+                        }
+                        (ir::PlaceholderKind::Class, "__class__") => {
+                            annotations::builtin_type("type").unwrap()
+                        }
+                        (ir::PlaceholderKind::Class, "__name__" | "__qualname__") => {
+                            unpacking::string("_PlaceholderType")
+                        }
+                        (ir::PlaceholderKind::Class, "__module__") => {
+                            unpacking::string("functools")
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported Placeholder attribute",
+                            ));
+                        }
+                    };
+                    return Ok(partials::after(receiver, result));
+                }
                 if let Type::CmpKey(frame, bound) = receiver.ty
                     && attribute.attr.as_str() == "obj"
                 {
@@ -6984,6 +7037,22 @@ impl<'a> Checker<'a> {
                 }
                 if let Type::StrDescriptor(method) = receiver.ty {
                     return self.descriptor_attribute(receiver, method, attribute);
+                }
+                if receiver.ty == Type::SysImplementation {
+                    let index = crate::version::IMPLEMENTATION
+                        .iter()
+                        .position(|&name| name == attribute.attr.as_str())
+                        .ok_or_else(|| {
+                            error(
+                                self.source,
+                                attribute,
+                                "unknown sys.implementation attribute",
+                            )
+                        })?;
+                    return Ok(Expr {
+                        ty: crate::version::implementation_fields(self.types)[index],
+                        kind: ExprKind::Field(Box::new(receiver), index),
+                    });
                 }
                 if let Some(declaration) = self.types.tuple_metadata(receiver.ty) {
                     if self.types.is_stat_result(receiver.ty) {
@@ -7932,6 +8001,13 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::Partial)) => return self.partial(call),
+            Some(Binding::Intrinsic(Intrinsic::Placeholder)) => {
+                return self.placeholder_call(
+                    call,
+                    partials::singleton(ir::PlaceholderKind::Value),
+                    ir::PlaceholderKind::Value,
+                );
+            }
             Some(Binding::Intrinsic(Intrinsic::SingleDispatch)) => {
                 return self.single_dispatch(call);
             }
@@ -9078,6 +9154,24 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [value] = args.as_slice()
+            && let Type::Placeholder(kind) = value.ty
+        {
+            let result = match name.id.as_str() {
+                "type" if kind == ir::PlaceholderKind::Value => {
+                    Some(partials::singleton(ir::PlaceholderKind::Class))
+                }
+                "type" => annotations::builtin_type("type"),
+                "callable" => Some(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(kind == ir::PlaceholderKind::Class),
+                }),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(partials::after(value.clone(), result));
+            }
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Calendar(_))
             && matches!(name.id.as_str(), "str" | "print" | "repr")
@@ -9120,16 +9214,21 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && ((args[0].ty.is_path() && matches!(name.id.as_str(), "str" | "print"))
+            && (((args[0].ty.is_path() || self.types.payload(args[0].ty) == Some(Type::Str))
+                && matches!(name.id.as_str(), "str" | "print"))
                 || (args[0].ty == Type::PathInfo
                     && matches!(name.id.as_str(), "str" | "repr" | "print")))
         {
-            let op = if args[0].ty == Type::PathInfo {
-                ir::PathOperation::InfoRepr
+            let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
+                self.optional_text(args.into_iter().next().unwrap())
             } else {
-                ir::PathOperation::Text
+                let op = if args[0].ty == Type::PathInfo {
+                    ir::PathOperation::InfoRepr
+                } else {
+                    ir::PathOperation::Text
+                };
+                paths::operation(op, Type::Str, args)
             };
-            let text = paths::operation(op, Type::Str, args);
             return Ok(if name.id != "print" {
                 text
             } else {
@@ -9304,7 +9403,10 @@ impl<'a> Checker<'a> {
             return Ok(rendered);
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::PlainObject | Type::StrDescriptor(_))
+            && matches!(
+                args[0].ty,
+                Type::PlainObject | Type::StrDescriptor(_) | Type::Placeholder(_)
+            )
             && matches!(name.id.as_str(), "repr" | "str" | "print")
         {
             let rendered = Expr {
@@ -9319,6 +9421,16 @@ impl<'a> Checker<'a> {
             } else {
                 rendered
             });
+        }
+        if name.id == "hasattr"
+            && let [receiver, key] = args.as_slice()
+            && receiver.ty == Type::SysImplementation
+            && self.resolve(&call.func).is_none()
+            && !self.names.contains_key("hasattr")
+        {
+            self.reject_builtin_keywords(call)?;
+            let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
+            return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
         if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
@@ -9354,6 +9466,7 @@ impl<'a> Checker<'a> {
                 && (matches!(
                     args[0].ty,
                     Type::Class(_)
+                        | Type::SysImplementation
                         | Type::CompletedProcess(..)
                         | Type::Context
                         | Type::ContextMissing

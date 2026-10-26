@@ -30,13 +30,7 @@ impl Checker<'_> {
             && self.resolve(expr).is_none()
     }
 
-    /// Keep the actual argument alive through the cached or original function call.
-    pub(super) fn pack_len_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let value = self.expr(expression)?;
-        self.pack_len_value(value, expression)
-    }
-
-    /// Pack the concrete item when a direct call or iterator invokes len.
+    /// Pack and retain the actual argument for a direct, cached or iterator call to len.
     pub(super) fn pack_len_value(
         &mut self,
         value: Expr,
@@ -264,6 +258,30 @@ impl Checker<'_> {
             result,
             format!("{name}() argument must be str, not {ty}"),
         ))
+    }
+
+    /// Evaluate the metadata receiver before looking up its field name.
+    pub(super) fn implementation_hasattr(&mut self, receiver: Expr, name: Expr) -> Expr {
+        let names = Expr {
+            ty: self.types.list(Type::Str),
+            kind: ExprKind::List(
+                crate::version::IMPLEMENTATION
+                    .iter()
+                    .map(|s| unpacking::string(*s))
+                    .collect(),
+            ),
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Expr(receiver)],
+                clear: vec![],
+                value: Box::new(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::StringListContains, vec![name, names]),
+                }),
+            },
+        }
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
@@ -711,11 +729,7 @@ impl Checker<'_> {
 
     pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
         Expr {
-            ty: self.types.struct_sequence(
-                "sys.version_info",
-                crate::version::FIELDS,
-                vec![Type::Int, Type::Int, Type::Int, Type::Str, Type::Int],
-            ),
+            ty: crate::version::info_type(self.types),
             kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
         }
     }

@@ -493,6 +493,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
                         }
+                        Storage::FunctoolsPlaceholder { class } => {
+                            output.push_str(if *class {
+                                "<class 'functools._PlaceholderType'>"
+                            } else {
+                                "Placeholder"
+                            });
+                            None
+                        }
                         Storage::StrDescriptor(index) => {
                             write!(
                                 output,
