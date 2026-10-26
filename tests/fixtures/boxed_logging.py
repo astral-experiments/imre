@@ -24,9 +24,12 @@ def current():
     assert parent.parent is logging.getLogger()
     assert logging.getLogger("access.child") is child
 
-    independent = logging.Logger("access.child")
+    independent = logging.Logger("access.child", logging.ERROR)
     assert independent is not child and independent.parent is None
     assert independent.handlers is not child.handlers
+    assert not independent.isEnabledFor(logging.INFO)
+    independent.setLevel(logging.DEBUG)
+    assert independent.isEnabledFor(logging.INFO)
     parent.setLevel("INFO")
     assert child.level == logging.NOTSET and child.getEffectiveLevel() == logging.INFO
 
