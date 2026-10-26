@@ -2,6 +2,13 @@
 from __future__ import annotations
 
 
+def _valid_field_name(name: str) -> bool:
+    for char in name:
+        if char == ":" or not 33 <= ord(char) <= 126:
+            return False
+    return bool(name)
+
+
 class HTTPMessage:
     _headers: list[tuple[str, str]]
 
@@ -21,6 +28,8 @@ class HTTPMessage:
         return self.get(name)
 
     def __setitem__(self, name: str, value: str) -> None:
+        if not _valid_field_name(name):
+            raise ValueError("Header field name contains invalid characters: " + repr(name))
         self._headers.append((name, value))
 
     def get_all(self, name: str) -> list[str] | None:
@@ -49,11 +58,8 @@ class HTTPMessage:
             if colon == 0:
                 continue
             name = line[:colon]
-            for char in name:
-                if ord(char) < 33 or ord(char) > 126:
-                    name = ""
-                    break
-            if not name:
+            if not _valid_field_name(name):
+                name = ""
                 break
             value = line[colon + 1:]
         if name:

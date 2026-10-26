@@ -70,6 +70,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body.encode())
 
 
+message = HTTPMessage()
+message['X-Tag'] = 'first'
+for invalid_name in ('', 'a:b', 'a b', 'a\tb', 'a\r\nb', 'a\x00b', 'a\x7fb'):
+    try:
+        message[invalid_name] = 'invalid'
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(invalid_name)
+message['x-tag'] = 'second'
+assert message.items() == [('X-Tag', 'first'), ('x-tag', 'second')]
+
 assert issubclass(HTTPServer, socketserver.TCPServer)
 assert issubclass(BaseHTTPRequestHandler, socketserver.StreamRequestHandler)
 assert BaseHTTPRequestHandler.MessageClass is HTTPMessage
