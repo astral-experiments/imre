@@ -374,6 +374,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
+            "boxed_list_pop.py",
             "boxed_bytes_separators.py",
             "boxed_reversed_list.py",
         ):
