@@ -957,19 +957,14 @@ impl Context {
                 });
                 Ok(result)
             }
-            Value::Class { name, .. } => {
-                if [
-                    "Exception",
-                    "ValueError",
-                    "RuntimeError",
-                    "OSError",
-                    "TypeError",
-                ]
-                .iter()
-                .any(|kind| self.has_base(callable, kind))
-                {
-                    let message = args.first().map(|&x| self.display(x)).unwrap_or_default();
-                    return Ok(self.alloc(Value::Raised(Error::new(&name, message))));
+            Value::Class {
+                name, ancestors, ..
+            } => {
+                if ancestors.iter().any(|&base| {
+                    matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
+                }) {
+                    let error = self.exception(&name, &args);
+                    return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
                     if args.len() > names.len() {
