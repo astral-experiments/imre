@@ -27,6 +27,14 @@ use super::{Object, Storage, StorageCell, Str, fail, object};
 mod os;
 pub(super) use os::Filename;
 
+#[derive(Clone, Debug)]
+pub(crate) struct OsErrorArgs {
+    pub(crate) errno: i64,
+    pub(crate) description: String,
+    /// Both path fields are available when the native exception contains text paths or no paths.
+    pub(crate) text_paths: Option<[Option<String>; 2]>,
+}
+
 #[repr(C)]
 pub struct NamedDescriptor {
     name: *const u8,
@@ -856,7 +864,7 @@ impl Error {
     }
 
     /// Copy the two original OS arguments when transferring a kernel error to boxed Python.
-    pub(crate) fn os_args(&self) -> Option<(i64, String)> {
+    pub(crate) fn os_args(&self) -> Option<OsErrorArgs> {
         if !self.kind.matches(Kind::OSError) {
             return None;
         }
@@ -869,12 +877,21 @@ impl Error {
         if code.kind.raw() != 2 || description.kind.raw() != 3 {
             return None;
         }
+        let text_path = |path: Option<&Filename>| match path {
+            Some(Filename::Str(path)) => Some(Some(path.to_string())),
+            None => Some(None),
+            Some(_) => None,
+        };
+        let paths = arguments.os_paths.as_deref();
+        let first = text_path(paths.map(|paths| &paths.first));
+        let second = text_path(paths.and_then(|paths| paths.second.as_ref()));
         // SAFETY: both owned argument words have the verified integer and string kinds.
         unsafe {
-            Some((
-                crate::Int::borrow(code.word).to_i64()?,
-                (&*(description.word as *const Str)).to_string(),
-            ))
+            Some(OsErrorArgs {
+                errno: crate::Int::borrow(code.word).to_i64()?,
+                description: (&*(description.word as *const Str)).to_string(),
+                text_paths: first.zip(second).map(|(first, second)| [first, second]),
+            })
         }
     }
 

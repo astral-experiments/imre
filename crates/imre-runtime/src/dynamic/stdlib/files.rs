@@ -264,3 +264,71 @@ pub(super) fn call(
         )),
     }
 }
+
+pub(super) fn text_method(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "expected a text file"));
+    };
+    let Value::TextFile(file) = ctx.heap.get(receiver) else {
+        return Err(Error::new("TypeError", "expected a text file"));
+    };
+    if !kwargs.is_empty() {
+        let class = if name == "__exit__" {
+            ""
+        } else {
+            "TextIOWrapper."
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("{class}{name}() takes no keyword arguments"),
+        ));
+    }
+    let arity = usize::from(name == "write");
+    if name != "__exit__" && args.len() != arity {
+        let expected = if arity == 0 {
+            "no arguments"
+        } else {
+            "exactly one argument"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "TextIOWrapper.{name}() takes {expected} ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    match name {
+        "write" => {
+            let Value::Str(value) = ctx.heap.get(args[0]) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "write() argument must be str, not {}",
+                        ctx.type_name(args[0])
+                    ),
+                ));
+            };
+            file.write(value)?;
+            Ok(ctx.int(value.chars().count() as i64))
+        }
+        "flush" => {
+            file.flush()?;
+            Ok(NONE)
+        }
+        "close" | "__exit__" => {
+            file.close()?;
+            Ok(NONE)
+        }
+        "__enter__" if file.closed() => {
+            Err(Error::new("ValueError", "I/O operation on closed file."))
+        }
+        "__enter__" => Ok(receiver),
+        _ => Err(Error::new("AttributeError", name)),
+    }
+}
