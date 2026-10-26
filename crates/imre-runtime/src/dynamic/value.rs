@@ -103,6 +103,7 @@ pub(super) enum Value {
     None,
     Bool(bool),
     Int(crate::Int),
+    Float(f64),
     Range {
         start: i64,
         stop: i64,
@@ -262,6 +263,7 @@ impl Value {
             Self::None
             | Self::Bool(_)
             | Self::Int(_)
+            | Self::Float(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::Native(_)

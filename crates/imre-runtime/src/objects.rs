@@ -41,7 +41,10 @@ mod itertools;
 mod join_buffer;
 mod joined_lines;
 mod json;
-pub(crate) use json::write_string as write_json_string;
+pub(crate) use json::{
+    DecodedJson, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
+    write_string as write_json_string,
+};
 mod linecache;
 mod logging;
 mod mappings;

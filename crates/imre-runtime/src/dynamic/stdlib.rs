@@ -156,6 +156,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     }
     let id = match (module, name) {
         ("sys", "argv") => ctx.argv,
+        ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
             path_text(ctx, &layout(ctx)?.prefix)?
@@ -254,7 +255,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_implementation",
         )
         | ("struct", "calcsize" | "unpack" | "error")
-        | ("json", "dumps")
+        | ("json", "dumps" | "loads")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
@@ -287,7 +288,11 @@ pub(super) fn call(
     let (max_args, keywords): (usize, &[&str]) = match name {
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
-        "json.dumps" => (1, &["ensure_ascii"]),
+        "json.loads" => (1, &["s"]),
+        "json.dumps" => (
+            1,
+            &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
+        ),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
@@ -471,9 +476,24 @@ pub(super) fn call(
                 .collect();
             ctx.alloc(Value::Tuple(items))
         }
+        "json.loads" => {
+            let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    "loads() missing 1 required positional argument: 's'",
+                )
+            })?;
+            json::loads(ctx, input)?
+        }
         "json.dumps" => {
-            let ascii = kwargs.first().is_none_or(|&(_, id)| ctx.truth(id));
-            ctx.text(json::dumps(ctx, argument(args, 0)?, ascii)?)
+            let input = option(args, 0, kwargs, "obj")?.ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    "dumps() missing 1 required positional argument: 'obj'",
+                )
+            })?;
+            let text = json::dumps(ctx, input, kwargs)?;
+            ctx.text(text)
         }
         "functools.lru_cache" => {
             if args.is_empty() && kwargs.is_empty() {

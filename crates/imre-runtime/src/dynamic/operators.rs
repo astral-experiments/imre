@@ -24,6 +24,7 @@ impl Context {
             Value::None => false,
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
+            Value::Float(f) => *f != 0.0,
             Value::Str(s) => !s.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::List(v)
@@ -54,6 +55,13 @@ impl Context {
                 .unwrap()
                 .cmp(&self.as_int(b).unwrap())
                 .is_eq(),
+            (Value::Float(x), Value::Float(y)) => x == y,
+            (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
+                crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
+            }
+            (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
+                crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
+            }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Native(a), Value::Native(b)) => a == b,
@@ -77,13 +85,22 @@ impl Context {
             },
         }
     }
-    fn compare(&self, a: Id, b: Id) -> Result<Ordering> {
+    pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let int_float = |integer, float| {
+            let order = crate::floats::compare(&self.as_int(integer)?, float);
+            Ok((order != 2).then(|| order.cmp(&0)))
+        };
         match (self.heap.get(a), self.heap.get(b)) {
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => {
-                Ok(self.as_int(a)?.cmp(&self.as_int(b)?))
+                Ok(Some(self.as_int(a)?.cmp(&self.as_int(b)?)))
             }
-            (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
-            (Value::Bytes(x), Value::Bytes(y)) => Ok(x.cmp(y)),
+            (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y)),
+            (Value::Int(_) | Value::Bool(_), Value::Float(f)) => int_float(a, *f),
+            (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
+                Ok(int_float(b, *f)?.map(Ordering::reverse))
+            }
+            (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
+            (Value::Bytes(x), Value::Bytes(y)) => Ok(Some(x.cmp(y))),
             _ => {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
@@ -96,7 +113,7 @@ impl Context {
                             return self.compare(i, j);
                         }
                     }
-                    Ok(x.len().cmp(&y.len()))
+                    Ok(Some(x.len().cmp(&y.len())))
                 } else {
                     Err(Error::new("TypeError", "objects do not support ordering"))
                 }
@@ -129,6 +146,7 @@ impl Context {
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Str(s) => s.clone(),
             Value::Bytes(bytes) => format!(
                 "b'{}'",
@@ -326,14 +344,19 @@ impl Context {
             "%" if let Value::Str(text) = self.heap.get(a) => {
                 return builtins::percent(self, &text.clone(), b);
             }
-            "==" => return Ok(truth(self.equal(a, b))),
-            "!=" => return Ok(truth(!self.equal(a, b))),
+            "==" | "!=" => {
+                let equal =
+                    self.equal(a, b) && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan());
+                return Ok(truth(equal == (op == "==")));
+            }
             "is" => return Ok(truth(a == b)),
             "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => {
-                let c = self.compare(a, b)?;
+                let Some(c) = self.compare(a, b)? else {
+                    return Ok(FALSE);
+                };
                 return Ok(truth(match op {
                     "<" => c.is_lt(),
                     "<=" => c.is_le(),

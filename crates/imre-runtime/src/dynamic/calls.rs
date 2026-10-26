@@ -85,6 +85,7 @@ impl Context {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
+                    || (name == "ValueError" && kind == "JSONDecodeError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (name == "OSError"

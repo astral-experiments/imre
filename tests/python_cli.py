@@ -320,6 +320,45 @@ except ValueError as err:
     print(err)
 """,
         )
+        compare(
+            "-IB",
+            "-c",
+            """\
+import json, sysconfig
+
+def fallback(value):
+    return ["fallback", value.label]
+
+class Extra:
+    label = "π"
+
+data = json.loads(b'{"values": [39614081257132168796771975168, 3, -2]}')
+values = data["values"]
+options = {"default": fallback, "separators": (",", ":")}
+options.setdefault("default", None)
+options.setdefault("ensure_ascii", True)
+options.setdefault("sort_keys", True)
+print(json.dumps({"total": values[0] + values[1] + values[2], "count": len(values)}, **options))
+try:
+    json.loads(b"{}")["values"]
+except KeyError as err:
+    print(str(err))
+print(json.dumps({"ok": True}, **options))
+print(json.dumps({"z": Extra(), "a": json.loads("1.25")}, **options))
+print(json.dumps({2: False, json.loads("0.5"): True}, sort_keys=True))
+nan = json.loads("NaN")
+print(nan == nan, nan <= 1, [nan] == [nan])
+defaults = {"present": None}
+print(defaults.setdefault("missing"), defaults.setdefault("present", 1), len(defaults))
+data = json.loads('{"k": 1, "other": [true], "k": 2}')
+data["other"].append(False)
+print(json.dumps(data))
+try:
+    json.loads(b'{"values": [1,]}')
+except ValueError as err:
+    print(isinstance(err, json.JSONDecodeError), str(err))
+""",
+        )
     print("Python script and command-line semantics match CPython")
 
 
