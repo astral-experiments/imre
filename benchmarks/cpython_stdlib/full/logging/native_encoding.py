@@ -125,14 +125,18 @@ def stream_setting_case(toolchain, work):
             lines = (work / "case.py").read_text().splitlines()
             (line, column), = [(i, s.index("self.") + 1) for i, s in enumerate(lines, 1)
                                if s.lstrip().startswith("self.assertIs(old, sys.stderr)")]
-            error = f"case.py:{line}:{column}: Imre: unknown class method"
-            if error not in str(exc):
+            diagnostics = ("unknown class method",
+                           "generated repr cannot format resource, callable, or custom-repr fields")
+            location = f"case.py:{line}:{column}: Imre: "
+            diagnostic = next((msg for msg in diagnostics
+                               if any(row.endswith(location + msg) for row in str(exc).splitlines())), None)
+            if diagnostic is None:
                 raise
             fixture = prefix + "\nclass NativeCase:\n" + SETUP + IDENTITY
             call = native_method(toolchain, work, SOURCE, "StreamHandlerTest", SETTING,
                                  fixture, operation=operation)
             details = {"assertion": "Native object identity and None checks on the original operands",
-                       "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"}
+                       "shared_assertion_blocker": f"unittest.TestCase.assertIs: {diagnostic}"}
         else:
             details = {"assertion": "Native unittest.TestCase identity assertions"}
         result = call(case, method)

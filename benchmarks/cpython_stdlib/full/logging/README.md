@@ -38,12 +38,11 @@ CPython also accepts assignment to `logger.manager`. Imre rejects that assignmen
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 22 |
+| Imre | Imre | Imre | CPython hooks and native child | 23 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
 | CPython | CPython | Imre | CPython hooks and native child | 7 |
 | Blocked before execution | | | | 196 |
-| Failed while compiling the stock stream identity assertion | | | | 1 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -54,8 +53,7 @@ delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
 The [plain UTF-8 file method](stream-delivery.md#plain-utf-8-file) checks text written by a native logger and file handler. Its body, file read, and assertion run in CPython.
-`StreamHandlerTest.test_stream_setting` fails to compile its stock `assertIs(old, sys.stderr)`:
-the assertion's diagnostic needs `repr` for a stream. The unchanged CPython method passes.
+The unchanged `StreamHandlerTest.test_stream_setting` checks the previous and unchanged streams by identity in Imre. The shared `assertIs(old, sys.stderr)` cannot render a stream in its diagnostic, so the [native assertion fixture](stream-delivery.md) checks the original operands. CPython still runs setup and cleanup.
 Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
 Two more [filename configuration methods](config.md#filename-configuration) check native option conflicts and the UTF-8 bytes emitted through the root. The option-conflict assertions run in Imre; CPython checks the emitted file.
 Two [ASCII file configuration methods](config.md#file-encoding-and-errors) check explicit and default error handling. Their bodies and assertions run in CPython, and their file handlers emit in Imre.

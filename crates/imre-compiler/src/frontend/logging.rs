@@ -135,7 +135,7 @@ impl Checker<'_> {
                 vec![
                     required("logger", Type::Logger),
                     required("level", Type::Int),
-                    required("msg", Type::Str),
+                    required("record", Type::LogRecord),
                     required("found", Type::Bool),
                 ],
             ),
@@ -754,17 +754,17 @@ impl Checker<'_> {
         }
         let logger = self.local(clear[0]);
         let level = self.local(clear[1]);
-        let message = if operands.is_empty() {
-            self.log_scalar(self.local(clear[2]), 's', message)?
-        } else {
-            let ast::Expr::StringLiteral(format) = message else {
-                return Err(error(
-                    self.source,
-                    message,
-                    "log messages with arguments require a literal format",
-                ));
-            };
-            self.log_format(format.value.to_str(), &clear[3..], message)?
+        let original = self.check_record_value(self.local(clear[2]), message)?;
+        let arguments = clear[3..]
+            .iter()
+            .zip(operands)
+            .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
+            .collect::<Result<Vec<_>, _>>()?;
+        let arguments = Expr {
+            ty: self
+                .types
+                .tuple(arguments.iter().map(|arg| arg.ty).collect()),
+            kind: ExprKind::Tuple(arguments),
         };
         let enabled = operation(
             Log::Enabled,
@@ -798,10 +798,33 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Int(line.to_string()),
         };
+        let none = || Expr {
+            ty: Type::None,
+            kind: ExprKind::None,
+        };
+        let caller = caller_name(
+            &self.graph.modules[self.module].parsed.syntax().body,
+            call.range(),
+        );
+        let record = logging_records::op(
+            ir::LogRecordOperation::New,
+            Type::LogRecord,
+            vec![
+                operation(Log::Name, Type::Str, vec![logger.clone()]),
+                level.clone(),
+                path,
+                lineno,
+                original,
+                arguments,
+                none(),
+                text(caller),
+                none(),
+            ],
+        );
         let emit = self.call_value(
             sig,
             Type::None,
-            ir::CallArgs::positional(vec![logger, level, message, path, lineno]),
+            ir::CallArgs::positional(vec![logger, level, record]),
         );
         Ok(Expr {
             ty: Type::None,
@@ -822,97 +845,59 @@ impl Checker<'_> {
             },
         })
     }
+}
 
-    fn log_scalar(&self, value: Expr, kind: char, node: &ast::Expr) -> Result<Expr, String> {
-        if kind == 's' && matches!(value.ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)) {
-            return Ok(Self::string_value(value));
-        }
-        if kind == 's' && value.ty == Type::Path {
-            return Ok(paths::operation(
-                ir::PathOperation::Text,
-                Type::Str,
-                vec![value],
-            ));
-        }
-        if kind == 'd' && value.ty == Type::Bool {
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Conditional(
-                    Box::new(value),
-                    Box::new(text("1")),
-                    Box::new(text("0")),
-                ),
-            });
-        }
-        if (kind == 'd' && value.ty != Type::Int)
-            || !matches!(
-                value.ty,
-                Type::Str
-                    | Type::StrLiteral(_)
-                    | Type::Bytes
-                    | Type::Int
-                    | Type::Float
-                    | Type::Bool
-                    | Type::None
-            )
-        {
-            return Err(error(
-                self.source,
-                node,
-                "log format argument requires a supported scalar type",
-            ));
-        }
-        Ok(Expr {
-            ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::Repr, vec![Self::string_value(value)]),
-        })
+/// Return the name of the Python frame that executes this call. Defaults and
+/// decorators execute in the enclosing frame; only the definition body changes it.
+fn caller_name(body: &[ast::Stmt], call: TextRange) -> &str {
+    use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+
+    struct Caller<'a> {
+        call: TextRange,
+        name: &'a str,
     }
-
-    fn log_format(
-        &self,
-        mut format: &str,
-        slots: &[usize],
-        node: &ast::Expr,
-    ) -> Result<Expr, String> {
-        let mut parts = Vec::new();
-        let mut slots = slots.iter();
-        while let Some((literal, tail)) = format.split_once('%') {
-            if !literal.is_empty() {
-                parts.push(text(literal));
+    impl<'a> Visitor<'a> for Caller<'a> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if !stmt.range().contains_range(self.call) {
+                return;
             }
-            let Some(kind) = tail.chars().next() else {
-                return Err(error(self.source, node, "incomplete log format"));
+            let scope = match stmt {
+                ast::Stmt::FunctionDef(f) => Some((f.name.as_str(), &*f.body)),
+                ast::Stmt::ClassDef(c) => Some((c.name.as_str(), &*c.body)),
+                _ => None,
             };
-            match kind {
-                '%' => parts.push(text("%")),
-                's' | 'r' | 'd' => {
-                    let slot = slots
-                        .next()
-                        .ok_or_else(|| error(self.source, node, "missing log format argument"))?;
-                    parts.push(self.log_scalar(self.local(*slot), kind, node)?);
-                }
-                _ => {
-                    return Err(error(
-                        self.source,
-                        node,
-                        "supported log conversions are %s, %r, %d and %%",
-                    ));
-                }
+            if let Some((name, body)) = scope
+                && body.iter().any(|s| s.range().contains_range(self.call))
+            {
+                self.name = name;
+                self.visit_body(body);
+            } else {
+                walk_stmt(self, stmt);
             }
-            format = &tail[kind.len_utf8()..];
         }
-        if slots.next().is_some() {
-            return Err(error(self.source, node, "unused log format argument"));
+
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if !expr.range().contains_range(self.call) {
+                return;
+            }
+            match expr {
+                ast::Expr::Lambda(f) if f.body.range().contains_range(self.call) => {
+                    self.name = "<lambda>"
+                }
+                ast::Expr::Generator(g)
+                    if !g.generators[0].iter.range().contains_range(self.call) =>
+                {
+                    self.name = "<genexpr>"
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
         }
-        if !format.is_empty() {
-            parts.push(text(format));
-        }
-        Ok(parts
-            .into_iter()
-            .reduce(|a, b| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, Box::new(a), Box::new(b)),
-            })
-            .unwrap_or_else(|| text("")))
     }
+    let mut caller = Caller {
+        call,
+        name: "<module>",
+    };
+    caller.visit_body(body);
+    caller.name
 }

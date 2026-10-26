@@ -87,9 +87,10 @@ def main():
             return result
 
         basic = HERE.parents[1] / "tests/fixtures/logging/basic.py"
-        build(basic)
-        expected, actual = run([sys.executable, basic]), run([binary])
-        assert (expected.stdout, expected.stderr) == (actual.stdout, actual.stderr)
+        for source in (basic, HERE / "full/logging/record_delivery.py"):
+            build(source)
+            expected, actual = run([sys.executable, source]), run([binary])
+            assert (expected.stdout, expected.stderr) == (actual.stdout, actual.stderr), source
         timestamps = basic.with_name("timestamps.py")
         build(timestamps)
         for result in (run([sys.executable, timestamps]), run([binary])):

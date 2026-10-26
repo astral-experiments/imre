@@ -50,3 +50,15 @@ deletes the entry. Defaults run even when the field exists; the fixture also
 copies the retained value into another record.
 
 The production compiler and IR verifier matched CPython's 35 output lines, stderr and exit status at O0 and O3. The [comparison receipt](record-attributes-linux.json) records both runs. The [full suite](evidence-linux.json) retained all 272 occurrences per level and their original fixture and assertion roles. The direct comparison adds no upstream occurrences.
+
+## Records delivered by loggers
+
+The [recording-handler comparison](record_delivery.py) retains the same record
+in two handlers on one logger hierarchy. Its message and mapping argument stay
+available for later formatting; mutations to the mapping are visible and formatting
+errors arise only when a handler asks for the message. The check also covers caller
+names, paths, enums, disabled loggers, and the last-resort handler.
+
+The production compiler and IR verifier matched CPython's 20 output lines, stderr and exit status at O0 and O3. The [comparison receipt](record-delivery-linux.json) records both runs. The [full suite](evidence-linux.json) accounts for all 272 occurrences per level. The original stream-setting test again runs its body and three identity assertions natively under CPython's setup and cleanup. The direct comparison adds no upstream occurrences.
+
+An empty record has no `__qualname__` field. Adding that key with value `None` makes `hasattr` true; deleting it makes `hasattr` false again. The [canonical attribute correction](https://github.com/astral-sh/imre/pull/1504) and the comparison receipt cover this sequence on pinned CPython and Imre.

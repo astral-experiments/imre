@@ -4516,7 +4516,7 @@ impl Emitter<'_, '_> {
                     EffectiveLevel => "imre_log_effective_level",
                     SetLevel => "imre_log_set_level",
                     Enabled => "imre_log_is_enabled",
-                    Emit => "imre_log_routed_emit",
+                    Emit => "imre_log_routed_record",
                 };
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 if returns == Type::None {
@@ -9817,7 +9817,7 @@ declare i1 @imre_log_propagate(ptr)
 declare void @imre_log_set_propagate(i1, ptr)
 declare i1 @imre_log_has_handlers(ptr)
 declare i1 @imre_log_is_enabled(ptr, i64)
-declare void @imre_log_routed_emit(ptr, i64, ptr, i1)
+declare void @imre_log_routed_record(ptr, i64, ptr, i1)
 declare ptr @imre_log_handlers(ptr)
 declare void @imre_log_add_handler(ptr, ptr)
 declare void @imre_log_remove_handler(ptr, ptr)

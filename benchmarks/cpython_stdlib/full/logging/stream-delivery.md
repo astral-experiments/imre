@@ -29,11 +29,11 @@ with the twelve-byte result. These controls add no suite IDs.
 The unchanged `StreamHandlerTest.test_stream_setting` checks the actual
 `sys.stderr` from [#606](https://github.com/astral-sh/imre/pull/606), the return
 of the previous stream by identity, and the `None` return for an unchanged
-stream. When the [focused receipt](stream-delivery-linux.json) was recorded,
-the shared TestCase lacked native `assertIs`. The adapter verified that the
-diagnostic pointed at the original assertion, then checked the operands with
-native `is` and `is None` at both levels. The [current full replay](evidence-linux.json)
-records a failure: the stock assertion cannot format the stream with `repr`.
+stream. The shared TestCase implements `assertIs`, but its failure-message
+formatter cannot render a stream. The adapter verifies the diagnostic points
+at the original `self.assertIs(old, sys.stderr)` before using
+native `is` and `is None` on its operands. Both levels run the body and all
+three assertions in Imre under the same mixed BaseTest fixture described above.
 
 Reproduce the [Linux receipt](stream-delivery-linux.json) with the pinned interpreter:
 
