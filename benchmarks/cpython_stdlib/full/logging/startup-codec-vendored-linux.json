@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "72dafd69002eaad7fbbcb6ebaab502261722cc8d8930faf700551a2b971611e9",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "vendored",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+    },
+    {
+      "suite": "test.test_logging",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+    }
+  ]
+}

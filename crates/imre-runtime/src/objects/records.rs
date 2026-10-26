@@ -714,6 +714,7 @@ mod tests {
     use super::*;
     use crate::objects::exceptions::{Kind, imre_error_set, imre_error_take, imre_exception_new};
     use crate::objects::{imre_object_release, imre_seq_new};
+    use crate::shared::Shared;
     use crate::{Int, List, Str, imre_list_new};
     use num_bigint::BigInt;
     use std::rc::Rc;
@@ -861,8 +862,8 @@ mod tests {
         assert_eq!(layout(kinds.len()).size(), 16 + kinds.len() * 8);
         let text = StrOwner::new(Str::from("partial owned field"));
         let weak_text = StrOwner::downgrade(&text);
-        let integer = Rc::new(BigInt::from(1_u128 << 120));
-        let weak_integer = Rc::downgrade(&integer);
+        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let weak_integer = Shared::downgrade(&integer);
         // SAFETY: metadata outlives all allocated records, every word has the
         // declared kind, and the parent/child ownership graph is acyclic.
         unsafe {
@@ -875,7 +876,7 @@ mod tests {
             let record = imre_record_new(&descriptor);
             assert!((0..kinds.len()).all(|index| record.add(index).read() == 0));
             replace(record, 1, 1, 1);
-            replace(record, 2, Rc::as_ptr(&integer) as usize, 2);
+            replace(record, 2, Shared::as_ptr(&integer) as usize, 2);
             replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
             replace(record, 4, Rc::as_ptr(&list) as usize, 4);
             replace(record, 5, crate::ObjectOwner::as_ptr(&object) as usize, 5);

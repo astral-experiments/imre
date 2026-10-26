@@ -3019,6 +3019,7 @@ mod tests {
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };
     use crate::objects::{imre_object_release, imre_seq_append, imre_seq_get_index, imre_seq_new};
+    use crate::shared::Shared;
     use num_bigint::BigInt;
 
     fn integer(value: i64) -> usize {
@@ -3306,8 +3307,8 @@ mod tests {
 
     #[test]
     fn character_gather_owns_big_integers_and_releases_partial_results() {
-        let integer = Rc::new(BigInt::from(1_u128 << 120));
-        let weak = Rc::downgrade(&integer);
+        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let weak = Shared::downgrade(&integer);
         // SAFETY: dictionary/text handles are exact and rooted. A successful
         // gather transfers one list owner; each failed gather transfers none.
         unsafe {
@@ -3316,7 +3317,7 @@ mod tests {
             imre_dict_set(
                 crate::ObjectOwner::as_ptr(&dictionary),
                 StrOwner::as_ptr(&key) as usize,
-                Rc::as_ptr(&integer) as usize,
+                Shared::as_ptr(&integer) as usize,
             );
             drop(integer);
             assert_eq!(weak.strong_count(), 1);
@@ -3380,8 +3381,8 @@ mod tests {
 
     #[test]
     fn character_gather_tracks_heap_value_transitions_in_its_ascii_cache() {
-        let large = Rc::new(BigInt::from(1_u128 << 120));
-        let heap_word = Rc::as_ptr(&large) as usize;
+        let large = Shared::new(BigInt::from(1_u128 << 120));
+        let heap_word = Shared::as_ptr(&large) as usize;
         // SAFETY: every key/value remains rooted, and successful results and
         // pending failures each transfer exactly one owner to Rc.
         unsafe {
@@ -3405,18 +3406,18 @@ mod tests {
             ] {
                 imre_dict_set(pointer, StrOwner::as_ptr(&keys[key]) as usize, word);
                 assert_eq!(count(), expected);
-                let before = Rc::strong_count(&large);
+                let before = Shared::strong_count(&large);
                 let gathered = Rc::from_raw(imre_dict_gather_str_int(
                     StrOwner::as_ptr(&keys[key]),
                     pointer,
                 ));
                 assert_eq!(
-                    Rc::strong_count(&large),
+                    Shared::strong_count(&large),
                     before + usize::from(word == heap_word)
                 );
                 gathered.0.with(|values| assert_eq!(values[0].0, word));
                 drop(gathered);
-                assert_eq!(Rc::strong_count(&large), before);
+                assert_eq!(Shared::strong_count(&large), before);
             }
             imre_dict_delete(pointer, StrOwner::as_ptr(&keys[1]) as usize);
             assert_eq!(count(), 0);
@@ -3430,7 +3431,7 @@ mod tests {
                 StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), "'\\x00'");
         }
-        assert_eq!(Rc::strong_count(&large), 1);
+        assert_eq!(Shared::strong_count(&large), 1);
         assert_eq!(imre_error_pending(), 0);
     }
 
@@ -3515,11 +3516,14 @@ mod tests {
 
     #[test]
     fn replacement_acquires_sole_owners_and_reclaims_deleted_keys() {
-        let key = Rc::new(BigInt::from(1_u128 << 120));
-        let value = Rc::new(BigInt::from(1_u128 << 100));
-        let key_weak = Rc::downgrade(&key);
-        let value_weak = Rc::downgrade(&value);
-        let (key_word, value_word) = (Rc::as_ptr(&key) as usize, Rc::as_ptr(&value) as usize);
+        let key = Shared::new(BigInt::from(1_u128 << 120));
+        let value = Shared::new(BigInt::from(1_u128 << 100));
+        let key_weak = Shared::downgrade(&key);
+        let value_weak = Shared::downgrade(&value);
+        let (key_word, value_word) = (
+            Shared::as_ptr(&key) as usize,
+            Shared::as_ptr(&value) as usize,
+        );
         let dictionary = imre_dict_new(2, 2);
         // SAFETY: the dictionary roots its existing key/value during self-assignment;
         // the equal deletion key is independently owned. Snapshots are consumed once.
@@ -3765,16 +3769,16 @@ mod tests {
 
     #[test]
     fn sets_deduplicate_integer_values_and_own_yielded_snapshots() {
-        let original = Rc::new(BigInt::from(1_u128 << 120));
-        let equal = Rc::new(BigInt::from(1_u128 << 120));
-        let original_weak = Rc::downgrade(&original);
-        let equal_weak = Rc::downgrade(&equal);
+        let original = Shared::new(BigInt::from(1_u128 << 120));
+        let equal = Shared::new(BigInt::from(1_u128 << 120));
+        let original_weak = Shared::downgrade(&original);
+        let equal_weak = Shared::downgrade(&equal);
         let set = imre_set_new(2);
         // SAFETY: all keys are canonical rooted Int words. Every yielded owner
         // is transferred into Int before its independent output slot is reused.
         unsafe {
-            imre_set_add(set, Rc::as_ptr(&original) as usize);
-            imre_set_add(set, Rc::as_ptr(&equal) as usize);
+            imre_set_add(set, Shared::as_ptr(&original) as usize);
+            imre_set_add(set, Shared::as_ptr(&equal) as usize);
             assert_eq!(Int(imre_set_len(set)).as_small(), Some(1));
             drop(equal);
             assert!(equal_weak.upgrade().is_none());

@@ -632,13 +632,24 @@ def indirect(value: str) -> int:
     }
 
     #[test]
-    fn splitlines_allocation_errors_escape_user_functions() {
-        let source = "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n";
-        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
-        for call in ["call ptr @imre_str_splitlines(", "call ptr @fn_0("] {
-            let (_, following) = llvm.split_once(call).unwrap();
-            let (body, _) = following.split_once("\n}").unwrap();
-            assert!(body.contains("call i32 @imre_error_pending()"));
+    fn allocation_errors_escape_user_functions() {
+        let cases = [
+            (
+                "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n",
+                "call ptr @imre_str_splitlines(",
+            ),
+            (
+                "import sys\ndef names() -> frozenset[str]:\n    return sys.stdlib_module_names\ndef count() -> int:\n    return len(names())\n",
+                "call ptr @imre_sys_stdlib_module_names(",
+            ),
+        ];
+        for (source, allocation) in cases {
+            let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+            for call in [allocation, "call ptr @fn_0("] {
+                let (_, following) = llvm.split_once(call).unwrap();
+                let (body, _) = following.split_once("\n}").unwrap();
+                assert!(body.contains("call i32 @imre_error_pending()"), "{call}");
+            }
         }
     }
 

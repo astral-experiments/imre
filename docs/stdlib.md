@@ -8,7 +8,7 @@ Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 389 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,507 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 391 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,508 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -46,7 +46,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 11 | 0 |
 | `json` | Yes | Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`. [Evidence](../benchmarks/cpython_stdlib/full/json/README.md) | [0 / 216](../benchmarks/cpython_stdlib/full/json/) | 38 | 45 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
-| `logging` | Yes | Loggers, formatters, configuration and file handlers with timed or size-based rotation. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 17 | 44 |
+| `logging` | Yes | Format records, replace a `StreamHandler` stream, configure loggers and rotate files by size or time. [Evidence](../benchmarks/cpython_stdlib/full/logging/README.md) | [0 / 272](../benchmarks/cpython_stdlib/full/logging/) | 19 | 44 |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 27 | 15 |
@@ -68,7 +68,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |
 | `struct` | Yes | Unpack an unsigned 64-bit big-endian integer with `unpack(">Q", data)`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `subprocess` | Yes | Launch with `Popen` and `run`, capture streams and handle deadlines. `getoutput` and `getstatusoutput` capture combined shell output. [Evidence](../benchmarks/cpython_stdlib/full/subprocess/README.md) | [0 / 353](../benchmarks/cpython_stdlib/full/subprocess/) | 54 | 97 |
-| `sys` | Yes | Process arguments, streams, interpreter flags, and `sys.setrecursionlimit(2000)`. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 7 | 4 |
+| `sys` | Yes | Process arguments, streams, interpreter flags, and `sys.setrecursionlimit(2000)`. [Evidence](../benchmarks/cpython_stdlib/full/sys/README.md) | [0 / 97](../benchmarks/cpython_stdlib/full/sys/) | 7 | 5 |
 | `sysconfig` | Yes | `get_path("scripts")`. [Evidence](../tests/fixtures/paths/executables.py) | — | — | — |
 | `tempfile` | Yes | Scoped `TemporaryDirectory` workspaces. [Evidence](../tests/fixtures/workspaces/arguments.py) | — | — | — |
 | `textwrap` | Yes | Dedent, indent, wrapping and shortening, including selected `TextWrapper` options. [Evidence](../benchmarks/cpython_stdlib/full/textwrap/README.md) | [15 / 68](../benchmarks/cpython_stdlib/full/textwrap/) | 0 | 53 |

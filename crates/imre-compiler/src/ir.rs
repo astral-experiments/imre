@@ -150,6 +150,7 @@ pub(crate) enum Type {
     Socket,
     CodecWriterClass,
     CodecWriter,
+    TextOutput,
     Sha256,
     Poll,
     JsonDecoder,
@@ -390,6 +391,7 @@ impl std::fmt::Display for Type {
             Self::Socket => "socket.socket",
             Self::CodecWriterClass => "type[codecs.StreamWriter]",
             Self::CodecWriter => "codecs.StreamWriter",
+            Self::TextOutput => "writable text stream",
             Self::Sha256 => "SHA-256 hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
             Self::ZipFile => "zipfile.ZipFile",
@@ -1830,6 +1832,11 @@ pub(crate) enum WriterOperation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LogOperation {
     Get,
+    Handlers,
+    AddHandler,
+    RemoveHandler,
+    WriteStream,
+    FlushStream,
     HandlerRename,
     LockNew,
     LockAcquire,

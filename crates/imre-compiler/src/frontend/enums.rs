@@ -638,7 +638,12 @@ impl Checker<'_> {
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]
             || types == [Type::CodecWriterClass; 2]
-            || types == [Type::CodecWriter; 2]
+            || types.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::TextOutput | Type::CodecWriter | Type::TextIO | Type::StringIO
+                )
+            })
             || types == [Type::BinaryIO; 2]
             || types == [Type::Sha256; 2])
         {
