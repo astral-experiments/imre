@@ -32,3 +32,17 @@ def current():
         type(1, label=True)
     except TypeError as error:
         print(str(error))
+
+    class Missing(AttributeError):
+        pass
+
+    class DetailMissing(Missing):
+        pass
+
+    details = [7]
+    error = DetailMissing(details)
+    details.append(8)
+    try:
+        raise error
+    except AttributeError as caught:
+        print(isinstance(caught, DetailMissing), caught.args, caught.args[0] is details)
