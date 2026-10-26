@@ -39,14 +39,30 @@ impl Nargs {
     }
 
     pub(super) fn label(self, metavar: &str) -> String {
+        let mut label = String::new();
+        self.write_label(&mut label, metavar).unwrap();
+        label
+    }
+
+    pub(super) fn write_label(
+        self,
+        out: &mut impl std::fmt::Write,
+        metavar: &str,
+    ) -> std::fmt::Result {
         match self {
-            Self::One => metavar.into(),
-            Self::Optional => format!("[{metavar}]"),
-            Self::ZeroOrMore => format!("[{metavar} ...]"),
-            Self::OneOrMore => format!("{metavar} [{metavar} ...]"),
-            Self::Fixed(n) => std::iter::repeat_n(metavar, n)
-                .collect::<Vec<_>>()
-                .join(" "),
+            Self::One => out.write_str(metavar),
+            Self::Optional => write!(out, "[{metavar}]"),
+            Self::ZeroOrMore => write!(out, "[{metavar} ...]"),
+            Self::OneOrMore => write!(out, "{metavar} [{metavar} ...]"),
+            Self::Fixed(count) => {
+                for i in 0..count {
+                    if i != 0 {
+                        out.write_char(' ')?;
+                    }
+                    out.write_str(metavar)?;
+                }
+                Ok(())
+            }
         }
     }
 
