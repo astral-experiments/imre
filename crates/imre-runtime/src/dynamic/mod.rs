@@ -8,6 +8,7 @@ mod ffi;
 mod function_fields;
 mod operators;
 mod property;
+mod static_method;
 mod stdlib;
 mod super_object;
 mod value;
@@ -24,6 +25,7 @@ struct SourceModule {
 
 enum IteratorSlice<'a> {
     Values(&'a [Id]),
+    Reversed(&'a [Id]),
     Bytes(&'a [u8]),
 }
 
@@ -31,7 +33,7 @@ impl IteratorSlice<'_> {
     /// Counts positions without allocating boxed integers for bytes.
     fn len(&self) -> usize {
         match self {
-            Self::Values(values) => values.len(),
+            Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
         }
     }
@@ -46,6 +48,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    native_code_objects: HashMap<usize, Id>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
@@ -55,6 +58,13 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    fn code_object(&self, id: Id) -> value::CodeObject {
+        let Value::Code(code) = self.heap.get(id) else {
+            unreachable!("function must retain its code object")
+        };
+        *code
+    }
+
     fn alloc(&mut self, value: Value) -> Id {
         self.heap.alloc(value)
     }
@@ -104,6 +114,18 @@ impl Context {
             Ok(value)
         } else {
             Err(Error::new("TypeError", "expected str"))
+        }
+    }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
         }
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
@@ -165,18 +187,27 @@ impl Context {
         Ok(self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
+            reverse: false,
         }))
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
     fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
-        let Value::Iterator { sequence, offset } = self.heap.get(id) else {
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+        } = self.heap.get(id)
+        else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
         let Some(sequence) = sequence else {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
+            Value::List(values) if *reverse => {
+                IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
+            }
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
@@ -215,10 +246,18 @@ impl Context {
         }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
         };
-        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-            *offset += 1;
+        if let Value::Iterator {
+            offset, reverse, ..
+        } = self.heap.get_mut(id)
+        {
+            if *reverse {
+                *offset -= 1;
+            } else {
+                *offset += 1;
+            }
         }
         Ok(Some(item))
     }
@@ -237,7 +276,7 @@ impl Context {
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
-            | Value::Set(items)
+            | Value::Set { items, .. }
             | Value::NamedTuple { values: items, .. } => Ok(items),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
@@ -252,6 +291,7 @@ impl Context {
             Value::Iterator { .. } => {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
                     IteratorSlice::Bytes(bytes) => {
                         let mut values = Vec::with_capacity(bytes.len());
                         while let Some(byte) = self.next_item(id)? {
@@ -406,11 +446,12 @@ impl Context {
         }
         value
     }
-    fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
-        self.heap.enter(scope);
+    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+        let entry = self.code_object(code).entry;
+        self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
-        let result = unsafe { code(self, scope) };
+        let result = unsafe { entry(self, scope) };
         self.heap.leave(result);
         self.pending.take().map_or(Ok(result), Err)
     }
@@ -438,8 +479,10 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if name == "urllib" {
-                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            if matches!(name, "email" | "urllib") {
+                locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
+            } else if name == "collections" {
+                locations.push(stdlib::package_path(self, name)?);
             }
             None
         } else {
@@ -504,7 +547,12 @@ impl Context {
             ));
         }
         let scope = self.scope(name, None);
-        let name_id = self.text(name);
+        // CPython's private module publishes its ABCs under the public name.
+        let name_id = self.text(if name == "_collections_abc" {
+            "collections.abc"
+        } else {
+            name
+        });
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
@@ -534,15 +582,41 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "sys" => {
+                for (name, original, stderr) in [
+                    ("stdout", "__stdout__", false),
+                    ("stderr", "__stderr__", true),
+                ] {
+                    let stream =
+                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    self.bind(scope, name, stream);
+                    self.bind(scope, original, stream);
+                }
+            }
+            "collections" => {
+                let abc = self.module("_collections_abc")?;
+                self.bind(scope, "abc", abc);
+                self.modules.insert("collections.abc".to_owned(), abc);
+            }
             _ => {}
         }
-        if let Some((path, code)) = source {
+        if let Some((path, entry)) = source {
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
                 let file = self.text(path.to_string_lossy());
                 self.bind(scope, "__file__", file);
             }
+            let filename = self.text(path.to_string_lossy());
+            let name_id = self.text("<module>");
+            let code = self.alloc(Value::Code(value::CodeObject {
+                entry,
+                parameters: NONE,
+                name: name_id,
+                filename,
+                first_line: 1,
+                module_definition: true,
+            }));
             if let Err(error) = self.execute(code, scope) {
                 self.modules.remove(name);
                 return Err(error);

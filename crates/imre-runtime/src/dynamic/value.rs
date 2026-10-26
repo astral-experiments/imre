@@ -9,6 +9,17 @@ use crate::objects::exceptions::ExitStatus;
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
+/// Immutable executable and argument layout shared by functions from one Python definition.
+#[derive(Clone, Copy)]
+pub(super) struct CodeObject {
+    pub entry: Code,
+    pub parameters: Id,
+    pub name: Id,
+    pub filename: Id,
+    pub first_line: u32,
+    pub module_definition: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Hmac {
     pub inner: Id,
@@ -26,6 +37,16 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) struct Location {
     pub file: &'static str,
     pub line: u32,
+    pub span: Option<[u32; 3]>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct Trace {
+    pub frames: Vec<(Location, Id)>,
+    pub instance: Option<Id>,
+    pub context: Option<Id>,
+    pub cause: Option<Id>,
+    cached: Option<(usize, Id)>,
 }
 
 #[derive(Clone, Debug)]
@@ -34,7 +55,7 @@ pub(super) struct Error {
     pub message: String,
     pub args: Option<Vec<Id>>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
-    pub trace: Vec<Location>,
+    pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
 }
 
@@ -45,13 +66,77 @@ impl Error {
             message: message.into(),
             args: None,
             os_args: None,
-            trace: Vec::new(),
+            trace: None,
             exit_status: None,
         }
+    }
+
+    pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.args
+            .iter()
+            .flatten()
+            .copied()
+            .chain(self.trace.iter().flat_map(|trace| {
+                trace
+                    .frames
+                    .iter()
+                    .map(|&(_, frame)| frame)
+                    .chain(trace.instance)
+                    .chain(trace.context)
+                    .chain(trace.cause)
+                    .chain(trace.cached.map(|(_, head)| head))
+            }))
+    }
+
+    pub(super) fn tracing(&mut self) -> &mut Trace {
+        self.trace.get_or_insert_with(Default::default)
     }
 }
 
 impl Context {
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        if let Some((mut loc, frame)) = self.heap.trace_location() {
+            if let Some(&[line, start, split, end]) = span {
+                loc.line = line;
+                loc.span = Some([start, split, end]);
+            }
+            let trace = error.tracing();
+            let active = self.heap.active_exception();
+            if trace.frames.is_empty() && active != NONE && trace.instance != Some(active) {
+                trace.context = Some(active);
+            }
+            trace.frames.push((loc, frame));
+        }
+    }
+
+    /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
+    pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
+        let Value::Raised(error) = self.heap.get(exception) else {
+            return Err(Error::new("TypeError", "expected exception"));
+        };
+        let Some(trace) = &error.trace else {
+            return Ok(NONE);
+        };
+        let (count, mut head) = trace.cached.unwrap_or((0, NONE));
+        let length = trace.frames.len();
+        if length != count {
+            let missing = trace.frames[count..].to_vec();
+            for (at, frame) in missing {
+                head = self.alloc(Value::Traceback {
+                    frame,
+                    next: head,
+                    lineno: i64::from(at.line),
+                    span: at.span,
+                });
+            }
+            let Value::Raised(error) = self.heap.get_mut(exception) else {
+                unreachable!()
+            };
+            error.tracing().cached = Some((length, head));
+        }
+        Ok(head)
+    }
+
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
             Value::None => "NoneType",
@@ -67,21 +152,27 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
+            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
-            Value::Set(_) => "set",
+            Value::Set { frozen: true, .. } => "frozenset",
+            Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::Code(_) => "code",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
+            Value::Traceback { .. } => "traceback",
+            Value::PythonFrame { .. } => "frame",
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {
                 Value::Class { name, .. } | Value::Native(name) => name,
@@ -139,9 +230,11 @@ impl From<crate::Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.trace.is_empty() {
+        if let Some(trace) = &self.trace
+            && !trace.frames.is_empty()
+        {
             writeln!(f, "Traceback (most recent call last):")?;
-            for loc in self.trace.iter().rev() {
+            for (loc, _) in trace.frames.iter().rev() {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
             }
         }
@@ -199,7 +292,10 @@ pub(super) enum Value {
         values: Vec<Id>,
         extras: Vec<(&'static str, Id)>,
     },
-    Set(Vec<Id>),
+    Set {
+        items: Vec<Id>,
+        frozen: bool,
+    },
     Dict(super::dictionary::Entries),
     DictionaryIterator(super::dictionary::Cursor),
     DictView {
@@ -223,12 +319,12 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
-        code: Code,
+        code: Id,
         scope: Id,
         class_cell: Option<Id>,
-        parameters: Id,
         defaults: Id,
     },
+    Code(CodeObject),
     Class {
         name: String,
         scope: Id,
@@ -238,13 +334,29 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
     Raised(Error),
+    Traceback {
+        frame: Id,
+        next: Id,
+        lineno: i64,
+        span: Option<[u32; 3]>,
+    },
+    PythonFrame {
+        scope: Id,
+        code: Id,
+        lineno: u32,
+    },
     Method {
         callable: Id,
         receiver: Id,
+    },
+    StaticMethod {
+        callable: Id,
+        dictionary: Id,
     },
     Property(super::property::Property),
     ReadOnlyDescriptor {
@@ -265,6 +377,7 @@ pub(super) enum Value {
     Iterator {
         sequence: Option<Id>,
         offset: usize,
+        reverse: bool,
     },
     IoMethod {
         owner: Id,
@@ -272,7 +385,7 @@ pub(super) enum Value {
     },
     File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
     TextFile(crate::objects::TextFile),
-    RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
+    RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
         groups: Vec<Option<String>>,
         names: HashMap<String, usize>,
@@ -302,7 +415,7 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::DictionaryIterator(cursor) => visit.extend(cursor.owner),
             Self::NamedTuple { values, extras, .. } => {
@@ -362,15 +475,16 @@ impl Value {
             Self::Function {
                 scope,
                 class_cell,
-                parameters,
+                code,
                 defaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *parameters, *defaults]);
+                visit.extend([*scope, *code, *defaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
+            Self::Code(code) => visit.extend([code.parameters, code.name, code.filename]),
             Self::Class {
                 scope, ancestors, ..
             } => {
@@ -381,12 +495,17 @@ impl Value {
                 class,
                 fields,
                 dictionary,
+                ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
+            Self::StaticMethod {
+                callable,
+                dictionary,
+            } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
             Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
@@ -402,7 +521,9 @@ impl Value {
                     visit.push(call.result);
                 }
             }
-            Self::Raised(error) => visit.extend(error.args.iter().flatten()),
+            Self::Raised(error) => visit.extend(error.roots()),
+            Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
+            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
@@ -446,16 +567,24 @@ pub(super) struct Heap {
 
 struct Frame {
     scope: Id,
+    code: Id,
     live: Vec<Id>,
     location: Option<Location>,
+    object: Option<Id>,
+    inherited: Id,
+    active: Id,
 }
 
 impl Frame {
-    fn new(scope: Id) -> Self {
+    fn new(scope: Id, code: Id, inherited: Id) -> Self {
         Self {
             scope,
+            code,
             live: Vec::new(),
             location: None,
+            object: None,
+            inherited,
+            active: inherited,
         }
     }
 }
@@ -471,7 +600,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
-            frames: vec![Frame::new(NONE)],
+            frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
         }
     }
@@ -499,8 +628,9 @@ impl Heap {
             .as_mut()
             .expect("live native handle")
     }
-    pub fn enter(&mut self, scope: Id) {
-        self.frames.push(Frame::new(scope));
+    pub fn enter(&mut self, scope: Id, code: Id) {
+        self.frames
+            .push(Frame::new(scope, code, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         self.frames.pop();
@@ -510,12 +640,36 @@ impl Heap {
         self.frames.last_mut().unwrap().live.push(value);
     }
 
-    pub fn location(&self) -> Option<Location> {
-        self.frames.last()?.location
+    pub fn active_exception(&self) -> Id {
+        self.frames.last().unwrap().active
+    }
+
+    pub fn replace_active(&mut self, exception: Id) -> Id {
+        std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
+    }
+
+    /// Materialize one frame per activation only when an exception unwinds it.
+    pub fn trace_location(&mut self) -> Option<(Location, Id)> {
+        let frame = self.frames.last()?;
+        let location = frame.location?;
+        if let Some(object) = frame.object {
+            return Some((location, object));
+        }
+        let object = self.alloc(Value::PythonFrame {
+            scope: frame.scope,
+            code: frame.code,
+            lineno: location.line,
+        });
+        self.frames.last_mut().unwrap().object = Some(object);
+        Some((location, object))
     }
 
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    pub fn current_location(&self) -> Option<Location> {
+        self.frames.last()?.location
     }
 
     pub fn statement(
@@ -523,9 +677,20 @@ impl Heap {
         globals: impl Iterator<Item = Id>,
         live: &[Id],
         location: Location,
+        caught: Id,
     ) {
         let frame = self.frames.last_mut().unwrap();
         frame.location = Some(location);
+        frame.active = if caught == NONE {
+            frame.inherited
+        } else {
+            caught
+        };
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize]
+        {
+            *lineno = location.line;
+        }
         frame.live.clear();
         frame.live.extend(live);
         if self.slots.len() < self.next_collection || !self.free.is_empty() {
@@ -534,7 +699,8 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.push(frame.scope);
+            pending.extend([frame.scope, frame.code, frame.active, frame.inherited]);
+            pending.extend(frame.object);
             pending.extend(&frame.live);
         }
         let mut marked = vec![false; self.slots.len()];

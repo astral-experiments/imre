@@ -16,7 +16,9 @@ pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
-pub(crate) use bytes::{concat_bytes, repeat_bytes, rstrip_bytes};
+pub(crate) use bytes::{
+    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
+};
 mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
@@ -194,7 +196,6 @@ enum Storage {
     LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
-    ClockTime(logging::timed::Clock),
     Calendar(allocator_api2::boxed::Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),

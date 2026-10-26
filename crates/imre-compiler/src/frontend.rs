@@ -10076,9 +10076,18 @@ impl<'a> Checker<'a> {
         if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name.id == "int" {
             return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
         }
+        if let [class] = args.as_slice()
+            && class.ty == Type::BuiltinClass
+            && name.id == "type"
+        {
+            return Ok(
+                self.evaluated_receiver(Some(class.clone()), annotations::class_value("type"))
+            );
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
-            && matches!(name.id.as_str(), "str" | "print")
+            && (matches!(name.id.as_str(), "str" | "print")
+                || (args[0].ty == Type::BuiltinClass && name.id == "repr"))
         {
             let builtin = if args[0].ty == Type::BuiltinClass {
                 Builtin::Repr
@@ -10089,7 +10098,7 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(builtin, args),
             };
-            return Ok(if name.id == "str" {
+            return Ok(if name.id != "print" {
                 text
             } else {
                 Expr {

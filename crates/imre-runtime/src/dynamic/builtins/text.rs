@@ -493,22 +493,49 @@ pub(super) fn method(
     {
         positional(name, kwargs)?;
         arity(name, args, 0, 1)?;
-        let chars: &[u8] = match args.first().filter(|&&id| id != NONE) {
-            None => b" \t\n\x0b\x0c\r",
-            Some(&id) => match ctx.heap.get(id) {
-                Value::Bytes(chars) | Value::ByteArray(chars) => chars,
-                _ => {
-                    return Err(type_error(format!(
-                        "a bytes-like object is required, not '{}'",
-                        ctx.type_name(id)
-                    )));
-                }
-            },
-        };
+        let chars = args
+            .first()
+            .copied()
+            .filter(|&id| id != NONE)
+            .map(|id| ctx.bytes_like(id))
+            .transpose()?
+            .unwrap_or(b" \t\n\x0b\x0c\r");
         return Ok(match crate::objects::rstrip_bytes(data, chars)? {
             Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
             None => receiver,
         });
+    }
+    if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
+        let [sep, max] = super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"])?;
+        let limit = match max {
+            None => usize::MAX,
+            Some(id) => {
+                let index = ctx.index_integer(id)?;
+                let count = index
+                    .to_i64()
+                    .and_then(|value| isize::try_from(value).ok())
+                    .ok_or_else(|| {
+                        Error::new(
+                            "OverflowError",
+                            "Python int too large to convert to C ssize_t",
+                        )
+                    })?;
+                usize::try_from(count).unwrap_or(usize::MAX)
+            }
+        };
+        let separator = sep
+            .filter(|&id| id != NONE)
+            .map(|id| ctx.bytes_like(id))
+            .transpose()?;
+        let Value::Bytes(data) = ctx.heap.get(receiver) else {
+            unreachable!()
+        };
+        let parts = crate::objects::rsplit_bytes(data, separator, limit)?;
+        let fields = parts
+            .into_iter()
+            .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
+            .collect();
+        return Ok(ctx.alloc(Value::List(fields)));
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {

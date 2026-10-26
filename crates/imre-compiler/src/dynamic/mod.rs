@@ -97,12 +97,19 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct"
+                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct" | "traceback"
             )
         {
             self.runtime_imports = true;
         }
     }
+}
+
+fn boxed_sys_export(name: &str) -> bool {
+    matches!(
+        name,
+        "path" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+    )
 }
 
 fn boxed_operator(name: &str) -> bool {
@@ -181,10 +188,7 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
-                            || matches!(
-                                (name, suffix),
-                                ("sys", "path" | "version_info" | "implementation" | "exit")
-                            ))
+                            || (name == "sys" && boxed_sys_export(suffix)))
                     {
                         self.runtime_imports = true;
                     }
@@ -222,9 +226,8 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if self.sys_path(e)
-            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
-            || matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "version_info" | "implementation" | "exit") && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
+        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+            || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;
         }
@@ -301,6 +304,7 @@ pub(crate) fn compile(
             "importlib",
             "operator",
             "struct",
+            "traceback",
             "SystemExit",
         ]
         .iter()
