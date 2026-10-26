@@ -646,7 +646,7 @@ impl Checker<'_> {
                 && kind != 0
             {
                 unknown = true;
-            } else if class.accepts(ty, &self.types) {
+            } else if class.accepts(ty, self.types) {
                 return Some(true);
             }
         }

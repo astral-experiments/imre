@@ -1020,6 +1020,11 @@ impl Checker<'_> {
             .transpose()?
             .map(normalized)
             .unwrap_or(if step > 0 { hi } else { lo });
+        // CPython returns an exact tuple itself for a full unit-stride slice.
+        // A struct sequence or namedtuple instead yields a fresh plain tuple.
+        if step == 1 && i == 0 && stop == len && self.types.tuple_origin(receiver.ty).is_none() {
+            return Ok(receiver);
+        }
         let slot = self.hidden(receiver.ty);
         let mut items = Vec::new();
         while if step > 0 { i < stop } else { i > stop } {
