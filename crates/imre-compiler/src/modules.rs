@@ -1185,7 +1185,7 @@ pub(crate) struct SourceGraph {
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
-    required_library_methods: Option<(ModuleId, reachability::Reachable)>,
+    required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
@@ -1355,9 +1355,17 @@ impl SourceGraph {
         self.reachable.is_some()
     }
 
+    fn required_definitions(&self, module: ModuleId) -> Option<&reachability::Reachable> {
+        if let Some((library, roots)) = &self.required_library
+            && *library == module
+        {
+            return Some(roots);
+        }
+        self.reachable.as_ref()
+    }
+
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
-        self.reachable
-            .as_ref()
+        self.required_definitions(definition.module)
             .is_none_or(|r| r.definitions.contains(&definition))
     }
 
@@ -1374,13 +1382,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
-        if let Some((library, roots)) = &self.required_library_methods
-            && module == *library
-        {
-            return roots.methods.contains(&(module, method.start()));
-        }
-        self.reachable
-            .as_ref()
+        self.required_definitions(module)
             .is_none_or(|r| r.methods.contains(&(module, method.start())))
     }
 
@@ -1568,7 +1570,7 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
-        if let Some((library, roots)) = &self.required_library_methods {
+        if let Some((library, roots)) = &self.required_library {
             skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
                 .extend_from_slice(&roots.skipped[*library]);
         }
@@ -2182,7 +2184,7 @@ impl<'a> Loader<'a> {
             mutable_documents: false,
             mutable_builtin_len: false,
             reachable: None,
-            required_library_methods: None,
+            required_library: None,
             entry_filename,
             inputs: self.inputs,
             session: self.session,
@@ -2195,7 +2197,7 @@ impl<'a> Loader<'a> {
             errno_names: self.errno_names,
         };
         if reachable_only {
-            graph.reachable = Some(reachability::Reachable::collect(&graph, None));
+            graph.reachable = Some(reachability::Reachable::collect(&graph, false));
         } else if let Some(library) = graph
             .modules
             .iter()
@@ -2203,10 +2205,8 @@ impl<'a> Loader<'a> {
         {
             // A sealed library can own higher-order methods that require object dispatch.
             // Strict builds still visit even an uncalled first-party function using them.
-            graph.required_library_methods = Some((
-                library,
-                reachability::Reachable::collect(&graph, Some(library)),
-            ));
+            graph.required_library =
+                Some((library, reachability::Reachable::collect(&graph, true)));
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();

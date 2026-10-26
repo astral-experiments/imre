@@ -350,20 +350,18 @@ impl Reachable {
         self.instance_attributes.contains(name)
             || self.class_attributes.contains(&(owner, name.to_owned()))
     }
-    pub(super) fn collect(graph: &SourceGraph, library: Option<ModuleId>) -> Self {
+    pub(super) fn collect(graph: &SourceGraph, strict_callers: bool) -> Self {
         let mut found = Self::default();
         for (module, source) in graph.modules.iter().enumerate() {
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
                 let id = DefinitionId { module, statement };
-                if library.is_some() && !source.bundled {
+                if strict_callers && !source.bundled {
                     References {
                         graph,
                         module,
                         found: &mut found,
                     }
                     .visit_stmt(node);
-                } else if library == Some(module) && matches!(node, ast::Stmt::ClassDef(_)) {
-                    found.definitions.insert(id);
                 }
                 match node {
                     ast::Stmt::FunctionDef(f) => {
