@@ -213,7 +213,7 @@ pub(super) enum Value {
         scope: Id,
     },
     Function {
-        name: String,
+        fields: super::function_fields::FunctionFields,
         code: Code,
         scope: Id,
         class_cell: Option<Id>,
@@ -350,10 +350,12 @@ impl Value {
                 class_cell,
                 parameters,
                 defaults,
+                fields,
                 ..
             } => {
                 visit.extend([*scope, *parameters, *defaults]);
                 visit.extend(class_cell);
+                fields.children(visit);
             }
             Self::Class {
                 scope, ancestors, ..
