@@ -373,10 +373,15 @@ impl Frame {
     }
 }
 
-/// Descriptor-relative traversal remains safe if children are exchanged for
-/// symlinks. The explicit stack avoids Rust stack growth for deeply nested trees.
-fn cleanup(path: &str) -> io::Result<()> {
-    let path = Path::new(path);
+/// Preserve the entry a cleanup syscall failed on in the Python exception.
+fn cleanup(path: &str) -> Result<()> {
+    let mut entry = PathBuf::from(path);
+    remove_tree(&mut entry).map_err(|error| errno_with_filename(error, entry.to_str()))
+}
+
+/// Remove entries relative to held directory descriptors. On failure, `path`
+/// names the current entry even if a descendant was exchanged for a symlink.
+fn remove_tree(path: &mut PathBuf) -> io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let name = CString::new(path.file_name().unwrap_or(OsStr::new(".")).as_bytes())?;
     #[cfg(target_os = "linux")]
@@ -404,6 +409,7 @@ fn cleanup(path: &str) -> io::Result<()> {
     while let Some(frame) = stack.last_mut() {
         let descriptor = &frame.descriptor;
         if let Some(entry) = frame.entries.next() {
+            path.push(OsStr::from_bytes(entry.name.as_bytes()));
             if entry.directory || unlink_entry(descriptor, &entry.name)? {
                 let child = Frame::open(descriptor, entry.name.clone()).or_else(|error| {
                     if error.kind() == io::ErrorKind::PermissionDenied {
@@ -414,7 +420,10 @@ fn cleanup(path: &str) -> io::Result<()> {
                     }
                 });
                 match child {
-                    Ok(child) => stack.push(child),
+                    Ok(child) => {
+                        stack.push(child);
+                        continue;
+                    }
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error),
                 }
@@ -432,6 +441,9 @@ fn cleanup(path: &str) -> io::Result<()> {
                 reset_permissions(&frame.descriptor)?;
                 remove_at(frame_parent, &frame.name, AtFlags::REMOVEDIR)?;
             }
+        }
+        if !stack.is_empty() {
+            path.pop();
         }
     }
     Ok(())
@@ -468,7 +480,7 @@ pub unsafe extern "C" fn imre_tempdir_new(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tempdir_cleanup(name: *const Str) {
     // SAFETY: the hidden immutable name remains live through descriptor cleanup.
-    let result = cleanup(unsafe { &*name }).map_err(os_error);
+    let result = cleanup(unsafe { &*name });
     finish(result, ());
 }
 
@@ -485,7 +497,7 @@ impl DirectoryContext {
         self.armed.get()
     }
 
-    fn remove(&self) -> io::Result<()> {
+    fn remove(&self) -> Result<()> {
         if self.temporary {
             self.armed.set(false);
             // SAFETY: a temporary context always owns a tagged string (tag zero).
@@ -551,7 +563,7 @@ pub unsafe extern "C" fn imre_directory_context_exit(manager: *const super::Obje
             let super::Storage::DirectoryContext(manager) = storage else {
                 unreachable!()
             };
-            manager.remove().map_err(os_error)
+            manager.remove()
         })
     };
     finish(result, ());
@@ -639,8 +651,8 @@ mod tests {
         symlink("absent", nested.join("broken")).unwrap();
         fs::set_permissions(&nested, fs::Permissions::from_mode(0o0)).unwrap();
         fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o0)).unwrap();
-        cleanup(directory.0.to_str().unwrap()).unwrap();
-        cleanup(directory.0.to_str().unwrap()).unwrap();
+        remove_tree(&mut directory.0.clone()).unwrap();
+        remove_tree(&mut directory.0.clone()).unwrap();
         assert!(fs::symlink_metadata(&directory.0).is_err());
         assert_eq!(
             fs::read_to_string(outside.0.join("keep")).unwrap(),
@@ -655,7 +667,7 @@ mod tests {
         let directory = Directory::new();
         fs::remove_dir(&directory.0).unwrap();
         symlink(&outside.0, &directory.0).unwrap();
-        let error = cleanup(directory.0.to_str().unwrap()).unwrap_err();
+        let error = remove_tree(&mut directory.0.clone()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert!(fs::symlink_metadata(&directory.0).unwrap().is_symlink());
         assert_eq!(
@@ -665,7 +677,7 @@ mod tests {
         fs::remove_file(&directory.0).unwrap();
         fs::write(&directory.0, "replacement").unwrap();
         assert_eq!(
-            cleanup(directory.0.to_str().unwrap()).unwrap_err().kind(),
+            remove_tree(&mut directory.0.clone()).unwrap_err().kind(),
             io::ErrorKind::NotADirectory
         );
         assert_eq!(fs::read_to_string(&directory.0).unwrap(), "replacement");
@@ -685,7 +697,7 @@ mod tests {
         fs::create_dir(&child).unwrap();
         fs::set_permissions(&child, fs::Permissions::from_mode(0o555)).unwrap();
         fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o500)).unwrap();
-        let result = cleanup(child.to_str().unwrap());
+        let result = remove_tree(&mut child.clone());
         let parent_mode = fs::metadata(&directory.0).unwrap().permissions().mode() & 0o777;
         let child_mode = fs::metadata(&child).unwrap().permissions().mode() & 0o777;
         fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o700)).unwrap();

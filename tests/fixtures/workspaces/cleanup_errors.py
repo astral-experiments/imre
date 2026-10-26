@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,8 +15,9 @@ names: list[str] = []
 try:
     pending_return(names)
     print("return escaped")
-except NotADirectoryError:
+except NotADirectoryError as error:
     print("cleanup replaces owned return")
+    print((error.errno, error.strerror, repr(error.filename) == repr(names[0]), repr(error.args)))
 Path(names[0]).replace("return-retained.txt")
 
 body_name = ""
@@ -62,4 +64,23 @@ for index in range(2):
         cancelled += 1
         Path(loop_name).replace("return-retained.txt")
 print(cancelled)
+
+# The harness limits descriptors. A traversal can exhaust them at any depth.
+directories: list[Path] = []
+nested = ""
+try:
+    with TemporaryDirectory(dir="scratch") as nested:
+        directory = Path(nested)
+        directories.append(directory)
+        for _ in range(80):
+            directory = directory / "d"
+            directory.mkdir()
+            directories.append(directory)
+except OSError as error:
+    assert error.errno == errno.EMFILE
+    assert repr(error.filename).startswith(repr(nested)[:-1] + "/")
+    assert repr(error.filename).endswith("/d'")
+for index in range(len(directories) - 1, -1, -1):
+    if directories[index].is_dir():
+        directories[index].rmdir()
 print(len(list(Path("scratch").iterdir())))
