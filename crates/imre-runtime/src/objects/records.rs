@@ -39,8 +39,8 @@ pub struct RecordDescriptor {
     pub semantics: *const RecordSemantics,
 }
 
-/// Kinds are zero for a class, one for a tuple, and two for a Python function
-/// that owns a wrapper link. Flags select generated equality and representation.
+/// Kinds are zero for a class, one for a tuple, two for a ModuleSpec, and three
+/// for a Python function with a wrapper link. Flags select generated equality and representation.
 /// All strings are immutable UTF-8 byte slices.
 #[repr(C)]
 pub struct RecordSemantics {
