@@ -257,6 +257,7 @@ impl Types {
             | Type::Bytes
             | Type::ListInt
             | Type::StringIterable
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -662,8 +663,10 @@ impl Types {
                 }
             }
             [Type::Str, other] | [other, Type::Str]
-                if matches!(other, Type::Bytes | Type::Path | Type::Enum(_))
-                    || self.element(*other) == Some(Type::Str) =>
+                if matches!(
+                    other,
+                    Type::Bytes | Type::Path | Type::FrozenStrings | Type::Enum(_)
+                ) || self.element(*other) == Some(Type::Str) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
@@ -1437,6 +1440,14 @@ impl Types {
         match self.0.borrow().shapes[id] {
             Shape::Set(element) => Some(element),
             _ => unreachable!("set type identity has a set shape"),
+        }
+    }
+
+    /// Element type for membership and iteration, including immutable set views.
+    pub(crate) fn readable_set_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::StringKeys | Type::FrozenStrings => Some(Type::Str),
+            _ => self.set_element(ty),
         }
     }
 

@@ -1181,10 +1181,7 @@ impl Checker<'_> {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);
         if fields.as_ref().is_some_and(Vec::is_empty) {
             let source = self.hidden(iterable.ty);

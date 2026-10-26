@@ -613,6 +613,7 @@ impl Builtin {
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }
+            | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::SysStreamText { .. }

@@ -326,6 +326,7 @@ impl Checker<'_> {
                 "list" => InstanceType::List,
                 "dict" => InstanceType::Dict,
                 "set" => InstanceType::Set,
+                "frozenset" => InstanceType::Exact(Type::FrozenStrings),
                 "tuple" => InstanceType::Tuple,
                 _ => {
                     return Err(error(

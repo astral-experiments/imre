@@ -38,7 +38,6 @@ SysModuleTest.test_ioencoding	failed	The unchanged method's first native child c
 SysModuleTest.test_is_finalizing	blocked	The runtime must transition during final destruction, after atexit; the original reads sys.is_finalizing both during execution and inside __del__.
 SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
-SysModuleTest.test_module_names	blocked	The runtime needs an immutable frozenset of its standard library module names and iterable native string elements.
 SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
 SysModuleTest.test_posix_locale_surrogateescape	blocked	The original LC_ALL=POSIX child stops at getattr(sys, name) before any stream read. The report keeps its argv, first failed host assertion and six stock control children.
 SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.

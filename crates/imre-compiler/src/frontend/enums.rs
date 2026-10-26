@@ -475,6 +475,7 @@ impl Checker<'_> {
                         | Type::Dict(_)
                         | Type::ChainMap(_)
                         | Type::Set(_)
+                        | Type::FrozenStrings
                         | Type::Deque(_)
                         | Type::Class(_)
                         | Type::ModuleSpec(_)
