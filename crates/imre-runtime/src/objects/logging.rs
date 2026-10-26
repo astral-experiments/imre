@@ -7,6 +7,7 @@ mod handler;
 mod hierarchy;
 mod levels;
 pub(super) mod locks;
+pub(super) mod manager;
 pub(super) mod timed;
 
 mod fields;
@@ -27,7 +28,7 @@ pub(super) struct Logger {
     name: StrOwner,
     level: RefCell<Int>,
     enabled: cache::EnabledCache,
-    handlers: crate::ObjectOwner,
+    handlers: RefCell<crate::ObjectOwner>,
     standalone: bool,
     propagate: Cell<bool>,
     disabled: Cell<bool>,
@@ -39,7 +40,7 @@ impl Logger {
             name,
             level: RefCell::new(level),
             enabled: cache::EnabledCache::new(),
-            handlers: super::Words::new(6).into_object(),
+            handlers: RefCell::new(super::Words::new(6).into_object()),
             standalone,
             propagate: Cell::new(true),
             disabled: Cell::new(false),

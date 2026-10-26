@@ -106,6 +106,7 @@ impl Type {
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
+            | Self::LogManager
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
@@ -202,6 +203,7 @@ impl Type {
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
+            | Self::LogManager
             | Self::TimedFileHandler
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
@@ -899,6 +901,7 @@ impl Emitter<'_, '_> {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ProcessSelectorClass
@@ -3772,6 +3775,7 @@ impl Emitter<'_, '_> {
                 | Type::LogRecord
                 | Type::Logger
                 | Type::Patch(_)
+                | Type::LogManager
                 | Type::RegexPattern
                 | Type::JsonRoot
                 | Type::JsonValue
@@ -4447,6 +4451,7 @@ impl Emitter<'_, '_> {
                     WriteStream => "imre_text_output_write",
                     FlushStream => "imre_text_output_flush",
                     New => "imre_log_new",
+                    StreamFile => "imre_text_output_file",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -4462,6 +4467,11 @@ impl Emitter<'_, '_> {
                     FileConfig => "imre_log_file_config",
                     Disabled => "imre_log_disabled",
                     SetDisabled => "imre_log_set_disabled",
+                    NewManager => "imre_log_manager_new",
+                    Manager => "imre_log_manager",
+                    ManagerRoot => "imre_log_manager_root",
+                    ManagerDisable => "imre_log_manager_disable",
+                    SetManagerDisable => "imre_log_manager_set_disable",
                     Propagate => "imre_log_propagate",
                     SetPropagate => "imre_log_set_propagate",
                     HasHandlers => "imre_log_has_handlers",
@@ -7445,6 +7455,7 @@ impl Emitter<'_, '_> {
                     | Type::LogFormatter
                     | Type::LogRecord
                     | Type::Logger
+                    | Type::LogManager
                     | Type::TimedFileHandler
                     | Type::CacheState(_)
                     | Type::ProcessSelectorClass
@@ -7764,6 +7775,7 @@ impl Emitter<'_, '_> {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ProcessSelectorClass
@@ -7875,6 +7887,7 @@ impl Emitter<'_, '_> {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::CacheState(_)
             | Type::ProcessSelectorClass
@@ -8537,6 +8550,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::LogFormatter
         | Type::LogRecord
         | Type::Logger
+        | Type::LogManager
         | Type::TimedFileHandler
         | Type::CacheState(_)
         | Type::ProcessSelectorClass
@@ -9647,6 +9661,11 @@ declare void @imre_log_typed_dict_config(ptr, i64)
 declare void @imre_log_file_config(ptr, i8, i1, i64)
 declare i1 @imre_log_disabled(ptr)
 declare void @imre_log_set_disabled(i1, ptr)
+declare ptr @imre_log_manager_new(i64)
+declare ptr @imre_log_manager(ptr)
+declare i64 @imre_log_manager_root(ptr)
+declare i64 @imre_log_manager_disable(ptr)
+declare void @imre_log_manager_set_disable(ptr, i64)
 declare i1 @imre_log_propagate(ptr)
 declare void @imre_log_set_propagate(i1, ptr)
 declare i1 @imre_log_has_handlers(ptr)
@@ -9657,6 +9676,7 @@ declare void @imre_log_add_handler(ptr, ptr)
 declare void @imre_log_remove_handler(ptr, ptr)
 declare i64 @imre_text_output_write(ptr, ptr)
 declare void @imre_text_output_flush(ptr)
+declare ptr @imre_text_output_file(ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)

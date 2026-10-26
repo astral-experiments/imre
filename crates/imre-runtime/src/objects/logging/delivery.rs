@@ -45,11 +45,43 @@ pub unsafe extern "C" fn imre_text_output_flush(stream: *const Object) {
     finish(result, ());
 }
 
+/// Return the underlying file for close, closed and descriptor operations.
+/// A codec writer delegates these attributes to its wrapped binary stream.
+///
+/// # Safety
+/// The caller roots a writable stream and receives its own reference to the file.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_text_output_file(stream: *const Object) -> *const Object {
+    // SAFETY: both alternatives retain a live file without calling back into the stream.
+    let file = unsafe {
+        object(stream).0.with(|s| match s {
+            Storage::CodecWriter(writer) => writer.stream.clone(),
+            Storage::File(_) => ObjectOwner::acquire_word(stream as usize),
+            _ => unreachable!("checked text output stream"),
+        })
+    };
+    ObjectOwner::into_raw(file)
+}
+
 /// # Safety
 /// The caller roots the exact logger during the list read.
 unsafe fn handler_list(logger: *const Object) -> ObjectOwner {
     // SAFETY: the caller retains the owner while the list acquires a reference.
-    unsafe { state(logger) }.handlers.clone()
+    unsafe { state(logger) }.handlers.borrow().clone()
+}
+
+/// Allocate an empty list before replacing a live handler list.
+pub(super) fn empty_handlers() -> Result<ObjectOwner, Error> {
+    let words = super::super::Words::new(6);
+    ObjectOwner::try_new(Object(super::super::StorageCell::new(words.into_storage())))
+        .map_err(|_| Error::memory_error())
+}
+
+/// Remove configured handlers in place so held list references observe the change.
+pub(super) fn remove_configured_handlers(logger: &super::Logger) {
+    let list = logger.handlers.borrow().clone();
+    // SAFETY: the retained list stays live through clear, outside the logger cell borrow.
+    unsafe { super::super::imre_seq_clear(ObjectOwner::as_ptr(&list)) };
 }
 
 /// # Safety

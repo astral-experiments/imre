@@ -78,6 +78,16 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if matches!(attribute.attr.as_str(), "close" | "fileno") {
+            let file = operation(Log::StreamFile, Type::TextIO, vec![stream]);
+            let args = self.arguments(call, &[], Some(file))?;
+            let (builtin, ty) = if attribute.attr.as_str() == "close" {
+                (Builtin::TextClose, Type::None)
+            } else {
+                (Builtin::FileFileno, Type::Int)
+            };
+            return Ok(self.ordered_builtin(builtin, ty, args));
+        }
         let (op, ty, params) = match attribute.attr.as_str() {
             "write" => (
                 Log::WriteStream,
@@ -89,7 +99,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     attribute,
-                    "writable text stream supports write and flush",
+                    "writable text stream supports write, flush, close and fileno",
                 ));
             }
         };
@@ -466,6 +476,49 @@ impl Checker<'_> {
         }
     }
 
+    pub(super) fn new_log_manager(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let root = self.types.optional(Type::Logger);
+        let args = self.arguments(call, &[required("rootnode", root)], None)?;
+        Ok(self.ordered_builtin(Builtin::Logging(Log::NewManager), Type::LogManager, args))
+    }
+
+    pub(super) fn log_manager_attribute(
+        &self,
+        manager: Expr,
+        attr: &ast::ExprAttribute,
+    ) -> Result<Expr, String> {
+        let (op, ty) = match attr.attr.as_str() {
+            "root" => (Log::ManagerRoot, self.types.optional(Type::Logger)),
+            "disable" => (Log::ManagerDisable, Type::Int),
+            _ => {
+                return Err(error(
+                    self.source,
+                    attr,
+                    "unsupported logging.Manager attribute",
+                ));
+            }
+        };
+        Ok(operation(op, ty, vec![manager]))
+    }
+
+    /// The property validates its argument after both assignment expressions have run.
+    pub(super) fn set_manager_disable(
+        &mut self,
+        manager: Expr,
+        value: Expr,
+        target: &ast::Expr,
+    ) -> Result<Statement, String> {
+        let mut scope = calls::ArgumentScope::default();
+        let value = scope.hold(self, Self::string_value(value));
+        let manager = scope.hold(self, manager);
+        let level = self.checked_level_value(value, target)?;
+        Ok(Statement::Expr(scope.finish(operation(
+            Log::SetManagerDisable,
+            Type::None,
+            vec![manager, level],
+        ))))
+    }
+
     pub(super) fn logger_attribute(
         &self,
         logger: Expr,
@@ -488,6 +541,7 @@ impl Checker<'_> {
                 ))
             }
             "disabled" => Ok(operation(Log::Disabled, Type::Bool, vec![logger])),
+            "manager" => Ok(operation(Log::Manager, Type::LogManager, vec![logger])),
             "propagate" => Ok(operation(Log::Propagate, Type::Bool, vec![logger])),
             "root" => Ok(operation(Log::Root, Type::Logger, vec![logger])),
             "parent" => Ok(operation(

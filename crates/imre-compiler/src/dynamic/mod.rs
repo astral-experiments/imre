@@ -5,6 +5,7 @@ mod emit;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
@@ -19,6 +20,8 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     sys_names: HashSet<String>,
+    machinery_names: HashSet<String>,
+    typed_machinery_receivers: HashSet<String>,
 }
 
 fn literal_path(expr: &Expr) -> Option<PathBuf> {
@@ -49,7 +52,27 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
     }
 }
 
+// The object runtime provides installation metadata (EXTENSION_SUFFIXES);
+// ModuleSpec and its operations belong to the typed frontend.
+fn typed_machinery_export(name: &str) -> bool {
+    crate::modules::IntrinsicModule::ImportlibMachinery
+        .symbol(name)
+        .is_some()
+}
+
 impl Imports {
+    fn needs_typed_machinery(&self) -> bool {
+        !self
+            .machinery_names
+            .is_disjoint(&self.typed_machinery_receivers)
+            || self.names.iter().any(|(level, name)| {
+                *level == 0
+                    && name
+                        .strip_prefix("importlib.machinery.")
+                        .is_some_and(typed_machinery_export)
+            })
+    }
+
     fn sys_path(&self, e: &Expr) -> bool {
         matches!(e,Expr::Attribute(a) if a.attr.as_str()=="path" && matches!(&*a.value,Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
     }
@@ -87,10 +110,13 @@ impl<'a> Visitor<'a> for Imports {
             Stmt::Import(imp) => {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
-                    if name == "sys" {
-                        self.sys_names
-                            .insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
-                    }
+                    let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    match name {
+                        "sys" => self.sys_names.insert(bound.to_string()),
+                        "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
+                        "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
+                        _ => false,
+                    };
                     self.add(0, name);
                 }
             }
@@ -99,6 +125,11 @@ impl<'a> Visitor<'a> for Imports {
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
+                    if imp.level == 0 && name == "importlib" && suffix == "machinery" {
+                        self.runtime_imports = true;
+                        self.machinery_names
+                            .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
+                    }
                     if imp.level == 0
                         && name == "sys"
                         && matches!(suffix, "path" | "version_info" | "implementation" | "exit")
@@ -126,6 +157,12 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Attribute(a) = e
+            && typed_machinery_export(a.attr.as_str())
+            && let Some(receiver) = UnqualifiedName::from_expr(&a.value)
+        {
+            self.typed_machinery_receivers.insert(receiver.to_string());
+        }
         if self.sys_path(e)
             || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "version_info" | "implementation" | "exit") && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
@@ -222,13 +259,29 @@ pub(crate) fn compile(
     };
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
-    let root = if let Some(r) = module_root {
-        cwd.join(r)
-    } else if command.is_some() {
-        cwd.clone()
+    let entry = cwd.join(path);
+    let entry_identity = command
+        .is_none()
+        .then(|| entry.canonicalize())
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let root = if let Some(root) = module_root {
+        cwd.join(root)
+    } else if entry_identity.is_some() {
+        entry.parent().unwrap_or(&cwd).to_owned()
     } else {
-        cwd.join(path).parent().unwrap_or(&cwd).to_owned()
+        cwd.clone()
     };
+    // POSIX starts a script's search path at its physical directory. Keep a
+    // usable UTF-8 alias when the physical name is outside our string domain.
+    let physical_root = match (cfg!(unix), &entry_identity, module_root) {
+        (true, Some(_), Some(_)) => root.canonicalize().ok(),
+        (true, Some(identity), None) => identity.parent().map(Path::to_owned),
+        _ => None,
+    };
+    let root = physical_root
+        .filter(|path| path.to_str().is_some())
+        .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
     if !safe_path {
@@ -242,21 +295,24 @@ pub(crate) fn compile(
         if command.is_some() {
             PathBuf::from("<string>")
         } else {
-            cwd.join(path)
+            entry
         },
         src.clone(),
     )];
     let mut inputs = SourceInputs::default();
-    if command.is_none() {
+    if let Some(identity) = entry_identity {
         inputs.files.push((
             path.to_owned(),
-            path.canonicalize().map_err(|e| e.to_string())?,
+            identity,
             blake3::hash(src.as_bytes()).to_hex().to_string(),
         ));
     }
     let mut seen = HashSet::new();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
+        if imports.needs_typed_machinery() {
+            return Ok(None);
+        }
         for (level, requested) in imports.names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;
@@ -302,6 +358,8 @@ pub(crate) fn compile(
             }
         }
     }
+    let paths = serde_json::to_value(initial)
+        .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let config = serde_json::json!({
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
@@ -309,7 +367,7 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":command.is_some(),"paths":initial,
+        "command":command.is_some(),"paths":paths,
     });
     let llvm_ir = emit::emit(&sources, &config.to_string())?;
     Ok(Some(Compilation {

@@ -18,7 +18,7 @@ from discover_staged import configuration, early_skips, reference_files, suite_n
 from reference_report import checked_reference
 from stage_tests import verify_prefix
 sys.path.insert(0, str(HERE.parent))
-from suite_inventory import reference_results
+from suite_inventory import load_suite, passing_subtest_skips, reference_results
 
 # These are the resource configurations used by the checked-in module ledgers.
 RESOURCES = {"collections": "cpu", "json": "cpu", "logging": "all", "pathlib": "all",
@@ -30,8 +30,16 @@ INSTALLED_ONLY = {f"test.test_subprocess.{cls}.test_executable_without_cwd"
 def run_group(mod, primary, pin, out):
     refs = reference_files(HERE / mod)
     expected = defaultdict(list)
+    recorded_subtests, subtest_aliases, subtest_differences = {}, {}, {}
     for ref in refs:
-        _, entries = checked_reference(ref, pin, sys.platform)
+        raw, entries = checked_reference(ref, pin, sys.platform)
+        if "subtest_skips" in raw:
+            suite = raw["module"]
+            _, observed, aliases = passing_subtest_skips(load_suite(suite))
+            recorded_subtests[suite] = observed
+            subtest_aliases.update(aliases)
+            if observed != raw["subtest_skips"]:
+                subtest_differences[suite] = {"expected": raw["subtest_skips"], "observed": observed}
         for key, outcome in entries:
             expected[key].append(outcome)
     if not expected:
@@ -59,13 +67,17 @@ def run_group(mod, primary, pin, out):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         proc = subprocess.run(command, cwd=work, stdout=log, stderr=subprocess.STDOUT,
                               env={**env, "PYTHONHOME": sys.prefix})
-    return compare_group(xml, expected, early, proc.returncode)
+    result = compare_group(xml, expected, early, proc.returncode, subtest_aliases)
+    if recorded_subtests:
+        result["subtest_skips"] = recorded_subtests
+        result["differences"].update(subtest_differences)
+    return result
 
 
-def compare_group(xml, expected, early, returncode):
+def compare_group(xml, expected, early, returncode, subtests=None):
     """Only a complete set of identified test occurrences can supply a module's counts."""
     try:
-        actual = reference_results(xml, Counter({k: len(v) for k, v in expected.items() if k not in early})) | early
+        actual = reference_results(xml, Counter({k: len(v) for k, v in expected.items() if k not in early}), subtests) | early
     except (FileNotFoundError, ParseError, ValueError) as exc:
         return {"exit": returncode, "expected_instances": sum(map(len, expected.values())),
                 "instances": None, "outcomes": {}, "installed_only_passes": [], "differences": {},

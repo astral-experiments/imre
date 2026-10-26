@@ -307,6 +307,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime
@@ -558,6 +559,7 @@ impl Types {
                 | Type::Bytes
                 | Type::Logger
                 | Type::Socket
+                | Type::LogManager
                 | Type::Path
                 | Type::PurePath(_)
         ) || matches!(ty, Type::Tuple(_) | Type::Class(_)) && self.immutable_key_field(ty)
@@ -582,6 +584,7 @@ impl Types {
             | Type::PurePath(_)
             | Type::Logger
             | Type::Socket
+            | Type::LogManager
             | Type::None => true,
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) if self.is_callback_storage(ty) => false,
@@ -686,7 +689,6 @@ impl Types {
                     self.string_literal(strings)
                 }
             }
-            [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.string_or_int(),
             choices @ [_, _, ..]
                 if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
                     && choices
@@ -828,6 +830,7 @@ impl Types {
             | Type::LogFormatter
             | Type::LogRecord
             | Type::Logger
+            | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
             | Type::ClockTime

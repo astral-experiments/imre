@@ -479,6 +479,32 @@ impl Checker<'_> {
                 expr
             });
         }
+        if let Some((union, members)) = types
+            .iter()
+            .find_map(|&ty| self.types.members(ty).map(|members| (ty, members)))
+            && members.iter().all(|ty| {
+                matches!(
+                    ty,
+                    Type::Bool | Type::LogRecord | Type::Str | Type::Bytes | Type::Path
+                )
+            })
+            && types.iter().all(|ty| *ty == union || members.contains(ty))
+        {
+            // A member's pointer and its tagged union word can differ. Put both
+            // operands in the same representation while preserving None and bool.
+            let target = if [left.ty, right.ty] == types {
+                union
+            } else {
+                self.types.optional(union)
+            };
+            return Ok(Self::identity_result(
+                vec![
+                    self.coerce(left, target, node)?,
+                    self.coerce(right, target, node)?,
+                ],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         let wrapper_attributes = matches!((left.ty, right.ty), (Type::Tuple(_), Type::Tuple(_)))
             && [&left, &right].iter().any(|value| {
                 matches!(
@@ -578,11 +604,6 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes))
-            || (types[0] == types[1]
-                && self
-                    .types
-                    .members(types[0])
-                    .is_some_and(|members| members == [Type::Str, Type::Bytes]))
             || types.iter().all(|ty| {
                 matches!(
                     ty,
@@ -620,6 +641,7 @@ impl Checker<'_> {
             || types
                 .iter()
                 .all(|ty| matches!(ty, Type::Popen(..) | Type::ActivePopen))
+            || types == [Type::LogManager; 2]
             || types == [Type::StringIO; 2]
             || types == [Type::HandlerLock; 2]
             || types == [Type::TimedFileHandler; 2]

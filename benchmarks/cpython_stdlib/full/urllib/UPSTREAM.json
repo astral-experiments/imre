@@ -3,6 +3,7 @@
   "tag": "v3.14.5",
   "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "module": "test.test_urlparse",
+  "record_subtest_skips": true,
   "files": {
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
     "Lib/test/test_urlparse.py": "b2bde5a9b1d696ea07dd4cc18d5816eec225058f"
