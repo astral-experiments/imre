@@ -48,6 +48,14 @@ def main():
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
+        streams = root / "streams.py"
+        streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
+        expected = run(sys.executable, "-B", streams)
+        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout == "stdout π\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
