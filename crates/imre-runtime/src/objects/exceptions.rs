@@ -781,7 +781,7 @@ impl Error {
     }
 
     /// Preserve the native exception class and its formatted Python message.
-    pub(crate) fn into_parts(self) -> (&'static str, StrOwner) {
+    pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
         let kind = self.kind.name();
         let error = self.into_object();
         // SAFETY: the local owner keeps the exception payload alive throughout the read.
