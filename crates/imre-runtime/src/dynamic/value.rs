@@ -153,6 +153,7 @@ impl Context {
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
+            Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
             Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::NamedTuple {
@@ -193,16 +194,9 @@ impl Context {
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
-        let message = match args {
-            [] => String::new(),
-            [one] => self.display(*one),
-            many => {
-                let tuple = self.alloc(Value::Tuple(many.to_vec()));
-                self.display(tuple)
-            }
-        };
-        let mut error = Error::new(kind, message);
+        let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -288,6 +282,10 @@ pub(super) enum Value {
     CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Struct {
+        format: String,
+        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+    },
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -340,6 +338,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        text: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -399,7 +398,7 @@ pub(super) enum Value {
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
-        groups: Vec<Option<String>>,
+        groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
     },
     Context(std::rc::Rc<HashMap<Id, Id>>),
@@ -517,11 +516,13 @@ impl Value {
                 class,
                 fields,
                 dictionary,
+                text,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
+                visit.extend(text);
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {
@@ -552,6 +553,8 @@ impl Value {
             Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexPattern(pattern) => visit.push(pattern.source),
+            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -562,15 +565,14 @@ impl Value {
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
+            | Self::Struct { .. }
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_)
-            | Self::RegexPattern(_)
-            | Self::RegexMatch { .. } => {}
+            | Self::TextFile(_) => {}
         }
     }
 }

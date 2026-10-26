@@ -358,14 +358,17 @@ def report(text):
             "boxed_ast.py",
             "boxed_code_objects.py",
             "boxed_bytes_add.py",
+            "boxed_int_to_bytes.py",
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
+            "boxed_re_verbose.py",
             "boxed_datetime.py",
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
+            "boxed_exception_repr.py",
             "boxed_type_identity.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
@@ -384,7 +387,9 @@ def report(text):
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_bytes_separators.py",
+            "boxed_struct.py",
             "boxed_reversed_list.py",
+            "boxed_string_new.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

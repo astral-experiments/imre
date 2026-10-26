@@ -13,7 +13,7 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
@@ -132,8 +132,9 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                    ) || name == "list.pop"
-                        || name.starts_with("dict.")
+                            | "int.to_bytes"
+                            | "list.pop"
+                    ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -174,7 +175,7 @@ impl Context {
                 let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
-            (None, None) => Err(self.missing_attribute(object, name)),
+            (None, None) => self.builtin_attribute(object, name),
         }
     }
 
@@ -396,6 +397,7 @@ impl Context {
             | ("float", Value::Float(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
@@ -492,10 +494,15 @@ impl Context {
 
     /// Match an attribute lookup failure using the ordinary exception hierarchy.
     pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
-        error.kind == "AttributeError"
+        self.is_builtin_error(error, "AttributeError")
+    }
+
+    /// Includes runtime-loaded subclasses of the named builtin exception.
+    pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
+        error.kind == kind
             || self
                 .builtins
-                .get("AttributeError")
+                .get(kind)
                 .is_some_and(|&base| self.error_matches(&error.kind, base))
     }
 
@@ -629,8 +636,11 @@ impl Context {
                 _ => {}
             },
             Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
+            Value::RegexPattern(pattern) if name == "groups" => {
+                return Ok(self.int(pattern.group_count() as i64));
+            }
             Value::RegexPattern(pattern) if name == "pattern" => {
-                return Ok(self.text(&pattern.source));
+                return Ok(pattern.source);
             }
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
@@ -713,6 +723,11 @@ impl Context {
                 });
                 return Ok(self.alloc(Value::Tuple(args)));
             }
+            Value::Struct { format, layout } => match name {
+                "format" => return Ok(self.text(format)),
+                "size" => return Ok(self.int(layout.size as i64)),
+                _ => {}
+            },
             Value::Hash(hash) => match name {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
@@ -746,11 +761,16 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "bool" && name == "to_bytes" => {
+                return Ok(self.builtin("int.to_bytes"));
+            }
             Value::Native(class) if class == "list" && name == "pop" => {
                 return Ok(self.builtin("list.pop"));
             }
             Value::Native(class)
-                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                if class == "dict"
+                    || (class == "int" && name == "to_bytes")
+                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
@@ -764,6 +784,9 @@ impl Context {
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
+            }
+            Value::Native(class) if class == "str" && name == "__new__" => {
+                return Ok(self.builtin("str.__new__"));
             }
             Value::Module {
                 name: module,
@@ -790,6 +813,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__new__" && self.has_base(obj, "str") {
+                    return Ok(self.builtin("str.__new__"));
+                }
             }
             Value::NamedTuple {
                 class,
@@ -814,7 +840,12 @@ impl Context {
             }
             _ => {}
         }
-        if let Some(method) = builtins::method_name(self.heap.get(obj), name) {
+        self.builtin_attribute(obj, name)
+    }
+
+    fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let base = self.string_storage(obj).unwrap_or(obj);
+        if let Some(method) = builtins::method_name(self.heap.get(base), name) {
             let fun = self.alloc(Value::Native(method));
             return Ok(self.alloc(Value::Method {
                 callable: fun,
@@ -1075,7 +1106,45 @@ impl Context {
             dictionary,
             text_memory: None,
             fields: HashMap::new(),
+            text: None,
         })
+    }
+
+    /// Allocate the immutable str payload while retaining the actual Python class.
+    pub(super) fn new_str(
+        &mut self,
+        class: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let base = self.builtin("str");
+        if !self.subclass(class, base) {
+            let message = match self.heap.get(class) {
+                Value::Class { name, .. } => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                Value::Native(name) if builtins::is_builtin_type(name) => {
+                    format!("str.__new__({name}): {name} is not a subtype of str")
+                }
+                _ => format!(
+                    "str.__new__(X): X is not a type object ({})",
+                    self.type_name(class)
+                ),
+            };
+            return Err(Error::new("TypeError", message));
+        }
+        let text = builtins::call(self, "str", args, kwargs)?;
+        if class == base {
+            return Ok(text);
+        }
+        let text = self.string_storage(text).expect("str() returns a string");
+        Ok(self.alloc(Value::Instance {
+            class,
+            fields: HashMap::new(),
+            dictionary: None,
+            text: Some(text),
+            text_memory: None,
+        }))
     }
 
     pub(super) fn call(
@@ -1106,6 +1175,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "set"
+                                | "int"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"
@@ -1234,19 +1304,36 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
+                        text: None,
                         text_memory: None,
                     }));
                 }
-                let dictionary = self
-                    .has_base(callable, "dict")
-                    .then(|| self.dict(Vec::new()));
-                let instance = self.instance(callable, dictionary);
-                if self.class_attr(callable, "__init__").is_some() {
-                    let init = self.lookup_attr(instance, "__init__")?;
+                let new = self.class_attr(callable, "__new__");
+                let str_subclass = self.has_base(callable, "str");
+                let instance = if let Some(new) = new {
+                    let allocate = self.bind_attribute(new, NONE, callable)?;
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect();
+                    let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if !self.instance_of(instance, callable) {
+                        return Ok(instance);
+                    }
+                    instance
+                } else if str_subclass {
+                    self.new_str(callable, &args, &kwargs)?
+                } else {
+                    let dictionary = self
+                        .has_base(callable, "dict")
+                        .then(|| self.dict(Vec::new()));
+                    self.instance(callable, dictionary)
+                };
+                if let Some(init) = self.bound_slot(instance, "__init__")? {
                     if self.call(init, args, kwargs)? != NONE {
                         return Err(Error::new("TypeError", "__init__ must return None"));
                     }
-                } else if !args.is_empty() || !kwargs.is_empty() {
+                } else if new.is_none() && !str_subclass && (!args.is_empty() || !kwargs.is_empty())
+                {
                     return Err(Error::new(
                         "TypeError",
                         format!("{name} takes no arguments"),

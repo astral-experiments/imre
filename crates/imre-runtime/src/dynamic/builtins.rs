@@ -1,7 +1,6 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use std::cell::RefCell;
-use std::fs::File;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -9,6 +8,7 @@ use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
@@ -152,6 +152,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
@@ -161,6 +162,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
         } if attr == "geturl" => "urllib.parse.SplitResult",
+        Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::Socket(_)
@@ -239,7 +241,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
             "pattern"
         }
-        Value::RegexMatch { .. } if attr == "group" => "match",
+        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {
@@ -315,6 +317,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
     args: &[Id],
     kwargs: &[(String, Id)],
     names: [&str; N],
+    max_positional: usize,
 ) -> Result<[Option<Id>; N]> {
     let count = args.len() + kwargs.len();
     if count > N {
@@ -323,25 +326,28 @@ pub(super) fn bind_method_arguments<const N: usize>(
             "{name}() takes at most {N} {kind}arguments ({count} given)"
         )));
     }
-    let mut values = [None; N];
-    for (slot, &arg) in values.iter_mut().zip(args) {
-        *slot = Some(arg);
+    if args.len() > max_positional {
+        return Err(type_error(format!(
+            "{name}() takes at most {max_positional} positional arguments ({} given)",
+            args.len()
+        )));
     }
-    for (key, value) in kwargs {
-        let index = names
-            .iter()
-            .position(|param| *param == key)
-            .ok_or_else(|| {
-                type_error(format!(
-                    "{name}() got an unexpected keyword argument '{key}'"
-                ))
-            })?;
-        if values[index].replace(*value).is_some() {
+    for (i, key) in names[..args.len()].iter().enumerate() {
+        if kwargs.iter().any(|(provided, _)| provided == key) {
             return Err(type_error(format!(
                 "argument for {name}() given by name ('{key}') and position ({})",
-                index + 1
+                i + 1
             )));
         }
+    }
+    let mut values = std::array::from_fn(|i| args.get(i).copied());
+    for (key, value) in kwargs {
+        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
+            type_error(format!(
+                "{name}() got an unexpected keyword argument '{key}'"
+            ))
+        })?;
+        values[index] = Some(*value);
     }
     Ok(values)
 }
@@ -508,6 +514,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
@@ -760,14 +767,7 @@ pub(super) fn call(
                     "unsupported mode for dynamic files",
                 ));
             }
-            let file = File::open(path).map_err(|e| {
-                let kind = match e.kind() {
-                    io::ErrorKind::NotFound => "FileNotFoundError",
-                    io::ErrorKind::PermissionDenied => "PermissionError",
-                    _ => "OSError",
-                };
-                Error::new(kind, format!("{path}: {e}"))
-            })?;
+            let (file, _) = crate::objects::open_file(path, 0)?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
                 io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))

@@ -113,13 +113,15 @@ impl Context {
             .collect()
     }
 
-    fn str_value(&self, id: Id) -> Result<&str> {
-        if let Value::Str(value) = self.heap.get(id) {
-            Ok(value)
-        } else {
-            Err(Error::new("TypeError", "expected str"))
+    /// The immutable text backing an exact string or a Python subclass of str.
+    fn string_storage(&self, id: Id) -> Option<Id> {
+        match self.heap.get(id) {
+            Value::Str(_) => Some(id),
+            Value::Instance { text, .. } => *text,
+            _ => None,
         }
     }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.heap.get(id) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
@@ -131,6 +133,16 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    fn str_value(&self, id: Id) -> Result<&str> {
+        let id = self
+            .string_storage(id)
+            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
+        let Value::Str(value) = self.heap.get(id) else {
+            unreachable!()
+        };
+        Ok(value)
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
@@ -463,6 +475,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
+            "int" => &["to_bytes"],
             "str" => builtins::STR_METHODS,
             _ => &[],
         };

@@ -201,6 +201,7 @@ fn parsed_instance(
         class: ctx.builtins[&format!("ast.{kind}")],
         fields,
         dictionary: None,
+        text: None,
         text_memory: None,
     })
 }
