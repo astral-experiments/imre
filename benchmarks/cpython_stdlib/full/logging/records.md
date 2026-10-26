@@ -40,3 +40,13 @@ records, protected names, argument evaluation order and catchable errors. The
 and tagged integers, including zero. Both compare the complete process output
 against the pinned interpreter and add no test IDs. These checks exercise the
 default record factory.
+
+## Reading attributes and the live dictionary
+
+The [record attribute comparison](../../../../tests/fixtures/files/logging_record_attributes.py)
+checks the distinction between a missing field and a field containing `None`.
+A retained field keeps its original value when a dictionary alias changes or
+deletes the entry. Defaults run even when the field exists; the fixture also
+copies the retained value into another record.
+
+The production compiler and IR verifier matched CPython's 35 output lines, stderr and exit status at O0 and O3. The [comparison receipt](record-attributes-linux.json) records both runs. The [full suite](evidence-linux.json) retained all 272 occurrences per level and their original fixture and assertion roles. The direct comparison adds no upstream occurrences.
