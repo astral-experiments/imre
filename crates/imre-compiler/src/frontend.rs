@@ -2735,6 +2735,22 @@ impl<'a> Checker<'a> {
         unreachable!("mismatched exact types return an error")
     }
 
+    /// Adapt an evaluated argument to the target's concrete or private representation.
+    fn coerce_argument_value(
+        &mut self,
+        value: Expr,
+        expected: Type,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if self.types.is_len_argument(expected) {
+            self.pack_len_value(value, site)
+        } else if self.types.is_unread_argument(expected) {
+            self.pack_unread_value(value, site, expected)
+        } else {
+            self.coerce(value, expected, site)
+        }
+    }
+
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         self.expr_expected_or(expression, expected, None)
@@ -2773,10 +2789,8 @@ impl<'a> Checker<'a> {
             // Keep the evaluated value so a lookup or callback runs exactly once.
             return if alternative == Some(value.ty) {
                 Ok(value)
-            } else if self.types.is_len_argument(expected) {
-                self.pack_len_value(value, expression)
             } else {
-                self.pack_unread_value(value, expression, expected)
+                self.coerce_argument_value(value, expected, expression)
             };
         }
         // A record can carry user fields with distinct types. An expected scalar type

@@ -264,7 +264,7 @@ impl Checker<'_> {
                 && value.ty != marker
             {
                 slots.push((true, captured.len(), ty));
-                captured.push(self.coerce(value.clone(), ty, *site)?);
+                captured.push(self.coerce_argument_value(value.clone(), ty, site)?);
             } else {
                 remaining.push(ty);
                 slots.push((false, remaining.len(), ty));
