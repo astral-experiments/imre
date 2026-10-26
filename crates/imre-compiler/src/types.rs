@@ -1326,6 +1326,7 @@ impl Types {
                     *underlying
                 }
                 Shape::CachedCallable(cache) => cache.callable,
+                Shape::DispatchCallable(dispatcher) => dispatcher.callable,
                 Shape::PartialCallable(p) => p.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,

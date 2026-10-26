@@ -1,4 +1,4 @@
-//! Standard stream settings captured once before user code can mutate the environment.
+//! Filesystem and standard stream settings captured before user code runs.
 use crate::objects::Codec;
 use std::borrow::Cow;
 use std::ffi::{CStr, CString};
@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 pub(super) struct Settings {
     pub(super) codec: Codec,
     pub(super) errors: Cow<'static, str>,
+    /// The startup locale or UTF-8 mode determines this independently of PYTHONIOENCODING.
+    pub(super) filesystem_codeset: Cow<'static, str>,
 }
 
 pub(super) fn settings(isolated: bool, utf8: Option<bool>) -> &'static Settings {
@@ -24,17 +26,6 @@ pub(super) fn settings(isolated: bool, utf8: Option<bool>) -> &'static Settings 
                 }
             }
         };
-        let (name, errors) = value.split_once(':').unwrap_or((&value, ""));
-        if !name.is_empty() {
-            return Settings {
-                codec: lookup(name),
-                errors: if errors.is_empty() {
-                    "strict".into()
-                } else {
-                    errors.to_owned().into()
-                },
-            };
-        }
         let utf8 = utf8.or_else(|| {
             if isolated {
                 return None;
@@ -46,9 +37,21 @@ pub(super) fn settings(isolated: bool, utf8: Option<bool>) -> &'static Settings 
                 Ok(_) => fatal("PYTHONUTF8 must be 0 or 1"),
             }
         });
-        let (codec, default_errors) = default_encoding(isolated, utf8);
+        let (locale, locale_errors) = default_encoding(isolated, utf8);
+        let (name, errors) = value.split_once(':').unwrap_or((&value, ""));
+        let (codec, default_errors) = if name.is_empty() {
+            (lookup(&locale), locale_errors)
+        } else {
+            (lookup(name), "strict")
+        };
         Settings {
             codec,
+            // Apple and Android always encode filesystem paths as UTF-8.
+            filesystem_codeset: if cfg!(any(target_vendor = "apple", target_os = "android")) {
+                "utf-8".into()
+            } else {
+                locale
+            },
             errors: if errors.is_empty() {
                 default_errors.into()
             } else {
@@ -67,10 +70,9 @@ fn fatal(message: &str) -> ! {
     std::process::exit(1);
 }
 
-fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Codec, &'static str) {
-    let utf8_codec = Codec::Utf8 { signature: false };
+fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Cow<'static, str>, &'static str) {
     if utf8 == Some(true) {
-        return (utf8_codec, "surrogateescape");
+        return ("utf-8".into(), "surrogateescape");
     }
     let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
         .into_iter()
@@ -82,7 +84,7 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Codec, &'static str)
     };
     if matches!(locale.as_str(), "C" | "POSIX") {
         if utf8 != Some(false) {
-            return (utf8_codec, "surrogateescape");
+            return ("utf-8".into(), "surrogateescape");
         }
         if std::env::var_os("LC_ALL").is_none_or(|s| s.is_empty())
             && (isolated || std::env::var("PYTHONCOERCECLOCALE").as_deref() != Ok("0"))
@@ -90,16 +92,16 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Codec, &'static str)
                 .into_iter()
                 .any(|name| locale_codeset(name).is_some())
         {
-            return (utf8_codec, "surrogateescape");
+            return ("utf-8".into(), "surrogateescape");
         }
-        return (lookup(&codeset), "surrogateescape");
+        return (codeset.into(), "surrogateescape");
     }
     let errors = if matches!(locale.as_str(), "C.UTF-8" | "C.utf8" | "UTF-8") {
         "surrogateescape"
     } else {
         "strict"
     };
-    (lookup(&codeset), errors)
+    (codeset.into(), errors)
 }
 
 /// Read the selected character set without changing the process locale.

@@ -479,6 +479,7 @@ impl Builtin {
             | Self::ExceptionCause
             // A fresh exception retains its cause without replacing any existing owner.
             | Self::ExceptionWithCause
+            | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
@@ -624,6 +625,7 @@ impl Builtin {
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
             | Self::SysStreamText { .. }
+            | Self::SysEncoding(_)
             | Self::OsName
             | Self::OptionalStrConcat
             | Self::SysOrigArgv
@@ -1099,6 +1101,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_builtins_last"
                 | "imre_builtins_del_last"
                 | "imre_sys_displayhook"
+                | "imre_sys_filesystem_encoding"
                 | "imre_sys_argv"
                 | "imre_sys_orig_argv"
                 | "imre_sys_getframemodulename"
