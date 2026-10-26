@@ -147,6 +147,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
+    pub class_cell: Option<Id>,
+    pub first_argument: Option<String>,
     pub names: HashMap<String, Id>,
     pub parent: Option<Id>,
     pub module: String,
@@ -193,6 +195,12 @@ pub(super) enum Value {
         entries: Vec<(Id, Id)>,
     },
     Scope(Scope),
+    ClassCell(Option<Id>),
+    Super {
+        start: Id,
+        receiver: Id,
+        owner: Id,
+    },
     Module {
         name: String,
         scope: Id,
@@ -201,13 +209,14 @@ pub(super) enum Value {
         name: String,
         code: Code,
         scope: Id,
+        class_cell: Option<Id>,
         parameters: Id,
         defaults: Id,
     },
     Class {
         name: String,
         scope: Id,
-        bases: Vec<Id>,
+        ancestors: Vec<Id>,
     },
     Instance {
         class: Id,
@@ -312,19 +321,32 @@ impl Value {
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
+                visit.extend(scope.class_cell);
                 visit.extend(scope.parent);
                 visit.extend(scope.names.values());
             }
+            Self::ClassCell(class) => visit.extend(class),
+            Self::Super {
+                start,
+                receiver,
+                owner,
+            } => visit.extend([*start, *receiver, *owner]),
             Self::Module { scope, .. } => visit.push(*scope),
             Self::Function {
                 scope,
+                class_cell,
                 parameters,
                 defaults,
                 ..
-            } => visit.extend([*scope, *parameters, *defaults]),
-            Self::Class { scope, bases, .. } => {
+            } => {
+                visit.extend([*scope, *parameters, *defaults]);
+                visit.extend(class_cell);
+            }
+            Self::Class {
+                scope, ancestors, ..
+            } => {
                 visit.push(*scope);
-                visit.extend(bases);
+                visit.extend(ancestors);
             }
             Self::Instance {
                 class,
@@ -455,6 +477,10 @@ impl Heap {
 
     pub fn location(&self) -> Option<Location> {
         self.frames.last()?.location
+    }
+
+    pub fn current_scope(&self) -> Id {
+        self.frames.last().unwrap().scope
     }
 
     pub fn statement(

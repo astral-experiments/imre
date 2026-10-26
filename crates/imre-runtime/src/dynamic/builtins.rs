@@ -89,6 +89,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "str"
             | "tuple"
             | "type"
+            | "super"
     ) || is_exception(name)
 }
 
@@ -358,6 +359,14 @@ pub(super) fn call(
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
+    if name == "object.__init__" {
+        if args.len() != 1 || !kwargs.is_empty() {
+            return Err(type_error(
+                "object.__init__() takes exactly one argument (the instance to initialize)",
+            ));
+        }
+        return Ok(NONE);
+    }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "str" | "bytes" => text::method(ctx, method, args, kwargs),
@@ -403,6 +412,12 @@ pub(super) fn call(
                 return Err(type_error("type() takes no keyword arguments"));
             }
             ctx.exact_type(*object)
+        }
+        "super" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("super() takes no keyword arguments"));
+            }
+            ctx.make_super(args)
         }
         "callable" => {
             positional(name, kwargs)?;
