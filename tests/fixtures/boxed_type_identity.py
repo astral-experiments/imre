@@ -1,6 +1,8 @@
 import json
+import types
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from operator import attrgetter
 
 
 def classify():
@@ -14,6 +16,27 @@ class ReportsString:
 
 
 def current():
+    class Reporter:
+        def render(self):
+            return self
+
+    report = Reporter()
+    samples = (
+        ("NoneType", None), ("EllipsisType", ...), ("NotImplementedType", NotImplemented),
+        ("BuiltinFunctionType", len), ("FunctionType", Reporter.render),
+        ("MethodType", report.render), ("CodeType", Reporter.render.__code__),
+    )
+    by_type = {}
+    for name, sample in samples:
+        alias = getattr(types, name)
+        print(name, alias is type(sample), sample.__class__ is alias, type(alias) is type,
+              isinstance(sample, alias))
+        by_type[alias] = name
+    print(len(by_type), [by_type[type(sample)] for name, sample in samples])
+    for obj in (len, [].append, Reporter.render, report.render, attrgetter, attrgetter("render")):
+        print(isinstance(obj, types.BuiltinFunctionType), isinstance(obj, types.FunctionType),
+              isinstance(obj, types.MethodType))
+
     marker, other = object(), object()
     retained = {marker: 1, other: 2}
     print(type(marker) is object, marker.__class__ is object, isinstance(marker, object))
