@@ -6,6 +6,7 @@ from enum import StrEnum
 
 class Word(StrEnum):
     EMPTY = ""
+    SAFE = "alpha"
     ARG = "two words"
 
 
@@ -43,6 +44,9 @@ def main() -> None:
     print(shlex.join(x for x in ["", "two words", "'"]))
     empty: list[str] = []
     queue: deque[int] = deque()
+    assert shlex.quote(Word.EMPTY) == "''"
+    assert shlex.quote(Word.SAFE) == "alpha"
+    assert shlex.quote(Word.ARG) == "'two words'"
     assert shlex.split(Word.ARG) == ["two", "words"]
     assert shlex.join([Word.ARG, Word.EMPTY]) == "'two words' ''"
     assert shlex.quote(queue) == "''"
