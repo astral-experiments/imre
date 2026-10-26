@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,8 @@ validity_window()
 REJECTED = [
     ("print(datetime.now())", 'missing required argument "tz"'),
     ("print(datetime.now(None))", "expected datetime.timezone, got None"),
+    ("print(datetime(2020, 1, 1).astimezone())", 'missing required argument "tz"'),
+    ("print(datetime(2020, 1, 1).astimezone(None))", "expected datetime.timezone, got None"),
     (
         "print(datetime(2000, 1, 1) - datetime(1999, 1, 1))",
         "unsupported arithmetic between these datetime values",
@@ -29,8 +32,8 @@ REJECTED = [
 ]
 
 
-def run(argv):
-    return subprocess.run(argv, capture_output=True, timeout=180)
+def run(argv, *, env=None):
+    return subprocess.run(argv, capture_output=True, timeout=180, env=env)
 
 
 def clock(argv):
@@ -70,6 +73,14 @@ def main():
         reference = {src: run([sys.executable, src]) for src in fixed}
         for src, result in reference.items():
             assert result.returncode == 0 and result.stderr == b"", (src, result)
+        conversions = HERE / "timezone_values.py"
+        local_zones = ["UTC", "EST+05EDT,M3.2.0,M11.1.0", "Europe/Berlin",
+                       "Australia/Lord_Howe", "Pacific/Apia"]
+        zone_reference = {}
+        for zone in local_zones:
+            result = run([sys.executable, conversions], env={**os.environ, "TZ": zone})
+            assert result.returncode == 0 and result.stderr == b"", (zone, result)
+            zone_reference[zone] = result.stdout
         for level in (0, 3):
             for reachable in (False, True):
 
@@ -92,11 +103,15 @@ def main():
                         cmd.append("--reachable-only")
                     return run(cmd)
 
-                for src in [*fixed, live]:
+                for src in [*fixed, live, conversions]:
                     built = build(src)
                     assert built.returncode == 0, (level, reachable, src, built.stderr)
                     if src == live:
                         clock([directory / "case"])
+                    elif src == conversions:
+                        for zone, expected in zone_reference.items():
+                            got = run([directory / "case"], env={**os.environ, "TZ": zone})
+                            assert (got.returncode, got.stdout, got.stderr) == (0, expected, b""), (zone, got)
                     else:
                         got = run([directory / "case"])
                         ref = reference[src]
@@ -117,7 +132,7 @@ def main():
                         and diagnostic.encode() in blocked.stderr
                     ), (source, blocked.stderr)
                 print(
-                    f"O{level} {'reachable' if reachable else 'whole'}: fixed outputs, live UTC interval, and scope checks match"
+                    f"O{level} {'reachable' if reachable else 'whole'}: fixed outputs, five source timezones, live clock, and scope checks match"
                 )
 
 

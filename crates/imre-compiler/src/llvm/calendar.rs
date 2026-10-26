@@ -69,6 +69,12 @@ impl Emitter<'_, '_> {
                 )
             }
             Op::Text { iso } => self.call("imre_calendar_text", Type::Str, &[get(0), &flag(iso)]),
+            Op::Replace { timezone_supplied } => {
+                let supplied = flag(timezone_supplied);
+                let mut fields: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                fields.push(&supplied);
+                self.call("imre_calendar_replace", returns, &fields)
+            }
             Op::ZoneOffset => self.call("imre_calendar_zoneoffset", returns, &[get(0)]),
             Op::ZoneName => self.call("imre_calendar_zonename", returns, &[get(0)]),
             _ => {
@@ -76,6 +82,7 @@ impl Emitter<'_, '_> {
                     Op::Date => "imre_calendar_date",
                     Op::DateTime => "imre_calendar_datetime",
                     Op::Combine => "imre_calendar_combine",
+                    Op::Astimezone => "imre_calendar_astimezone",
                     Op::Zone => "imre_calendar_zone",
                     Op::Utc => "imre_calendar_utc",
                     Op::ZoneLimit => "imre_calendar_zone_limit",

@@ -94,6 +94,8 @@ impl Builtin {
                     crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
                         | crate::ir::CalendarOp::Combine
+                        | crate::ir::CalendarOp::Replace { .. }
+                        | crate::ir::CalendarOp::Astimezone
                         | crate::ir::CalendarOp::Delta
                         | crate::ir::CalendarOp::Zone
                         | crate::ir::CalendarOp::Now
@@ -404,6 +406,14 @@ impl Builtin {
             | Self::BytesIoValue
             | Self::CodecWriter(_)
             | Self::HashNew
+            | Self::HashAvailable
+            | Self::Sha1Hex
+            | Self::Sha1New
+            | Self::Sha256Hex
+            | Self::Sha256New
+            | Self::HashName
+            | Self::HashDigest { .. }
+            | Self::HashCopy
             | Self::DecodeSplitLines
             | Self::SplitLines
             | Self::FreezeStrings
@@ -476,18 +486,14 @@ impl Builtin {
             | Self::Encode
             | Self::CsvLineNumber
             | Self::CodecName
-            | Self::Sha256Hex
-            | Self::Sha256New
             | Self::StrDescriptor(_)
             | Self::Placeholder(_)
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
             | Self::JsonDecoderMemo
-            | Self::HashAvailable
-            | Self::Sha256Update
-            | Self::Sha256Digest { .. }
-            | Self::Sha256Copy
+            | Self::HashUpdate
+            | Self::HashDigestSize
             | Self::ActiveException
             | Self::SysIntern
             | Self::SysIsInterned
@@ -1028,6 +1034,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_calendar_datetime"
                 | "imre_calendar_date"
                 | "imre_calendar_combine"
+                | "imre_calendar_replace"
+                | "imre_calendar_astimezone"
                 | "imre_calendar_delta"
                 | "imre_calendar_zone"
                 | "imre_calendar_now"
@@ -1122,6 +1130,15 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_codec_writer_write"
                 | "imre_codec_writer_control"
                 | "imre_hash_new"
+                | "imre_sha1_new"
+                | "imre_sha256_new"
+                | "imre_sha1_hex"
+                | "imre_sha256_hex"
+                | "imre_hash_copy"
+                | "imre_hash_name"
+                | "imre_hash_digest"
+                | "imre_hash_hexdigest"
+                | "imre_hash_algorithms_available"
                 | "imre_toml_keys"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"

@@ -729,7 +729,7 @@ impl Checker<'_> {
                 )
             })
             || types == [Type::BinaryIO; 2]
-            || types == [Type::Sha256; 2])
+            || types == [Type::Hash; 2])
         {
             return Err(error(
                 self.source,

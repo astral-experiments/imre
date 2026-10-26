@@ -1337,19 +1337,33 @@ impl Set {
     }
 
     /// Transfer exact string keys into a new, immutable set.
-    fn frozen_strings(
+    fn string_set(
         keys: impl Iterator<Item = Result<OwnedWord, Error>>,
+        frozen: bool,
     ) -> Result<crate::ObjectOwner, Error> {
         let mut tables = Tables::new(3);
         for key in keys {
             tables.insert(key?, ())?;
         }
-        let set = TableOwner::try_new(Self {
-            tables,
-            frozen: true,
-        })?;
+        let set = TableOwner::try_new(Self { tables, frozen })?;
         crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(set))))
             .map_err(|_| Error::allocation())
+    }
+
+    pub(super) fn names<'a>(
+        names: impl Iterator<Item = &'a str>,
+        frozen: bool,
+    ) -> Result<crate::ObjectOwner, Error> {
+        let keys =
+            names.map(|name| {
+                let text = Str::try_new(name).map_err(|_| Error::allocation())?;
+                let key = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
+                // SAFETY: transfer the newly owned native string to the set.
+                Ok(unsafe {
+                    OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
+                })
+            });
+        Self::string_set(keys, frozen)
     }
 
     /// Deep-copy admission proves each set member is unchanged by deepcopy.
@@ -2678,10 +2692,11 @@ pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const
     // SAFETY: the source roots each exact string and insertion cannot reenter Python.
     let result = unsafe {
         object(source).0.with(|s| {
-            Set::frozen_strings(
+            Set::string_set(
                 s.sequence()?
                     .strings()
                     .map(|(word, _)| Ok(WordKind::new(3).acquire(word))),
+                true,
             )
         })
     };
@@ -2698,17 +2713,8 @@ pub extern "C" fn imre_sys_stdlib_module_names() -> *const Object {
         if let Some(names) = root.get() {
             return crate::ObjectOwner::into_raw(names.clone());
         }
-        let keys = include_str!("../../native/stdlib-module-names.txt")
-            .lines()
-            .map(|name| {
-                let text = Str::try_new(name).map_err(|_| Error::allocation())?;
-                let key = StrOwner::try_new(text).map_err(|_| Error::allocation())?;
-                // SAFETY: transfer the newly owned native string to the set.
-                Ok(unsafe {
-                    OwnedWord::from_owned(StrOwner::into_raw(key) as usize, WordKind::new(3))
-                })
-            });
-        match Set::frozen_strings(keys) {
+        let names = include_str!("../../native/stdlib-module-names.txt").lines();
+        match Set::names(names, true) {
             Ok(names) => crate::ObjectOwner::into_raw(root.get_or_init(|| names).clone()),
             Err(error) => error.returning(std::ptr::null()),
         }

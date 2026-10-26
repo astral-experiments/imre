@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 70 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 35 modules with recorded suites, 93 complete test executions pass natively at both optimization levels; 14,659 of 14,806 upstream executions have a classification.
+**At a glance:** 70 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 36 modules with recorded suites, 93 complete test executions pass natively at both optimization levels; 14,741 of 14,888 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 409 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,553 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 411 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,553 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -29,7 +29,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `copy` | Yes | Shallow and deep copies of supported containers and fixed-layout objects. [Evidence](../benchmarks/cpython_stdlib/full/copy/README.md) | [6 / 81](../benchmarks/cpython_stdlib/full/copy/) | 0 | 4 |
 | `csv` | Yes | Read rows and apply supported CSV dialect options. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [18 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 7 |
 | `dataclasses` | Yes | Construct fixed-field dataclasses with defaults and factories. [Evidence](../tests/fixtures/dataclasses/record_factories.py) | — | — | — |
-| `datetime` | Yes | Construct and compare Gregorian dates, combine a date and time, and add timedeltas to dates or fixed-offset datetimes. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 12 | 0 |
+| `datetime` | Yes | Construct, combine and compare civil dates and times, add timedeltas, replace datetime fields and convert to a fixed timezone. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 12 | 0 |
 | `difflib` | Yes | `ndiff` on sequences of lines. [Evidence](../tests/fixtures/iterables/ndiff.py) | — | — | — |
 | `doctest` | Yes | `DocTestSuite` and execution of selected original docstring examples. [Evidence](../benchmarks/cpython_stdlib/full/doctest/README.md) | — | — | — |
 | `email` | Yes | Parse and format RFC mail dates with `email.utils.parsedate_to_datetime`, `format_datetime`, and `formatdate`. Selected message declarations also bind in unreachable code. [Evidence](../benchmarks/cpython_stdlib/full/email/README.md) | [0 / 1,793](../benchmarks/cpython_stdlib/full/email/) | 4 | 7 |
@@ -39,7 +39,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 18 | 17 |
 | `genericpath` | Rejected | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
-| `hashlib` | Yes | SHA-256 construction, incremental updates, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/native_hashlib.py) | — | — | — |
+| `hashlib` | Yes | SHA-1 and SHA-256 construction, incremental updates, copy, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
 | `http` | Yes | Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 1 | 27 |
 | `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`; with a configured cache tag, convert paths using `util.cache_from_source` and `util.source_from_cache`. [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
 | `inspect` | Yes | `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 0 |

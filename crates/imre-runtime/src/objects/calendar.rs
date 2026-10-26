@@ -1,6 +1,7 @@
 //! Immutable Python calendar values. Civil dates use an ordinal and microseconds of day;
 //! fixed zones keep their original offset and owner, including the canonical UTC singleton.
 use super::*;
+mod conversion;
 mod maildates;
 /// # Safety
 /// The rooted receiver is an exact timedelta.
@@ -513,7 +514,13 @@ fn new_date(
     zone: Option<crate::ObjectOwner>,
 ) -> Result<crate::ObjectOwner, Error> {
     let [y, m, d, h, mn, s, u, fold] = words.map(c_component);
-    let (y, m, d, h, mn, s, u, fold) = (y?, m?, d?, h?, mn?, s?, u?, fold?);
+    datetime_from_fields([y?, m?, d?, h?, mn?, s?, u?, fold?], zone)
+}
+
+fn datetime_from_fields(
+    [y, m, d, h, mn, s, u, fold]: [i32; 8],
+    zone: Option<crate::ObjectOwner>,
+) -> Result<crate::ObjectOwner, Error> {
     let ord = checked_ordinal(y, m, d)?;
     check(h, "hour", 0, 23)?;
     check(mn, "minute", 0, 59)?;
@@ -526,7 +533,7 @@ fn new_date(
         ));
     }
     let local = (ord - 1) * DAY + i128::from(h * 3600 + mn * 60 + s) * 1_000_000 + i128::from(u);
-    Ok(owner(Value::Date { local, zone, fold }))
+    try_owner(Value::Date { local, zone, fold })
 }
 
 /// # Safety
@@ -585,15 +592,20 @@ pub unsafe extern "C" fn imre_calendar_combine(
         fold: fold as i32,
     }))
 }
-fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOwner, Error> {
-    if !(0..MAX_ORD * DAY).contains(&local) {
-        return Err(Error::new(Kind::OverflowError, "date value out of range"));
+fn check_datetime_range(local: i128) -> Result<(), Error> {
+    if (0..MAX_ORD * DAY).contains(&local) {
+        Ok(())
+    } else {
+        Err(Error::new(Kind::OverflowError, "date value out of range"))
     }
-    Ok(owner(Value::Date {
+}
+fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOwner, Error> {
+    check_datetime_range(local)?;
+    try_owner(Value::Date {
         local,
         zone,
         fold: 0,
-    }))
+    })
 }
 fn date_fields(local: i128, fold: i32) -> [i128; 8] {
     let ord = local.div_euclid(DAY) + 1;

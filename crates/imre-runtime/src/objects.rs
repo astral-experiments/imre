@@ -139,7 +139,7 @@ enum Storage {
         name: crate::StrOwner,
         filename: crate::StrOwner,
     },
-    Sha256(Box<sha2::Sha256>),
+    Hash(allocator_api2::boxed::Box<hashlib::State>),
     Poll(Box<readiness::Poll>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
