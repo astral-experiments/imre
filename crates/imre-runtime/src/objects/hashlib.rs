@@ -11,24 +11,46 @@ use super::{Bytes, Object, Storage, StorageCell, Str, object};
 use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
-pub(super) enum State {
+pub(crate) enum State {
     Sha1(Sha1),
     Sha256(Sha256),
 }
 
 impl State {
-    fn name(&self) -> &'static str {
+    pub(crate) fn sha1(data: &[u8]) -> Self {
+        Self::Sha1(Sha1::new_with_prefix(data))
+    }
+
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Sha1(_) => "sha1",
             Self::Sha256(_) => "sha256",
         }
     }
 
-    fn digest<T>(&self, result: impl FnOnce(&[u8]) -> T) -> T {
+    pub(crate) fn update(&mut self, data: &[u8]) {
+        match self {
+            Self::Sha1(h) => h.update(data),
+            Self::Sha256(h) => h.update(data),
+        }
+    }
+
+    pub(crate) fn digest_size(&self) -> usize {
+        match self {
+            Self::Sha1(_) => Sha1::output_size(),
+            Self::Sha256(_) => Sha256::output_size(),
+        }
+    }
+
+    pub(crate) fn digest<T>(&self, result: impl FnOnce(&[u8]) -> T) -> T {
         match self {
             Self::Sha1(h) => result(&h.clone().finalize()),
             Self::Sha256(h) => result(&h.clone().finalize()),
         }
+    }
+
+    pub(crate) fn hexdigest(&self) -> Result<Str> {
+        self.digest(hex_text)
     }
 }
 
@@ -47,7 +69,7 @@ pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> 
     let (name, data) = unsafe { (&*name, &*data) };
     let matches = |aliases: &[&str]| aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias));
     let result = if matches(&["sha1", "sha-1", "ssl3-sha1", "1.3.14.3.2.26"]) {
-        handle(State::Sha1(Sha1::new_with_prefix(data)))
+        handle(State::sha1(data))
     } else if matches(&["sha256", "sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"]) {
         handle(State::Sha256(Sha256::new_with_prefix(data)))
     } else {
@@ -81,14 +103,18 @@ pub(super) fn clear_algorithms() {
     AVAILABLE.with(RefCell::take);
 }
 
-fn hex(digest: &[u8]) -> Result<*const Str> {
+fn hex_text(digest: &[u8]) -> Result<Str> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut result = Str::try_with_capacity(digest.len() * 2).map_err(|_| Error::allocation())?;
     for &byte in digest {
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
-    crate::checked_owned_str(result)
+    Ok(result)
+}
+
+fn hex(digest: &[u8]) -> Result<*const Str> {
+    crate::checked_owned_str(hex_text(digest)?)
 }
 
 /// # Safety
@@ -112,10 +138,7 @@ pub unsafe extern "C" fn imre_sha256_hex(value: *const Bytes) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sha1_new(value: *const Bytes) -> *const Object {
     // SAFETY: the provider consumes the borrowed bytes before returning.
-    finish(
-        handle(State::Sha1(Sha1::new_with_prefix(unsafe { &*value }))),
-        ptr::null(),
-    )
+    finish(handle(State::sha1(unsafe { &*value })), ptr::null())
 }
 
 /// # Safety
@@ -139,10 +162,7 @@ pub unsafe extern "C" fn imre_hash_update(hash: *const Object, value: *const Byt
             let Storage::Hash(state) = storage else {
                 unreachable!()
             };
-            match &mut **state {
-                State::Sha1(h) => h.update(&*value),
-                State::Sha256(h) => h.update(&*value),
-            }
+            state.update(&*value);
         });
     }
 }
@@ -175,12 +195,7 @@ pub unsafe extern "C" fn imre_hash_name(hash: *const Object) -> *const Str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_digest_size(hash: *const Object) -> usize {
     // SAFETY: the lookup only reads the hash's algorithm tag.
-    let size = unsafe {
-        with_state(hash, |s| match s {
-            State::Sha1(_) => Sha1::output_size(),
-            State::Sha256(_) => Sha256::output_size(),
-        })
-    };
+    let size = unsafe { with_state(hash, State::digest_size) };
     Int::from_usize(size).into_raw()
 }
 
@@ -209,5 +224,6 @@ pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str {
     // SAFETY: finalize reads a snapshot of the rooted hash.
-    finish(unsafe { with_state(hash, |s| s.digest(hex)) }, ptr::null())
+    let result = unsafe { with_state(hash, State::hexdigest) };
+    finish(result.and_then(crate::checked_owned_str), ptr::null())
 }
