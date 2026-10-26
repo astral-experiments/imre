@@ -966,7 +966,6 @@ fn class_attribute(name: &str) -> bool {
         name,
         "getMessage"
             | "__module__"
-            | "__qualname__"
             | "__firstlineno__"
             | "__doc__"
             | "__static_attributes__"
