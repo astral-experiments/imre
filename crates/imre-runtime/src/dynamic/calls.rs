@@ -817,7 +817,8 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Some(descriptor) = self.slot(obj, name)
+        let member = self.slot(obj, name);
+        if let Some(descriptor) = member
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
@@ -836,7 +837,7 @@ impl Context {
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
-        if name == "__class__" {
+        if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
         match *self.heap.get(obj) {
@@ -914,7 +915,7 @@ impl Context {
                 let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                if name == "__dict__" {
+                if name == "__dict__" && member.is_none() {
                     fields.clear();
                     return Ok(());
                 }
