@@ -1,7 +1,16 @@
 //! Source-ordered construction of ImportError's argument tuple and keyword fields.
 use super::*;
 
+mod keywords;
+
 impl Checker<'_> {
+    pub(super) fn exception_tuple_slot(&self, class: usize) -> bool {
+        self.classes.declarations.definitions[class]
+            .fields
+            .iter()
+            .any(|field| field.name == crate::classes::EXCEPTION_ARGS_SLOT)
+    }
+
     pub(super) fn is_import_error(&self, kind: u32) -> bool {
         let base = self
             .types
@@ -12,26 +21,25 @@ impl Checker<'_> {
         matches!(base, 41 | 42)
     }
 
-    pub(super) fn import_argument_supported(&self, ty: Type) -> bool {
+    pub(super) fn boxable_value(&self, ty: Type) -> bool {
         matches!(
             ty,
             Type::None | Type::Bool | Type::Int | Type::Str | Type::StrLiteral(_) | Type::Bytes
         ) || self
             .types
             .payload(ty)
-            .is_some_and(|ty| self.import_argument_supported(ty))
-            || self.types.fields(ty).is_some_and(|items| {
-                items
-                    .into_iter()
-                    .all(|item| self.import_argument_supported(item))
-            })
+            .is_some_and(|ty| self.boxable_value(ty))
+            || self
+                .types
+                .fields(ty)
+                .is_some_and(|items| items.into_iter().all(|item| self.boxable_value(item)))
     }
 
     pub(super) fn import_error(
         &mut self,
         call: &ast::ExprCall,
         kind: u32,
-        mut receiver: Option<Expr>,
+        receiver: Option<Expr>,
     ) -> Result<Expr, String> {
         // Typeshed omits name_from and treats unknown keywords as static errors;
         // our resolved builtin supplies the CPython constructor or its exact TypeError.
@@ -39,69 +47,84 @@ impl Checker<'_> {
             self.module,
             call.arguments.keywords.iter().map(Ranged::range),
         );
-        let mut fields = [None; 3];
-        let mut rejected_reset = None;
-        for (index, kw) in call.arguments.keywords.iter().enumerate() {
-            let Some(key) = &kw.arg else {
-                return Err(error(
-                    self.source,
-                    kw,
-                    "expanded import exception keywords require a fixed signature",
-                ));
+        let callable = if receiver.is_some() {
+            "ImportError.__init__".to_owned()
+        } else if let Some(Binding::Definition(def)) = self.resolve(&call.func)
+            && let Some(decl) = self
+                .types
+                .exception_declarations()
+                .iter()
+                .find(|d| d.id == kind)
+        {
+            let module = if def.module == self.graph.entry {
+                "__main__"
+            } else {
+                &self.graph.modules[def.module].name
             };
-            let slot = match key.as_str() {
-                "name" => 0,
-                "path" => 1,
-                "name_from" => 2,
-                _ => {
-                    if rejected_reset.is_none() {
-                        let message =
-                            format!("ImportError() got an unexpected keyword argument '{key}'");
-                        let Some(target) = receiver.take() else {
-                            return self.sys_type_error(call, Type::ImportException, message);
-                        };
-                        rejected_reset = Some((target, message));
-                    }
-                    continue;
-                }
-            };
-            fields[slot] = Some(index + 1);
-        }
-        let mut value = |node: &ast::Expr| {
-            let arg = self.expr(node)?;
-            if !self.import_argument_supported(arg.ty) {
-                return Err(error(
-                    self.source,
-                    node,
-                    "import exception arguments support None, bool, int, str, bytes, and fixed tuples of these values",
-                ));
-            }
-            Ok(Self::string_value(arg))
+            format!("{module}.{}", decl.name)
+        } else if kind == 42 {
+            "ModuleNotFoundError".to_owned()
+        } else {
+            "ImportError".to_owned()
         };
-        let args = call
-            .arguments
-            .args
-            .iter()
-            .map(&mut value)
-            .collect::<Result<Vec<_>, _>>()?;
-        if let Some((target, message)) = rejected_reset {
-            let mut operands = vec![target, self.import_args_tuple(args)];
-            for kw in &call.arguments.keywords {
-                operands.push(self.expr(&kw.value)?);
+        let keywords = keywords::bind(self.source, call, &callable)?;
+        let args = &call.arguments.args;
+        if let Some(message) = keywords.binding_error {
+            let ty = if receiver.is_some() {
+                Type::None
+            } else {
+                Type::ImportException
+            };
+            let mut operands: Vec<_> = receiver.into_iter().collect();
+            for node in args.iter().chain(keywords.values) {
+                operands.push(self.expr(node)?);
             }
-            operands.push(unpacking::string(message));
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::ImportErrorRejectReset, operands),
-            });
+            return Ok(Self::type_error_after(operands, ty, message));
         }
-        let kwargs = call
-            .arguments
-            .keywords
+        if let Some(message) = keywords.init_error {
+            if let Some(target) = receiver {
+                let args = args
+                    .iter()
+                    .map(|n| self.import_argument(n))
+                    .collect::<Result<_, _>>()?;
+                let mut operands = vec![target, self.import_args_tuple(args)];
+                for node in keywords.values {
+                    operands.push(self.expr(node)?);
+                }
+                operands.push(unpacking::string(message));
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ImportErrorRejectReset, operands),
+                });
+            }
+            let operands = args
+                .iter()
+                .chain(keywords.values)
+                .map(|n| self.expr(n))
+                .collect::<Result<_, _>>()?;
+            return Ok(Self::type_error_after(
+                operands,
+                Type::ImportException,
+                message,
+            ));
+        }
+        let args = args
             .iter()
-            .map(|kw| value(&kw.value))
-            .collect::<Result<Vec<_>, _>>()?;
-        let new = self.import_error_value(kind, args, kwargs, fields);
+            .map(|n| self.import_argument(n))
+            .collect::<Result<_, _>>()?;
+        let kwargs = keywords
+            .values
+            .into_iter()
+            .enumerate()
+            .map(|(i, n)| {
+                if keywords.fields.contains(&Some(i + 1)) {
+                    self.import_argument(n)
+                } else {
+                    self.expr(n)
+                }
+            })
+            .collect::<Result<_, _>>()?;
+        let new = self.import_error_value(kind, args, kwargs, keywords.fields);
         Ok(match receiver {
             Some(old) => Expr {
                 ty: Type::None,
@@ -109,6 +132,19 @@ impl Checker<'_> {
             },
             None => new,
         })
+    }
+
+    /// Convert a value when the native argument tuple or a keyword field retains it.
+    fn import_argument(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+        let value = self.expr(node)?;
+        if !self.boxable_value(value.ty) {
+            return Err(error(
+                self.source,
+                node,
+                "import exception arguments support None, bool, int, str, bytes, and fixed tuples of these values",
+            ));
+        }
+        Ok(Self::string_value(value))
     }
 
     /// Retain the positional tuple independently of the import-specific fields.

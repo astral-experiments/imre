@@ -10,3 +10,7 @@ class Item:
 
     def label(self, *, prefix: str = "item") -> str:
         return f"{prefix}:{self.number}"
+
+
+def marked(*, mark: str = "marker:\t", shift: int = -100_000_000_000_000_000_000) -> str:
+    return mark + str(shift)

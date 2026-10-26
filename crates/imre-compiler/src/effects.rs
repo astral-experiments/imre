@@ -1,14 +1,14 @@
 //! Conservative escaping-error summaries over the final, rewritten typed IR.
 //!
-//! Allocation failure remains fatal under the current runtime contract. Fixed
-//! fields cannot raise: the checker fixes their indices, prevents partially
+//! Some runtime operations report allocation failure. Fixed fields cannot raise:
+//! the checker fixes their indices, prevents partially
 //! initialized objects from escaping, and proves optional payloads present.
 //! Container bounds, I/O, conversion, explicit raises and uncertain operations
 //! remain fallible. Catching an error does not make its containing function
 //! infallible here; every handler, else and finally body is included.
 
 use crate::callables::Targets;
-use crate::ir::{Expr, ExprKind, Module, Statement};
+use crate::ir::{Expr, ExprKind, Module, Statement, Type};
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -23,16 +23,29 @@ impl ExceptionEffects {
     }
 }
 
+#[derive(Clone, Copy)]
+struct Context<'a> {
+    calls: &'a Targets,
+    types: &'a crate::types::Types,
+}
+
 /// Removes fallibility only after every operation and callee is proved safe.
 /// Starting pessimistically also leaves unexpected recursive cycles fallible;
 /// the current frontend rejects them, and its acyclic graph reaches a fixed
 /// point after at most one successful transition per function.
 pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
+    let targets = Context {
+        calls: targets,
+        types: &module.types,
+    };
     let mut functions = vec![true; module.functions.len()];
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !block(&function.body, &functions, targets) {
+            if functions[id]
+                && !module.source_frames.get(id).is_some_and(Option::is_some)
+                && !block(&function.body, &functions, targets)
+            {
                 functions[id] = false;
                 changed = true;
             }
@@ -43,9 +56,21 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     }
 }
 
+/// Check a fragment during lowering, when no callee is yet proven infallible.
+pub(crate) fn may_raise_locally(body: &[Statement], types: &crate::types::Types) -> bool {
+    block(
+        body,
+        &[],
+        Context {
+            calls: &Targets::default(),
+            types,
+        },
+    )
+}
+
 /// Any potentially failing path is enough; unreachable branches and caught
 /// errors deliberately remain conservative rather than requiring control flow.
-fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
+fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
     body.iter().any(|statement| match statement {
         Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
             expression(value, functions, targets)
@@ -106,7 +131,7 @@ fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
 
 /// Includes every evaluated child; fixed-layout reads and writes themselves
 /// cannot fail, but their receiver, replacement or initializer still can.
-fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
+fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
     match &value.kind {
         ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -115,11 +140,49 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
-        ExprKind::List(values) | ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
-            values
+        // Fixed-offset datetime ordering raises on a mix of naive and aware operands.
+        // Preserve this effect across a direct call even when both operands are simple locals.
+        ExprKind::Compare(values, ops)
+            if ops.iter().zip(values).any(|(op, value)| {
+                matches!(
+                    value.ty,
+                    crate::ir::Type::Calendar(crate::ir::CalendarType::DateTime)
+                ) && !matches!(op, crate::ir::Compare::Equal | crate::ir::Compare::NotEqual)
+            }) =>
+        {
+            true
+        }
+        // Even an existing point needs space when appended to a packed list literal.
+        ExprKind::List(values)
+            if !values.is_empty()
+                && targets
+                    .types
+                    .element(value.ty)
+                    .is_some_and(|ty| targets.types.is_value_struct(ty)) =>
+        {
+            true
+        }
+        ExprKind::Compare(values, _) => {
+            // A structural comparison may allocate a traversal stack, including
+            // when a set or Counter looks up an equal record key.
+            values.windows(2).any(|pair| {
+                matches!(
+                    pair[0].ty,
+                    Type::Class(_)
+                        | Type::Tuple(_)
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::Set(_)
+                        | Type::Deque(_)
+                        | Type::SimpleNamespace(_)
+                )
+            }) || values
                 .iter()
                 .any(|value| expression(value, functions, targets))
         }
+        ExprKind::List(values) | ExprKind::Boolean(_, values) => values
+            .iter()
+            .any(|value| expression(value, functions, targets)),
         ExprKind::Dict { entries, .. } => !entries.is_empty(),
         ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
@@ -156,7 +219,7 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
             .as_ref()
             .is_some_and(|receiver| expression(receiver, functions, targets)),
         ExprKind::Invoke { callable, args } => {
-            let candidates = targets.get(callable.ty);
+            let candidates = targets.calls.get(callable.ty);
             candidates.is_empty()
                 || candidates
                     .iter()
@@ -172,7 +235,10 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
             .as_ref()
             .is_some_and(|message| expression(message, functions, targets)),
         ExprKind::Builtin(builtin, args) => {
-            builtin.contract(args).may_raise
+            // An owned struct read can need a new box even at a proven index.
+            (matches!(builtin, crate::ir::Builtin::SequenceGetInBounds)
+                && targets.types.is_value_struct(value.ty))
+                || builtin.contract(args).may_raise
                 || args.iter().any(|arg| expression(arg, functions, targets))
         }
     }
@@ -211,7 +277,57 @@ mod tests {
     }
 
     #[test]
+    fn local_and_final_analysis_agree_on_packed_list_allocations() {
+        let types = crate::types::Types::default();
+        types.set_value_structs([0].into());
+        let local = |ty, slot| Expr {
+            ty,
+            kind: ExprKind::Local(slot),
+        };
+        let mut functions = Vec::new();
+        for (item, packed) in [(Type::Class(0), true), (Type::Float, false)] {
+            let list = types.list(item);
+            let literal = Expr {
+                ty: list,
+                kind: ExprKind::List(vec![local(item, 0)]),
+            };
+            let read = Expr {
+                ty: item,
+                kind: ExprKind::Builtin(
+                    Builtin::SequenceGetInBounds,
+                    vec![local(list, 1), integer()],
+                ),
+            };
+            for value in [literal, read] {
+                let mut f = function(vec![Statement::Expr(value)]);
+                f.params = vec![0, 1];
+                f.locals = vec![item, list];
+                assert_eq!(may_raise_locally(&f.body, &types), packed);
+                functions.push(f);
+            }
+        }
+        let module = Module {
+            list_builds: Default::default(),
+            ignore_python_environment: false,
+            command_utf8_mode: None,
+            types,
+            functions,
+            class_fields: Vec::new(),
+            class_metadata: Vec::new(),
+            json_records: Vec::new(),
+            globals: Vec::new(),
+            source_frames: Vec::new(),
+            entry: function(Vec::new()),
+        };
+        assert_eq!(analyze(&module).functions, [true, true, false, false]);
+    }
+
+    #[test]
     fn unknown_callbacks_keep_escaping_error_checks() {
+        let context = Context {
+            calls: &Targets::default(),
+            types: &Default::default(),
+        };
         let callback = Expr {
             ty: Type::Callable(0),
             kind: ExprKind::Local(0),
@@ -223,7 +339,7 @@ mod tests {
                 args: CallArgs::positional(vec![integer()]),
             },
         };
-        assert!(expression(&invocation, &[], &Targets::default()));
+        assert!(expression(&invocation, &[], context));
     }
 
     #[test]
@@ -248,11 +364,15 @@ mod tests {
             kind: ExprKind::Local(0),
         };
         let mut module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Return(integer())]),
@@ -268,6 +388,10 @@ mod tests {
             ]),
         };
         let targets = Targets::analyze(&module);
+        let context = Context {
+            calls: &targets,
+            types: &module.types,
+        };
         assert_eq!(
             super::analyze(&module, &targets).functions,
             [false, false, false, true]
@@ -276,7 +400,7 @@ mod tests {
         assert!(expression(
             &invocation(local.clone(), vec![call(3, Vec::new())]),
             &functions,
-            &targets,
+            context,
         ));
         assert!(expression(
             &invocation(
@@ -291,7 +415,7 @@ mod tests {
                 vec![integer()]
             ),
             &functions,
-            &targets,
+            context,
         ));
         // One failing alternative poisons the whole exact signature, even if
         // no local value-flow analysis would select it at this particular call.
@@ -302,11 +426,15 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -358,11 +486,15 @@ def conversion(values: list[str]) -> bool:
             },
         };
         let module = Module {
+            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
+            list_builds: Default::default(),
             class_metadata: Vec::new(),
+            command_utf8_mode: None,
             json_records: Vec::new(),
             globals: Vec::new(),
+            source_frames: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),
@@ -386,6 +518,10 @@ def conversion(values: list[str]) -> bool:
 
     #[test]
     fn scopes_handlers_finally_and_iterator_steps_remain_fallible() {
+        let context = Context {
+            calls: &Targets::default(),
+            types: &Default::default(),
+        };
         let raises = vec![Statement::Raise(None)];
         for part in 0..4 {
             let statement = Statement::Try {
@@ -414,7 +550,7 @@ def conversion(values: list[str]) -> bool:
                     Vec::new()
                 },
             };
-            assert!(block(&[statement], &[], &Targets::default()));
+            assert!(block(&[statement], &[], context));
         }
         assert!(block(
             &[Statement::Scope {
@@ -427,12 +563,16 @@ def conversion(values: list[str]) -> bool:
                 clear: vec![0],
             }],
             &[],
-            &Targets::default()
+            context
         ));
     }
 
     #[test]
     fn range_steps_and_default_arguments_keep_their_errors() {
+        let context = Context {
+            calls: &Targets::default(),
+            types: &Default::default(),
+        };
         let range = |args| Statement::For {
             target: 0,
             cursor: 1,
@@ -442,17 +582,13 @@ def conversion(values: list[str]) -> bool:
             body: Vec::new(),
             orelse: Vec::new(),
         };
-        assert!(!block(&[range(vec![integer()])], &[], &Targets::default()));
+        assert!(!block(&[range(vec![integer()])], &[], context));
         assert!(block(
             &[range(vec![integer(), integer(), integer()])],
             &[],
-            &Targets::default()
+            context
         ));
-        assert!(block(
-            &[range(vec![call(0, Vec::new())])],
-            &[true],
-            &Targets::default()
-        ));
+        assert!(block(&[range(vec![call(0, Vec::new())])], &[true], context));
         let value = Expr {
             ty: Type::Int,
             kind: ExprKind::Builtin(
@@ -460,7 +596,7 @@ def conversion(values: list[str]) -> bool:
                 vec![integer(), integer(), call(0, Vec::new())],
             ),
         };
-        assert!(expression(&value, &[true], &Targets::default()));
+        assert!(expression(&value, &[true], context));
     }
 
     #[test]

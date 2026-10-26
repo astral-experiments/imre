@@ -1,0 +1,95 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "5cbfe694ad871c74aaba102dae34d0dcf9b434f95bed6051ea2189321e92e1a3",
+  "operation": "check",
+  "tests_executed": 0,
+  "source": "vendored and pinned Git Lib/test",
+  "support_files": [],
+  "checks": [
+    {
+      "suite": "test.test_csv",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+    },
+    {
+      "suite": "test.test_csv",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+    },
+    {
+      "suite": "test.test_csv",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+    },
+    {
+      "suite": "test.test_csv",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_itertools",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:5:1: Imre: Lib/test/support/threading_helper.py:277:63: Imre: starred elements in tuple displays require a bounded, unmodified sequence"
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "import",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": false,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    },
+    {
+      "suite": "test.test_json",
+      "entry": "runner",
+      "reachable_only": true,
+      "exit": 1,
+      "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:7:1: Imre: Lib/test/support/import_helper.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"_imp\""
+    }
+  ],
+  "normalization": "Only the randomly generated staging directory before /Lib is replaced by <staged>."
+}

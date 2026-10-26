@@ -14,6 +14,7 @@ import copyfile
 import native_copy
 import native_rmtree
 import tree_ops
+import move_ops
 import which_cases
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
@@ -81,6 +82,9 @@ def run_level(args, module, reference, level, directory):
     tree_work = directory / "tree"
     tree_work.mkdir()
     executions.update(tree_ops.executors(module, tools, tree_work, with_roles=True))
+    move_work = directory / "move"
+    move_work.mkdir()
+    executions.update(move_ops.executors(module, tools, move_work, with_roles=True))
     preflight = {}
     for cls, operation, blockers in (
         (module.TestCopy, "shutil metadata", native_copy.MOCK_CASES),

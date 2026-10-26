@@ -28,7 +28,7 @@ impl Checker<'_> {
             args.values.push(if index == 0 {
                 self.expr(expression)?
             } else {
-                self.cursor_index(expression)?
+                self.integer_index(expression)?
             });
         }
         let object =
@@ -49,7 +49,7 @@ impl Checker<'_> {
                 .arguments
                 .args
                 .iter()
-                .map(|node| self.cursor_index(node))
+                .map(|node| self.integer_index(node))
                 .collect::<Result<Vec<_>, _>>()?;
             let args = match args.as_slice() {
                 [stop] => vec![pipelines::integer(0), stop.clone(), pipelines::integer(1)],
@@ -285,7 +285,7 @@ impl Checker<'_> {
             ));
         }
         let default = if let Some(default) = default {
-            self.cursor_index(default)?
+            self.integer_index(default)?
         } else {
             pipelines::integer(0)
         };
@@ -295,8 +295,12 @@ impl Checker<'_> {
         })
     }
 
-    fn cursor_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn integer_index(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         let value = self.expr(node)?;
+        self.index_value(value, node)
+    }
+
+    pub(super) fn index_value(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == Type::Bool {
             return Ok(Expr {
                 ty: Type::Int,
@@ -310,6 +314,9 @@ impl Checker<'_> {
     pub(super) fn iter_cursor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let cursor = self.cursor_source_value(&call.arguments.args[0])?;
+        if cursor.ty == Type::StringIO {
+            return Ok(self.open_string_io(cursor));
+        }
         if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
             return Err(error(
                 self.source,
@@ -329,6 +336,15 @@ impl Checker<'_> {
             return Err(error(self.source, call, "next takes at most one default"));
         }
         let source = self.expr(source)?;
+        self.next_value(source, rest, call)
+    }
+
+    pub(super) fn next_value(
+        &mut self,
+        source: Expr,
+        rest: &[ast::Expr],
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
         let prepared = if source.ty == Type::CsvReader {
             if rest.is_empty() {
                 return Ok(Expr {
@@ -337,6 +353,12 @@ impl Checker<'_> {
                 });
             }
             self.prepare_csv_reader(source)
+        } else if source.ty == Type::StringIO {
+            let mut lines = self.prepare_file_lines(source);
+            // next(stream) pulls directly. It does not invoke iter(stream)'s
+            // separate closed-file check before readline.
+            lines.acquire.clear();
+            lines
         } else {
             let element = self
                 .types

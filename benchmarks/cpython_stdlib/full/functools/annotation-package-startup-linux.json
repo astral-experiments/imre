@@ -1,0 +1,38 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_guard_commit": "03977539a984a794bf05b5bb4d8d236883bfd3b4",
+  "annotation_commits": [
+    "cf1dce4",
+    "a345357"
+  ],
+  "check_modes": [
+    "default",
+    "reachable-only"
+  ],
+  "entrypoints": {
+    "normal.py/all": [
+      1,
+      "normal.py:1:1: Imre: test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+    ],
+    "normal.py/reachable": [
+      1,
+      "normal.py:1:1: Imre: test/support/__init__.py:9:1: Imre: standard-library imports and shadowing are unsupported: \"inspect\""
+    ],
+    "imre_functools_imports.py/all": [
+      1,
+      "imre_functools_imports.py:1:1: Imre: test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+    ],
+    "imre_functools_imports.py/reachable": [
+      1,
+      "imre_functools_imports.py:1:1: Imre: test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+    ],
+    "imre_functools_run.py/all": [
+      1,
+      "imre_functools_run.py:1:1: Imre: test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+    ],
+    "imre_functools_run.py/reachable": [
+      1,
+      "imre_functools_run.py:1:1: Imre: test/test_functools.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"builtins\""
+    ]
+  }
+}

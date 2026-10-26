@@ -31,6 +31,25 @@ def flow(choose: bool) -> None:
         print(optional + "?")
     if (optional := maybe(True)) is not None and len(optional) > 0:
         print(optional)
+    after: str | None = "ok"
+    print(choose and (after := None) is None)
+    try:
+        print(after + "!")
+    except TypeError as error:
+        print(str(error))
+    after = "ok"
+    _ = (after := None) if choose else None
+    try:
+        print(after + "bad")
+    except TypeError as error:
+        print(str(error))
+    after = "ok"
+    values = [(after := None) for _index in range(2 if choose else 0)]
+    print(len(values))
+    try:
+        print(after + "bad")
+    except TypeError as error:
+        print(str(error))
     count = 0
     while (count := count + 1) < 4:
         print(count)

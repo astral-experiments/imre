@@ -1,0 +1,190 @@
+{
+  "schema": "imre.shutil.directory-identity/v1",
+  "platform": "x86_64",
+  "scope": "supplemental real filesystem controls; no original test credit",
+  "optimization_levels": {
+    "0": {
+      "known-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "known-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      },
+      "unknown-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 2,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": false
+      },
+      "unknown-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 2,
+          "old_preserved": true,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": false
+      }
+    },
+    "3": {
+      "known-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": true
+      },
+      "known-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "matches": true
+      },
+      "unknown-stable": {
+        "reference": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 1,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 2,
+          "old_preserved": false,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": false
+      },
+      "unknown-exchanged": {
+        "reference": {
+          "output": [
+            "OSError('Cannot call rmtree on a symbolic link')",
+            "'root/victim'"
+          ],
+          "victim_stats": 1,
+          "old_preserved": true,
+          "replacement_preserved": true,
+          "root_exists": true
+        },
+        "native": {
+          "output": [
+            "removed"
+          ],
+          "victim_stats": 2,
+          "old_preserved": true,
+          "replacement_preserved": false,
+          "root_exists": false
+        },
+        "matches": false
+      }
+    }
+  },
+  "imre_sha256": "625c6948656b62ca86c63a7944cd486c27bf3ea7260ba511fff0abdb911b65b9",
+  "runtime_sha256": "ca27b9c1b698e8d451349514f135a8e4d45e6bbb785f7c65ccc6d4604bd8cc96",
+  "source_commit": "cffd1dade4f4d7c1f2bfd73fea8b130b8e48b948",
+  "source_tree": "c1b030c62018eaf7486ef251fb33d566e02f7a0a",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115"
+}

@@ -4,7 +4,9 @@ import hashlib
 from pathlib import Path
 
 from exit_case import exit_observation
+import intern_case
 from ioencoding_case import observe as ioencoding_observation
+from locale_stream_cases import observe as locale_stream_observations
 from suite_evidence import roles
 from suite_inventory import load_suite
 from suite_native import NativeCompileError, native_method, run_in_fixtures, testcase_fixture
@@ -89,6 +91,11 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
             compiled = native_method(toolchain, folder, source, cls, name, fixture)
         except NativeCompileError as exc:
             proof.update(stage="compile", diagnostic=str(exc).replace(str(folder), "[case]").strip())
+            if name == intern_case.CASE:
+                observed = intern_case.observation(module, toolchain, folder, source)
+                observed["evidence"]["whole_native_body"] = proof
+                results[key] = observed
+                continue
         except ValueError as exc:
             if not node.decorator_list:
                 raise
@@ -111,4 +118,5 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         if state == "proposed":
             proof["exception_proposal"] = "unreviewed; still in the denominator"
         results[key] = {"outcome": outcome, "roles": locations, "reason": reason, "evidence": proof}
+    locale_stream_observations(module, toolchain, source, results)
     return results

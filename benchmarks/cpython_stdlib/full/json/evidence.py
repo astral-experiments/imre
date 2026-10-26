@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, PRIVATE, Probe
 from bodies import compiled
 from deep_decode import DRIVER as DEEP_DRIVER, METHOD as DEEP_METHOD, fixture as deep_fixture
+from key_identity import METHOD as KEY_METHOD, OPERATIONS as KEY_OPERATIONS, SOURCE as KEY_SOURCE
+from key_identity import native_identity_control, native_key_fixture, owner_fixture
 from formatting import METHODS as FORMATTING, Native as NativeFormatter, formatting_method
 from native import counts
 from reference import BENCH, COMMIT, HERE, routine, verify
@@ -23,7 +25,7 @@ sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_evidence import ROLES, build_report, occurrence_keys, roles, write_reports
 from suite_inventory import cases, load_suite
-from suite_native import Toolchain, run_in_fixtures
+from suite_native import Toolchain, method_bytes, native_method, run_in_fixtures
 
 UNOBSERVED = dict.fromkeys(ROLES, "unobserved")
 
@@ -44,6 +46,33 @@ def definition(source):
 def fixture_variant(case):
     variant = f"{type(case).__module__}.{type(case).__qualname__}"
     return f"{variant}[{case.id()}]" if isinstance(case, doctest.DocTestCase) else variant
+
+
+@cache
+def intact_startup():
+    checks = json.loads((HERE / "doctest-startup-linux.json").read_bytes())["checks"]
+    summaries = {}
+    for reachable in (False, True):
+        rows = [row for row in checks if row["reachable_only"] == reachable]
+        reasons = {": ".join(row["diagnostic"].split(": Imre: ")[-2:]) for row in rows}
+        if len(reasons) != 1 or not all(row["exit"] for row in rows):
+            return "see the four entry checks in doctest-startup-linux.json"
+        summaries[reachable] = reasons.pop()
+    if summaries[False] == summaries[True]:
+        return summaries[False]
+    return f"ordinary: {summaries[False]}; --reachable-only: {summaries[True]}"
+
+
+@cache
+def direct_doctest(source, level):
+    """Report the observed direct suite separately from the original package fixture."""
+    report = json.loads((HERE / "doctest-direct-linux.json").read_bytes())
+    row, = (row for row in report["levels"][str(level)].values() if source in row["ids"])
+    if row["outcome"] == "blocked":
+        return row["diagnostic"].splitlines()[-1]
+    if row["outcome"] == "pass":
+        return "direct native suite passed outside the original package fixture"
+    raise ValueError(f"unexpected direct doctest result for {source}: {row}")
 
 
 def missing(source, reference, variant, level):
@@ -68,7 +97,7 @@ def missing(source, reference, variant, level):
             "revisit": f"Run {source} if Imre exposes the corresponding CPython backend identity or private factory.",
         }
     if source.startswith("json"):
-        why = "DocTestSuite imports CPython json; native example execution requires the shared doctest fixture (DOCTEST.md)"
+        why = f"{direct_doctest(source, level)}; intact package: {intact_startup()} (DOCTEST.md)"
     elif ".test_tool." in source:
         why = "original subprocess invokes CPython -m json or json.tool; a native module entry point is required"
     else:
@@ -141,6 +170,46 @@ def run(tools, directory, reference):
                              "native_calls": {"loads": len(calls)}, "native_exceptions": calls}}
 
     executions.update(dict.fromkeys(ids[DEEP_METHOD], native_depth))
+    key_dir = directory / "decoder-key-owners"
+    key_dir.mkdir()
+    keys_method = owner_fixture(tools, key_dir)
+
+    def native_keys(case, original):
+        result = keys_method(case, original)
+        obs = {"outcome": "pass" if result["outcome"] == "pass" else "failure",
+               "roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
+               "evidence": {"source": KEY_METHOD, "method_sha256": definition(KEY_METHOD)[1], "opt_level": tools.level,
+                            "fixture": "original CPython lifecycle, method, sort and identity assertions",
+                            "operation": ", ".join(result["native_operations"]),
+                            "native_key_owners": result["native_key_owners"]}}
+        if result["reason"]:
+            obs["reason"] = result["reason"]
+        return obs
+
+    executions.update(dict.fromkeys(ids[KEY_METHOD], native_keys))
+    # Only choose the body observation if its actual native assertions also
+    # reject different key owners and a nonempty memo. The focused report
+    # separately retains the general TestCase and repr transport attempts.
+    control = native_identity_control(tools, key_dir / "assertion-control")
+    if control["outcome"] == "pass":
+        body_dir = key_dir / "original-body"
+        body_dir.mkdir()
+        helper = method_bytes(KEY_SOURCE, "TestDecode", "check_keys_reuse")
+        body = native_method(tools, body_dir, KEY_SOURCE, "TestDecode", ids[KEY_METHOD][0],
+                             native_key_fixture(), operation=("imre", KEY_OPERATIONS))
+
+        def native_key_body(case, original):
+            try:
+                result = body(case, original)["observation"]
+            except AssertionError as exc:
+                return {"outcome": "failure", "roles": roles(body="imre", assertions="imre", operation="imre", fixture="mixed"),
+                        "reason": str(exc), "evidence": {"source": KEY_METHOD, "opt_level": tools.level,
+                            "fixture": "CPython module/class/instance hooks; native instance in child", "operation": KEY_OPERATIONS}}
+            return {"outcome": "pass", "roles": result["roles"], "evidence": {**result["evidence"], "source": KEY_METHOD,
+                    "helper_sha256": hashlib.sha256(helper).hexdigest(), "negative_control": control["operation"]}}
+
+        executions.update(dict.fromkeys(ids[KEY_METHOD], native_key_body))
+
     formatter = NativeFormatter(tools, directory)
     for short in FORMATTING:
         source = f"test.test_json.{short}"

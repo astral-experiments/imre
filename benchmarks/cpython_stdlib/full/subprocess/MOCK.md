@@ -12,3 +12,20 @@ Subprocess mock requirements from an AST and source audit of CPython 3.14.5 at `
 [Original source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_subprocess.py). Subprocess owns whether native operations really dispatch through those targets; a mock applied only to a CPython proxy does not validate the native operation.
 
 [Handoff to the unittest owner](https://github.com/astral-sh/imre/pull/508#issuecomment-6392208717).
+
+## Recheck with the shared native Mock
+
+The original import now executes at both optimization levels on [#758](https://github.com/astral-sh/imre/pull/758).
+Its recorder asserted the actual native parent's waitpid call in
+[the stopped-child fixture](STOPPED.md). A direct build of the original
+`with mock.patch('subprocess.os.waitpid', return_value=(proc.pid, status))`
+still stops at `mock.patch`. The original context and its tuple ran in CPython;
+both the restored host function identity and a fresh native kernel wait were checked.
+
+With #758 alone, the complete import and runner stop in `test.support` at
+`warnings` (all definitions) or `_imp` (reachable definitions).
+With #758 and merged main at `e90462e6`, both modes reach
+`test/support/import_helper.py:2`, `import _imp`. These checks were repeated
+as real builds at `-O0` and `-O3`; none entered a suite body.
+[Compiler diagnostics and reference provenance](mock-startup-linux.json).
+The full CPython rerun matched the committed 353-ID reference byte for byte.

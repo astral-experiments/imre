@@ -2,6 +2,7 @@
 import argparse
 import ast
 from functools import cache
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -64,12 +65,12 @@ except OSError as error:
 
             recovery = Path(__file__).parent / "full/sys/stream_errno.py"
             executable = native(recovery.read_text())
-            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush"):
+            for mode in ("stdout-write", "stderr-write", "stdout-flush", "stderr-flush", "stdout-displayhook"):
                 stock, actual = [subprocess.run([*cmd, mode], capture_output=True, check=True, timeout=10)
                                  for cmd in ([args.python, recovery], [executable])]
                 if (actual.stdout, actual.stderr) != (stock.stdout, stock.stderr):
                     raise AssertionError((mode, stock, actual))
-            print("Matched errno, strerror and recovery for four standard stream failures")
+            print("Matched errno, strerror and recovery for stream and display hook failures")
 
         def command(argv):
             if len(argv) != 3 or argv[:2] != [sys.executable, "-c"]:
@@ -152,6 +153,37 @@ except OSError as error:
                 if observed(outputs[0]) != observed(outputs[1]):
                     raise AssertionError((mode, action, outputs))
         print("Matched 20 caught and uncaught SystemExit payload observations")
+
+        if Path("/dev/full").exists():
+            source = Path(__file__).parent / "full/sys/stream_buffer.py"
+            program = native(source.read_text())
+            writes = [(n,) for n in ("0", "1", "8191", "8192", "8193", "17000", "131071", "131072", "131073")]
+            writes += [("65536", "65536"), ("65536", "65535", "1", "1"), ("1", "131071"), ("2", "131071"),
+                       ("8191", "122881"), ("131071", "1"), ("131071", "2"), ("131000", "71", "2"),
+                       ("8191", "1", "122880"), ("65536", "65537"), ("u65536",), ("u65535", "1"),
+                       ("3", "LF"), ("3", "CR"), ("17000", "LF")]
+            for fd in ("1", "2"):
+                for parts in writes:
+                    stock, actual = [subprocess.run([*cmd, fd, *parts], capture_output=True, check=True, timeout=10)
+                                     for cmd in ([args.python, source], [program])]
+                    if (stock.stdout, stock.stderr) != (actual.stdout, actual.stderr):
+                        def state(run):
+                            data, stage = (run.stdout, run.stderr) if fd == "1" else (run.stderr, run.stdout)
+                            return stage, len(data)
+                        raise AssertionError((fd, parts, state(stock), state(actual)))
+            print(f"Matched the failed operation and retained bytes for {2 * len(writes)} standard stream sequences")
+
+            # stdout starts on a terminal; the same child then replaces fd 1 with /dev/full.
+            master, slave = os.openpty()
+            try:
+                for newline in ("LF", "CR"):
+                    phases = [subprocess.run([*cmd, "1", "3", newline], stdout=slave, stderr=subprocess.PIPE,
+                                             check=True, timeout=10).stderr for cmd in ([args.python, source], [program])]
+                    if phases != [b"write 2\n", b"write 2\n"]:
+                        raise AssertionError(("terminal at startup", newline, phases))
+            finally:
+                os.close(slave)
+                os.close(master)
 
 
 if __name__ == "__main__":

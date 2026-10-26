@@ -15,10 +15,12 @@ import unittest
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
 from suite_evidence import build_report, roles, write_reports
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, method_bytes
+from wrapper_cases import shorten_case, wrapper_cases
 
 TESTS = HERE / "upstream/Lib/test/test_textwrap.py"
 OWNERS = ("DedentTestCase", "IndentTestCase")
@@ -199,6 +201,14 @@ def main():
             directory = Path(tmp)
             tools = Toolchain(args.imre, args.runtime, args.clang, level)
             native = run_native_cases(tools, directory, module, methods)
+            wrapped = wrapper_cases(module, tools, directory, ref["denominator"])
+            if native.keys() & wrapped.keys():
+                raise AssertionError("duplicate execution evidence")
+            key, complete = shorten_case(module, tools, directory, TESTS)
+            if key not in wrapped:
+                raise AssertionError("the original placeholder case did not consume native operations")
+            wrapped[key] = complete
+            native.update(wrapped)
             worker = tools.build(callback_worker(lambdas), directory)
             report = run_host_cases(module, worker, ref, native, lambdas, level)
             edges = HERE / "edge_cases.py"

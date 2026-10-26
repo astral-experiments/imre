@@ -1,6 +1,7 @@
 //! Snapshot each source directory before creating its destination. Finish siblings
 //! after a filesystem failure and retain each (source, destination, message) tuple.
 
+use crate::StrOwner;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -13,14 +14,14 @@ use crate::objects::words::{OwnedWord, WordKind, Words};
 
 #[path = "tree_callback.rs"]
 mod callback;
-use callback::Callback;
+pub(super) use callback::Callback;
 #[path = "tree_ignore.rs"]
 mod ignore;
 use ignore::{Ignore, Ignored};
 
-enum Failure {
+pub(super) enum Failure {
     Native(Error),
-    Raised(Rc<Object>),
+    Raised(crate::ObjectOwner),
 }
 
 impl From<Error> for Failure {
@@ -29,7 +30,21 @@ impl From<Error> for Failure {
     }
 }
 
-type TreeResult<T> = std::result::Result<T, Failure>;
+pub(super) type TreeResult<T> = std::result::Result<T, Failure>;
+
+impl Failure {
+    /// Publish the original raised object, including when a custom copier raised it.
+    pub(super) fn finish(result: TreeResult<usize>, sentinel: usize) -> usize {
+        match result {
+            Ok(word) => word,
+            Err(Self::Native(error)) => error.returning(sentinel),
+            Err(Self::Raised(error)) => {
+                replace_pending(Some(error));
+                sentinel
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct Options {
@@ -134,8 +149,8 @@ fn entry(
 
 fn path_word(name: &Name) -> usize {
     match name {
-        Name::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
-        Name::Text(s) | Name::Path(s) => Rc::into_raw(Rc::clone(s)) as usize,
+        Name::Bytes(b) => crate::BytesOwner::into_raw(crate::BytesOwner::clone(b)) as usize | 1,
+        Name::Text(s) | Name::Path(s) => StrOwner::into_raw(StrOwner::clone(s)) as usize,
     }
 }
 
@@ -151,17 +166,18 @@ fn record(
         Failure::Raised(e) => {
             // SAFETY: this owner roots the original exception through both reads.
             unsafe {
-                if imre_exception_matches(Rc::as_ptr(&e), Kind::OSError as u32) == 0 {
+                if imre_exception_matches(crate::ObjectOwner::as_ptr(&e), Kind::OSError as u32) == 0
+                {
                     return Err(Failure::Raised(e));
                 }
                 if crate::objects::exceptions::append_tree_entries(&e, errors)? {
                     return Ok(());
                 }
-                let raw = imre_exception_message(Rc::as_ptr(&e));
+                let raw = imre_exception_message(crate::ObjectOwner::as_ptr(&e));
                 if let Some(display_error) = take_pending() {
                     return Err(Failure::Raised(display_error));
                 }
-                Rc::from_raw(raw)
+                StrOwner::from_raw(raw)
             }
         }
     };
@@ -181,7 +197,7 @@ fn record(
         tuple
             .add(2)
             .cast::<*const Str>()
-            .write(Rc::into_raw(message));
+            .write(StrOwner::into_raw(message));
         errors.values.push(tuple as usize);
     }
     Ok(())
@@ -236,6 +252,17 @@ fn copy_tree(
     Ok(())
 }
 
+/// Copy a directory after rename fails. Move always preserves links and has no ignore filter.
+pub(super) fn copy_for_move(
+    src: &Name,
+    dst: &Name,
+    options: Options,
+    layout: &RecordDescriptor,
+    callback: Option<Callback>,
+) -> TreeResult<()> {
+    copy_tree(src, dst, options, layout, callback, None)
+}
+
 /// # Safety
 /// Both path handles are rooted and exactly tagged. The layout describes a
 /// program-lifetime (str | bytes, str | bytes, str) tuple. A non-null callback
@@ -282,15 +309,5 @@ pub unsafe extern "C" fn imre_shutil_copytree(
         )
         .map(|()| retain_handle(dst, dst_tag))
     };
-    match result {
-        Ok(v) => v,
-        Err(Failure::Native(e)) => {
-            e.raise();
-            0
-        }
-        Err(Failure::Raised(e)) => {
-            replace_pending(Some(e));
-            0
-        }
-    }
+    Failure::finish(result, 0)
 }

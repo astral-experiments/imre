@@ -78,11 +78,12 @@ unsafe fn checked_result(value: Py) -> Option<Owned> {
     // SAFETY: non-null extension returns transfer one owned reference.
     let result = unsafe { Owned::take(value) };
     if pending {
-        extensions_error(
+        Error::new(
             Kind::SystemError,
             "extension returned a value with an exception set",
-            None,
         )
+        .with_pending_cause()
+        .returning(None)
     } else {
         Some(result)
     }

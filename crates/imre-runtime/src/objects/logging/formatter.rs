@@ -1,5 +1,5 @@
 //! Percent, brace and template formatting over the actual fields of native log records.
-use std::rc::Rc;
+use crate::StrOwner;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -8,10 +8,8 @@ use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, Fr
 
 use super::super::exceptions::{Result, string_repr};
 use super::super::words::OwnedWord;
-use super::super::{
-    Error, Int, Kind, Object, Storage, StorageCell, Str, acquire_rc, finish, object,
-};
-use super::record::{self, Record, display, string};
+use super::super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object};
+use super::record::{self, Record, append, display, string, write_display};
 
 static PERCENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)%\(\w+\)[#0+ -]*(\*|\d+)?(\.(\*|\d+))?[diouxefgcrsa%]").unwrap()
@@ -32,12 +30,12 @@ enum Style {
 
 pub(in crate::objects) struct Formatter {
     style: Style,
-    fmt: Rc<Str>,
-    date: Option<Rc<Str>>,
-    defaults: Option<Rc<Object>>,
+    fmt: StrOwner,
+    date: Option<StrOwner>,
+    defaults: Option<crate::ObjectOwner>,
     utc: bool,
-    default_time: Rc<Str>,
-    default_msec: Option<Rc<Str>>,
+    default_time: StrOwner,
+    default_msec: Option<StrOwner>,
 }
 
 fn error(message: impl Into<Str>) -> Error {
@@ -103,11 +101,11 @@ fn dollars(mut fmt: &str) -> Result<Vec<Dollar<'_>>> {
 
 impl Formatter {
     fn new(
-        fmt: Option<Rc<Str>>,
-        date: Option<Rc<Str>>,
+        fmt: Option<StrOwner>,
+        date: Option<StrOwner>,
         style: &str,
         validate: bool,
-        defaults: Option<Rc<Object>>,
+        defaults: Option<crate::ObjectOwner>,
     ) -> Result<Self> {
         let (style, default) = match style {
             "%" => (Style::Percent, "%(message)s"),
@@ -117,15 +115,15 @@ impl Formatter {
         };
         let fmt = fmt
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| Rc::new(Str::from(default)));
+            .unwrap_or_else(|| StrOwner::new(Str::from(default)));
         let value = Self {
             style,
             fmt,
             date,
             defaults,
             utc: false,
-            default_time: Rc::new(Str::from("%Y-%m-%d %H:%M:%S")),
-            default_msec: Some(Rc::new(Str::from("%s,%03d"))),
+            default_time: StrOwner::new(Str::from("%Y-%m-%d %H:%M:%S")),
+            default_msec: Some(StrOwner::new(Str::from("%s,%03d"))),
         };
         if validate {
             value.validate()?;
@@ -225,17 +223,17 @@ impl Formatter {
             Style::Dollar => {
                 for part in dollars(self.fmt.as_str())? {
                     match part {
-                        Dollar::Text(s) => out.push_str(s),
-                        Dollar::Field(key) => out.push_str(&display(&self.get(r, key)?, false)),
+                        Dollar::Text(s) => append(&mut out, s)?,
+                        Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?)?,
                     }
                 }
             }
             Style::Percent => {
                 let mut tail = self.fmt.as_str();
                 while let Some((literal, rest)) = tail.split_once('%') {
-                    out.push_str(literal);
+                    append(&mut out, literal)?;
                     if let Some(rest) = rest.strip_prefix('%') {
-                        out.push('%');
+                        append(&mut out, "%")?;
                         tail = rest;
                         continue;
                     }
@@ -244,10 +242,10 @@ impl Formatter {
                         .ok_or_else(|| Error::new(Kind::TypeError, "format requires a mapping"))?;
                     let (key, rest) = record::mapping_key(rest)?;
                     let (text, rest) = record::percent_value(rest, &self.get(r, key)?)?;
-                    out.push_str(&text);
+                    append(&mut out, &text)?;
                     tail = rest;
                 }
-                out.push_str(tail);
+                append(&mut out, tail)?;
             }
             Style::Brace => out = self.brace_fields(r, self.fmt.as_str(), 0)?,
         }
@@ -261,13 +259,14 @@ impl Formatter {
         let mut out = String::new();
         for part in braces(fmt)? {
             match part {
-                FormatPart::Literal(s) => out.push_str(&s),
+                FormatPart::Literal(s) => append(&mut out, &s)?,
                 FormatPart::Field {
                     field_name,
                     conversion_spec,
                     format_spec,
                 } => {
                     let stem = field_name.find(['[', '.']).unwrap_or(field_name.len());
+                    super::super::stdlib::check_keyword_field(&field_name[..stem])?;
                     let mut v = self.get(r, &field_name[..stem])?;
                     let mut parts = &field_name[stem..];
                     while !parts.is_empty() {
@@ -275,15 +274,7 @@ impl Formatter {
                             let (sub, rest) = rest
                                 .split_once(']')
                                 .ok_or_else(|| error("Missing ']' in format string"))?;
-                            v = if let Some(n) = record::tuple_len(&v) {
-                                let index =
-                                    sub.parse::<usize>().ok().filter(|i| *i < n).ok_or_else(
-                                        || Error::new(Kind::IndexError, "tuple index out of range"),
-                                    )?;
-                                record::tuple_item(&v, index)
-                            } else {
-                                record::dict_item(&v, sub)?
-                            };
+                            v = record::brace_item(&v, sub)?;
                             parts = rest;
                         } else {
                             return Err(Error::new(
@@ -296,14 +287,14 @@ impl Formatter {
                         }
                     }
                     if let Some(c) = conversion_spec {
-                        v = string(&record::percent_value(&c.to_string(), &v)?.0);
+                        v = record::owned_string(record::percent_value(&c.to_string(), &v)?.0)?;
                     }
                     let spec = if format_spec.contains('{') {
                         self.brace_fields(r, &format_spec, depth + 1)?
                     } else {
                         format_spec
                     };
-                    out.push_str(&format_specifier(&v, &spec)?);
+                    append(&mut out, &format_specifier(&v, &spec)?)?;
                 }
             }
         }
@@ -311,24 +302,28 @@ impl Formatter {
     }
 
     fn time(&self, r: &Record, date: Option<&str>) -> Result<String> {
-        let created = number(&self.get(r, "created")?)?;
-        if !created.is_finite()
-            || created < libc::time_t::MIN as f64
-            || created >= libc::time_t::MAX as f64
-        {
-            return Err(Error::new(
-                Kind::OverflowError,
-                "timestamp out of range for platform time_t",
-            ));
+        use num_traits::ToPrimitive;
+        let created = self.get(r, "created")?;
+        let seconds = match created.kind.raw() {
+            // SAFETY: a null destination asks time() to return the current epoch seconds.
+            0 => unsafe { libc::time(std::ptr::null_mut()) },
+            1 => i64::from(created.word != 0),
+            // SAFETY: the record field owns this exact integer.
+            2 => unsafe { Int::borrow(created.word) }
+                .big()
+                .to_i64()
+                .ok_or_else(super::timed::overflow)?,
+            7 => super::timed::float_seconds(f64::from_bits(created.word as u64))?,
+            _ => return Err(Error::new(Kind::TypeError, "expected a number")),
+        };
+        let clock = super::timed::civil(seconds, self.utc)?;
+        // Python passes a full C-int year from struct_time back to strftime.
+        if clock.tm_year.checked_add(1900).is_none() {
+            return Err(Error::new(Kind::OverflowError, "year out of range"));
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::timestamp_at(
-            Some(pattern),
-            created.floor() as libc::time_t,
-            Duration::ZERO,
-            self.utc,
-        );
+        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
         let Some(msec) = self
             .default_msec
             .as_ref()
@@ -365,7 +360,7 @@ impl Formatter {
 
     fn format(&self, r: &mut Record) -> Result<String> {
         let message = r.message()?;
-        r.fields.insert("message".into(), string(&message));
+        r.fields.insert("message".into(), message);
         if self.uses_time() {
             let time = self.time(r, self.date.as_deref().map(Str::as_str))?;
             r.fields.insert("asctime".into(), string(&time));
@@ -389,9 +384,9 @@ impl Formatter {
         for key in ["exc_text", "stack_info"] {
             if let Some(v) = r.fields.get(key).filter(|v| record::truth(v)) {
                 if !text.ends_with('\n') {
-                    text.push('\n');
+                    append(&mut text, "\n")?;
                 }
-                text.push_str(&display(v, false));
+                write_display(&mut text, v)?;
             }
         }
         Ok(text)
@@ -414,7 +409,7 @@ fn number(v: &OwnedWord) -> Result<f64> {
 /// Apply Python's alignment after converting the scalar; the field width counts characters.
 fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     if spec.is_empty() {
-        return Ok(display(value, false));
+        return display(value);
     }
     let mut tail = spec;
     let mut align = None;
@@ -561,17 +556,26 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     Ok(out)
 }
 
-unsafe fn optional<T>(word: usize) -> Option<Rc<T>> {
-    // SAFETY: callers supply zero or a rooted allocation of the inferred exact type.
-    (word != 0).then(|| unsafe { acquire_rc(word) })
+unsafe fn optional_string(word: usize) -> Option<StrOwner> {
+    // SAFETY: the caller roots the exact string or passes zero for None.
+    (word != 0).then(|| unsafe { StrOwner::acquire_word(word) })
 }
 
-fn word(s: Option<Rc<Str>>) -> usize {
-    s.map_or(0, |s| Rc::into_raw(s) as usize)
+unsafe fn optional_object(word: usize) -> Option<crate::ObjectOwner> {
+    // SAFETY: callers supply zero or a rooted native object.
+    (word != 0).then(|| unsafe { crate::ObjectOwner::acquire_word(word) })
+}
+
+fn word(s: Option<StrOwner>) -> usize {
+    s.map_or(0, |s| StrOwner::into_raw(s) as usize)
 }
 fn text(result: Result<String>) -> *const Str {
     finish(
-        result.map(|s| Rc::into_raw(Rc::new(Str::from(s)))),
+        result.and_then(|s| {
+            StrOwner::try_new(Str::from(s))
+                .map(StrOwner::into_raw)
+                .map_err(|_| Error::allocation())
+        }),
         std::ptr::null(),
     )
 }
@@ -589,18 +593,18 @@ pub unsafe extern "C" fn imre_formatter_new(
     // SAFETY: retain all constructor inputs that may outlive this call.
     let result = unsafe {
         Formatter::new(
-            optional(fmt),
-            optional(date),
+            optional_string(fmt),
+            optional_string(date),
             (&*style).as_str(),
             validate,
-            optional(defaults),
+            optional_object(defaults),
         )
     };
     finish(
         result.map(|f| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LogFormatter(
-                Box::new(f),
-            )))))
+            crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                Storage::LogFormatter(Box::new(f)),
+            ))))
         }),
         std::ptr::null(),
     )
@@ -630,7 +634,7 @@ unsafe fn change(f: *const Object, write: impl FnOnce(&mut Formatter)) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_formatter_text(f: *const Object) -> *const Str {
     // SAFETY: the formatter owns the cloned string throughout this read.
-    unsafe { with(f, |f| Rc::into_raw(f.fmt.clone())) }
+    unsafe { with(f, |f| StrOwner::into_raw(f.fmt.clone())) }
 }
 /// # Safety
 /// The formatter is rooted; nonzero results have independent string ownership.
@@ -644,7 +648,7 @@ pub unsafe extern "C" fn imre_formatter_date(f: *const Object) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_formatter_default_time(f: *const Object) -> *const Str {
     // SAFETY: the formatter owns the cloned string throughout this read.
-    unsafe { with(f, |f| Rc::into_raw(f.default_time.clone())) }
+    unsafe { with(f, |f| StrOwner::into_raw(f.default_time.clone())) }
 }
 /// # Safety
 /// The formatter is rooted; a nonzero return transfers an owned string.
@@ -711,7 +715,7 @@ pub unsafe extern "C" fn imre_formatter_utc(f: *const Object, utc: bool) {
 pub unsafe extern "C" fn imre_formatter_set_date(f: *const Object, date: usize) {
     // SAFETY: acquire the exact input before replacing the old owner.
     unsafe {
-        let date = optional(date);
+        let date = optional_string(date);
         change(f, |f| f.date = date)
     }
 }
@@ -721,7 +725,7 @@ pub unsafe extern "C" fn imre_formatter_set_date(f: *const Object, date: usize) 
 pub unsafe extern "C" fn imre_formatter_set_default_time(f: *const Object, s: *const Str) {
     // SAFETY: acquire the input before replacing the previous reference.
     unsafe {
-        let s = acquire_rc(s as usize);
+        let s = crate::StrOwner::acquire_word(s as usize);
         change(f, |f| f.default_time = s)
     }
 }
@@ -731,7 +735,7 @@ pub unsafe extern "C" fn imre_formatter_set_default_time(f: *const Object, s: *c
 pub unsafe extern "C" fn imre_formatter_set_default_msec(f: *const Object, s: usize) {
     // SAFETY: acquire the input before replacing the previous reference.
     unsafe {
-        let s = optional(s);
+        let s = optional_string(s);
         change(f, |f| f.default_msec = s)
     }
 }
@@ -740,5 +744,5 @@ pub unsafe extern "C" fn imre_formatter_set_default_msec(f: *const Object, s: us
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_formatter_stack(_f: *const Object, s: *const Str) -> *const Str {
     // SAFETY: acquire the exact string, which the default formatter returns unchanged.
-    Rc::into_raw(unsafe { acquire_rc(s as usize) })
+    StrOwner::into_raw(unsafe { crate::StrOwner::acquire_word(s as usize) })
 }

@@ -25,7 +25,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
     let kind = match value & 7 {
         0 => 3,                                      // str
         1 => 8,                                      // bytes
-        2 => 5,                                      // list[str]
+        2 => 5,                                      // list[str] or frozenset[str]
         3 => 5,                                      // exception
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
@@ -101,9 +101,10 @@ pub unsafe extern "C" fn imre_union_truthy(value: usize) -> u32 {
         u32::from(match value & 7 {
             0 => !(*(word as *const Str)).is_empty(),
             1 => !(*(word as *const Bytes)).is_empty(),
-            2 => object(word as *const Object)
-                .0
-                .with(|s| !s.sequence().values.is_empty()),
+            2 => object(word as *const Object).0.with(|s| match s {
+                super::Storage::Set(set) => !set.is_empty(),
+                _ => !s.sequence().values.is_empty(),
+            }),
             7 => !(*(word as *const BigInt)).is_zero(),
             _ => true,
         })
@@ -136,7 +137,7 @@ pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Objec
     let (word, _) = member(value);
     if value & 7 == 2 {
         // SAFETY: the tagged value roots this live sequence handle.
-        return std::rc::Rc::into_raw(unsafe { super::acquire_rc::<Object>(word) });
+        return crate::ObjectOwner::into_raw(unsafe { crate::ObjectOwner::acquire_word(word) });
     }
     debug_assert_eq!(value & 7, 4);
     let fields = word as *const usize;
@@ -151,32 +152,32 @@ pub unsafe extern "C" fn imre_string_iterable_list(value: usize) -> *const Objec
         // SAFETY: the immutable tuple keeps this str alive while taking the list's own reference.
         unsafe { WordKind::new(3).acquire(entry) }.into_word()
     }));
-    std::rc::Rc::into_raw(words.into_object())
+    crate::ObjectOwner::into_raw(words.into_object())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
+    use crate::StrOwner;
 
     #[test]
     fn tagged_members_keep_exact_owners_and_truth_values() {
-        let text = Rc::new(Str::from("text"));
-        let bytes = Rc::new(Bytes::new());
-        let text_word = Rc::as_ptr(&text) as usize;
-        let bytes_word = Rc::as_ptr(&bytes) as usize | 1;
+        let text = StrOwner::new(Str::from("text"));
+        let bytes = crate::BytesOwner::new(Bytes::new());
+        let text_word = StrOwner::as_ptr(&text) as usize;
+        let bytes_word = crate::BytesOwner::as_ptr(&bytes) as usize | 1;
         // SAFETY: both locals root their exact tagged payloads throughout.
         unsafe {
             assert_eq!(imre_union_truthy(text_word), 1);
             assert_eq!(imre_union_truthy(bytes_word), 0);
             let text_owner = WordKind::new(9).acquire(text_word);
             let bytes_owner = WordKind::new(9).acquire(bytes_word);
-            assert_eq!(Rc::strong_count(&text), 2);
-            assert_eq!(Rc::strong_count(&bytes), 2);
+            assert_eq!(StrOwner::strong_count(&text), 2);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 2);
             drop(text_owner);
             drop(bytes_owner);
-            assert_eq!(Rc::strong_count(&text), 1);
-            assert_eq!(Rc::strong_count(&bytes), 1);
+            assert_eq!(StrOwner::strong_count(&text), 1);
+            assert_eq!(crate::BytesOwner::strong_count(&bytes), 1);
             drop(WordKind::new(256 | 9).acquire(0));
         }
     }

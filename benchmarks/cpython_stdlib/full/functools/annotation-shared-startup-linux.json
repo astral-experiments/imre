@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "tests_executed": 0,
+  "operation": "check_suite_startup.py --cpython-git; complete Lib/test, no supplemental stubs",
+  "source": "Coordinator startup-canonical-linux.json",
+  "source_sha256": "1c9374851fe4379682252b937f21db11b1b0ff388cbc54128fc5bc6faec787ad",
+  "entry_modules": [
+    "test.test_unittest",
+    "test.test_unittest.test_assertions",
+    "test.test_pathlib",
+    "test.test_pathlib.test_pathlib",
+    "test.test_inspect",
+    "test.test_inspect.test_inspect"
+  ],
+  "modes": [
+    "import full",
+    "import reachable",
+    "runner full",
+    "runner reachable"
+  ],
+  "runs": [
+    {
+      "compiler_commit": "fccfcc7c974fb7d9248ff44f06f8fbd04f508cef",
+      "compiler_sha256": "fdf207a15ccbe36195bb7498d97837b89761b77cca388cf80920e43787112b6a",
+      "input": "landed #586",
+      "check_exit": 1,
+      "shared_blocker": {
+        "upstream_file": "Lib/test/support/__init__.py",
+        "line": 9,
+        "import": "inspect",
+        "occurrences": 24
+      },
+      "functools_blocker": {
+        "upstream_file": "Lib/test/test_functools.py",
+        "line": 3,
+        "import": "builtins",
+        "occurrences": 4
+      }
+    },
+    {
+      "compiler_commit": "f2a022d29443698c7fec19268e127b9257bbe664",
+      "compiler_sha256": "7b294d7dc053d5a0800b8692fb3a104608267512d1bf5ed331b721a75f229b07",
+      "input": "landed #586 plus native inspect",
+      "check_exit": 1,
+      "shared_blocker": {
+        "upstream_file": "Lib/test/support/__init__.py",
+        "line": 11,
+        "import": "_opcode",
+        "occurrences": 24
+      },
+      "functools_blocker": {
+        "upstream_file": "Lib/test/test_functools.py",
+        "line": 3,
+        "import": "builtins",
+        "occurrences": 4
+      }
+    }
+  ]
+}

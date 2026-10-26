@@ -1,21 +1,46 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use super::super::codecs::Codec;
-use super::{Error, Int, Kind, Object, Rc, Result, Str, finish, object, with_path_file};
+use super::super::codecs::{Codec, option_error};
+use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
+use crate::StrOwner;
+
+fn output_newlines(text: &str, replacement: &str) -> Result<String> {
+    let extra = if replacement.len() == 2 {
+        text.bytes().filter(|&byte| byte == b'\n').count()
+    } else {
+        0
+    };
+    let mut result = String::new();
+    let len = text
+        .len()
+        .checked_add(extra)
+        .ok_or_else(Error::allocation)?;
+    result
+        .try_reserve_exact(len)
+        .map_err(|_| Error::allocation())?;
+    for part in text.split_inclusive('\n') {
+        if let Some(line) = part.strip_suffix('\n') {
+            result.push_str(line);
+            result.push_str(replacement);
+        } else {
+            result.push_str(part);
+        }
+    }
+    Ok(result)
+}
 
 fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
     {
-        return Err(Error::new(
+        return Err(option_error(
             Kind::ValueError,
-            format!("illegal newline value: {value}"),
+            "illegal newline value: ",
+            value,
+            "",
         ));
     }
-    match encoding {
-        None | Some("locale") => Ok(Codec::Utf8 { signature: false }),
-        Some(name) => Codec::lookup(name),
-    }
+    Codec::for_stream(encoding)
 }
 
 // An optional native string is an owned pointer word, or zero for None.
@@ -33,13 +58,11 @@ pub(super) fn read(
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
-        let text = codec.decode(&data, errors)?;
-        let text = if newline.is_none() && text.contains('\r') {
-            text.replace("\r\n", "\n").replace('\r', "\n")
-        } else {
-            text
-        };
-        Ok(Str::from(text))
+        Ok(Str::from(codec.decode_stream(
+            &data,
+            errors,
+            newline.is_none(),
+        )?))
     })
 }
 
@@ -67,7 +90,7 @@ pub unsafe extern "C" fn imre_path_read_text_options(
             .with(|storage| read(storage.path(), encoding, errors, newline))
     };
     finish(
-        result.map(|text| Rc::into_raw(Rc::new(text))),
+        result.map(|text| StrOwner::into_raw(StrOwner::new(text))),
         std::ptr::null(),
     )
 }
@@ -99,12 +122,20 @@ pub unsafe extern "C" fn imre_path_write_text_options(
                 let codec = options(encoding, newline)?;
                 let converted;
                 let value = if let Some(replacement @ ("\r" | "\r\n")) = newline {
-                    converted = text.replace('\n', replacement);
+                    converted = output_newlines(text, replacement)?;
                     &converted
                 } else {
                     text.as_str()
                 };
-                file.write_bytes(&codec.encode(value, errors)?)?;
+                file.write_bytes(&codec.encode(value, errors, || {
+                    if value == text.as_str() {
+                        // The native write roots its input until conversion finishes.
+                        Ok(StrOwner::acquire_word(text as *const Str as usize))
+                    } else {
+                        StrOwner::try_new(Str::try_new(value).map_err(|_| Error::allocation())?)
+                            .map_err(|_| Error::allocation())
+                    }
+                })?)?;
                 Ok(Int::from_usize(text.chars().count()).into_raw())
             })
         })

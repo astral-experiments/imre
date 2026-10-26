@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retained-values"
+version = "2.4.1"
+description = "Retain a list and call into the application"
+requires-python = ">=3.11"
+dependencies = ["packaging>=23"]
+
+[tool.setuptools]
+packages = ["retained_values"]
+
+[tool.setuptools.package-data]
+retained_values = ["*.pyi", "format.txt"]
+
+[tool.setuptools.cmdclass]
+bdist_wheel = "extconfig.ProjectWheel"
+
+[[tool.setuptools.ext-modules]]
+name = "retained_values.retainer"
+sources = ["native/module.c", "native/retainer.c"]
+include-dirs = ["headers"]
+extra-compile-args = ["-DSETUP_VALUE=17"]

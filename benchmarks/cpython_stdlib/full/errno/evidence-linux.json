@@ -1,0 +1,156 @@
+[
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_errno",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 0,
+    "denominator": 3,
+    "distinct_ids": 3,
+    "counts": {
+      "fully-native": 3
+    },
+    "records": [
+      {
+        "id": "test.test_errno.ErrnoAttributeTests.test_for_improper_attributes",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_errno.ErrnoAttributeTests.test_using_errorcode",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_errno.ErrorcodeTests.test_attributes_in_errorcode",
+        "occurrence": 1,
+        "opt_level": 0,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      }
+    ]
+  },
+  {
+    "schema": "imre.cpython-stdlib.native-evidence/v1",
+    "suite": "test.test_errno",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "platform": "linux",
+    "opt_level": 3,
+    "denominator": 3,
+    "distinct_ids": 3,
+    "counts": {
+      "fully-native": 3
+    },
+    "records": [
+      {
+        "id": "test.test_errno.ErrnoAttributeTests.test_for_improper_attributes",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_errno.ErrnoAttributeTests.test_using_errorcode",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      },
+      {
+        "id": "test.test_errno.ErrorcodeTests.test_attributes_in_errorcode",
+        "occurrence": 1,
+        "opt_level": 3,
+        "fixture_variant": "complete module, fresh native process",
+        "reference": "pass",
+        "outcome": "pass",
+        "roles": {
+          "body": "imre",
+          "assertions": "imre",
+          "operation": "imre",
+          "fixture": "imre"
+        },
+        "evidence": {
+          "operation": "native errno object backed by target headers; original method completed in its own executable process",
+          "fixture": "Imre imported the intact module as suite, created its original module-level frozenset and unittest case, and ran native unittest assertions; a host driver scheduled each ID",
+          "source_blob": "e7f185c6b1a1812cbe3db181c41c5a5d43be6984",
+          "process_stdout": "pass"
+        },
+        "classification": "fully-native"
+      }
+    ]
+  }
+]

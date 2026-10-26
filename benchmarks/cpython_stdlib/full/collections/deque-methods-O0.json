@@ -1,0 +1,102 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 0,
+  "operation": "native Imre deque",
+  "tests": {
+    "test.test_deque.TestBasic.test_big_queue_popleft": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "2444de4de4b94aa6624fb438bf98dea295400946c94080758acf165a93a276bb",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Construct, append, and pop at opposite or matching deque ends",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "2444de4de4b94aa6624fb438bf98dea295400946c94080758acf165a93a276bb"
+          }
+        }
+      }
+    ],
+    "test.test_deque.TestBasic.test_big_queue_popright": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "a6333b8bf8dd8d234721074503ab8ddb5972b154886d033822b8528a92bbdb6d",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Construct, append, and pop at opposite or matching deque ends",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "a6333b8bf8dd8d234721074503ab8ddb5972b154886d033822b8528a92bbdb6d"
+          }
+        }
+      }
+    ],
+    "test.test_deque.TestBasic.test_big_stack_left": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "6f33da74e18c655bbe5b445d95470f54ed92035c4830a60acb5d65fb1cf466d3",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Construct, append, and pop at opposite or matching deque ends",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "6f33da74e18c655bbe5b445d95470f54ed92035c4830a60acb5d65fb1cf466d3"
+          }
+        }
+      }
+    ],
+    "test.test_deque.TestBasic.test_big_stack_right": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "0d78d80cd99bb60f47c6a618643bbf2af34b58d17e8015eabc0596a2afae74ea",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Construct, append, and pop at opposite or matching deque ends",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "0d78d80cd99bb60f47c6a618643bbf2af34b58d17e8015eabc0596a2afae74ea"
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": [],
+  "compiler_revision": "8bed1fe034374b90860cfde5fe7f6324dfebb4de"
+}

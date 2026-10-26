@@ -1,0 +1,71 @@
+[
+  {
+    "commit": "8b26d0c58f5d2ec3bf325d950462a5001dcd4b5c",
+    "tree": "6fd902350e0d1d35e53525541b826a14515a2bf0",
+    "parents": [
+      "61038ed3fa66f601d8719864aa745b264905f6de",
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9"
+    ],
+    "pr": 706,
+    "source": "cached annotations",
+    "binary_sha256": {
+      "imre": "7cf8c51253f7a747d2345b67674d33d81bc73641fdd9e766f1aa6ca8b59753e1",
+      "libimre_runtime.a": "3be6934bf4e80f76f6709f1a9f7974aa756d2aab1630d80f4b859589f7f7cce1"
+    }
+  },
+  {
+    "commit": "4f666a7d783c0217864836150dcd94570791c4e8",
+    "tree": "5afa1076d169f3994db5a85e7932269a7f3a87c2",
+    "parents": [
+      "6f0a0b3f38dbafa141c3413f8512065f5bf9addf",
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9"
+    ],
+    "pr": 844,
+    "source": "wrapper links",
+    "binary_sha256": {
+      "imre": "1f643b8f21a06f8c824976f34374177eecd2b3eb9b760416cc711b920a3d8ad0",
+      "libimre_runtime.a": "851083e56ab9ace4a4d496906035573507e467230e0f0431283ce207ba39aa84"
+    }
+  },
+  {
+    "commit": "019960d316afc0dd67146201929bd544f2973b16",
+    "tree": "34dc8fca9b62336b488527a6f339fba58421062b",
+    "parents": [
+      "6fd9333646e3c8136badd4169072850e7f21df66"
+    ],
+    "pr": 949,
+    "source": "live len in iterators",
+    "binary_sha256": {
+      "imre": "5fc24aeec2caf6f784b80b1182c890680e1c1e858f903a17b978658e10ac59b5",
+      "libimre_runtime.a": "230d3d70e4648835898b628f2c3eae6633002ec7435a6afa9f38b2fc8b09ad24"
+    }
+  },
+  {
+    "commit": "8869c97d119d7d9d57e57c3550a37cc2bdeedd46",
+    "tree": "3fd9a4fa42d17fd417a012c6696845b8f0b90279",
+    "parents": [
+      "f259c3d26d7ab15f75a1e4db07620305f5099a45",
+      "9e5d17affac2ef8a7da3c3bc5adbe0283efb78d8"
+    ],
+    "pr": 1027,
+    "source": "Python optimization; local merge",
+    "binary_sha256": {
+      "imre": "56fa4e94a9a25626bf35b438e1573003981858b2a0065fd7ab2cab5b5c9dde1c",
+      "libimre_runtime.a": "485817eae453aa7cd0ff76dbf3a6eaef8aea5ecb566da800c2025d7fb3a4d87f"
+    }
+  },
+  {
+    "commit": "7af5331969636dc3cc527699049c05d6b56e514c",
+    "tree": "073ebcb0729885ce289b16671d2601f696e97acb",
+    "parents": [
+      "6fcf33f02db9cc7131d73503d52f7bb78fd7b5b9",
+      "41ea8783c83e83e07999ac40c3fc8f42a8bc917f"
+    ],
+    "pr": 650,
+    "source": "deferred annotations; local merge",
+    "binary_sha256": {
+      "imre": "11adec3f5b051fbcff86eafc4380d8c752bca4af3705688ad5ab6a608d17c6bf",
+      "libimre_runtime.a": "95a7bb073558a464bc20ed1d668ab4777bf9dadddfc73f68c73d02436b2eeded"
+    }
+  }
+]

@@ -1,0 +1,185 @@
+{
+  "source": {
+    "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "main": "00f91c45c63201dd938126cecbcc2cfa9287236a",
+    "csv_pr": 468,
+    "csv_merge": "fce47341adca5540e3f15140ba5505446c7b29ec",
+    "copy_pr": 603,
+    "copy_head": "ba5167d85867428763c2f6bb8e437612ff8c44f4",
+    "doctest_pr": 646,
+    "doctest_head": "e7834155fd510015bf69ed96ee5f5209370c1ed5",
+    "stringio_head": "811f8d51cb7aa5201b401726d35866af463e0309",
+    "integration": "f14d74bfe52a125a6e54a55b4f312638153dd1b6"
+  },
+  "startup": {
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "compiler_sha256": "4a3858479d76759d8eca3970c754747783623c58a29804be155420f5347b5042",
+    "operation": "check",
+    "tests_executed": 0,
+    "support_files": [],
+    "checks": [
+      {
+        "suite": "test.test_itertools",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_itertools",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_itertools.py:4:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_json",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_json",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_json",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_json",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_json/__init__.py:6:1: Imre: Lib/test/support/__init__.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"annotationlib\""
+      },
+      {
+        "suite": "test.test_csv",
+        "entry": "import",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+      },
+      {
+        "suite": "test.test_csv",
+        "entry": "import",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+      },
+      {
+        "suite": "test.test_csv",
+        "entry": "runner",
+        "reachable_only": false,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+      },
+      {
+        "suite": "test.test_csv",
+        "entry": "runner",
+        "reachable_only": true,
+        "exit": 1,
+        "diagnostic": "Lib/imre_suite.py:1:1: Imre: Lib/test/test_csv.py:8:1: Imre: unsupported sealed standard-library export tempfile.TemporaryFile"
+      }
+    ]
+  },
+  "doctest_execution": [
+    {
+      "opt_level": 0,
+      "controls": [
+        "discovery",
+        "execute"
+      ],
+      "modules": {
+        "itertools": {
+          "ids": [
+            "itertools.batched"
+          ],
+          "examples": 1,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest itertools.batched: <entry>/_imre_compiled_doctest_0.py:3:1: Imre: unsupported sealed standard-library export itertools.batched"
+        },
+        "json": {
+          "ids": [
+            "json"
+          ],
+          "examples": 32,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json, example 26: import decimal requires a runtime module initializer"
+        },
+        "json.encoder": {
+          "ids": [
+            "json.encoder.JSONEncoder.encode"
+          ],
+          "examples": 2,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O0)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+        },
+        "json.decoder": {
+          "ids": [],
+          "examples": 0,
+          "outcome": "empty-suite"
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "controls": [
+        "discovery",
+        "execute"
+      ],
+      "modules": {
+        "itertools": {
+          "ids": [
+            "itertools.batched"
+          ],
+          "examples": 1,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest itertools.batched: <entry>/_imre_compiled_doctest_0.py:3:1: Imre: unsupported sealed standard-library export itertools.batched"
+        },
+        "json": {
+          "ids": [
+            "json"
+          ],
+          "examples": 32,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json, example 26: import decimal requires a runtime module initializer"
+        },
+        "json.encoder": {
+          "ids": [
+            "json.encoder.JSONEncoder.encode"
+          ],
+          "examples": 2,
+          "outcome": "blocked",
+          "diagnostic": "Compiling <entry>/case.py (-O3)\ndoctest json.encoder.JSONEncoder.encode, example 1: unsupported sealed standard-library export json.encoder.JSONEncoder"
+        },
+        "json.decoder": {
+          "ids": [],
+          "examples": 0,
+          "outcome": "empty-suite"
+        }
+      }
+    }
+  ]
+}

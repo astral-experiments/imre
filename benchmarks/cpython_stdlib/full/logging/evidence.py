@@ -21,11 +21,14 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 import native_config
 import native_filters
+import native_files
 import native_formatters
+import native_handlers
 import native_hierarchy
 import native_levels
 import native_logging
 import native_records
+import native_rotation
 import native_timed
 from suite_evidence import roles, write_reports
 from suite_inventory import cases, load_suite, verify_files
@@ -150,8 +153,11 @@ def known_cases(toolchain, work, original):
             operation=("imre", "Native handler construction, calendar rollover and close"))(case, method)
     executions[daily] = native_daily
     executions.update(native_config.config_cases(toolchain, directory("config"), original))
+    executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
+    executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
+    executions.update(native_rotation.rotation_cases(toolchain, directory("size-rotation")))
     formatter = toolchain.build((HERE / "formatter_driver.py").read_bytes(), directory("formatters"))
     executions.update(native_formatters.host_formatter_cases(toolchain, formatter, original))
     executions[native_formatters.PRECISION] = native_formatters.precision_case(toolchain, directory("precision"))
@@ -236,9 +242,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + arg, type=Path, required=True)
+    parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5) or not __debug__:
         parser.error("use a test-enabled CPython 3.14.5 with assertions enabled")
+    if args.cpython_source:
+        sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     import test
     from test import test_logging
     manifest = json.loads((HERE / "UPSTREAM.json").read_text())

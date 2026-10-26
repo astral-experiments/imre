@@ -2,6 +2,9 @@
 
 
 import difflib
+import re
+from fnmatch import fnmatchcase
+from types import ModuleType
 from typing import ClassVar
 
 
@@ -48,10 +51,11 @@ def _kept_lines(text: str) -> list[str]:
     return lines
 
 
-def _pretty_text_item(value: str) -> str:
-    # pprint.pformat(list) indents each element by one column. A long
-    # string keeps each whitespace run attached to its preceding word.
-    if len(repr(value)) <= 78:
+def _pretty_text_item(value: str, indent: int = 1) -> str:
+    # The closing delimiter or comma takes one column. Keep each run of
+    # whitespace attached to the word that precedes it.
+    width = 80 - indent
+    if len(repr(value)) <= width - 1:
         return repr(value)
     chunks: list[str] = []
     lines = _kept_lines(value)
@@ -59,7 +63,7 @@ def _pretty_text_item(value: str) -> str:
     for index in range(len(lines)):
         line = lines[index]
         final = index == len(lines) - 1
-        if len(repr(line)) <= (78 if final else 79):
+        if len(repr(line)) <= (width - 1 if final else width):
             chunks.append(repr(line))
         else:
             pos = 0
@@ -72,7 +76,7 @@ def _pretty_text_item(value: str) -> str:
                     pos += 1
                 part = line[start:pos]
                 candidate = current + part
-                if len(repr(candidate)) > (78 if final and pos == len(line) else 79):
+                if len(repr(candidate)) > (width - 1 if final and pos == len(line) else width):
                     if current:
                         chunks.append(repr(current))
                     current = part
@@ -80,7 +84,7 @@ def _pretty_text_item(value: str) -> str:
                     current = candidate
             if current:
                 chunks.append(repr(current))
-    return "\n ".join(chunks)
+    return ("\n" + " " * indent).join(chunks)
 
 
 def _pretty_bytes_item(value: bytes) -> str:
@@ -112,19 +116,41 @@ def _pretty_list(flat: str, items: list[str]) -> list[str]:
     return ("[" + ",\n ".join(items) + "]").splitlines()
 
 
+def _mapping_text(mapping: dict[str, str], pretty: bool) -> str:
+    keys: list[str] = []
+    for key in mapping:
+        keys.append(key)
+    if pretty:
+        keys.sort()
+    parts = [repr(key) + ": " + repr(mapping[key]) for key in keys]
+    compact = "{" + ", ".join(parts) + "}"
+    if not pretty or len(compact) <= 80:
+        return compact
+    expanded: list[str] = []
+    for key in keys:
+        label = repr(key)
+        expanded.append(label + ": " + _pretty_text_item(mapping[key], len(label) + 3))
+    return "{" + ",\n ".join(expanded) + "}"
+
+
 class TestCase:
     failureException: ClassVar[type[Exception]] = AssertionError
+    _testMethodName: str
     longMessage: bool
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self) -> None:
+        self._testMethodName = "runTest"
         self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
 
     def countTestCases(self) -> int:
         return 1
+
+    def id(self) -> str:
+        return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
     def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
         if msg is None:
@@ -141,13 +167,33 @@ class TestCase:
     def skipTest(self, reason: str) -> None:
         raise SkipTest(reason)
 
-    def assertTrue(self, expr: bool, msg: str | None = None) -> None:
-        if not expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not true"))
+    def assertIsNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is not None:
+            self.fail(self._formatMessage(msg, repr(obj) + " is not None"))
 
-    def assertFalse(self, expr: bool, msg: str | None = None) -> None:
+    def assertIsNotNone(self, obj: object, msg: str | None = None) -> None:
+        if obj is None:
+            self.fail(self._formatMessage(msg, "unexpectedly None"))
+
+    def _raise_missing_callable(self, kind: str, name: str) -> None:
+        raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
+
+    def _bound_assertEqual(self) -> _BoundEqual:
+        return _BoundEqual(self)
+
+    def _bound_assertListEqual(self) -> _BoundListEqual:
+        return _BoundListEqual(self)
+
+    def _bound_assertRaises(self) -> _BoundRaises:
+        return _BoundRaises(self)
+
+    def assertTrue(self, expr: object, msg: str | None = None) -> None:
+        if not expr:
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not true"))
+
+    def assertFalse(self, expr: object, msg: str | None = None) -> None:
         if expr:
-            self.fail(self._formatMessage(msg, repr(expr) + " is not false"))
+            raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
 
     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
         if not a < b:
@@ -165,9 +211,10 @@ class TestCase:
         if not a >= b:
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
-    def _baseAssertEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            self.fail(self._formatMessage(msg, f"{first!r} != {second!r}"))
+            left, right = _short_reprs(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff
@@ -193,6 +240,8 @@ class TestCase:
                 second += "\n"
             changes = list(difflib.ndiff(_kept_lines(first), _kept_lines(second)))
             standard = self._truncateMessage(standard, "\n" + "".join(changes))
+        else:
+            raise self.failureException(self._formatMessage(msg, standard))
         self.fail(self._formatMessage(msg, standard))
 
     def _list_difference(self, left: list[str], right: list[str], pretty1: list[str],
@@ -249,15 +298,89 @@ class TestCase:
             right = [repr(x) for x in list2]
             self._list_difference(left, right, left, right, msg)
 
+    def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+        if len(d1) == len(d2):
+            equal = True
+            for key in d1:
+                if key not in d2 or d1[key] != d2[key]:
+                    equal = False
+                    break
+            if equal:
+                return
+        sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+        message = sides[0] + " != " + sides[1]
+        diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
+        self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
+
+    def _failMembership(self, member: str, container: str, msg: str | None, expected: bool) -> None:
+        detail = " not found in " if expected else " unexpectedly found in "
+        self.fail(self._formatMessage(msg, member + detail + container))
+
+    def _assertTextMembership(self, member: str, container: str, msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextListMembership(self, member: str, container: list[str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntListMembership(self, member: int, container: list[int], msg: str | None = None, *, expected: bool) -> None:
+        found = False
+        for item in container:
+            if member == item:
+                found = True
+                break
+        if found != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertTextDictMembership(self, member: str, container: dict[str, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
+    def _assertIntKeyMembership(self, member: object, container: dict[int, str], msg: str | None = None, *, expected: bool) -> None:
+        if (member in container) != expected:
+            self._failMembership(repr(member), repr(container), msg, expected)
+
     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
         if first == second:
-            self.fail(self._formatMessage(msg, f"{first!r} == {second!r}"))
+            raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+
+    def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
+        if not hasattr(obj, name):
+            self.fail(self._formatMessage(msg, "module " + repr(obj.__name__) + " has no attribute " + repr(name)))
+
+    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+        if member not in container:
+            self.fail(self._formatMessage(msg, repr(member) + " not found in " + repr(container)))
 
     def setUp(self) -> None:
         pass
 
     def tearDown(self) -> None:
         pass
+
+
+class _BoundAssertion:
+    _receiver: TestCase
+
+    def __init__(self, case: TestCase) -> None:
+        self._receiver = case
+
+
+class _BoundEqual(_BoundAssertion):
+    pass
+
+
+class _BoundListEqual(_BoundAssertion):
+    pass
+
+
+class _BoundRaises(_BoundAssertion):
+    pass
+
+
+def _raise_call_type_error(message: str) -> None:
+    raise TypeError(message)
 
 
 def _checked_expected(kinds: list[int], error: str | None) -> list[int]:
@@ -272,13 +395,24 @@ class _AssertRaisesContext:
     _expected: list[int]
     _label: str
     _caught: Exception | None
+    _regex: re.Pattern[str] | None
+    _spelling: str
 
-    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None) -> None:
+    def __init__(self, case: TestCase, kinds: list[int], label: str, msg: str | None, error: str | None,
+                 pattern: re.Pattern[str] | None, spelling: str) -> None:
         self.test_case = case
         self._expected = _checked_expected(kinds, error)
         self._label = label
         self.msg = msg
         self._caught = None
+        self._regex = pattern
+        self._spelling = spelling
+
+    def _check_regex(self, exc: Exception) -> None:
+        pattern = self._regex
+        if pattern is not None and pattern.search(str(exc)) is None:
+            standard = '"' + self._spelling + '" does not match "' + str(exc) + '"'
+            raise self.test_case.failureException(self.test_case._formatMessage(self.msg, standard))
 
     def _missing(self) -> None:
         raise self.test_case.failureException(self.test_case._formatMessage(self.msg, self._label + " not raised"))
@@ -335,6 +469,40 @@ class TestResult:
 from typing import Callable
 import sys
 import time
+
+
+class TestLoader:
+    testMethodPrefix: str
+    testNamePatterns: list[str] | None
+    errors: list[str]
+
+    def __init__(self) -> None:
+        self.testMethodPrefix = "test"
+        self.testNamePatterns = None
+        self.errors = []
+
+    def _getTestCaseNames(self, owner: str, names: list[str], descriptors: list[str]) -> list[str]:
+        prefix = self.testMethodPrefix
+        if not prefix or prefix.startswith("_"):
+            raise NotImplementedError("native TestLoader cannot enumerate Python's private class metadata")
+        for name in descriptors:
+            if name.startswith(prefix):
+                raise NotImplementedError("native TestLoader cannot inspect descriptor " + owner + "." + name)
+        patterns = self.testNamePatterns
+        selected: list[str] = []
+        for name in names:
+            if name.startswith(prefix):
+                if patterns is None:
+                    selected.append(name)
+                else:
+                    for pattern in patterns:
+                        if fnmatchcase(owner + "." + name, pattern):
+                            selected.append(name)
+                            break
+        return selected
+
+
+defaultTestLoader = TestLoader()
 
 
 def main() -> None:

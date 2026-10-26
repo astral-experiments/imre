@@ -2,6 +2,19 @@
 
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum JoinStyle {
+    Plain,
+    Shell,
+    WindowsCommand,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ReverseSequence {
+    List,
+    Deque,
+}
+
 /// All leaves must be plain local reads so no later operand can change the
 /// keys captured by an earlier union. Bound the number of membership probes.
 fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
@@ -90,6 +103,110 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+
+    /// Bind reverse on an instance or as a descriptor. The receiver and
+    /// every argument are evaluated before a rejected call raises TypeError.
+    pub(super) fn sequence_reverse(
+        &mut self,
+        sequence: ReverseSequence,
+        receiver: Option<Expr>,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        let skip = usize::from(receiver.is_none());
+        let mut receiver = if let Some(receiver) = receiver {
+            Some(receiver)
+        } else {
+            args.args
+                .first()
+                .map(|arg| self.evaluated_argument(arg))
+                .transpose()?
+        };
+        let (owner, descriptor, builtin) = match sequence {
+            ReverseSequence::List => {
+                if let Some(value) = receiver.take() {
+                    receiver = Some(self.json_mutation_receiver(value, call)?);
+                }
+                ("list", "list", Builtin::ListReverse)
+            }
+            ReverseSequence::Deque => ("deque", "collections.deque", Builtin::DequeReverse),
+        };
+        let accepts = |ty| match sequence {
+            ReverseSequence::List => self.types.element(ty).is_some(),
+            ReverseSequence::Deque => self.types.deque_element(ty).is_some(),
+        };
+        let extra = args.args.len().saturating_sub(skip);
+        let message = match receiver.as_ref() {
+            None => {
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                format!("unbound method {owner}.reverse() needs an argument")
+            }
+            Some(value) if !accepts(value.ty) => {
+                let name = match value.ty {
+                    Type::None => "NoneType".to_owned(),
+                    Type::PlainObject => "object".to_owned(),
+                    Type::Deque(_) => "collections.deque".to_owned(),
+                    Type::ListInt | Type::List(_) => "list".to_owned(),
+                    Type::StrLiteral(_) => "str".to_owned(),
+                    Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes => {
+                        self.type_name(value.ty)
+                    }
+                    Type::Set(_) => "set".to_owned(),
+                    Type::Tuple(_) if self.types.namedtuple_definition(value.ty).is_none() => {
+                        "tuple".to_owned()
+                    }
+                    Type::Dict(_)
+                        if !self.types.is_counter(value.ty)
+                            && !self.types.is_default_list_dict(value.ty) =>
+                    {
+                        "dict".to_owned()
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            &format!(
+                                "{owner}.reverse requires an exact native {owner} or known descriptor receiver"
+                            ),
+                        ));
+                    }
+                };
+                format!(
+                    "descriptor 'reverse' for '{descriptor}' objects doesn't apply to a '{name}' object"
+                )
+            }
+            Some(_) if !args.keywords.is_empty() => {
+                format!("{owner}.reverse() takes no keyword arguments")
+            }
+            Some(_) if extra != 0 => {
+                format!("{owner}.reverse() takes no arguments ({extra} given)")
+            }
+            Some(_) => {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(builtin, vec![receiver.unwrap()]),
+                });
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        self.graph
+            .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
+        for arg in args.args.iter().skip(skip) {
+            self.graph.checked_excess_argument(self.module, arg.range());
+        }
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        for arg in args
+            .args
+            .iter()
+            .skip(skip)
+            .chain(args.keywords.iter().map(|kw| &kw.value))
+        {
+            values.push(self.evaluated_argument(arg)?);
+        }
+        Ok(calls::type_error(Type::None, values, message))
     }
 
     /// Keeps the receiver identity and argument order. A key can observe or mutate
@@ -223,6 +340,19 @@ impl Checker<'_> {
         clear: &mut Vec<usize>,
     ) -> Result<(), String> {
         let element = self.types.element(self.locals[result]).unwrap();
+        if let Some(slot) = callback
+            && let Type::CmpKey(frame, _) = self.locals[slot]
+        {
+            body.push(Statement::Expr(self.sort_cmp_key(
+                self.local(result),
+                self.local(slot),
+                frame,
+                element,
+                reverse,
+                call,
+            )?));
+            return Ok(());
+        }
         let keys = if let Some(callback) = callback {
             let (parameters, key) = self.types.signature(self.locals[callback]).unwrap();
             let [parameter] = parameters.as_slice() else {
@@ -298,7 +428,9 @@ impl Checker<'_> {
         } else {
             self.expr(expression)?
         };
-        if value.ty != Type::None && self.types.signature(value.ty).is_none() {
+        if !matches!(value.ty, Type::None | Type::CmpKey(..))
+            && self.types.signature(value.ty).is_none()
+        {
             return Err(error(
                 self.source,
                 expression,
@@ -335,24 +467,63 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
-        self.join_parts(receiver, source, call, false)
+        if self.joined_lines.finishes_buffer(call.range()) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
+            });
+        }
+        self.join_parts(receiver, source, call, JoinStyle::Plain)
     }
 
-    /// For shlex.join, quote each yielded item before requesting the next one.
+    /// Quote or convert each yielded item before asking for the next one.
     pub(super) fn join_parts(
         &mut self,
         receiver: Expr,
         source: &ast::Expr,
         call: &ast::ExprCall,
-        shell_quote: bool,
+        style: JoinStyle,
     ) -> Result<Expr, String> {
-        let input = self.expansion_input(source, (!shell_quote).then_some(Type::Str))?;
+        let input = if style == JoinStyle::WindowsCommand
+            && let ast::Expr::List(display) = source
+            && !display
+                .elts
+                .iter()
+                .any(|item| matches!(item, ast::Expr::Starred(_)))
+        {
+            Iteration::Container {
+                iterable: self.process_argument_list(display)?,
+                items: false,
+                start: None,
+            }
+        } else {
+            self.expansion_input(source, (style == JoinStyle::Plain).then_some(Type::Str))?
+        };
+        if style == JoinStyle::WindowsCommand
+            && let Iteration::Container { iterable, .. } = &input
+            && let Some(name) = match iterable.ty {
+                Type::None => Some("NoneType"),
+                Type::Int => Some("int"),
+                Type::Bool => Some("bool"),
+                Type::Float => Some("float"),
+                Type::Path => Some("PosixPath"),
+                Type::PurePath(ir::PathFlavor::Posix) => Some("PurePosixPath"),
+                Type::PurePath(ir::PathFlavor::Windows) => Some("PureWindowsPath"),
+                _ => None,
+            }
+        {
+            return self.sys_type_error(
+                call,
+                Type::Str,
+                format!("'{name}' object is not iterable"),
+            );
+        }
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &input
-            && !shell_quote
+            && style == JoinStyle::Plain
             && matches!(
                 self.types.element(iterable.ty),
                 Some(Type::Str | Type::StrLiteral(_))
@@ -379,10 +550,19 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            let value = if shell_quote {
-                checker.shlex_quote_value(value, call)?
-            } else {
-                checker.coerce(value, Type::Str, call)?
+            let value = match style {
+                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
+                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
+                JoinStyle::WindowsCommand => {
+                    let path = Self::string_value(checker.fspath(value, source)?);
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
+                            vec![path],
+                        ),
+                    }
+                }
             };
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
@@ -428,25 +608,18 @@ impl Checker<'_> {
                 return Err(error(self.source, keyword, "repeated str.format keyword"));
             }
             let value = Self::string_value(self.expr(&keyword.value)?);
-            let text = match value.ty {
-                Type::Str => value,
-                Type::Int => Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Str, vec![value]),
-                },
-                _ => {
-                    return Err(error(
-                        self.source,
-                        keyword,
-                        "str.format fields require str or int",
-                    ));
-                }
-            };
+            if !matches!(value.ty, Type::Str | Type::Int) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "str.format fields require str or int",
+                ));
+            }
             args.push(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Str(name.to_string()),
             });
-            args.push(text);
+            args.push(value);
         }
         Ok(Expr {
             ty: Type::Str,
@@ -509,16 +682,6 @@ impl Checker<'_> {
                 "debug f-string fields are unsupported",
             ));
         }
-        if !matches!(
-            field.conversion,
-            ast::ConversionFlag::None | ast::ConversionFlag::Str | ast::ConversionFlag::Repr
-        ) {
-            return Err(error(
-                self.source,
-                field,
-                "f-string conversions support only !s and !r",
-            ));
-        }
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
@@ -531,6 +694,16 @@ impl Checker<'_> {
                 };
                 specification.push_str(&literal.value);
             }
+        }
+        if field.conversion == ast::ConversionFlag::Ascii {
+            if !specification.is_empty() {
+                return Err(error(
+                    self.source,
+                    field,
+                    "formatted strings support !a with an empty format specification",
+                ));
+            }
+            return self.ascii_expr(&field.expression);
         }
         if specification.is_empty()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
@@ -656,7 +829,10 @@ impl Checker<'_> {
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ValueView {
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+            return self.record_repr(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
@@ -728,7 +904,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
-                | Type::ValueView
+                | Type::ObjectValue
                 | Type::ImportException
                 | Type::TimeoutExpired
         ) {

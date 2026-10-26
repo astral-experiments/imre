@@ -1,0 +1,9 @@
+{
+  "compiler_revision": "ab4053ca9fdc951c64e7b257c302d0258a4f0f0f",
+  "compiler_tree": "bed9c4afd25f8dc15373a960f53c1b20e36e7369",
+  "main_revision": "7e3bd3079b41a3d91f1c970a2a41ce05344610cb",
+  "support_table_sha256": "1443b46beb702191f1f52e9963e711176f049f40dc85082ab58a2608d50c71b6",
+  "scope": "Support-table import probes use the compiler only.",
+  "routine_pair": "../d72d067c6ebc/source.json",
+  "imre_sha256": "0cf45b85948ed9f6ed0d7d1427717cf47c8d7ab5ca870821005b4814e6fcbe79"
+}

@@ -1,6 +1,7 @@
 //! Lexical component operations borrow parsed path flavors and never access the filesystem.
 
 use super::*;
+use crate::StrOwner;
 use crate::objects::exceptions::string_repr;
 use crate::objects::words::Words;
 
@@ -8,7 +9,10 @@ impl Storage {
     fn parsed<T>(&self, f: impl FnOnce(&PurePath) -> Result<T>) -> Result<T> {
         match self {
             Self::PurePath(path) => f(path),
-            _ => f(&PurePath::new(false, vec![Rc::clone(self.path_text())])?),
+            _ => f(&PurePath::new(
+                false,
+                vec![StrOwner::clone(self.path_text())],
+            )?),
         }
     }
 
@@ -154,9 +158,11 @@ pub unsafe extern "C" fn imre_path_suffixes(path: *const Object) -> *const Objec
             for part in name.split('.').skip(1) {
                 let mut suffix = Str::from(".");
                 suffix.push_str(part);
-                suffixes.values.push(Rc::into_raw(Rc::new(suffix)) as usize);
+                suffixes
+                    .values
+                    .push(StrOwner::into_raw(StrOwner::new(suffix)) as usize);
             }
-            Ok(Rc::into_raw(suffixes.into_object()))
+            Ok(crate::ObjectOwner::into_raw(suffixes.into_object()))
         })
     };
     finish(result, std::ptr::null())

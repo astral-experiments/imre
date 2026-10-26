@@ -3,17 +3,17 @@
 use std::cell::OnceCell;
 use std::rc::Rc;
 
-use super::{Error, Kind, Object, OwnedWord, Payload, Str, WordKind, finish, object};
+use super::{Error, Kind, Object, OwnedWord, Payload, WordKind, finish, object};
 use crate::objects::words::Words;
 use crate::objects::{records, values};
 
 pub(super) struct Errors {
-    entries: Rc<Object>,
+    entries: crate::ObjectOwner,
     args: OnceCell<OwnedWord>,
 }
 
 impl Error {
-    pub(in crate::objects) fn tree_errors(entries: Rc<Object>) -> Self {
+    pub(in crate::objects) fn tree_errors(entries: crate::ObjectOwner) -> Self {
         Self {
             kind: Kind::ShutilError,
             payload: Some(Payload::Tree(Rc::new(Errors {
@@ -26,17 +26,43 @@ impl Error {
 }
 
 impl Errors {
-    pub(super) fn message(&self) -> Rc<Str> {
-        let mut repr = String::new();
-        // SAFETY: the list and all its tuple entries are retained by this payload.
+    /// Reuse the owned one-element tuple for both typed and generic exception views.
+    pub(super) fn args(
+        &self,
+        layout: &'static records::RecordDescriptor,
+    ) -> super::Result<OwnedWord> {
+        // SAFETY: this immutable layout describes exactly the owned list in slot zero.
         unsafe {
-            values::write_repr(
-                &mut repr,
-                Rc::as_ptr(&self.entries) as usize,
+            if self.args.get().is_none() {
+                let tuple = records::allocate_record(layout);
+                if tuple.is_null() {
+                    return Err(Error::allocation());
+                }
+                tuple.write(
+                    crate::ObjectOwner::into_raw(crate::ObjectOwner::clone(&self.entries)) as usize,
+                );
+                let owned = OwnedWord::from_owned(tuple as usize, WordKind::new(6));
+                assert!(self.args.set(owned).is_ok());
+            }
+            Ok(self.args.get().unwrap().clone())
+        }
+    }
+
+    pub(super) fn message(&self) -> super::Rendered {
+        let mut text = String::new();
+        self.write_message(&mut values::ReprWriter(&mut text))?;
+        super::rendered(text.into())
+    }
+
+    pub(super) fn write_message(&self, output: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        // SAFETY: this payload roots the list and every tuple entry during representation.
+        unsafe {
+            values::try_write_unchecked_repr(
+                output,
+                crate::ObjectOwner::as_ptr(&self.entries) as usize,
                 WordKind::new(5),
             )
-        };
-        Rc::new(repr.into())
+        }
     }
 }
 
@@ -84,16 +110,9 @@ pub unsafe extern "C" fn imre_shutil_tree_error_args(
                     "exception does not have copytree error entries",
                 ));
             };
-            if errors.args.get().is_none() {
-                let tuple = records::allocate_record(layout);
-                if tuple.is_null() {
-                    return Err(Error::allocation());
-                }
-                tuple.write(Rc::into_raw(Rc::clone(&errors.entries)) as usize);
-                let owned = OwnedWord::from_owned(tuple as usize, WordKind::new(6));
-                assert!(errors.args.set(owned).is_ok());
-            }
-            Ok(errors.args.get().unwrap().clone().into_word() as *const usize)
+            errors
+                .args(&*layout)
+                .map(|tuple| tuple.into_word() as *const usize)
         })
     };
     finish(result, std::ptr::null())
@@ -113,17 +132,17 @@ mod tests {
             semantics: std::ptr::null(),
         };
         let list = Words::new(6).into_object();
-        let error = Error::tree_errors(Rc::clone(&list)).into_object();
+        let error = Error::tree_errors(crate::ObjectOwner::clone(&list)).into_object();
         // SAFETY: the layout outlives the exception and both returned tuple owners.
         unsafe {
-            let first = imre_shutil_tree_error_args(Rc::as_ptr(&error), &layout);
-            let second = imre_shutil_tree_error_args(Rc::as_ptr(&error), &layout);
+            let first = imre_shutil_tree_error_args(crate::ObjectOwner::as_ptr(&error), &layout);
+            let second = imre_shutil_tree_error_args(crate::ObjectOwner::as_ptr(&error), &layout);
             assert_eq!(first, second);
             drop(error);
-            assert_eq!(*first, Rc::as_ptr(&list) as usize);
+            assert_eq!(*first, crate::ObjectOwner::as_ptr(&list) as usize);
             drop(OwnedWord::from_owned(first as usize, WordKind::new(6)));
             drop(OwnedWord::from_owned(second as usize, WordKind::new(6)));
         }
-        assert_eq!(Rc::strong_count(&list), 1);
+        assert_eq!(crate::ObjectOwner::strong_count(&list), 1);
     }
 }

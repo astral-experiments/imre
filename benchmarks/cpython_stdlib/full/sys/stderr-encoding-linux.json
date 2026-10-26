@@ -1,0 +1,365 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "files": {
+    "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044"
+  },
+  "upstream_id": "test.test_sys.SysModuleTest.test_exit",
+  "whole_methods_added": 0,
+  "levels": {
+    "0": [
+      {
+        "case": "stderr metadata and writes",
+        "setting": null,
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "LATIN-1",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "69736f383835392d317c6261636b736c6173687265706c6163657c636166e9205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:replace",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:ignore",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:unknown-policy",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "utf_8",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "UTF-8-SIG",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "efbbbf7574662d382d7369677c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": ":surrogateescape",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ASCII:",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": ":",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "one signature across writes and flushes",
+        "setting": "utf-8-sig",
+        "source_sha256": "48c867ee20770c380ec282a8c2ced99777cb82759172bc9d7276114c1188b324",
+        "status": 0,
+        "stdout": "",
+        "stderr": "efbbbf6f6e6574776f"
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": null,
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "LATIN-1",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "US-ASCII:replace",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "UTF_8_SIG",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "efbbbf3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "shadowed repr remains an ordinary invalid call",
+        "stage": "compile",
+        "source_sha256": "e04d4fe2339866837f0a3964ee5d1eb69d5f3b366a87eb4708832ba5071cc5b1",
+        "diagnostic": "[case]/shadow.py:3:12: Imre: an indirect call requires a nonoptional exact Callable value"
+      },
+      {
+        "case": "isolated command preserves environment and ignores codec",
+        "setting": "not-a-codec",
+        "source_sha256": "4ce05053f5b6b3ebdfab501e94c14e6e53bc981fed16ca38fbaca73acd9a3945",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a6e6f742d612d636f646563"
+      },
+      {
+        "case": "test.test_sys.SysModuleTest.test_exit child",
+        "setting": null,
+        "source_sha256": "821c9b763b7c12d91e826185a84162fce062a2ea2207b879eef29872b45f82fd",
+        "status": 1,
+        "stdout": "",
+        "stderr": "756e666c75736865642c6d6573736167650a"
+      },
+      {
+        "case": "test.test_sys.SysModuleTest.test_exit child",
+        "setting": "latin-1",
+        "source_sha256": "ffffe27913c821f2fee71ee8c85275a74fb789f118744263980979378505b9f2",
+        "status": 1,
+        "stdout": "",
+        "stderr": "68e90a"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "ascii:ignore",
+        "status": 1,
+        "line": "56616c75654572726f723a20685c7865395c7532306163"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "latin1",
+        "status": 1,
+        "line": "56616c75654572726f723a2068e95c7532306163"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "utf-8",
+        "status": 1,
+        "line": "56616c75654572726f723a2068c3a9e282ac"
+      },
+      {
+        "case": "unknown codec before script output",
+        "setting": "no-such-sys-codec",
+        "status": 1,
+        "stdout": "",
+        "diagnostic_contains": "unknown encoding: no-such-sys-codec"
+      }
+    ],
+    "3": [
+      {
+        "case": "stderr metadata and writes",
+        "setting": null,
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "LATIN-1",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "69736f383835392d317c6261636b736c6173687265706c6163657c636166e9205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:replace",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:ignore",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ascii:unknown-policy",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "utf_8",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "UTF-8-SIG",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "efbbbf7574662d382d7369677c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": ":surrogateescape",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": "ASCII:",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "61736369697c6261636b736c6173687265706c6163657c6361665c786539205c75323061635c5530303031663938307c370a"
+      },
+      {
+        "case": "stderr metadata and writes",
+        "setting": ":",
+        "source_sha256": "0f6c49ee4332f67f1929eb3a79c872a40a900712a49b3c8efb1775b20ce67516",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a"
+      },
+      {
+        "case": "one signature across writes and flushes",
+        "setting": "utf-8-sig",
+        "source_sha256": "48c867ee20770c380ec282a8c2ced99777cb82759172bc9d7276114c1188b324",
+        "status": 0,
+        "stdout": "",
+        "stderr": "efbbbf6f6e6574776f"
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": null,
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d38273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "LATIN-1",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d2769736f383835392d31273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "US-ASCII:replace",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d276173636969273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "repr, str and positional stderr",
+        "setting": "UTF_8_SIG",
+        "source_sha256": "09dceb6cc71f465d6b49cc0936f42dde092565849c610fdbb365d2017c3ce7e0",
+        "status": 0,
+        "stdout": "efbbbf3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a3c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a73747265616d3a203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e203c5f696f2e54657874494f57726170706572206e616d653d273c7374646572723e27206d6f64653d27772720656e636f64696e673d277574662d382d736967273e0a",
+        "stderr": ""
+      },
+      {
+        "case": "shadowed repr remains an ordinary invalid call",
+        "stage": "compile",
+        "source_sha256": "e04d4fe2339866837f0a3964ee5d1eb69d5f3b366a87eb4708832ba5071cc5b1",
+        "diagnostic": "[case]/shadow.py:3:12: Imre: an indirect call requires a nonoptional exact Callable value"
+      },
+      {
+        "case": "isolated command preserves environment and ignores codec",
+        "setting": "not-a-codec",
+        "source_sha256": "4ce05053f5b6b3ebdfab501e94c14e6e53bc981fed16ca38fbaca73acd9a3945",
+        "status": 0,
+        "stdout": "",
+        "stderr": "7574662d387c6261636b736c6173687265706c6163657c636166c3a920e282acf09fa6807c370a6e6f742d612d636f646563"
+      },
+      {
+        "case": "test.test_sys.SysModuleTest.test_exit child",
+        "setting": null,
+        "source_sha256": "821c9b763b7c12d91e826185a84162fce062a2ea2207b879eef29872b45f82fd",
+        "status": 1,
+        "stdout": "",
+        "stderr": "756e666c75736865642c6d6573736167650a"
+      },
+      {
+        "case": "test.test_sys.SysModuleTest.test_exit child",
+        "setting": "latin-1",
+        "source_sha256": "ffffe27913c821f2fee71ee8c85275a74fb789f118744263980979378505b9f2",
+        "status": 1,
+        "stdout": "",
+        "stderr": "68e90a"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "ascii:ignore",
+        "status": 1,
+        "line": "56616c75654572726f723a20685c7865395c7532306163"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "latin1",
+        "status": 1,
+        "line": "56616c75654572726f723a2068e95c7532306163"
+      },
+      {
+        "case": "uncaught exception diagnostic (last line)",
+        "setting": "utf-8",
+        "status": 1,
+        "line": "56616c75654572726f723a2068c3a9e282ac"
+      },
+      {
+        "case": "unknown codec before script output",
+        "setting": "no-such-sys-codec",
+        "status": 1,
+        "stdout": "",
+        "diagnostic_contains": "unknown encoding: no-such-sys-codec"
+      }
+    ]
+  }
+}

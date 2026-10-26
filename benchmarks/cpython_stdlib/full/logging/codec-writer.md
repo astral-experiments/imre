@@ -28,3 +28,12 @@ python -I -B benchmarks/cpython_stdlib/full/logging/codec_writer.py \
   --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
   --result /tmp/codec-writer-linux.json
 ```
+
+The production compiler and the compiler built with IR verification reproduced
+the [writer receipt](codec-writer-linux.json) at O0 and O3 with the merged
+[sys registry](https://github.com/astral-sh/imre/commit/796917bfff5c13cfbf7a2f219c9d08608e6f8fb8).
+Both builds matched CPython's subprocess text output and writable
+`Popen.returncode` fixtures. The registry's ownership unit test and its
+[device receipt](../sys/codec-device-linux.json) passed. The separate
+[StreamHandler run](https://github.com/astral-sh/imre/actions/runs/40217698211)
+covers the handler adding the newline.

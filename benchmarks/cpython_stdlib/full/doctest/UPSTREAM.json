@@ -4,6 +4,7 @@
   "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
   "files": {
     "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
-    "Lib/test/test_doctest/sample_doctest_skip.py": "1b83dec1f8c4dcfe6ae24cbb8ac9d4f07f3a79ea"
+    "Lib/test/test_doctest/sample_doctest_skip.py": "1b83dec1f8c4dcfe6ae24cbb8ac9d4f07f3a79ea",
+    "Lib/test/test_memoryio.py": "482b183da23ffa259664e52592021d5c3c12d34d"
   }
 }

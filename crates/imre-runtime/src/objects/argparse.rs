@@ -1,15 +1,15 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use crate::StrOwner;
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, TryReserveError};
 use std::io::{self, Write};
-use std::rc::Rc;
 
 use serde::Deserialize;
 
 use super::exceptions::{self, Error, string_repr};
-use super::records::{RecordDescriptor, imre_record_new};
+use super::records::{RecordDescriptor, imre_record_new, imre_record_release};
 use super::{Object, Str, Words, fail};
 use crate::objects::paths::imre_path_new;
 
@@ -20,17 +20,13 @@ mod nargs;
 use binding::{Bound, IntegerRange};
 use nargs::{Nargs, positional_counts};
 
-/// Large decimal conversions obey the interpreter's configured digit limit,
-/// including leading zeroes. Underscores and signs do not count.
-fn decimal_digits_allowed(count: usize) -> bool {
-    if count <= 640 {
-        return true;
-    }
-    let limit = std::env::var("PYTHONINTMAXSTRDIGITS")
+use crate::integer_text::decimal_digits_allowed;
+
+fn owned_text(value: &str) -> Result<crate::StrOwner, Error> {
+    Str::try_new(value)
         .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(4300);
-    limit == 0 || count <= limit
+        .and_then(|text| StrOwner::try_new(text).ok())
+        .ok_or_else(Error::allocation)
 }
 
 #[derive(Deserialize, Copy, Clone, PartialEq)]
@@ -51,6 +47,7 @@ enum Action {
     StoreConst,
     StoreTrue,
     StoreFalse,
+    BooleanOptional,
     Count,
 }
 
@@ -81,6 +78,7 @@ struct OptionSpec {
     help: String,
     optional: bool,
     group: Option<usize>,
+    mutex: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -100,6 +98,8 @@ struct Parser {
     options: Vec<OptionSpec>,
     #[serde(default)]
     groups: Vec<ArgumentGroup>,
+    #[serde(default)]
+    mutex_required: Vec<bool>,
     subcommands: Option<Subcommands>,
 }
 
@@ -128,7 +128,7 @@ enum Token<'a> {
     Unknown,
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
-    Option(usize, Option<&'a str>),
+    Option(usize, &'a str, Option<&'a str>),
     Cluster(char, &'a str),
 }
 
@@ -178,6 +178,12 @@ enum Stop<'a> {
     Help(&'a Parser),
     Error(&'a Parser, String),
     Exception(Error),
+}
+
+impl From<TryReserveError> for Stop<'_> {
+    fn from(_: TryReserveError) -> Self {
+        Self::Exception(Error::allocation())
+    }
 }
 
 impl Parser {
@@ -264,12 +270,12 @@ impl Parser {
         let Some(prefix) = chars.next().filter(|&c| self.prefixes.contains(c)) else {
             return Token::Value;
         };
-        let token = |slot, value| match slot {
+        let token = |flag, slot, value| match slot {
             None => Token::Help(value),
-            Some(i) => Token::Option(i, value),
+            Some(i) => Token::Option(i, flag, value),
         };
-        if let Some((_, slot)) = self.flags().find(|(s, _)| *s == arg) {
-            return token(slot, None);
+        if let Some((flag, slot)) = self.flags().find(|(s, _)| *s == arg) {
+            return token(flag, slot, None);
         }
         let Some(second) = chars.next() else {
             return Token::Value;
@@ -278,9 +284,9 @@ impl Parser {
             .split_once('=')
             .map_or((arg, None), |(h, v)| (h, Some(v)));
         if explicit.is_some()
-            && let Some((_, slot)) = self.flags().find(|(s, _)| *s == head)
+            && let Some((flag, slot)) = self.flags().find(|(s, _)| *s == head)
         {
-            return token(slot, explicit);
+            return token(flag, slot, explicit);
         }
         let long = self.prefixes.contains(second);
         let short = &arg[..prefix.len_utf8() + second.len_utf8()];
@@ -289,7 +295,7 @@ impl Parser {
             if !long && flag == short {
                 matches.push((flag, Token::Cluster(prefix, &arg[prefix.len_utf8()..])));
             } else if self.abbrev && flag.starts_with(head) {
-                matches.push((flag, token(slot, explicit)));
+                matches.push((flag, token(flag, slot, explicit)));
             }
         }
         if matches.len() > 1 {
@@ -315,8 +321,48 @@ impl Parser {
         }
     }
 
+    fn select_group<'a>(&'a self, seen: &mut [Option<usize>], slot: usize) -> Result<(), Stop<'a>> {
+        if let Some(group) = self.options[slot].mutex {
+            if let Some(other) = seen[group]
+                && other != slot
+            {
+                return Err(Stop::Error(
+                    self,
+                    format!(
+                        "argument {}: not allowed with argument {}",
+                        self.options[slot].error_name(),
+                        self.options[other].error_name()
+                    ),
+                ));
+            }
+            seen[group] = Some(slot);
+        }
+        Ok(())
+    }
+
+    /// Resolve the whole short-option cluster before invoking its actions in order.
+    fn apply_flags<'a>(
+        &'a self,
+        flags: impl IntoIterator<Item = Option<(usize, &'a str)>>,
+        seen: &mut [Option<usize>],
+        values: &mut [Option<Bound<'a>>],
+    ) -> Result<(), Stop<'a>> {
+        for flag in flags {
+            let Some((slot, spelling)) = flag else {
+                return Err(Stop::Help(self));
+            };
+            self.select_group(seen, slot)?;
+            values[slot] =
+                Some(self.options[slot].flag_value(self, values[slot].take(), spelling)?);
+        }
+        Ok(())
+    }
+
     fn parse<'a>(&'a self, args: &[&'a str]) -> Result<Parsed<'a>, Stop<'a>> {
         let mut values = self.options.iter().map(|_| None).collect::<Vec<_>>();
+        let mut seen = Vec::new();
+        seen.try_reserve_exact(self.mutex_required.len())?;
+        seen.resize(self.mutex_required.len(), None);
         let mut extras = Vec::new();
         let mut index = 0;
         let mut selected = None;
@@ -378,11 +424,13 @@ impl Parser {
                             ));
                         };
                         let mut parsed = definition.parser.parse(&args[index + 1..])?;
+                        extras.try_reserve(parsed.extras.len())?;
                         extras.append(&mut parsed.extras);
                         selected = Some((child, name, parsed.words));
                         break 'parse;
                     };
-                    let mut taken = Vec::with_capacity(count);
+                    let mut taken = Vec::new();
+                    taken.try_reserve_exact(count)?;
                     for _ in 0..count {
                         if marker == Some(index) {
                             index += 1;
@@ -393,12 +441,12 @@ impl Parser {
                     if marker == Some(index) {
                         index += 1;
                     }
-                    values[slot] = Some(
-                        self.options[slot]
-                            .bind(Some(&taken))
-                            .map_err(|e| Stop::Error(self, e))?,
-                    );
+                    values[slot] = Some(self.options[slot].bind(self, Some(&taken))?);
+                    if !taken.is_empty() {
+                        self.select_group(&mut seen, slot)?;
+                    }
                 }
+                extras.try_reserve(end - index)?;
                 extras.extend(args[index..end].iter().copied().map(Cow::Borrowed));
                 index = end;
                 if index == args.len() {
@@ -407,8 +455,8 @@ impl Parser {
             }
             let arg = args[index];
             index += 1;
-            let mut clustered_help = false;
-            let (slot, explicit) = match self.token(arg) {
+            let mut cluster = Vec::new();
+            let (slot, spelling, explicit) = match self.token(arg) {
                 Token::Help(None) => return Err(Stop::Help(self)),
                 Token::Help(Some(value)) => {
                     return Err(Stop::Error(
@@ -428,6 +476,7 @@ impl Parser {
                 }
                 Token::End | Token::Value => unreachable!("positional run already consumed"),
                 Token::Unknown => {
+                    extras.try_reserve(1)?;
                     extras.push(Cow::Borrowed(arg));
                     continue;
                 }
@@ -437,22 +486,20 @@ impl Parser {
                         let letter = suffix.chars().next().unwrap();
                         let rest = &suffix[letter.len_utf8()..];
                         let spelling = format!("{prefix}{letter}");
-                        let option = self.options.iter().enumerate().find(|(_, option)| {
-                            !option.positional() && option.flags().any(|s| s == spelling)
-                        });
-                        let help = self
-                            .help_flags
-                            .as_ref()
-                            .is_some_and(|flags| flags[0] == spelling);
-                        if !help && option.is_none() {
+                        let Some((matched, slot)) =
+                            self.flags().find(|(name, _)| *name == spelling)
+                        else {
+                            extras.try_reserve(1)?;
                             extras.push(Cow::Owned(format!("{prefix}{suffix}")));
                             break;
-                        }
+                        };
+                        let option = slot.map(|slot| (slot, &self.options[slot]));
                         if let Some((slot, option)) = option
                             && option.takes_value()
                         {
                             take = Some((
                                 slot,
+                                matched,
                                 (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
                             ));
                             break;
@@ -477,26 +524,17 @@ impl Parser {
                                 ),
                             ));
                         }
-                        if let Some((slot, option)) = option {
-                            values[slot] = Some(
-                                option
-                                    .flag_value(values[slot].take())
-                                    .map_err(|e| Stop::Error(self, e))?,
-                            );
-                        } else {
-                            clustered_help = true;
-                        }
+                        cluster.try_reserve(1)?;
+                        cluster.push(slot.map(|slot| (slot, matched)));
                         suffix = rest;
                     }
                     let Some(take) = take else {
-                        if clustered_help {
-                            return Err(Stop::Help(self));
-                        }
+                        self.apply_flags(cluster, &mut seen, &mut values)?;
                         continue;
                     };
                     take
                 }
-                Token::Option(slot, value) => (slot, value),
+                Token::Option(slot, spelling, value) => (slot, spelling, value),
             };
             let option = &self.options[slot];
             let taken = if let Some(value) = explicit {
@@ -520,13 +558,9 @@ impl Parser {
                         ),
                     ));
                 }
-                vec![value]
+                explicit.as_slice()
             } else if !option.takes_value() {
-                values[slot] = Some(
-                    option
-                        .flag_value(values[slot].take())
-                        .map_err(|e| Stop::Error(self, e))?,
-                );
+                self.apply_flags([Some((slot, spelling))], &mut seen, &mut values)?;
                 continue;
             } else {
                 let start = index;
@@ -549,16 +583,11 @@ impl Parser {
                         ),
                     ));
                 }
-                args[start..index].to_vec()
+                &args[start..index]
             };
-            if clustered_help {
-                return Err(Stop::Help(self));
-            }
-            values[slot] = Some(
-                option
-                    .bind(Some(&taken))
-                    .map_err(|e| Stop::Error(self, e))?,
-            );
+            self.apply_flags(cluster, &mut seen, &mut values)?;
+            values[slot] = Some(option.bind(self, Some(taken))?);
+            self.select_group(&mut seen, slot)?;
         }
         let mut missing = Vec::new();
         let mut words = Vec::with_capacity(values.len());
@@ -569,7 +598,7 @@ impl Parser {
                     missing.push(option.error_name());
                     continue;
                 }
-                None => option.bind(None).map_err(|e| Stop::Error(self, e))?,
+                None => option.bind(self, None)?,
             };
             words.push(Word::Option(option, bound));
         }
@@ -596,6 +625,21 @@ impl Parser {
                     missing.join(", ")
                 ),
             ));
+        }
+        for (id, required) in self.mutex_required.iter().enumerate() {
+            if *required && seen[id].is_none() {
+                let names = self
+                    .options
+                    .iter()
+                    .filter(|o| o.mutex == Some(id))
+                    .map(OptionSpec::error_name)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(Stop::Error(
+                    self,
+                    format!("one of the arguments {names} is required"),
+                ));
+            }
         }
         if self
             .subcommands
@@ -635,12 +679,12 @@ impl OptionSpec {
 }
 
 impl Parser {
-    fn from_schema(schema: &str) -> Self {
+    fn from_schema(schema: &str) -> Result<Self, Error> {
         let mut parser: Self = serde_json::from_str(schema)
             .unwrap_or_else(|_| fail("SystemError", "invalid argparse schema"));
         parser.normalize_numbers();
-        parser.set_child_programs();
-        parser
+        parser.set_child_programs()?;
+        Ok(parser)
     }
 }
 
@@ -659,7 +703,10 @@ pub unsafe extern "C" fn imre_argparse_text(
 ) -> *const Str {
     // SAFETY: both strings stay rooted while the formatter reads them.
     let (schema, description) = unsafe { (&*schema, &*description) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
     let text: Str = if usage {
         parser.usage(help::width())
     } else {
@@ -670,7 +717,7 @@ pub unsafe extern "C" fn imre_argparse_text(
     }
     .into();
     match output {
-        0 => return Rc::into_raw(Rc::new(text)),
+        0 => return StrOwner::into_raw(StrOwner::new(text)),
         1 | 2 => {
             // SAFETY: the native stream borrows the live string. A successful
             // write returns an owned character count; zero indicates failure.
@@ -690,7 +737,10 @@ pub unsafe extern "C" fn imre_argparse_text(
     if let Some(error) = exceptions::take_pending() {
         // SAFETY: the pending exception stays rooted for the kind check.
         if unsafe {
-            exceptions::imre_exception_matches(Rc::as_ptr(&error), exceptions::Kind::OSError as u32)
+            exceptions::imre_exception_matches(
+                crate::ObjectOwner::as_ptr(&error),
+                exceptions::Kind::OSError as u32,
+            )
         } == 0
         {
             exceptions::replace_pending(Some(error));
@@ -718,25 +768,29 @@ pub unsafe extern "C" fn imre_argparse_parse(
 ) -> *mut usize {
     // SAFETY: these immutable inputs remain rooted during parsing and construction.
     let (schema, description, argv) = unsafe { (&*schema, &*description, &*argv) };
-    let parser = Parser::from_schema(schema);
+    let parser = match Parser::from_schema(schema) {
+        Ok(parser) => parser,
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
+    let mut owners = Vec::new();
+    let mut args = Vec::new();
     // SAFETY: argv is a rooted list[str]; take independent string owners before
     // reading the argument values or constructing the output namespace.
-    let owners = unsafe {
+    let reserved = unsafe {
         argv.0.with(|storage| {
             let sequence = storage.sequence();
             sequence.check_kind(3);
-            sequence
-                .values
-                .iter()
-                .skip(usize::from(process_argv))
-                .map(|&word| super::acquire_rc::<Str>(word))
-                .collect::<Vec<_>>()
+            let words = sequence.values.iter().skip(usize::from(process_argv));
+            owners.try_reserve_exact(words.len())?;
+            args.try_reserve_exact(words.len())?;
+            owners.extend(words.map(|&word| crate::StrOwner::acquire_word(word)));
+            Ok::<_, std::collections::TryReserveError>(())
         })
     };
-    let args = owners
-        .iter()
-        .map(|value| value.as_str())
-        .collect::<Vec<_>>();
+    if reserved.is_err() {
+        return Error::allocation().returning(std::ptr::null_mut());
+    }
+    args.extend(owners.iter().map(|value| value.as_str()));
     let parsed = match parser.parse(&args).and_then(|parsed| {
         if !pair_layout.is_null() || parsed.extras.is_empty() {
             Ok(parsed)
@@ -758,13 +812,8 @@ pub unsafe extern "C" fn imre_argparse_parse(
                 Ok(help) => help,
                 Err(error) => return error.returning(std::ptr::null_mut()),
             };
-            if crate::write_output(|writer| {
-                writer.write_all(help.trim_end_matches('\n').as_bytes())
-            })
-            .is_err()
-            {
-                return Error::new(exceptions::Kind::OSError, "could not write standard output")
-                    .returning(std::ptr::null_mut());
+            if let Err(error) = crate::sys::write_stdout(help.trim_end_matches('\n'), true) {
+                return error.returning(std::ptr::null_mut());
             }
             return Error::exit_status(0).returning(std::ptr::null_mut());
         }
@@ -786,6 +835,23 @@ pub unsafe extern "C" fn imre_argparse_parse(
             return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
+    let mut extras = Words::new(3);
+    if !pair_layout.is_null() {
+        if extras
+            .values
+            .try_reserve_exact(parsed.extras.len())
+            .is_err()
+        {
+            return Error::allocation().returning(std::ptr::null_mut());
+        }
+        for value in &parsed.extras {
+            let text = match owned_text(value) {
+                Ok(text) => text,
+                Err(error) => return error.returning(std::ptr::null_mut()),
+            };
+            extras.values.push(StrOwner::into_raw(text) as usize);
+        }
+    }
     // SAFETY: every slot receives exactly one owner of its declared kind. All
     // input validation is complete, and option conversion invokes no user code.
     unsafe {
@@ -798,8 +864,16 @@ pub unsafe extern "C" fn imre_argparse_parse(
         for (index, field) in parsed.words.into_iter().enumerate() {
             let word = match field {
                 Word::Option(option, values) => option.word(values),
-                Word::Command(value) => {
-                    value.map_or(0, |name| Rc::into_raw(Rc::new(Str::new(name))) as usize)
+                Word::Command(value) => value.map_or(Ok(0), |name| {
+                    owned_text(name).map(|text| StrOwner::into_raw(text) as usize)
+                }),
+            };
+            let word = match word {
+                Ok(word) => word,
+                Err(error) => {
+                    // Unfilled record slots are zeroed so its initialized fields can be released.
+                    imre_record_release(result);
+                    return error.returning(std::ptr::null_mut());
                 }
             };
             let dest = result.add(index);
@@ -811,18 +885,11 @@ pub unsafe extern "C" fn imre_argparse_parse(
         if pair_layout.is_null() {
             return result;
         }
-        let mut extras = Words::new(3);
-        extras.values.extend(
-            parsed
-                .extras
-                .iter()
-                .map(|value| Rc::into_raw(Rc::new(Str::new(value))) as usize),
-        );
         let pair = imre_record_new(pair_layout);
         pair.cast::<*mut usize>().write(result);
         pair.add(1)
             .cast::<*const Object>()
-            .write(Rc::into_raw(extras.into_object()));
+            .write(crate::ObjectOwner::into_raw(extras.into_object()));
         pair
     }
 }

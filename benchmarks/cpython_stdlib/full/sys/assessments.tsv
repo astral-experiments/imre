@@ -20,7 +20,7 @@ SizeofTest.test_objecttypes	proposed	The assertions enumerate exact C struct siz
 SizeofTest.test_pythontypes	proposed	The _ast.AST, traceback and sys.flags byte sizes are calculated from CPython C pointer layouts and struct-sequence fields; those expressions do not specify Imre object sizes.
 SizeofTest.test_slots	proposed	This test derives subclass sizes from CPython's three additional slot pointers and, when needed, the GC header, including an additional GC header relative to the base object.
 SysModuleTest.test_attributes	blocked	This single routine also reads float_info, int_info, hash_info, prefixes, builtin names and implementation metadata. Hash and digit descriptions need to agree with actual native algorithms.
-SysModuleTest.test_c_locale_surrogateescape	blocked	The native child needs per-stream error policies under LC_ALL=C, PYTHONCOERCECLOCALE=0, -X utf8=0 and PYTHONIOENCODING overrides.
+SysModuleTest.test_c_locale_surrogateescape	blocked	The unchanged child calls getattr(sys, name) for each standard stream. Its first LC_ALL=C process stops compiling at the sys operand before any policy is read; see the stock six-child comparison in the occurrence report.
 SysModuleTest.test_call_tracing	blocked	sys.call_tracing must accept a real callable and tuple and reject the non-tuple argument. The native tracing/callable boundary is absent.
 SysModuleTest.test_clear_type_cache	proposed	The sole call is deprecated sys._clear_type_cache(), whose warning refers to CPython's method lookup cache. Imre statically resolves methods; this proposes only this private cache warning.
 SysModuleTest.test_current_exceptions	blocked	The sys snapshot must associate each running thread with its active exception; a current-thread TLS value alone cannot satisfy the two-thread fixture.
@@ -28,25 +28,20 @@ SysModuleTest.test_current_frames	blocked	Requires a live frame snapshot for a b
 SysModuleTest.test_debugmallocstats	proposed	The stderr assertions name pymalloc arenas and the free PyDictObjects list. Imre does not use those CPython allocators or freelists.
 SysModuleTest.test_disable_gil_abi	proposed	This sole assertion ties the CPython extension ABI suffix 't' to its Py_GIL_DISABLED configure flag. Imre does not implement that binary extension ABI.
 SysModuleTest.test_dlopenflags	blocked	A persistent native loader policy must be shared by get/setdlopenflags and future extension loading, with errors for invalid arity.
-SysModuleTest.test_executable	blocked	Imre currently returns the host helper interpreter; the original also relaunches with overridden argv[0], executable and PATH. A host Python child cannot validate the native boundary (#302).
-SysModuleTest.test_exit	blocked	The unchanged method verifies the native caught payloads and child exits through stderr flushing. Compiling its next child with lone U+DCFF fails before the final Latin-1 check (#405, #409).
+SysModuleTest.test_exit	blocked	Six native caught calls and five native children complete. The next child cannot compile its lone U+DCFF. Running the later untouched Latin-1 child separately emits 68 e9 0a and exits 1; the complete method remains blocked (#405, #409).
 SysModuleTest.test_exit_codes_under_repl	blocked	Requires interactive stdin/REPL execution and exit propagation from exit(), __import__('sys').exit and raise SystemExit for statuses 0 and 123.
 SysModuleTest.test_getallocatedblocks	blocked	The check uses live allocation counts before and after gc.collect, with optional total refcount/intern accounting. The native allocator does not expose these counters.
 SysModuleTest.test_getframe	blocked	A callable native frame must expose the test function's actual code object by identity and reject out-of-range depth and extra arguments.
-SysModuleTest.test_getframemodulename	blocked	Depth must follow real frame links (including the unittest caller), produce its module name and return None past the stack.
-SysModuleTest.test_getrecursionlimit	blocked	The native call graph rejects recursive cycles and has no enforced logical interpreter recursion limit to query.
-SysModuleTest.test_implementation	blocked	Public PEP 421 fields need an actual Imre version, named version tuple, cache policy and isolation capabilities. A local implementation is being aligned with the shared named-tuple layout (#497).
-SysModuleTest.test_intern	blocked	Requires canonical native str identity, rejection of str subclasses and optional intern-state queries. A content-equality surrogate would not suffice.
-SysModuleTest.test_ioencoding	failed	The unchanged method reaches its first original child, which exits 0 but writes UTF-8 c2 a2 0a instead of CP424 4a 25. The native codec can encode those characters; stdout still needs to select it.
+SysModuleTest.test_getframemodulename	blocked	Native source frames supply the current or calling module and return None beyond the stack. The original first comparison still needs unittest equality for str | None; its loop needs sys._getframe, f_globals and f_back identity.
+SysModuleTest.test_intern	blocked	The original parent can query one live native string table. The whole native body also needs its test.support/random imports, callable assertions and the original local str subclass S with its own __hash__.
+SysModuleTest.test_ioencoding	failed	The unchanged method's first native child cannot find CP424 on this branch. Its three original ASCII children match independently. The final child needs chr(0xdcbd) to produce a Python string containing a lone surrogate for surrogateescape.
 SysModuleTest.test_is_finalizing	blocked	The runtime must transition during final destruction, after atexit; the original reads sys.is_finalizing both during execution and inside __del__.
 SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
-SysModuleTest.test_module_names	blocked	The runtime needs an immutable frozenset of its standard library module names and iterable native string elements.
 SysModuleTest.test_no_duplicates_in_meta_path	blocked	The static module loader does not expose Python's mutable meta_path or its initialized finder instances.
-SysModuleTest.test_posix_locale_surrogateescape	blocked	The same verified child checks stdin/stdout/stderr error policies under LC_ALL=POSIX, both with and without an encoding override.
+SysModuleTest.test_posix_locale_surrogateescape	blocked	The original LC_ALL=POSIX child stops at getattr(sys, name) before any stream read. The report keeps its argv, first failed host assertion and six stock control children.
 SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.
 SysModuleTest.test_refcount	blocked	Native getrefcount must reject missing arguments, preserve the None singleton count across global bindings and expose total count only if available.
-SysModuleTest.test_setrecursionlimit	blocked	Setting and restoring the process recursion limit requires a persistent native interpreter and enforcement on subsequent calls.
 SysModuleTest.test_setrecursionlimit_to_depth	blocked	Rejecting a limit below the current depth needs actual frame depth and exception-safe restoration of nested calls.
 SysModuleTest.test_stdlib_dir	blocked	The target directory must agree with the target os module's file origin; a CPython installation path is not a native standard library.
 SysModuleTest.test_subinterp_intern_dynamically_allocated	proposed	The asserted addresses of dynamically interned strings must differ across CPython subinterpreters. Imre lacks isolated interpreters; public sys.intern remains open.
@@ -58,7 +53,6 @@ SysModuleTest.test_sys_flags_no_instantiation	blocked	The flags value and its ty
 SysModuleTest.test_sys_ignores_cleaning_up_user_data	blocked	Storing a user object on sys and finalizing its failing destructor quietly needs mutable module attributes and native shutdown ownership.
 SysModuleTest.test_sys_tracebacklimit	blocked	Real chained native frames must be formatted or suppressed according to mutable sys.tracebacklimit on uncaught errors.
 SysModuleTest.test_sys_version_info_no_instantiation	blocked	Needs a real version-info type object and its construction error, in addition to exposed tuple fields and indexing.
-SysModuleTest.test_thread_info	blocked	Expose a real thread_info struct sequence (name, lock, version) for the native target, with index, len and field access.
 TestRemoteExec.test_new_namespace_for_each_remote_exec	blocked	Each injected script must run in a new globals dictionary distinct from the target's __main__.__dict__.
 TestRemoteExec.test_remote_exec	blocked	Inject and execute the actual script at a safe point in the waiting target; no native debugger transport exists.
 TestRemoteExec.test_remote_exec_bytes	blocked	The same cross-process operation must accept a bytes path without involving a CPython child.

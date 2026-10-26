@@ -1,0 +1,178 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "gil_enabled": true,
+  "execution": "stock CPython reference only; monitored calls in the suite interpreter",
+  "blobs": {
+    "Lib/test/support/import_helper.py": "4c7eac0b7eb674f508fe40e8ad1e0f2b184fa533",
+    "Lib/test/test_json/__init__.py": "74b64ed86a3183db5a54166d89cf2fb227281e06",
+    "Python/import.c": "5914722c8f75177e111dd9f3dd69fead54d0db19"
+  },
+  "suite": {
+    "occurrences": 216,
+    "distinct_ids": 212,
+    "duplicate_ids": {
+      "json": 2,
+      "json.encoder.JSONEncoder.encode": 2,
+      "test.test_json.TestPyTest.test_pyjson": 2,
+      "test.test_json.TestCTest.test_cjson": 2
+    },
+    "passed": 215,
+    "skipped": {
+      "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow": "not enough memory: 8589934592.0G minimum needed"
+    }
+  },
+  "fixtures": [
+    {
+      "package_line": 11,
+      "fresh": [
+        "_json"
+      ],
+      "blocked": [],
+      "usefrozen": false,
+      "deprecated": false,
+      "calls": [
+        0,
+        1
+      ],
+      "restored_module_objects": [
+        "_json",
+        "json",
+        "json.decoder",
+        "json.encoder",
+        "json.scanner"
+      ],
+      "scanner_module": "_json"
+    },
+    {
+      "package_line": 12,
+      "fresh": [],
+      "blocked": [
+        "_json"
+      ],
+      "usefrozen": false,
+      "deprecated": false,
+      "calls": [
+        2,
+        3
+      ],
+      "restored_module_objects": [
+        "_json",
+        "json",
+        "json.decoder",
+        "json.encoder",
+        "json.scanner"
+      ],
+      "scanner_module": "json.scanner"
+    }
+  ],
+  "original_calls": [
+    {
+      "builtin": "_override_frozen_modules_for_tests",
+      "line": 103,
+      "arg": -1,
+      "_json": "absent",
+      "outcome": "return"
+    },
+    {
+      "builtin": "_override_frozen_modules_for_tests",
+      "line": 107,
+      "arg": 0,
+      "_json": "present",
+      "outcome": "return"
+    },
+    {
+      "builtin": "_override_frozen_modules_for_tests",
+      "line": 103,
+      "arg": -1,
+      "_json": "blocked",
+      "outcome": "return"
+    },
+    {
+      "builtin": "_override_frozen_modules_for_tests",
+      "line": 107,
+      "arg": 0,
+      "_json": "blocked",
+      "outcome": "return"
+    }
+  ],
+  "original_extension_override_calls": 0,
+  "separate_reference_controls": {
+    "main": [
+      {
+        "builtin": "_override_frozen_modules_for_tests",
+        "line": 103,
+        "arg": -1,
+        "_json": "present",
+        "outcome": "return"
+      },
+      {
+        "builtin": "_override_frozen_modules_for_tests",
+        "line": 107,
+        "arg": 0,
+        "_json": "present",
+        "outcome": "return"
+      },
+      {
+        "builtin": "_override_frozen_modules_for_tests",
+        "line": 103,
+        "arg": 1,
+        "_json": "present",
+        "outcome": "return"
+      },
+      {
+        "builtin": "_override_frozen_modules_for_tests",
+        "line": 107,
+        "arg": 0,
+        "_json": "present",
+        "outcome": "return"
+      },
+      {
+        "builtin": "_override_multi_interp_extensions_check",
+        "line": 123,
+        "arg": 1,
+        "_json": "present",
+        "outcome": "raise"
+      }
+    ],
+    "main_extension_error": "_imp._override_multi_interp_extensions_check() cannot be used in the main interpreter",
+    "is_frozen___hello__": {
+      "baseline": true,
+      "off": false,
+      "on": true,
+      "after": true
+    },
+    "subinterpreter_nested_extension_override": [
+      {
+        "builtin": "_override_multi_interp_extensions_check",
+        "line": 123,
+        "arg": -1,
+        "_json": "present",
+        "outcome": "return",
+        "returned_previous": 0
+      },
+      {
+        "builtin": "_override_multi_interp_extensions_check",
+        "line": 123,
+        "arg": 1,
+        "_json": "present",
+        "outcome": "return",
+        "returned_previous": -1
+      },
+      {
+        "builtin": "_override_multi_interp_extensions_check",
+        "line": 127,
+        "arg": -1,
+        "_json": "present",
+        "outcome": "return"
+      },
+      {
+        "builtin": "_override_multi_interp_extensions_check",
+        "line": 127,
+        "arg": 0,
+        "_json": "present",
+        "outcome": "return"
+      }
+    ]
+  }
+}

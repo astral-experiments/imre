@@ -1,0 +1,759 @@
+{
+  "blob": "482b183da23ffa259664e52592021d5c3c12d34d",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "observations": {
+    "O0": {
+      "test.test_memoryio.CStringIOTest.testInit": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "ed90f8d34bda4bdc644421154f8696eb4f05aec0d93d22062c38b3cb8c7fb89e",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testRead": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "36919deb666fb52f35f3eaa781ee99cd3b1988dbb3144179e67083f6eec2883b",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testReadNoArgs": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "13f10ba32f90c1d70530ed4c70b72520ffe88b4b895764dc6c5e1a0501623986",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testTell": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "7bc4c773215c4d238da3d37f384ac4f47e8c099e1873d2648b62d3bbe8e82a16",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_flags": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "a5925cd1b76779603d37a34a180a98061904f476afc0706a3eaddba23f9d8fb9",
+          "native_calls": {
+            "StringIO": 1,
+            "close": 1,
+            "closed": 2,
+            "isatty": 2,
+            "readable": 2,
+            "seekable": 2,
+            "writable": 2
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_flush": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "307febcb111778805af4c2e4f79acb3059c2afd685f71d0235c2976af34bd65a",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_getvalue": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+          "native_calls": {
+            "StringIO": 3,
+            "close": 1,
+            "getvalue": 5,
+            "read": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_issue5265": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "d76731882ca724ea2b63dcba541cda836311ced90f7e4af8a6ca5ca9afba2e44",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_cr": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "9866bfb49961dc1704d1960c8db2ac07591aeeefea5ae129086db3e39602b845",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 12,
+            "read": 1,
+            "readlines": 1,
+            "seek": 3,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_crlf": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "950204bf47b2a04c832ca7339f5d6652a2cf984ff1fe6a58cf00317f6f4ab648",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "read": 1,
+            "readlines": 1,
+            "seek": 3,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_default": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "75a08a8296f494db68d40dd9d2869c6ab07f1b1424ea37e2f7e622129b2e6e32",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "seek": 1,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_empty": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "4ba073b2422236a0a02a67360a381eef72a651e090ec731684dfae68878125c9",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 10,
+            "read": 3,
+            "seek": 2,
+            "write": 4
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_lf": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "6fbc14273242f8dc5348466a7f8066e20142858ae7243603d02917d12e690138",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "seek": 1,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_none": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "1786ceffc8084a5d616c0f5f38f2eb133ed41337b131a7c530d684f92be25528",
+          "native_calls": {
+            "StringIO": 3,
+            "getvalue": 2,
+            "iter": 1,
+            "next": 5,
+            "read": 6,
+            "seek": 2,
+            "write": 3
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newlines_property": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "7697af68f21a650998d687d12d0aa2d3b907559b466991434d0c7bf8ca7c4cb1",
+          "native_calls": {
+            "StringIO": 1,
+            "newlines": 4,
+            "read": 3,
+            "seek": 3,
+            "write": 3
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_overseek": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "90eefd43be8211ab58fe5e1614018f84035a381895ec76365d593550be97b61a",
+          "native_calls": {
+            "StringIO": 1,
+            "getvalue": 3,
+            "read": 1,
+            "seek": 1,
+            "tell": 1,
+            "write": 2
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_relative_seek": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "74f4c94fee73bcdc99971daddba448f9826874a1a435fb99bcd235f89bfb53eb",
+          "native_calls": {
+            "StringIO": 1,
+            "seek": 6
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_tell": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "e027d8a667f613917da14d9eba98d1f1bb99683e181713a3293b49bb3d89a315",
+          "native_calls": {
+            "StringIO": 1,
+            "close": 1,
+            "seek": 2,
+            "tell": 4
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_textio_properties": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "e344a3666b557ff1e86572d95b47064165d7851116349cec7c84d3b6f6514c21",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_widechar": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "ff0e6d66124e09372bad17af7940f8153e246cd1d128abdeddf7e27500603488",
+          "operation": "native io.StringIO",
+          "opt_level": 0
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      }
+    },
+    "O3": {
+      "test.test_memoryio.CStringIOTest.testInit": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "ed90f8d34bda4bdc644421154f8696eb4f05aec0d93d22062c38b3cb8c7fb89e",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testRead": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "36919deb666fb52f35f3eaa781ee99cd3b1988dbb3144179e67083f6eec2883b",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testReadNoArgs": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "13f10ba32f90c1d70530ed4c70b72520ffe88b4b895764dc6c5e1a0501623986",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.testTell": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "7bc4c773215c4d238da3d37f384ac4f47e8c099e1873d2648b62d3bbe8e82a16",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_flags": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "a5925cd1b76779603d37a34a180a98061904f476afc0706a3eaddba23f9d8fb9",
+          "native_calls": {
+            "StringIO": 1,
+            "close": 1,
+            "closed": 2,
+            "isatty": 2,
+            "readable": 2,
+            "seekable": 2,
+            "writable": 2
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_flush": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "307febcb111778805af4c2e4f79acb3059c2afd685f71d0235c2976af34bd65a",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_getvalue": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "23b3657562151499bfd699eefc1e5a571aad53b213f173940fd85f135c634849",
+          "native_calls": {
+            "StringIO": 3,
+            "close": 1,
+            "getvalue": 5,
+            "read": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_issue5265": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "d76731882ca724ea2b63dcba541cda836311ced90f7e4af8a6ca5ca9afba2e44",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_cr": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "9866bfb49961dc1704d1960c8db2ac07591aeeefea5ae129086db3e39602b845",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 12,
+            "read": 1,
+            "readlines": 1,
+            "seek": 3,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_crlf": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "950204bf47b2a04c832ca7339f5d6652a2cf984ff1fe6a58cf00317f6f4ab648",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "read": 1,
+            "readlines": 1,
+            "seek": 3,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_default": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "75a08a8296f494db68d40dd9d2869c6ab07f1b1424ea37e2f7e622129b2e6e32",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "seek": 1,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_empty": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "4ba073b2422236a0a02a67360a381eef72a651e090ec731684dfae68878125c9",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 10,
+            "read": 3,
+            "seek": 2,
+            "write": 4
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_lf": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "6fbc14273242f8dc5348466a7f8066e20142858ae7243603d02917d12e690138",
+          "native_calls": {
+            "StringIO": 2,
+            "getvalue": 2,
+            "iter": 2,
+            "next": 8,
+            "seek": 1,
+            "write": 1
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newline_none": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "1786ceffc8084a5d616c0f5f38f2eb133ed41337b131a7c530d684f92be25528",
+          "native_calls": {
+            "StringIO": 3,
+            "getvalue": 2,
+            "iter": 1,
+            "next": 5,
+            "read": 6,
+            "seek": 2,
+            "write": 3
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_newlines_property": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "7697af68f21a650998d687d12d0aa2d3b907559b466991434d0c7bf8ca7c4cb1",
+          "native_calls": {
+            "StringIO": 1,
+            "newlines": 4,
+            "read": 3,
+            "seek": 3,
+            "write": 3
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_overseek": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "90eefd43be8211ab58fe5e1614018f84035a381895ec76365d593550be97b61a",
+          "native_calls": {
+            "StringIO": 1,
+            "getvalue": 3,
+            "read": 1,
+            "seek": 1,
+            "tell": 1,
+            "write": 2
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_relative_seek": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "74f4c94fee73bcdc99971daddba448f9826874a1a435fb99bcd235f89bfb53eb",
+          "native_calls": {
+            "StringIO": 1,
+            "seek": 6
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_tell": {
+        "evidence": {
+          "fixture": "original CPython module, class, instance and method; native stream factory",
+          "method_sha256": "e027d8a667f613917da14d9eba98d1f1bb99683e181713a3293b49bb3d89a315",
+          "native_calls": {
+            "StringIO": 1,
+            "close": 1,
+            "seek": 2,
+            "tell": 4
+          },
+          "operation": "io.StringIO held by the native child",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "cpython",
+          "body": "cpython",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_textio_properties": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "e344a3666b557ff1e86572d95b47064165d7851116349cec7c84d3b6f6514c21",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      },
+      "test.test_memoryio.CStringIOTest.test_widechar": {
+        "evidence": {
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "ff0e6d66124e09372bad17af7940f8153e246cd1d128abdeddf7e27500603488",
+          "operation": "native io.StringIO",
+          "opt_level": 3
+        },
+        "roles": {
+          "assertions": "imre",
+          "body": "imre",
+          "fixture": "mixed",
+          "operation": "imre"
+        }
+      }
+    }
+  },
+  "source": "Lib/test/test_memoryio.py"
+}

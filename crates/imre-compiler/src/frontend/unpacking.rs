@@ -85,6 +85,20 @@ impl Checker<'_> {
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
         if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+            && attribute.attr.as_str() == "default_factory"
+            && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
+                || self.unshadowed_builtin(&assignment.value, "list"))
+        {
+            let receiver = self.expr(&attribute.value)?;
+            if self.types.is_default_list_dict(receiver.ty) {
+                let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
+                return Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
+                })]);
+            }
+        }
+        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
             && attribute.attr.as_str() == "converter"
             && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
                 self.resolve(&assignment.value)
@@ -183,6 +197,30 @@ impl Checker<'_> {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
                 let receiver = self.expr(&subscript.value)?;
+                if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
+                    let value = self.coerce(value, element, target)?;
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::ChainMapSetItem,
+                            vec![value, receiver, key],
+                        ),
+                    }));
+                }
+                if let Type::Class(class) = receiver.ty
+                    && self.classes.methods[class].contains_key("__setitem__")
+                {
+                    // Python evaluates the RHS, the receiver, then the index.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let receiver = scope.hold(self, receiver);
+                    let key = self.expr(&subscript.slice)?;
+                    let key = scope.hold(self, key);
+                    let assigned =
+                        self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
+                    return Ok(Statement::Expr(scope.finish(assigned)));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
                         if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
@@ -218,7 +256,7 @@ impl Checker<'_> {
                     .mapping(receiver.ty)
                     .or_else(|| {
                         self.types
-                            .element(receiver.ty)
+                            .indexed_element(receiver.ty)
                             .map(|element| (Type::Int, element))
                     })
                     .ok_or_else(|| {
@@ -228,11 +266,33 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
-                let index = self.expr_expected(&subscript.slice, key)?;
+                let index = if matches!(receiver.ty, Type::Deque(_)) {
+                    self.integer_index(&subscript.slice)?
+                } else {
+                    self.expr_expected(&subscript.slice, key)?
+                };
                 let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
+                    let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::SetSelector),
+                            vec![value],
+                        ),
+                    }));
+                }
+                if self.cache_config(target) == Some(true) {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(true),
+                        Type::None,
+                        vec![value],
+                    )));
+                }
                 if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
                     self.resolve(target)
                 {
@@ -242,6 +302,13 @@ impl Checker<'_> {
                         Type::None,
                         vec![logging::number(mask), value],
                     )));
+                }
+                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                    let value = self.coerce(value, self.builtin_len().ty, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
+                    }));
                 }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
@@ -256,7 +323,79 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
                     }));
                 }
+                if let Some(class) = self.class_reference(&attribute.value)
+                    && matches!(
+                        self.classes.declarations.definitions[class]
+                            .static_bindings
+                            .get(attribute.attr.as_str()),
+                        Some(crate::classes::ClassValue::Runtime { .. })
+                    )
+                {
+                    return self.store_class_data(class, attribute, value);
+                }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Str), target)?;
+                    return Ok(Statement::Expr(cache_paths::op(
+                        ir::CachePathOperation::Set(false),
+                        Type::None,
+                        vec![value, receiver],
+                    )));
+                }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                {
+                    let value = self.coerce(value, self.types.optional(Type::Int), target)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        vec![value, receiver],
+                    )));
+                }
+                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
+                    let Some((params, returns)) = self.types.signature(value.ty) else {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable",
+                        ));
+                    };
+                    if !params.is_empty()
+                        || !(matches!(returns, Type::None | Type::Int)
+                            || returns == self.types.optional(Type::Int))
+                    {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "Popen.poll needs a zero-argument callable returning int or None",
+                        ));
+                    }
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                            returns_none: returns == Type::None,
+                        }),
+                        vec![value, receiver],
+                    )));
+                }
+                if let Some(class) =
+                    self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
+                {
+                    return self.store_instance_data(class, attribute, receiver, value);
+                }
+                if self.types.has_reflected_functions()
+                    && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
+                    && let Some(index) = typing::attribute_index(attribute.attr.as_str())
+                {
+                    let value = self.coerce(value, Type::Str, target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::SetAttr(index)),
+                            vec![value, receiver],
+                        ),
+                    }));
+                }
                 if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
                     let op = match (receiver.ty, attribute.attr.as_str()) {
                         (_, "encoding") => ir::WriterOperation::SetEncoding,
@@ -290,6 +429,13 @@ impl Checker<'_> {
                 if receiver.ty == Type::LogFormatter {
                     return self.formatter_set(receiver, attribute, value);
                 }
+                if let Type::CmpKey(frame, true) = receiver.ty
+                    && attribute.attr.as_str() == "obj"
+                {
+                    let cell = self.cmp_field(receiver, frame, 1);
+                    let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
+                    return Ok(Statement::SetItem(cell, pipelines::integer(0), value));
+                }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
                     let item = self.types.mapping(Type::Dict(id)).unwrap().1;
@@ -299,6 +445,11 @@ impl Checker<'_> {
                         name,
                         value,
                     ));
+                }
+                if matches!(receiver.ty, Type::ModuleSpec(_))
+                    && attribute.attr.as_str() == "has_location"
+                {
+                    return self.set_module_spec_location(attribute, receiver, value);
                 }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
@@ -317,8 +468,20 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
                     }));
                 }
+                if let Type::ChainMap(id) = receiver.ty
+                    && attribute.attr.as_str() == "maps"
+                {
+                    let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
+                    return Ok(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
+                    }));
+                }
                 if let Some(class) = self.writable_property(receiver.ty, attribute) {
                     return self.set_property(class, attribute, receiver, value);
+                }
+                if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
+                    return self.store_setup_field(receiver, value, attribute, field);
                 }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
@@ -763,6 +926,97 @@ impl Checker<'_> {
                 body,
                 value: Box::new(self.local(result)),
                 clear: vec![result, item],
+            },
+        })
+    }
+}
+
+impl Checker<'_> {
+    /// A fixed tuple's result shape is known for constant slice bounds. Capture
+    /// the receiver once, even when the selected fields are empty or out of order.
+    pub(super) fn fixed_tuple_slice(
+        &mut self,
+        receiver: Expr,
+        fields: &[Type],
+        slice: &ast::ExprSlice,
+    ) -> Result<Expr, String> {
+        let bound = |expr: &ast::Expr| -> Result<i64, String> {
+            let (value, negative) = match expr {
+                ast::Expr::UnaryOp(op) if op.op == ast::UnaryOp::USub => (&*op.operand, true),
+                value => (value, false),
+            };
+            if let ast::Expr::NumberLiteral(n) = value
+                && let ast::Number::Int(i) = &n.value
+            {
+                let i = i.as_i64().unwrap_or(i64::MAX);
+                return Ok(if negative { -i } else { i });
+            }
+            Err(error(
+                self.source,
+                expr,
+                "fixed tuple slice bounds must be integer literals",
+            ))
+        };
+        let step = slice.step.as_deref().map(bound).transpose()?.unwrap_or(1);
+        if step == 0 {
+            let ty = self.types.tuple(vec![]);
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Expr(receiver)],
+                    clear: vec![],
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Builtin(
+                            Builtin::RaiseException,
+                            vec![Expr {
+                                ty: Type::Exception,
+                                kind: ExprKind::Exception {
+                                    kind: exception_kind("ValueError").unwrap(),
+                                    message: Some(Box::new(string("slice step cannot be zero"))),
+                                },
+                            }],
+                        ),
+                    }),
+                },
+            });
+        }
+        let len = fields.len() as i64;
+        let (lo, hi) = if step > 0 { (0, len) } else { (-1, len - 1) };
+        let normalized = |value: i64| (if value < 0 { value + len } else { value }).clamp(lo, hi);
+        let mut i = slice
+            .lower
+            .as_deref()
+            .map(bound)
+            .transpose()?
+            .map(normalized)
+            .unwrap_or(if step > 0 { lo } else { hi });
+        let stop = slice
+            .upper
+            .as_deref()
+            .map(bound)
+            .transpose()?
+            .map(normalized)
+            .unwrap_or(if step > 0 { hi } else { lo });
+        let slot = self.hidden(receiver.ty);
+        let mut items = Vec::new();
+        while if step > 0 { i < stop } else { i > stop } {
+            items.push(Expr {
+                ty: fields[i as usize],
+                kind: ExprKind::Field(Box::new(self.local(slot)), i as usize),
+            });
+            i = i.saturating_add(step);
+        }
+        let ty = self.types.tuple(items.iter().map(|item| item.ty).collect());
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, receiver)],
+                clear: vec![slot],
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Tuple(items),
+                }),
             },
         })
     }

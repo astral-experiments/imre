@@ -13,3 +13,16 @@ class Row:
     @property
     def count(self) -> int:
         return len(self.values)
+
+
+@record(slots=True)
+class Stamp:
+    value: int
+
+
+def erased(stamp: Stamp) -> object:
+    return stamp
+
+
+def make_stamp(value: int) -> object:
+    return Stamp(value)

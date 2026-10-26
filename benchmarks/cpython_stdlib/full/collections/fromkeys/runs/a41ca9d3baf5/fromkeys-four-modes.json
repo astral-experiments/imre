@@ -1,0 +1,32 @@
+{
+  "fixture_sha256": "fd244770de2294377561e3886455f6c32264a4af5103f27c8e9ab7d582fb615d",
+  "imre_sha256": "1d24ae6fe359b9575a8c7b1e7b303dd28ecc46282ae8635bd80c4613dd9c59d2",
+  "runtime_sha256": "11a56f72e140643a6cea8ef10cf83e025ce732e53d2b8979951f626ea58408e2",
+  "reference": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\nTrue\nTrue\n{'b': [5], 'a': [5]}\nTrue\nbad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n'int' object is not iterable\nCounter.fromkeys() is undefined.  Use Counter(iterable) instead.\ndefaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+  "modes": {
+    "O0-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\nTrue\nTrue\n{'b': [5], 'a': [5]}\nTrue\nbad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n'int' object is not iterable\nCounter.fromkeys() is undefined.  Use Counter(iterable) instead.\ndefaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+      "stderr": ""
+    },
+    "O0-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\nTrue\nTrue\n{'b': [5], 'a': [5]}\nTrue\nbad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n'int' object is not iterable\nCounter.fromkeys() is undefined.  Use Counter(iterable) instead.\ndefaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+      "stderr": ""
+    },
+    "O3-reachable-0": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\nTrue\nTrue\n{'b': [5], 'a': [5]}\nTrue\nbad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n'int' object is not iterable\nCounter.fromkeys() is undefined.  Use Counter(iterable) instead.\ndefaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+      "stderr": ""
+    },
+    "O3-reachable-1": {
+      "outcome": "matched",
+      "exit": 0,
+      "stdout": "{'\u00e9': None, 'a': None}\n{4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{9: 32, 10: 32, 11: 32, 12: 32, 13: 32, 32: 32}\n{0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}\n{4: 0, 2: 0, 7: 0}\n{8: 0}\n{4: 10, 2: 20, 7: 30}\n{5: None, 3: None}\n{}\n{}\nTrue\nTrue\n{'b': [5], 'a': [5]}\nTrue\nbad key iterator\n[10, 20, 1, 2, 3]\n[1, 2, 3]\nbad key iterator\n[10, 3]\n'int' object is not iterable\nCounter.fromkeys() is undefined.  Use Counter(iterable) instead.\ndefaultdict(None, {1: 9, 2: 9})\n3\ndefaultdict(<class 'list'>, {'prior': [5]})\n",
+      "stderr": ""
+    }
+  }
+}

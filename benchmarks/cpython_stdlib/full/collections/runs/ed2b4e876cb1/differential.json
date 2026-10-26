@@ -1,0 +1,66 @@
+{
+  "deque_reinitialize": {
+    "fixture_sha256": "2ec2b002cefacde31d1a0646e3d699ae37131bf699d43b8fb950899b6c522e19",
+    "imre_sha256": "a96d065043782219056e276895743994052fc6377ff650990395d139f715b6d1",
+    "runtime_sha256": "1fbdd9c7a60691c2a79af475a3255b7a568395668cf96163e1c68d78cfc86fc8",
+    "reference": "None\nTrue\n[0, 1, 2, 3, 4]\nNone\nTrue\nNone\n[]\n0\nNone\n[4, 5]\n2\nNone\n[]\nNone\nNone\n[]\n1\n[11]\n1\nthird pull\n[1, 3, 2, 8, 7, 9]\n[8, 7]\n3\nmaxlen must be non-negative\n[1, 2]\n[8, 7]\n3\nPython int too large to convert to C ssize_t\n[8, 7]\n3\n'NoneType' object is not iterable\n[]\n4\nmaxlen must be non-negative\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\ndeque() takes at most 2 arguments (3 given)\n[1, 2, 3, 3]\n[2, 3]\n4\nargument for deque() given by name ('iterable') and position (1)\n[1, 2, 2]\n[2, 3]\n4\ndeque() got an unexpected keyword argument 'bad'\n[1, 3]\n[2, 3]\n4\nsource failed\n[1, 4]\n[2, 3]\n4\nNone\n[]\nNone\n['a', '\u00a3']\n2\n",
+    "modes": {
+      "O0-reachable-0": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "None\nTrue\n[0, 1, 2, 3, 4]\nNone\nTrue\nNone\n[]\n0\nNone\n[4, 5]\n2\nNone\n[]\nNone\nNone\n[]\n1\n[11]\n1\nthird pull\n[1, 3, 2, 8, 7, 9]\n[8, 7]\n3\nmaxlen must be non-negative\n[1, 2]\n[8, 7]\n3\nPython int too large to convert to C ssize_t\n[8, 7]\n3\n'NoneType' object is not iterable\n[]\n4\nmaxlen must be non-negative\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\ndeque() takes at most 2 arguments (3 given)\n[1, 2, 3, 3]\n[2, 3]\n4\nargument for deque() given by name ('iterable') and position (1)\n[1, 2, 2]\n[2, 3]\n4\ndeque() got an unexpected keyword argument 'bad'\n[1, 3]\n[2, 3]\n4\nsource failed\n[1, 4]\n[2, 3]\n4\nNone\n[]\nNone\n['a', '\u00a3']\n2\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "None\nTrue\n[0, 1, 2, 3, 4]\nNone\nTrue\nNone\n[]\n0\nNone\n[4, 5]\n2\nNone\n[]\nNone\nNone\n[]\n1\n[11]\n1\nthird pull\n[1, 3, 2, 8, 7, 9]\n[8, 7]\n3\nmaxlen must be non-negative\n[1, 2]\n[8, 7]\n3\nPython int too large to convert to C ssize_t\n[8, 7]\n3\n'NoneType' object is not iterable\n[]\n4\nmaxlen must be non-negative\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\ndeque() takes at most 2 arguments (3 given)\n[1, 2, 3, 3]\n[2, 3]\n4\nargument for deque() given by name ('iterable') and position (1)\n[1, 2, 2]\n[2, 3]\n4\ndeque() got an unexpected keyword argument 'bad'\n[1, 3]\n[2, 3]\n4\nsource failed\n[1, 4]\n[2, 3]\n4\nNone\n[]\nNone\n['a', '\u00a3']\n2\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "None\nTrue\n[0, 1, 2, 3, 4]\nNone\nTrue\nNone\n[]\n0\nNone\n[4, 5]\n2\nNone\n[]\nNone\nNone\n[]\n1\n[11]\n1\nthird pull\n[1, 3, 2, 8, 7, 9]\n[8, 7]\n3\nmaxlen must be non-negative\n[1, 2]\n[8, 7]\n3\nPython int too large to convert to C ssize_t\n[8, 7]\n3\n'NoneType' object is not iterable\n[]\n4\nmaxlen must be non-negative\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\ndeque() takes at most 2 arguments (3 given)\n[1, 2, 3, 3]\n[2, 3]\n4\nargument for deque() given by name ('iterable') and position (1)\n[1, 2, 2]\n[2, 3]\n4\ndeque() got an unexpected keyword argument 'bad'\n[1, 3]\n[2, 3]\n4\nsource failed\n[1, 4]\n[2, 3]\n4\nNone\n[]\nNone\n['a', '\u00a3']\n2\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "None\nTrue\n[0, 1, 2, 3, 4]\nNone\nTrue\nNone\n[]\n0\nNone\n[4, 5]\n2\nNone\n[]\nNone\nNone\n[]\n1\n[11]\n1\nthird pull\n[1, 3, 2, 8, 7, 9]\n[8, 7]\n3\nmaxlen must be non-negative\n[1, 2]\n[8, 7]\n3\nPython int too large to convert to C ssize_t\n[8, 7]\n3\n'NoneType' object is not iterable\n[]\n4\nmaxlen must be non-negative\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\nan integer is required\n[2, 3]\n4\ndeque() takes at most 2 arguments (3 given)\n[1, 2, 3, 3]\n[2, 3]\n4\nargument for deque() given by name ('iterable') and position (1)\n[1, 2, 2]\n[2, 3]\n4\ndeque() got an unexpected keyword argument 'bad'\n[1, 3]\n[2, 3]\n4\nsource failed\n[1, 4]\n[2, 3]\n4\nNone\n[]\nNone\n['a', '\u00a3']\n2\n",
+        "stderr": ""
+      }
+    }
+  },
+  "deque": {
+    "fixture_sha256": "858776eb94701f8fe10db71422db36c6bfe3d809663f386556e4d6519ecb7d12",
+    "imre_sha256": "a96d065043782219056e276895743994052fc6377ff650990395d139f715b6d1",
+    "runtime_sha256": "1fbdd9c7a60691c2a79af475a3255b7a568395668cf96163e1c68d78cfc86fc8",
+    "reference": "0\nTrue\nFalse\n1\nTrue\n11\nFalse\n11\n11\n2\nTrue\n10\n11\nFalse\n11\n10\n11\n10\n3\nTrue\n3\n10\n11\nFalse\n11\n10\n3\n11\n10\n3\n4\nTrue\n3\n2\n10\n11\nFalse\n11\n10\n2\n3\n11\n10\n2\n3\nz\nc\na\nb\nTrue\na\nTrue\nTrue\ndeque mutated during iteration\npop from an empty deque\nmaxlen must be non-negative\nPython int too large to convert to C ssize_t\nsource\nlimit\n2\n3\nlimit\nsource\n2\n3\n",
+    "modes": {
+      "O0-reachable-0": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "0\nTrue\nFalse\n1\nTrue\n11\nFalse\n11\n11\n2\nTrue\n10\n11\nFalse\n11\n10\n11\n10\n3\nTrue\n3\n10\n11\nFalse\n11\n10\n3\n11\n10\n3\n4\nTrue\n3\n2\n10\n11\nFalse\n11\n10\n2\n3\n11\n10\n2\n3\nz\nc\na\nb\nTrue\na\nTrue\nTrue\ndeque mutated during iteration\npop from an empty deque\nmaxlen must be non-negative\nPython int too large to convert to C ssize_t\nsource\nlimit\n2\n3\nlimit\nsource\n2\n3\n",
+        "stderr": ""
+      },
+      "O0-reachable-1": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "0\nTrue\nFalse\n1\nTrue\n11\nFalse\n11\n11\n2\nTrue\n10\n11\nFalse\n11\n10\n11\n10\n3\nTrue\n3\n10\n11\nFalse\n11\n10\n3\n11\n10\n3\n4\nTrue\n3\n2\n10\n11\nFalse\n11\n10\n2\n3\n11\n10\n2\n3\nz\nc\na\nb\nTrue\na\nTrue\nTrue\ndeque mutated during iteration\npop from an empty deque\nmaxlen must be non-negative\nPython int too large to convert to C ssize_t\nsource\nlimit\n2\n3\nlimit\nsource\n2\n3\n",
+        "stderr": ""
+      },
+      "O3-reachable-0": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "0\nTrue\nFalse\n1\nTrue\n11\nFalse\n11\n11\n2\nTrue\n10\n11\nFalse\n11\n10\n11\n10\n3\nTrue\n3\n10\n11\nFalse\n11\n10\n3\n11\n10\n3\n4\nTrue\n3\n2\n10\n11\nFalse\n11\n10\n2\n3\n11\n10\n2\n3\nz\nc\na\nb\nTrue\na\nTrue\nTrue\ndeque mutated during iteration\npop from an empty deque\nmaxlen must be non-negative\nPython int too large to convert to C ssize_t\nsource\nlimit\n2\n3\nlimit\nsource\n2\n3\n",
+        "stderr": ""
+      },
+      "O3-reachable-1": {
+        "outcome": "matched",
+        "exit": 0,
+        "stdout": "0\nTrue\nFalse\n1\nTrue\n11\nFalse\n11\n11\n2\nTrue\n10\n11\nFalse\n11\n10\n11\n10\n3\nTrue\n3\n10\n11\nFalse\n11\n10\n3\n11\n10\n3\n4\nTrue\n3\n2\n10\n11\nFalse\n11\n10\n2\n3\n11\n10\n2\n3\nz\nc\na\nb\nTrue\na\nTrue\nTrue\ndeque mutated during iteration\npop from an empty deque\nmaxlen must be non-negative\nPython int too large to convert to C ssize_t\nsource\nlimit\n2\n3\nlimit\nsource\n2\n3\n",
+        "stderr": ""
+      }
+    }
+  }
+}

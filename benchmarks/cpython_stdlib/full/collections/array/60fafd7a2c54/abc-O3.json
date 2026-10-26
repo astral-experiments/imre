@@ -1,0 +1,176 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "60fafd7a2c544aa1f5203d81d3cdec9f4c3ca9ea",
+  "opt_level": 3,
+  "reference_denominator": 659,
+  "routines": {
+    "test.test_collections.TestCollectionABCs.test_Buffer": {
+      "source": "Lib/test/test_collections.py:1959",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.Buffer"
+    },
+    "test.test_collections.TestCollectionABCs.test_ByteString": {
+      "source": "Lib/test/test_collections.py:1937",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:2:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.ByteString"
+    },
+    "test.test_collections.TestCollectionABCs.test_Mapping": {
+      "source": "Lib/test/test_collections.py:1842",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.Mapping"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableMapping": {
+      "source": "Lib/test/test_collections.py:1857",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1859:13",
+      "reason": "Imre: unknown class method"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableMapping_subclass": {
+      "source": "Lib/test/test_collections.py:1864",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.UserDict"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableSequence": {
+      "source": "Lib/test/test_collections.py:1968",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1970:13",
+      "reason": "Imre: unknown class method"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableSequence_mixins": {
+      "source": "Lib/test/test_collections.py:1980",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1983:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_MutableSet": {
+      "source": "Lib/test/test_collections.py:1502",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.MutableSet"
+    },
+    "test.test_collections.TestCollectionABCs.test_Sequence": {
+      "source": "Lib/test/test_collections.py:1891",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1893:13",
+      "reason": "Imre: unknown class method"
+    },
+    "test.test_collections.TestCollectionABCs.test_Sequence_mixins": {
+      "source": "Lib/test/test_collections.py:1902",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1903:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_Set": {
+      "source": "Lib/test/test_collections.py:1420",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1422:13",
+      "reason": "Imre: unknown class method"
+    },
+    "test.test_collections.TestCollectionABCs.test_Set_from_iterable": {
+      "source": "Lib/test/test_collections.py:1622",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.MutableSet"
+    },
+    "test.test_collections.TestCollectionABCs.test_Set_hash_matches_frozenset": {
+      "source": "Lib/test/test_collections.py:1830",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1832:13",
+      "reason": "Imre: an empty dictionary requires a concrete dict[K, V] context"
+    },
+    "test.test_collections.TestCollectionABCs.test_Set_interoperability_with_real_sets": {
+      "source": "Lib/test/test_collections.py:1678",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1680:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_arithmetic_Set": {
+      "source": "Lib/test/test_collections.py:1487",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1488:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_equality_Set": {
+      "source": "Lib/test/test_collections.py:1465",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1466:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_hash_Set": {
+      "source": "Lib/test/test_collections.py:1434",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1435:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_illegal_patma_flags": {
+      "source": "Lib/test/test_collections.py:2030",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.Collection"
+    },
+    "test.test_collections.TestCollectionABCs.test_isdisjoint_Set": {
+      "source": "Lib/test/test_collections.py:1449",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1450:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_issue16373": {
+      "source": "Lib/test/test_collections.py:1562",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1565:9",
+      "reason": "Imre: unsupported statement in the Imre subset"
+    },
+    "test.test_collections.TestCollectionABCs.test_issue26915": {
+      "source": "Lib/test/test_collections.py:1591",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: cannot resolve first-party module \"test\" under <work>; external and namespace-package imports are unsupported"
+    },
+    "test.test_collections.TestCollectionABCs.test_issue8750": {
+      "source": "Lib/test/test_collections.py:1547",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1548:17",
+      "reason": "Imre: unknown function or unsupported builtin arguments"
+    },
+    "test.test_collections.TestCollectionABCs.test_issue_4920": {
+      "source": "Lib/test/test_collections.py:1516",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "fixture:1:1",
+      "reason": "Imre: unsupported sealed standard-library export collections.abc.MutableSet"
+    },
+    "test.test_collections.TestCollectionABCs.test_issue_5647": {
+      "source": "Lib/test/test_collections.py:1510",
+      "variant": "test.test_collections.TestCollectionABCs",
+      "result": "compile-blocked",
+      "location": "upstream:1512:13",
+      "reason": "Imre: unknown function or unsupported builtin arguments"
+    }
+  }
+}

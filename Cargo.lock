@@ -647,6 +647,7 @@ name = "imre-compiler"
 version = "0.1.2"
 dependencies = [
  "blake3",
+ "imre-regex",
  "libc",
  "notify",
  "regex",
@@ -671,10 +672,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "imre-regex"
+version = "0.1.2"
+dependencies = [
+ "regex",
+ "regex-syntax",
+]
+
+[[package]]
 name = "imre-runtime"
 version = "0.1.2"
 dependencies = [
+ "allocator-api2",
  "base64",
+ "cc",
  "compact_str",
  "corosensei",
  "flate2",
@@ -682,6 +693,7 @@ dependencies = [
  "glidesort",
  "hashbrown 0.17.1",
  "icu_properties",
+ "imre-regex",
  "itoa",
  "libc",
  "linux-raw-sys",
@@ -699,7 +711,9 @@ dependencies = [
  "sha2",
  "smallvec",
  "toml",
+ "toml_datetime",
  "toml_parser",
+ "triomphe",
  "unicode-case-mapping",
  "unicode_names2",
 ]

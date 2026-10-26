@@ -1,0 +1,10 @@
+{
+  "compiler_revision": "1aede5ac54d6946ee0c2b264380d14c2d4ba179a",
+  "tree": "df6a8851853fbb75399fbfc961ce166af12433a1",
+  "parents": [
+    "15c22a8c2b420d237ff44a7d86e76d651d416628",
+    "27525b613276d3e3862effd4be25e4517d3feaa3"
+  ],
+  "imre_sha256": "3a16a1e1c8b31522f08b95ca458dd5fa8cfb527d71d48620ecaacd8fc9924934",
+  "runtime_sha256": "7a02732624b705da0940ff73893f473ad9e494c8cbcdc76f9a35fbd71dc0d1fe"
+}

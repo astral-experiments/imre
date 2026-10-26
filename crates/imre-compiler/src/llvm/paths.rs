@@ -11,12 +11,67 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::CheckStatPath => {
+                self.checked_line(format!(
+                    "call void @imre_path_check_stat(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            PathOperation::Stat { lstat } => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
+                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_path_stat(ptr {}, i32 {follow}, i32 {}, ptr @{layout})",
+                    args[0].value.operand,
+                    u32::from(lstat)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::StatTime(index) => {
+                let call = format!(
+                    "call double @imre_stat_time(ptr {}, i32 {index})",
+                    args[0].value.operand
+                );
+                let operand = if index == 3 {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            PathOperation::StatExtraInt(index) => {
+                let call = format!(
+                    "call i64 @imre_stat_extra_int(ptr {}, i32 {index})",
+                    args[0].value.operand
+                );
+                let operand = if (6..=8).contains(&index) {
+                    self.checked_instruction(call)
+                } else {
+                    self.instruction(call)
+                };
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::WithName
             | PathOperation::WithStem
             | PathOperation::WithSuffix
             | PathOperation::RelativeTo => {
                 let path = &args[0].value.operand;
-                let other = self.directory_pointer(&args[1].value);
+                let other = self.optional_object_pointer(&args[1].value);
                 let call = match operation {
                     PathOperation::WithName => {
                         format!("call ptr @imre_path_with_name(ptr {path}, ptr {other})")
@@ -149,6 +204,20 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            PathOperation::Link(kind) => {
+                let target = &args[1].value;
+                let tag = match target.ty {
+                    Type::Bytes => 1,
+                    Type::Union(_) => 2, // tagged str | bytes protocol result
+                    _ => 0,
+                };
+                let word = self.word(target);
+                self.checked_line(format!(
+                    "call void @imre_path_link(ptr {}, i64 {word}, i32 {tag}, i32 {})",
+                    args[0].value.operand, kind as u32,
+                ));
+                none()
+            }
             PathOperation::Mkdir => {
                 let parents = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 let exist_ok =
@@ -275,6 +344,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Suffixes => "imre_path_suffixes",
                     PathOperation::Parent => "imre_path_parent",
                     PathOperation::ReadBytes => "imre_path_read_bytes",
+                    PathOperation::Readlink => "imre_path_readlink",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",
                     PathOperation::ReadText => "imre_path_read_text_options",
                     PathOperation::WriteText => "imre_path_write_text_options",

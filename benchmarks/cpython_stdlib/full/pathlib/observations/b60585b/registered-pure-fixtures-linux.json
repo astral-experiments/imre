@@ -1,0 +1,2078 @@
+{
+  "schema": "imre.pathlib.registered-pure-fixtures/v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "source": "Lib/test/test_pathlib/test_pathlib.py",
+  "source_blob": "a1ea69a6b906e8e66f9518cf2999123f2406f373",
+  "setup_sha256": "5fedd98cf27c6791770cbda71065e322c608ad5089da0a297d6398a0ec8d76b0",
+  "package_denominator": 1369,
+  "package_native_body_host_fixture": 136,
+  "registered_cases": 180,
+  "reference_passes": 140,
+  "reference_skips": 40,
+  "candidate_count": 45,
+  "common_candidate_methods": [
+    "test_as_posix_common",
+    "test_div_nested",
+    "test_drive_common",
+    "test_empty_path",
+    "test_full_match_case_sensitive",
+    "test_join_nested",
+    "test_match_common",
+    "test_name_empty",
+    "test_root_common",
+    "test_stem_empty",
+    "test_str_common"
+  ],
+  "families": {
+    "PurePathTest": {
+      "registered": 60,
+      "candidates": 15,
+      "fixture_skips": {
+        "requires Windows-flavoured path class": 16
+      }
+    },
+    "PurePosixPathTest": {
+      "registered": 60,
+      "candidates": 15,
+      "fixture_skips": {
+        "requires Windows-flavoured path class": 16
+      }
+    },
+    "PureWindowsPathTest": {
+      "registered": 60,
+      "candidates": 15,
+      "fixture_skips": {
+        "requires POSIX-flavoured path class": 8
+      }
+    }
+  },
+  "fully_native_original_cases_observed": 0,
+  "records": [
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_bytes_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_posix_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_uri_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_uri_non_ascii",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_uri_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_as_uri_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_bytes",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_bytes_exc_message",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_concrete_class",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_concrete_parser",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_constructor_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_constructor_nested_foreign_flavour",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_different_parsers_unequal",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_different_parsers_unordered",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_div_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_drive_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_drive_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_empty_path",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_eq_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_eq_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_eq_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_equivalences",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_equivalences_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_fspath_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_full_match_case_sensitive",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_is_absolute_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_is_absolute_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_is_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_is_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_is_reserved_deprecated",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_join_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_match_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_match_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_match_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_match_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_ordering_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_ordering_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_parse_path_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_parse_path_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_parse_path_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_parse_windows_path",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_pickling_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_repr_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_repr_roundtrips",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_root_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_root_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_root_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_str_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "original fixture needs execution: ['setUp']"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_str_subclass_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_str_subclass_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_str_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_unpicking_3_13",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_with_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_with_name_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_with_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePathTest.test_with_stem_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_bytes_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_posix_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_uri_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_uri_non_ascii",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_uri_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_as_uri_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_bytes",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_bytes_exc_message",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_concrete_class",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_concrete_parser",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_constructor_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_constructor_nested_foreign_flavour",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_different_parsers_unequal",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_different_parsers_unordered",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_div_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_drive_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_drive_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_empty_path",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_eq_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_eq_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_eq_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_equivalences",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_equivalences_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_fspath_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_full_match_case_sensitive",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_absolute_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_absolute_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_is_reserved_deprecated",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_join_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_match_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_ordering_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_ordering_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_parse_path_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_parse_path_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_parse_path_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_parse_windows_path",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_pickling_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_repr_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_repr_roundtrips",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_root_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_root_posix",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_root_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_str_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_str_subclass_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_str_subclass_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_str_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_unpicking_3_13",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_with_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_with_name_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_with_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "posixpath",
+        "sep": "/",
+        "altsep": null
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PurePosixPathTest.test_with_stem_windows",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires Windows-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires Windows-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_bytes_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_posix_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_uri_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_uri_non_ascii",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_uri_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_as_uri_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_bytes",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_bytes_exc_message",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_concrete_class",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_concrete_parser",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_constructor_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_constructor_nested_foreign_flavour",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_different_parsers_unequal",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_different_parsers_unordered",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_div_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_drive_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_drive_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_empty_path",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_eq_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_eq_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_eq_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_equivalences",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_equivalences_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_fspath_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_full_match_case_sensitive",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_is_absolute_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_is_absolute_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_is_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_is_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_is_reserved_deprecated",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_join_nested",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_match_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_ordering_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_ordering_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_parse_path_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_parse_path_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_parse_path_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_parse_windows_path",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_pickling_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_relative_to_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_relative_to_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_repr_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_repr_roundtrips",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_root_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_root_posix",
+      "occurrence": 1,
+      "cpython_case": {
+        "skipped": "requires POSIX-flavoured path class"
+      },
+      "cpython_fixture": {
+        "skip": "requires POSIX-flavoured path class"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_root_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_str_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_str_subclass_common",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_str_subclass_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_str_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": true,
+      "shared_runner": "requires a direct, named unittest.TestCase"
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_unpicking_3_13",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_with_name_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_with_name_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_with_stem_empty",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    },
+    {
+      "id": "test.test_pathlib.test_pathlib.PureWindowsPathTest.test_with_stem_windows",
+      "occurrence": 1,
+      "cpython_case": "pass",
+      "cpython_fixture": {
+        "parser": "ntpath",
+        "sep": "\\",
+        "altsep": "/"
+      },
+      "native_body_candidate": false
+    }
+  ]
+}

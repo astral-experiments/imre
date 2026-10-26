@@ -1,0 +1,99 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "textwrap_git_blob": "41366fbf443a4fc46768a6745d0b9e64c1d3b056",
+  "whitespace_line": 15,
+  "class_line": 17,
+  "initializer_line": 66,
+  "initializer_sha256": "dc94d7ddecfc6a8e2445a451501f01adaf87f8fbc3075a48eacb0383cd891bb3",
+  "private_reference_tip": "27525b613276d3e3862effd4be25e4517d3feaa3",
+  "tested_ord_commit": "501d59aa3c903be651379ecaf60b7e7753ec379c",
+  "combined_tree": "fa060570286b1642c9f471ff7dd4d6c7c6d7f42a",
+  "probes": {
+    "expression": {
+      "program_sha256": "b9a75a5333ca25e9bcb483dddd907048110d74a29a2397c14df40c71f1da467e",
+      "reference": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]",
+      "modes": {
+        "O0-reachable-0": {
+          "compile_exit": 0,
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]\n",
+          "stderr": ""
+        },
+        "O0-reachable-1": {
+          "compile_exit": 0,
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]\n",
+          "stderr": ""
+        },
+        "O3-reachable-0": {
+          "compile_exit": 0,
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]\n",
+          "stderr": ""
+        },
+        "O3-reachable-1": {
+          "compile_exit": 0,
+          "outcome": "matched",
+          "exit": 0,
+          "stdout": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]\n",
+          "stderr": ""
+        }
+      }
+    },
+    "class-initializer": {
+      "program_sha256": "196ab8928eb7dcf2c134ecb4d17fcd489ba3a2dd5fddfb3bd920cfb68d2af9cf",
+      "reference": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]",
+      "modes": {
+        "O0-reachable-0": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:4:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O0-reachable-1": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/entry.py:4:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O3-reachable-0": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:4:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O3-reachable-1": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/entry.py:4:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        }
+      }
+    },
+    "whole-module": {
+      "program_sha256": "003f43e98f4d1d532493a39411542f2a6e4fa1ab3fbda5680171b490ba44009e",
+      "reference": "[(9, 32), (10, 32), (11, 32), (12, 32), (13, 32), (32, 32)]",
+      "modes": {
+        "O0-reachable-0": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/stock_textwrap.py:66:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O0-reachable-1": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O0)\n<work>/stock_textwrap.py:66:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O3-reachable-0": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/stock_textwrap.py:66:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        },
+        "O3-reachable-1": {
+          "compile_exit": 1,
+          "outcome": "compile-blocked",
+          "diagnostic": " Compiling <work>/entry.py (-O3)\n<work>/stock_textwrap.py:66:5: Imre: class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass\n"
+        }
+      }
+    }
+  }
+}

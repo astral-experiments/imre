@@ -1,18 +1,16 @@
 //! Calendar scheduling and retained file streams for TimedRotatingFileHandler.
+use crate::StrOwner;
 use std::fs;
 use std::mem::MaybeUninit;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 use super::super::exceptions::{Error, Kind, Result, finish};
-use super::super::{
-    Int, Object, Storage, StorageCell, Str, Words, acquire_rc, fail, files, object, posixpath,
-};
+use super::super::{Int, Object, Storage, StorageCell, Str, Words, fail, files, object, posixpath};
 
 const DAY: i64 = 86_400;
 
@@ -101,14 +99,14 @@ impl Period {
     }
 }
 
-fn overflow() -> Error {
+pub(super) fn overflow() -> Error {
     Error::new(
         Kind::OverflowError,
         "timestamp out of range for platform time_t",
     )
 }
 
-fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
+pub(super) fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
     let mut result = MaybeUninit::uninit();
     // SAFETY: the timestamp and properly sized result live through the reentrant libc call.
     let ptr = unsafe {
@@ -125,7 +123,7 @@ fn civil(seconds: i64, utc: bool) -> Result<libc::tm> {
     Ok(unsafe { result.assume_init() })
 }
 
-fn float_seconds(value: f64) -> Result<i64> {
+pub(super) fn float_seconds(value: f64) -> Result<i64> {
     if value.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -136,23 +134,23 @@ fn float_seconds(value: f64) -> Result<i64> {
 }
 
 pub(in crate::objects) struct Handler {
-    filename: Rc<Str>,
-    stream: Option<Rc<Object>>,
-    when: Rc<Str>,
+    filename: StrOwner,
+    stream: Option<crate::ObjectOwner>,
+    when: StrOwner,
     period: Period,
     interval: Int,
     backups: Int,
     rollover_at: Int,
     utc: bool,
     delay: bool,
-    clock: Option<Rc<Object>>,
+    clock: Option<crate::ObjectOwner>,
 }
 
 impl Handler {
-    /// The return value adjusts the ordinary interval to the next civil boundary.
+    /// Keep the daily and weekday delays separate so each float addition rounds as in Python.
     /// An omitted time means the *end* of the chosen day. Explicit 00:00 means
     /// its start, which can select a different week.
-    fn calendar_offset(&self, now: i64) -> Result<(i64, bool)> {
+    fn calendar_delays(&self, now: i64) -> Result<(i64, i64, bool)> {
         let t = civil(now, self.utc)?;
         let at = self.clock.as_ref().map_or(DAY, |clock| {
             // SAFETY: the handler retains this exact immutable time.
@@ -169,10 +167,11 @@ impl Handler {
             until += DAY;
             day = (day + 1) % 7;
         }
-        if let Period::Week(target) = self.period {
-            until += DAY * i64::from((target - day).rem_euclid(7));
-        }
-        Ok((until - self.period.seconds(), t.tm_isdst > 0))
+        let weekday_delay = match self.period {
+            Period::Week(target) => DAY * i64::from((target - day).rem_euclid(7)),
+            _ => 0,
+        };
+        Ok((until, weekday_delay, t.tm_isdst > 0))
     }
 
     fn dst_adjust(&self, dst_now: bool, target: i64) -> Result<i64> {
@@ -191,8 +190,9 @@ impl Handler {
     fn compute_int(&self, now: &Int) -> Result<Int> {
         let mut result = now.big().as_ref() + self.interval.big().as_ref();
         if matches!(self.period, Period::Midnight | Period::Week(_)) {
-            let (shift, dst) = self.calendar_offset(now.big().to_i64().ok_or_else(overflow)?)?;
-            result += shift;
+            let (until, weekday_delay, dst) =
+                self.calendar_delays(now.big().to_i64().ok_or_else(overflow)?)?;
+            result += until + weekday_delay - self.period.seconds();
             if !self.utc {
                 result += self.dst_adjust(dst, result.to_i64().ok_or_else(overflow)?)?;
             }
@@ -209,9 +209,10 @@ impl Handler {
             .ok_or_else(|| Error::new(Kind::OverflowError, "int too large to convert to float"))?;
         let mut result = now + interval;
         if matches!(self.period, Period::Midnight | Period::Week(_)) {
-            let (shift, dst) = self.calendar_offset(float_seconds(now)?)?;
-            result = (now + (shift + self.period.seconds()) as f64)
-                + (interval - self.period.seconds() as f64);
+            let (until, weekday_delay, dst) = self.calendar_delays(float_seconds(now)?)?;
+            let extra = Int::new(self.interval.big().as_ref() - self.period.seconds());
+            result =
+                (now + until as f64) + weekday_delay as f64 + crate::floats::int_to_float(&extra)?;
             if !self.utc {
                 result += self.dst_adjust(dst, float_seconds(result)?)? as f64;
             }
@@ -278,8 +279,9 @@ impl Handler {
         }
         if !self.delay {
             // SAFETY: open transfers a fresh text stream owner on success.
-            self.stream =
-                Some(unsafe { Rc::from_raw(files::open(&self.filename, 2, false, false)?) });
+            self.stream = Some(unsafe {
+                crate::ObjectOwner::from_raw(files::open(&self.filename, 2, false, false)?)
+            });
         }
         self.rollover_at = self.compute_int(&now)?;
         Ok(())
@@ -315,7 +317,7 @@ impl Handler {
         Ok(files)
     }
 
-    fn files_to_delete(&self) -> Result<Rc<Object>> {
+    fn files_to_delete(&self) -> Result<crate::ObjectOwner> {
         let files = self.expired_paths()?;
         let mut names = Words::new(3);
         names
@@ -324,7 +326,9 @@ impl Handler {
             .map_err(|_| Error::allocation())?;
         for path in files {
             let name = super::super::paths::path_utf8(path.into_os_string())?;
-            names.values.push(Rc::into_raw(Rc::new(name)) as usize);
+            names
+                .values
+                .push(StrOwner::into_raw(StrOwner::new(name)) as usize);
         }
         Ok(names.into_object())
     }
@@ -399,9 +403,9 @@ pub unsafe extern "C" fn imre_log_clock_new(
             }
             parts[i] = i64::from(n);
         }
-        Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-            Storage::ClockTime(Clock(parts)),
-        )))))
+        Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+            Object(StorageCell::new(Storage::ClockTime(Clock(parts)))),
+        )))
     })();
     finish(result, std::ptr::null())
 }
@@ -461,11 +465,11 @@ pub unsafe extern "C" fn imre_log_file_new(
     // SAFETY: all borrowed arguments remain rooted while the handler acquires them.
     let (filename, when, interval, backups, clock) = unsafe {
         (
-            Rc::from_raw(abs.cast::<Str>()),
+            StrOwner::from_raw(abs.cast::<Str>()),
             (&*when).to_uppercase(),
             Int::borrow(interval),
             (*Int::borrow(count)).clone(),
-            (clock != 0).then(|| acquire_rc::<Object>(clock)),
+            (clock != 0).then(|| crate::ObjectOwner::acquire_word(clock)),
         )
     };
     let result = (|| {
@@ -473,14 +477,14 @@ pub unsafe extern "C" fn imre_log_file_new(
             None
         } else {
             // SAFETY: opening an exact text stream transfers its owner on success.
-            Some(unsafe { Rc::from_raw(files::open(&filename, 2, false, false)?) })
+            Some(unsafe { crate::ObjectOwner::from_raw(files::open(&filename, 2, false, false)?) })
         };
         let period = Period::parse(&when)?;
         let interval = Int::new(interval.big().as_ref() * period.seconds());
         let mut handler = Handler {
             filename,
             stream,
-            when: Rc::new(Str::from(when)),
+            when: StrOwner::new(Str::from(when)),
             period,
             interval,
             backups,
@@ -502,9 +506,11 @@ pub unsafe extern "C" fn imre_log_file_new(
                 )
             });
         handler.rollover_at = handler.compute_int(&Int::new(BigInt::from(now)))?;
-        Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-            Storage::TimedFileHandler(Box::new(handler)),
-        )))))
+        Ok(crate::ObjectOwner::into_raw(crate::ObjectOwner::new(
+            Object(StorageCell::new(Storage::TimedFileHandler(Box::new(
+                handler,
+            )))),
+        )))
     })();
     finish(result, std::ptr::null())
 }
@@ -525,15 +531,15 @@ macro_rules! read {
         }
     };
 }
-read!(imre_log_file_when, *const Str, |h| Rc::into_raw(
+read!(imre_log_file_when, *const Str, |h| StrOwner::into_raw(
     h.when.clone()
 ));
-read!(imre_log_file_filename, *const Str, |h| Rc::into_raw(
+read!(imre_log_file_filename, *const Str, |h| StrOwner::into_raw(
     h.filename.clone()
 ));
-read!(imre_log_file_suffix, *const Str, |h| Rc::into_raw(Rc::new(
-    Str::from(h.period.suffix())
-)));
+read!(imre_log_file_suffix, *const Str, |h| StrOwner::into_raw(
+    StrOwner::new(Str::from(h.period.suffix()))
+));
 read!(imre_log_file_count, usize, |h| h.backups.clone().into_raw());
 read!(imre_log_file_interval, usize, |h| h
     .interval
@@ -546,15 +552,15 @@ read!(imre_log_file_rollover_at, usize, |h| h
 read!(imre_log_file_stream, usize, |h| h
     .stream
     .clone()
-    .map_or(0, |s| Rc::into_raw(s) as usize));
+    .map_or(0, |s| crate::ObjectOwner::into_raw(s) as usize));
 read!(imre_log_file_at_time, usize, |h| h
     .clock
     .clone()
-    .map_or(0, |c| Rc::into_raw(c) as usize));
+    .map_or(0, |c| crate::ObjectOwner::into_raw(c) as usize));
 read!(imre_log_file_utc, bool, |h| h.utc);
 read!(imre_log_file_delay, bool, |h| h.delay);
 read!(imre_log_file_deletions, *const Object, |h| finish(
-    h.files_to_delete().map(Rc::into_raw),
+    h.files_to_delete().map(crate::ObjectOwner::into_raw),
     std::ptr::null()
 ));
 
@@ -592,7 +598,7 @@ pub unsafe extern "C" fn imre_log_file_close(handler: *const Object) {
     // SAFETY: the removed stream owns the descriptor while close updates any external aliases.
     unsafe {
         if let Some(stream) = object(handler).0.with_mut(|s| s.timed_mut().stream.take()) {
-            files::imre_text_close(Rc::as_ptr(&stream));
+            files::imre_text_close(crate::ObjectOwner::as_ptr(&stream));
         }
     }
 }
@@ -605,7 +611,7 @@ pub unsafe extern "C" fn imre_log_file_flush(handler: *const Object) {
     unsafe {
         object(handler).0.with(|s| {
             if let Some(stream) = &s.timed().stream {
-                files::imre_text_flush(Rc::as_ptr(stream));
+                files::imre_text_flush(crate::ObjectOwner::as_ptr(stream));
             }
         });
     }
@@ -631,4 +637,35 @@ pub unsafe extern "C" fn imre_log_file_roll(handler: *const Object) {
         unsafe { object(handler).0.with_mut(|s| s.timed_mut().roll()) },
         (),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_rollover_preserves_float_rounding() {
+        let mut handler = Handler {
+            filename: crate::StrOwner::new(Str::default()),
+            stream: None,
+            when: crate::StrOwner::new(Str::default()),
+            period: Period::Week(0),
+            interval: Int::new(BigInt::from(7 * DAY)),
+            backups: Int::small(0).unwrap(),
+            rollover_at: Int::small(0).unwrap(),
+            utc: true,
+            delay: true,
+            clock: None,
+        };
+        assert_eq!(
+            handler.compute_float(3.001332515850663e-11).ok(),
+            Some(432000.0)
+        );
+        handler.period = Period::Midnight;
+        handler.interval = Int::new(BigInt::from(17_592_186_044_387_i64) * DAY);
+        assert_eq!(
+            handler.compute_float(-1.5).ok(),
+            Some(1.5199648742349504e18)
+        );
+    }
 }

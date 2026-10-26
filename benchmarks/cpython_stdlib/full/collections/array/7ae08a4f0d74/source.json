@@ -1,0 +1,11 @@
+{
+  "compiler_revision": "7ae08a4f0d74f63214464e55397895408e1ce63e",
+  "tree": "ded7985b03bd6aacc947c6d4795ebc9f6b701dd7",
+  "base": "19d5f95354128d2be22b807a571d29f0a9380999",
+  "head": "7ae08a4f0d74f63214464e55397895408e1ce63e",
+  "parents": [
+    "fe71f6472bc3a54c1eee821f134257a1c95d4435"
+  ],
+  "imre_sha256": "a87280cfa5bed9c654e73578a5aa7916ca02711e71e4765cb4f35b1c5e3d73a2",
+  "runtime_sha256": "b64059cd63af61814d4af8b4f77b9b00d4a7466218d7ea9f5f3f9d8aec7277c6"
+}

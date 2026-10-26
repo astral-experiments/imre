@@ -2,7 +2,18 @@
 
 use super::*;
 
-pub(super) type CaptureLayout = std::rc::Rc<[crate::fixed_regex::Capture]>;
+#[derive(Clone)]
+pub(super) struct CaptureLayout {
+    groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
+    nonempty_match: bool,
+}
+
+impl std::ops::Deref for CaptureLayout {
+    type Target = [crate::fixed_regex::Capture];
+    fn deref(&self) -> &Self::Target {
+        &self.groups
+    }
+}
 
 impl Checker<'_> {
     /// A successful search with an unchanged local has the fixed pattern's
@@ -88,10 +99,11 @@ impl Checker<'_> {
         };
         let dictionary = matches!(value.kind, ExprKind::Builtin(Builtin::RegexGroupDict, _));
         if !dictionary
+            && value.ty != Type::RegexPattern
             && !matches!(
                 value.kind,
                 ExprKind::Builtin(
-                    Builtin::RegexCompile(_) | Builtin::RegexSearch | Builtin::RegexMatchStart,
+                    Builtin::RegexCompile { .. } | Builtin::RegexSearch | Builtin::RegexMatchStart,
                     _
                 )
             )
@@ -238,7 +250,7 @@ impl Checker<'_> {
         }
     }
 
-    fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
+    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
         let ast::Expr::StringLiteral(literal) = pattern else {
             return Err(error(
                 self.source,
@@ -253,10 +265,19 @@ impl Checker<'_> {
             .regex_literals
             .borrow_mut()
             .entry(pattern.source.clone())
-            .or_insert_with(|| pattern.groups.into());
+            .or_insert_with(|| CaptureLayout {
+                groups: pattern.groups.into(),
+                nonempty_match: !pattern.may_match_empty,
+            });
         Ok(Expr {
             ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(Builtin::RegexCompile(pattern.source), Vec::new()),
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: pattern.source,
+                    spelling: literal.value.to_str().to_owned(),
+                },
+                Vec::new(),
+            ),
         })
     }
 
@@ -299,7 +320,13 @@ impl Checker<'_> {
             .map_err(|msg| error(self.source, replacement, msg))?;
         let pattern = Expr {
             ty: Type::RegexPattern,
-            kind: ExprKind::Builtin(Builtin::RegexCompile(fixed.source), vec![]),
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    source: fixed.source,
+                    spelling: pattern.value.to_str().to_owned(),
+                },
+                vec![],
+            ),
         };
         Ok(Expr {
             ty: Type::Str,
@@ -354,12 +381,31 @@ impl Checker<'_> {
         let args = call.arguments.args.as_ref();
         if receiver.ty == Type::RegexPattern {
             return match (method, args) {
+                ("finditer", [text]) => {
+                    if !self
+                        .capture_layout(&receiver)
+                        .is_some_and(|layout| layout.nonempty_match)
+                    {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "finditer requires a known fixed pattern that cannot match an empty string",
+                        ));
+                    }
+                    Ok(Expr {
+                        ty: self.types.cursor(Type::RegexMatch),
+                        kind: ExprKind::Builtin(
+                            Builtin::RegexFindIter,
+                            vec![receiver, self.expr_expected(text, Type::Str)?],
+                        ),
+                    })
+                }
                 ("search", [text]) => self.pattern_search(receiver, text, Builtin::RegexSearch),
                 ("match", [text]) => self.pattern_search(receiver, text, Builtin::RegexMatchStart),
                 _ => Err(error(
                     self.source,
                     call,
-                    "a regex pattern supports search(text) and match(text)",
+                    "a regex pattern supports search(text), match(text), and finditer(text)",
                 )),
             };
         }

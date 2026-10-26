@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Python's runtime type name for exact values that cannot implement a call.
+pub(super) fn noncallable_type(ty: Type) -> Option<&'static str> {
+    Some(match ty {
+        Type::None => "NoneType",
+        Type::Bool => "bool",
+        Type::Int => "int",
+        Type::Float => "float",
+        Type::Str | Type::StrLiteral(_) => "str",
+        Type::Bytes => "bytes",
+        Type::ListInt | Type::List(_) => "list",
+        Type::Tuple(_) => "tuple",
+        Type::Dict(_) => "dict",
+        Type::Set(_) => "set",
+        _ => return None,
+    })
+}
+
 pub(super) fn wrapper_attributes(fields: ir::WrapperAttributes, types: &Types) -> Expr {
     Expr {
         ty: types.tuple(vec![Type::Str; fields.names().len()]),
@@ -20,6 +37,115 @@ fn type_error(message: &str) -> Statement {
 }
 
 impl Checker<'_> {
+    /// Check each argument in source order and hold it across the later calls.
+    fn wrapper_arguments<const N: usize>(
+        &mut self,
+        call: &ast::ExprCall,
+        names: [&str; N],
+    ) -> Result<(calls::ArgumentScope, [Expr; N]), String> {
+        let mut supplied = call.arguments.args.iter().enumerate().collect::<Vec<_>>();
+        for keyword in &call.arguments.keywords {
+            let index = names
+                .iter()
+                .position(|name| keyword.arg.as_deref() == Some(*name))
+                .ok_or_else(|| error(self.source, keyword, "unsupported wrapper keyword"))?;
+            supplied.push((index, &keyword.value));
+        }
+        let mut fields: [Option<Expr>; N] = std::array::from_fn(|_| None);
+        let mut scope = calls::ArgumentScope::default();
+        for (index, node) in supplied {
+            let slot = fields
+                .get_mut(index)
+                .filter(|slot| slot.is_none())
+                .ok_or_else(|| error(self.source, node, "invalid wrapper argument binding"))?;
+            let value = self.expr(node)?;
+            if index >= N - 2 && value.ty != self.types.tuple(Vec::new()) {
+                return Err(error(
+                    self.source,
+                    node,
+                    "native wrapper updates require empty assigned and updated tuples",
+                ));
+            }
+            *slot = Some(scope.hold(self, value));
+        }
+        if fields.iter().any(Option::is_none) {
+            return Err(error(
+                self.source,
+                call,
+                "native wrapper updates require explicit assigned and updated tuples",
+            ));
+        }
+        Ok((scope, fields.map(Option::unwrap)))
+    }
+
+    pub(super) fn attach_wrapped(
+        &self,
+        wrapper: Expr,
+        wrapped: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        if !matches!(wrapper.ty, Type::Callable(_)) || wrapper.ty != wrapped.ty {
+            return Err(error(
+                self.source,
+                node,
+                "native wrapper links require two functions with the same callable signature",
+            ));
+        }
+        Ok(Expr {
+            ty: wrapper.ty,
+            kind: ExprKind::Builtin(Builtin::FunctionWrappedSet, vec![wrapper, wrapped]),
+        })
+    }
+
+    pub(super) fn update_wrapper(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let (scope, [wrapper, wrapped, _, _]) =
+            self.wrapper_arguments(call, ["wrapper", "wrapped", "assigned", "updated"])?;
+        Ok(scope.finish(self.attach_wrapped(wrapper, wrapped, call)?))
+    }
+
+    pub(super) fn wraps_config(
+        &mut self,
+        config: &ast::ExprCall,
+    ) -> Result<(calls::ArgumentScope, Expr), String> {
+        let (scope, [wrapped, _, _]) =
+            self.wrapper_arguments(config, ["wrapped", "assigned", "updated"])?;
+        Ok((scope, wrapped))
+    }
+
+    /// An immediate decorator application can consume the partial without exposing it.
+    pub(super) fn apply_wraps(
+        &mut self,
+        config: &ast::ExprCall,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (scope, wrapped) = self.wraps_config(config)?;
+        let node = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([node], []) => node,
+            ([], [key]) if key.arg.as_deref() == Some("wrapper") => &key.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "an immediate wraps decorator needs a single wrapper",
+                ));
+            }
+        };
+        let wrapper = self.expr(node)?;
+        let result = self.attach_wrapped(wrapper, wrapped, call)?;
+        if let [keyword] = call.arguments.keywords.as_ref() {
+            // The stub calls this parameter `f`; the actual partial calls
+            // update_wrapper, whose first parameter is named `wrapper`.
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+            self.graph
+                .checked_keywords(self.module, std::iter::once(keyword.range()));
+        }
+        Ok(scope.finish(result))
+    }
+
     /// Evaluate the callable, iterable and optional seed before acquiring the iterator.
     /// Without a seed, the first item becomes the accumulator without a callback.
     pub(super) fn reduce_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -54,11 +180,7 @@ impl Checker<'_> {
         let checked = if definition.is_some() || matches!(function, ast::Expr::Lambda(_)) {
             None
         } else if let Some(binding) = self.local_function_binding(function) {
-            Some(binding.target(self.source, function)?.callback(
-                self.types,
-                self.source,
-                function,
-            )?)
+            Some(self.local_callback(binding, function)?)
         } else {
             Some(self.expr(function)?)
         };
@@ -142,25 +264,10 @@ impl Checker<'_> {
                     Statement::Assign(result, checker.coerce(value, accumulator, function)?)
                 } else {
                     // Exact noncallable values are valid until a step actually calls one.
-                    let name = match checker.locals[callback_slot] {
-                        Type::None => "NoneType",
-                        Type::Bool => "bool",
-                        Type::Int => "int",
-                        Type::Float => "float",
-                        Type::Str | Type::StrLiteral(_) => "str",
-                        Type::Bytes => "bytes",
-                        Type::ListInt | Type::List(_) => "list",
-                        Type::Tuple(_) => "tuple",
-                        Type::Dict(_) => "dict",
-                        Type::Set(_) => "set",
-                        _ => {
-                            return Err(error(
-                                checker.source,
-                                function,
-                                "unsupported reduce callback type",
-                            ));
-                        }
-                    };
+                    let name =
+                        noncallable_type(checker.locals[callback_slot]).ok_or_else(|| {
+                            error(checker.source, function, "unsupported reduce callback type")
+                        })?;
                     type_error(&format!("'{name}' object is not callable"))
                 };
                 Ok(vec![if let Some(slot) = missing {

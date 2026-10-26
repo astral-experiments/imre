@@ -12,16 +12,15 @@ class Patterns:
         self.patterns = patterns
 
 
-SOURCE = '''import shutil
-import sys
-
-def copy_file(src: str, dst: str) -> None:
+COPY_CALLBACK = '''def copy_file(src: str, dst: str) -> None:
     with open(sys.argv[3], "w") as outgoing:
         outgoing.write(repr((src, dst)) + "\\n")
     with open(sys.argv[4]) as incoming:
         if incoming.readline() != "ok\\n":
             raise RuntimeError("original callback raised")
+'''
 
+SOURCE = "import shutil\nimport sys\n\n" + COPY_CALLBACK + '''
 def ignore_names(src: str, names: list[str]) -> list[str]:
     with open(sys.argv[3], "w") as outgoing:
         outgoing.write(repr((src, names)) + "\\n")
@@ -55,12 +54,13 @@ def patterns(binary, src, dst, arguments):
     return dst
 
 
-def call(binary, src, dst, callback, events, *, ignore=False):
+def call(binary, src, dst, callback, events, *, ignore=False, env=None, pass_fds=(), expected_dst=None):
     request, child_write = os.pipe()
     child_read, reply = os.pipe()
     try:
         proc = subprocess.Popen([binary, src, dst, f"/proc/self/fd/{child_write}",
-                                 f"/proc/self/fd/{child_read}", "ignore" if ignore else "copy"], pass_fds=(child_write, child_read),
+                                 f"/proc/self/fd/{child_read}", "ignore" if ignore else "copy"],
+                                pass_fds=(child_write, child_read, *pass_fds), env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except BaseException:
         os.close(request)
@@ -103,8 +103,9 @@ def call(binary, src, dst, callback, events, *, ignore=False):
         if raised is not None:
             assert stdout == "original callback raised\n", stdout
             raise raised
-        assert stdout == os.fsdecode(dst) + "\n", stdout
-        return dst
+        expected = dst if expected_dst is None else expected_dst
+        assert stdout == os.fsdecode(expected) + "\n", stdout
+        return expected
     finally:
         if proc.poll() is None:
             proc.kill()

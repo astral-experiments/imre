@@ -1,0 +1,11 @@
+{
+  "module": "test.test_errno",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 3,
+  "reference": {
+    "test.test_errno.ErrnoAttributeTests.test_for_improper_attributes": "pass",
+    "test.test_errno.ErrnoAttributeTests.test_using_errorcode": "pass",
+    "test.test_errno.ErrorcodeTests.test_attributes_in_errorcode": "pass"
+  }
+}

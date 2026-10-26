@@ -1,0 +1,10 @@
+{
+  "compiler_revision": "a99beb43679f493b14f2ba1be5ba62dedda0d3f2",
+  "tree": "fa060570286b1642c9f471ff7dd4d6c7c6d7f42a",
+  "base": "501d59aa3c903be651379ecaf60b7e7753ec379c",
+  "head": "49a44de7cd4c35793893c91beab37cd34c468221",
+  "imre_sha256": "ef2198f5ce27218dedaabdd2757ea55b83a809083e8b3ce5811eb203ff274bbe",
+  "runtime_sha256": "555b02c21851f2f2063128d4599a640da56dd63bf4909140a81be0937eda6f96",
+  "cpython": "3.14.5 (main, May 11 2026, 02:45:53) [GCC 13.3.0]",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115"
+}

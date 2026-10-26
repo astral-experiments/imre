@@ -15,12 +15,19 @@ HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files, verify_interpreter_tests
-from suite_native import Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, Toolchain, native_method, run_evidence, run_in_fixtures, testcase_fixture
 from suite_evidence import roles
 from occurrences import blocked_methods, reference_skips
 import argv_case
+import encoding_methods
+import executable_case
 import jit_case
 import locale_case
+import recursion_case
+import thread_case
+from filesystem_case import filesystem_method
+from metadata import metadata_observer
+import module_names_case
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -58,6 +65,22 @@ def method_hashes(source):
 def select(toolchain, work, source, module):
     executions = {}
     pinned_methods = method_hashes(source)
+    # A host process cannot supply frames to a native child. Compare the stacks
+    # of two complete programs with the same calls, separately from upstream IDs.
+    frames = directory(work, "frame-names")
+    owner = HERE / "frame_names_owner.py"
+    (frames / owner.name).write_bytes(owner.read_bytes())
+    binary = toolchain.build((HERE / "frame_names.py").read_bytes(), frames)
+    stock = subprocess.run([sys.executable, "-E", "-B", frames / "case.py"],
+                           capture_output=True, check=True, timeout=15)
+    actual = output(binary)
+    if actual != (stock.stdout, stock.stderr):
+        raise AssertionError(("native module frames", (stock.stdout, stock.stderr), actual))
+    frame_control = {"kind": "separate native program", "opt_level": toolchain.level,
+                     "source": "frame_names.py and frame_names_owner.py",
+                     "stdout_sha256": hashlib.sha256(actual[0]).hexdigest(),
+                     "stdout_lines": len(actual[0].splitlines()), "matches_cpython": True,
+                     "original_method_operations": 0}
     for cls, method, fixture, operation in [
         ("SysModuleTest", "test_43581", "import sys\n" + testcase_fixture(), "sys.__stdout__.encoding and sys.__stderr__.encoding"),
         ("ActiveExceptionTests", "test_sys_exception_no_exception", EXCEPTION_EQUAL, "sys.exception() outside a handler"),
@@ -66,17 +89,72 @@ def select(toolchain, work, source, module):
         executions[case_id] = native_method(toolchain, directory(work, method),
                                              source, cls, case_id, fixture, operation=("imre", operation))
 
+    thread = toolchain.build((HERE / "thread_info.py").read_bytes(), directory(work, "thread-info"))
+    thread_case.check_record(thread, toolchain.clang)
+    executions[SYS + "test_thread_info"] = thread_case.observer(
+        module, thread, pinned_methods["SysModuleTest", "test_thread_info"], toolchain.level)
+    impl = toolchain.build((HERE / "metadata_driver.py").read_bytes(), directory(work, "implementation"))
+    executions[SYS + "test_implementation"] = metadata_observer(module, impl, toolchain.level)
+    identity = subprocess.run([impl, "identity"], check=True, capture_output=True, text=True, timeout=15)
+    lines = identity.stdout.splitlines()
+    if identity.stderr or len(lines) != 4 or lines[:3] != ["True", "True", "True"]:
+        raise AssertionError(identity)
+    if not lines[3].startswith("namespace(name='imre', cache_tag=None, version=sys.version_info("):
+        raise AssertionError(lines[3])
+    # A cache tag assigned through either alias must also reach importlib and namespace repr.
+    command = ["cache_alias", "shared-cache-unit"]
+    native = subprocess.run([impl, *command], capture_output=True, check=True, timeout=15)
+    control = subprocess.run([sys.executable, "-I", HERE / "metadata_driver.py", *command],
+                             capture_output=True, check=True, timeout=15)
+    if (native.stdout, native.stderr) != (control.stdout, control.stderr):
+        raise AssertionError((native, control))
+    executions[module_names_case.CASE_ID] = module_names_case.execution(
+        toolchain, directory(work, "module-names-method"), source)
+    names_control = HERE / "module_names.py"
+    names_program = toolchain.build(names_control.read_bytes(), directory(work, "module-names"))
+    names_reference = subprocess.run([sys.executable, names_control], capture_output=True, check=True, timeout=15)
+    if output(names_program) != (names_reference.stdout, names_reference.stderr):
+        raise AssertionError("module names or frozen set operations differ from CPython")
+
+    # Both implementations check internal consistency using their own language version.
+    metadata = HERE / "version_info.py"
+    version_work = directory(work, "language-version")
+    owner = HERE / "version_info_owner.py"
+    (version_work / owner.name).write_bytes(owner.read_bytes())
+    program = toolchain.build(metadata.read_bytes(), version_work)
+    reference = subprocess.run([sys.executable, "-E", "-B", version_work / "case.py"],
+                               capture_output=True, check=True, timeout=15)
+    if (reference.stdout, reference.stderr) != (b"", b"") or output(program) != (b"", b""):
+        raise AssertionError("unexpected output from language version checks")
+
     # Process regressions use the real hooks and retained objects; none adds a test ID.
-    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py"):
+    for filename in ("active_exception.py", "display_values.py", "codec_lookup.py", "codec_callbacks.py", "codec_error_args.py", "executable_encoding.py"):
         exercise = HERE / filename
         ref = subprocess.run([sys.executable, exercise], capture_output=True, check=True, timeout=15)
         binary = toolchain.build(exercise.read_bytes(), directory(work, exercise.stem))
         if output(binary) != (ref.stdout, ref.stderr):
             raise AssertionError(f"{filename}: native output differs from CPython")
 
+    exercise = HERE / "intern_values.py"
+    ref = subprocess.run([sys.executable, "-B", exercise], capture_output=True, check=True, timeout=15)
+    binary = toolchain.build(exercise.read_bytes(), directory(work, "intern-values"))
+    if output(binary) != (ref.stdout, ref.stderr):
+        raise AssertionError("native string interning differs from CPython")
+
+    invalid = HERE / "intern-binder/intern-nested-invalid.py"
+    folder = directory(work, "intern-nested-invalid")
+    try:
+        toolchain.build(invalid.read_bytes(), folder)
+    except NativeCompileError as error:
+        expected = f'{folder}/case.py:6:23: Imre: parameter "value" is positional-only'
+        if str(error).splitlines()[-1] != expected:
+            raise AssertionError(("nested sys.intern diagnostic", str(error))) from error
+    else:
+        raise AssertionError("sys.intern accepted a bad call inside its argument")
+
     encoding = toolchain.build((HERE / "encoding_driver.py").read_bytes(), directory(work, "encoding"))
 
-    def encoding_case(case, original):
+    def default_encoding_case(case, original):
         calls = []
 
         def invoke(operation, *values):
@@ -91,49 +169,38 @@ def select(toolchain, work, source, module):
             return ast.literal_eval(run.stdout.decode())
 
         class NativeSys:
-            @property
-            def platform(self):
-                return invoke("platform")
-
             def getdefaultencoding(self, *args):
                 return invoke("default-argument" if args else "default", *args)
 
-            def getfilesystemencoding(self):
-                return invoke("filesystem")
-
-        def lookup(name):
-            # The upstream helper discards the CodecInfo. Only its name crosses the process boundary.
-            return SimpleNamespace(name=invoke("lookup", name))
-
-        with (patch.object(module, "sys", NativeSys()),
-              patch.object(module, "codecs", SimpleNamespace(lookup=lookup))):
+        with patch.object(module, "sys", NativeSys()):
             original()
-        is_default = case._testMethodName == "test_getdefaultencoding"
-        expected_calls = ["default-argument", "default"] if is_default else ["filesystem", "platform", "lookup"]
-        if calls != expected_calls:
+        if calls != ["default-argument", "default"]:
             raise AssertionError((case.id(), calls))
         return {"execution": "host-driven-native", "body": "CPython", "assertions": "CPython",
                 "fixture_execution": "CPython module/class/instance hooks", "calls": calls,
                 "observation": {"roles": roles(body="cpython", assertions="cpython", operation="imre", fixture="cpython"),
-                                "evidence": {"operation": ("sys.getdefaultencoding" if is_default else
-                                             "sys.getfilesystemencoding, sys.platform, codecs.lookup"),
-                                             "assertions": ("upstream TypeError and result type assertions" if is_default else
-                                                            "upstream check_fsencoding validates the encoding; Imre resolves its codec"),
+                                "evidence": {"operation": "sys.getdefaultencoding",
+                                             "assertions": "upstream TypeError and result type assertions",
                                              "method_sha256": pinned_methods[type(case).__name__, case._testMethodName],
                                              "fixture": "original SysModuleTest lifecycle and reap_children teardown",
                                              "native_calls": len(calls), "calls": calls, "opt_level": toolchain.level}}}
 
-    for method in ("test_getdefaultencoding", "test_getfilesystemencoding"):
-        executions[SYS + method] = encoding_case
+    default_id = SYS + "test_getdefaultencoding"
+    executions[default_id] = encoding_methods.select(toolchain, work, source, default_id, default_encoding_case)
+    fs_id = SYS + "test_getfilesystemencoding"
+    executions[fs_id] = filesystem_method(toolchain, directory(work, "filesystem"), source, fs_id)
 
     executions[argv_case.CASE_ID] = argv_case.observer(
         module, toolchain, work / "argv-controls", pinned_methods["SysModuleTest", "test_orig_argv"])
+    executions[executable_case.CASE_ID] = executable_case.observer(
+        module, toolchain, pinned_methods["SysModuleTest", "test_executable"])
     executions[locale_case.CASE_ID] = locale_case.observer(
         module, toolchain, work / "nonascii-child", pinned_methods["SysModuleTest", "test_ioencoding_nonascii"])
+    executions.update(recursion_case.cases(module, toolchain, work, source))
     jit = jit_case.observer(module, toolchain, work, pinned_methods)
     for method in ("test_jit_is_available", "test_jit_is_enabled"):
         executions[f"{MODULE}.TestSysJIT.{method}"] = jit
-    return executions
+    return executions, frame_control
 
 
 def main():
@@ -155,6 +222,8 @@ def main():
     files = {name: manifest["files"][name] for name in filenames}
     verify_files(STDLIB / "upstream", files)
     if args.cpython_source:
+        module_names_case.verify_table(
+            args.cpython_source, STDLIB.parents[1] / "crates/imre-runtime/native/stdlib-module-names.txt")
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     verify_interpreter_tests({"files": files})
     import test
@@ -181,9 +250,10 @@ def main():
             if (config["LC_CTYPE"], config["utf8_mode"], config["filesystem_encoding"],
                     config["preferred_encoding"]) != ("C.UTF-8", 0, "utf-8", "UTF-8"):
                 parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
-        executions = select(toolchain, Path(tmp), source, test_sys)
+        executions, frame_control = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
+            preflight[SYS + "test_getframemodulename", 1]["evidence"]["module_name_control"] = frame_control
             jit_case.audit_active(load_suite(MODULE), executions, preflight)
             evidence = {}
 

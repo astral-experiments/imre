@@ -105,6 +105,19 @@ with io.BytesIO(path.read_bytes()) as mem:
     print(mem.seek(-3, 2))
     print(repr(mem.read()))
     print(mem.tell())
+for read_eof in (False, True):
+    with io.BytesIO(path.read_bytes()) as source:
+        with ZipFile(source) as archive:
+            with archive.open("final-line") as member:
+                member.seek(-1, 2)
+                print(repr(member.readline()))
+                if read_eof:
+                    print(repr(member.readline()))
+                source.close()
+                try:
+                    print(member.seek(0))
+                except ValueError:
+                    print("closed source " + str(member.tell()))
 with io.BytesIO(path.read_bytes()) as source:
     with ZipFile(source) as archive:
         with archive.open(archive.infolist()[0]) as member:
@@ -249,6 +262,7 @@ def main():
             writer.writestr("duplicate", b"second-deflated", compress_type=zipfile.ZIP_DEFLATED)
             writer.writestr("subdir/", b"")
             writer.writestr("lines", b"abc\nxy\nz")
+            writer.writestr("final-line", b"a\n", compress_type=zipfile.ZIP_DEFLATED)
         for cmd in ([sys.executable, control], [binary]):
             result = subprocess.run([*cmd, fixture], capture_output=True, timeout=30)
             if len(cmd) == 2:

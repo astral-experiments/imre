@@ -4,6 +4,32 @@ use super::*;
 use crate::ir::InstanceType;
 
 impl Checker<'_> {
+    /// int() on a closed string/integer value preserves the integer or parses the
+    /// string. Keep the original value alive and evaluate it only once.
+    pub(super) fn integer_from_text_or_int(&mut self, value: Expr) -> Expr {
+        let (slot, test, text, integer) = self.protocol_alternatives(value.ty).unwrap();
+        debug_assert_eq!((text.ty, integer.ty), (Type::Str, Type::Int));
+        let parsed = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Int, vec![text]),
+        };
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Conditional(
+                        Box::new(test),
+                        Box::new(parsed),
+                        Box::new(integer),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        }
+    }
+
     /// Store a protocol operand once, then provide the test and exact values for
     /// its two possible layouts. The caller assigns the operand to the returned slot.
     pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
@@ -63,6 +89,29 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if self.types.index_callable_signature(ty) == Some(value.ty) {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
+        if matches!(value.ty, Type::AnnotationValue(_)) {
+            let Type::Tuple(layout) = self.types.tuple(vec![ty]) else {
+                unreachable!()
+            };
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::AnnotationMember(layout), vec![value]),
+            };
+        }
+        if value.ty == Type::ObjectValue
+            && let Type::Class(class) = ty
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::ObjectRecordProject(class), vec![value]),
+            };
+        }
         if matches!(value.ty, Type::Document(_)) {
             return if ty == Type::Str {
                 documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
@@ -73,7 +122,9 @@ impl Checker<'_> {
                 }
             };
         }
-        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child))
+            if self.classes.parsers.child_of(child, parent)
+                || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
             return Expr {
                 ty,
@@ -151,8 +202,45 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
-            return Ok(vec![InstanceType::SimpleNamespace]);
+        use InstanceType::{Deque, Exact, List, Tuple};
+        match self.collection_class_name(expression) {
+            Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
+            Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
+            Some("collections.abc.Sequence") => {
+                return Ok(vec![
+                    List,
+                    Deque,
+                    Tuple,
+                    Exact(Type::Str),
+                    Exact(Type::Bytes),
+                ]);
+            }
+            _ => {}
+        }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
+            return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
+        }
+        match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::Context)) => {
+                return Ok(vec![InstanceType::Exact(Type::Context)]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
+                return Ok(vec![InstanceType::ContextVar]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ContextToken)) => {
+                return Ok(vec![InstanceType::ContextToken]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ModuleSpec)) => {
+                return Ok(vec![InstanceType::ModuleSpec]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ForwardRef)) => {
+                return Ok(vec![InstanceType::ForwardRef]);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) => {
+                return Ok(vec![InstanceType::SimpleNamespace]);
+            }
+            _ => {}
         }
         if let ast::Expr::Tuple(tuple) = expression {
             let mut result = Vec::new();
@@ -164,8 +252,27 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
+        if matches!(
+            self.collection_binding(expression),
+            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        ) {
+            let mut classes = vec![InstanceType::Dict];
+            classes.extend(
+                self.classes
+                    .declarations
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, class)| class.mapping)
+                    .map(|(id, _)| InstanceType::Exact(Type::Class(id))),
+            );
+            return Ok(classes);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
             return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
+            return Ok(vec![InstanceType::IoBase(base)]);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
             return Ok(vec![InstanceType::StrEnum]);
@@ -211,6 +318,7 @@ impl Checker<'_> {
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {
                 "str" => InstanceType::Exact(Type::Str),
+                "type" => InstanceType::Exact(Type::BuiltinClass),
                 "bytes" => InstanceType::Exact(Type::Bytes),
                 "int" => InstanceType::Exact(Type::Int),
                 "bool" => InstanceType::Exact(Type::Bool),
@@ -218,6 +326,7 @@ impl Checker<'_> {
                 "list" => InstanceType::List,
                 "dict" => InstanceType::Dict,
                 "set" => InstanceType::Set,
+                "frozenset" => InstanceType::Exact(Type::FrozenStrings),
                 "tuple" => InstanceType::Tuple,
                 _ => {
                     return Err(error(
@@ -246,8 +355,41 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        let classes = match self.instance_types(classes) {
+            Ok(classes) => classes,
+            Err(diagnostic) => {
+                if let Ok(target) = self.expr(classes) {
+                    match target.ty {
+                        Type::Placeholder(ir::PlaceholderKind::Class) => {
+                            // Looking up either operand can run Python code.
+                            let mut scope = calls::ArgumentScope::default();
+                            let value = scope.hold(self, value);
+                            scope.hold(self, target);
+                            let class =
+                                InstanceType::Exact(Type::Placeholder(ir::PlaceholderKind::Value));
+                            return Ok(scope.finish(Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Builtin(
+                                    Builtin::IsInstance(vec![class]),
+                                    vec![value],
+                                ),
+                            }));
+                        }
+                        Type::ForwardRef(_) | Type::Placeholder(ir::PlaceholderKind::Value) => {
+                            return Ok(Self::class_check_error(
+                                value,
+                                target,
+                                "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                return Err(diagnostic);
+            }
+        };
         if matches!(value.ty, Type::Document(_)) {
-            let op = match self.instance_types(classes)?.as_slice() {
+            let op = match classes.as_slice() {
                 [InstanceType::Dict] => ir::DocumentOp::IsMap,
                 [InstanceType::List] => ir::DocumentOp::IsList,
                 [InstanceType::Exact(Type::Str)] => ir::DocumentOp::IsStr,
@@ -262,10 +404,7 @@ impl Checker<'_> {
             return Ok(documents::op(op, Type::Bool, vec![value]));
         }
         if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
-            && matches!(
-                self.instance_types(classes)?.as_slice(),
-                [InstanceType::Exact(Type::Int)]
-            )
+            && matches!(classes.as_slice(), [InstanceType::Exact(Type::Int)])
         {
             return Ok(Expr {
                 ty: Type::Bool,
@@ -282,14 +421,78 @@ impl Checker<'_> {
                 "isinstance on readonly JSON is unsupported; select into an exact type",
             ));
         }
-        let classes = self.instance_types(classes)?;
         Ok(Expr {
             ty: Type::Bool,
             kind: ExprKind::Builtin(Builtin::IsInstance(classes), vec![value]),
         })
     }
 
+    /// Class checks evaluate both operands before reporting an invalid class.
+    fn class_check_error(first: Expr, second: Expr, message: &str) -> Expr {
+        let exception = Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("TypeError").unwrap(),
+                message: Some(Box::new(unpacking::string(message))),
+            },
+        };
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::RaiseException, vec![first, second, exception]),
+        }
+    }
+
+    pub(super) fn issubclass(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [first, second] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "issubclass requires two positional operands",
+            ));
+        };
+        let first = self.expr(first)?;
+        let second = self.expr(second)?;
+        self.builtin_subclass_values(first, second, call)
+    }
+
+    /// Compare evaluated class operands or raise for an invalid Python argument.
+    pub(super) fn builtin_subclass_values(
+        &self,
+        first: Expr,
+        second: Expr,
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
+        match (first.ty, second.ty) {
+            (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsBuiltinSubclass, vec![first, second]),
+            }),
+            (Type::BuiltinClass, Type::ForwardRef(_)) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            )),
+            (
+                Type::Bool | Type::Int | Type::Float | Type::Str | Type::None | Type::ForwardRef(_),
+                Type::BuiltinClass | Type::ForwardRef(_),
+            ) => Ok(Self::class_check_error(
+                first,
+                second,
+                "issubclass() arg 1 must be a class",
+            )),
+            _ => Err(error(
+                self.source,
+                at,
+                "issubclass requires supported native class objects",
+            )),
+        }
+    }
+
     fn instance_members(&self, ty: Type) -> Vec<Type> {
+        if matches!(ty, Type::AnnotationValue(_)) {
+            return self.types.children(ty);
+        }
         let concrete = self.types.payload(ty).unwrap_or(ty);
         let mut members = self
             .types
@@ -304,11 +507,19 @@ impl Checker<'_> {
     /// Tests for derived records or exception kinds can require runtime inspection.
     /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(&self, ty: Type, classes: &[InstanceType]) -> Option<bool> {
-        if matches!(ty, Type::ValueView | Type::StringIterable) {
+        if matches!(ty, Type::ObjectValue | Type::StringIterable) {
             return None;
         }
         let mut unknown = false;
         for &class in classes {
+            if let InstanceType::IoBase(base) = class {
+                match base.matches(ty) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => unknown = true,
+                }
+                continue;
+            }
             if let (Type::Class(base), InstanceType::Exact(Type::Class(derived))) = (ty, class)
                 && self.classes.declarations.definitions[derived]
                     .bases
@@ -362,6 +573,19 @@ impl Checker<'_> {
                     result = Some(current);
                 }
                 result
+            }
+            ExprKind::Compare(values, ops) => {
+                let [left, right] = values.as_slice() else {
+                    return None;
+                };
+                let (ExprKind::Str(left), ExprKind::Str(right)) = (&left.kind, &right.kind) else {
+                    return None;
+                };
+                match ops.as_slice() {
+                    [Compare::Equal] => Some(left == right),
+                    [Compare::NotEqual] => Some(left != right),
+                    _ => None,
+                }
             }
             ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
             _ => None,
@@ -423,6 +647,23 @@ impl Checker<'_> {
         }
     }
 
+    /// A successful test proves a derived layout only if every matching class
+    /// has that layout. A tuple of siblings cannot expose either's fields.
+    fn tested_subclass(&self, base: usize, classes: &[InstanceType]) -> Option<usize> {
+        let definitions = &self.classes.declarations.definitions;
+        classes.iter().find_map(|class| {
+            let InstanceType::Exact(Type::Class(child)) = *class else {
+                return None;
+            };
+            (definitions[child].bases.contains(&base)
+                && classes.iter().all(|class| {
+                    matches!(*class, InstanceType::Exact(Type::Class(id))
+                    if id == child || definitions[id].bases.contains(&child))
+                }))
+            .then_some(child)
+        })
+    }
+
     pub(super) fn apply_instance_facts(&mut self, test: &ast::Expr, truth: bool) {
         for (name, constraints) in self.instance_facts(test, truth) {
             let Some(&slot) = self.names.get(&name) else {
@@ -433,6 +674,26 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if current == Type::ObjectValue {
+                for (classes, truth) in &constraints {
+                    if *truth
+                        && let [InstanceType::Exact(Type::Class(class))] = classes.as_slice()
+                        && self.boxed_dataclass(*class)
+                    {
+                        self.narrowed.insert_mut(slot, Type::Class(*class));
+                    }
+                }
+                continue;
+            }
+            if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
+                for (classes, positive) in &constraints {
+                    if *positive && let Some(child) = self.tested_subclass(base, classes) {
+                        base = child;
+                    }
+                }
+                self.narrowed.insert_mut(slot, Type::Class(base));
+                continue;
+            }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
                     if !*truth {

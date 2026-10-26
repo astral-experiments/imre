@@ -1,5 +1,7 @@
 """Unknown integer parameters exercise checked tagged arithmetic and fallback."""
 
+import sys
+
 
 def arithmetic(left: int, right: int) -> None:
     print(left + right)
@@ -60,6 +62,13 @@ def count(value: int, flag: bool) -> None:
     print(value)
 
 
+def plus(value: int) -> int:
+    return value + 1
+
+def compare(value: int) -> bool:
+    return plus(value) > 0
+
+
 boundary = 1 << 62
 huge = 1 << 150
 # The existing input-driven arithmetic matrix omits right-hand zero so it can
@@ -106,3 +115,19 @@ for value in [0, boundary - 1, huge]:
 
 for value in [-huge, 0, huge]:
     print(unwound_integer(value))
+
+
+depth = 0
+while sys._getframemodulename(depth) is not None:
+    depth += 1
+old_limit = sys.getrecursionlimit()
+for number in [1, 1 << 100, 1]:
+    for extra in (1, 2, 1):
+        sys.setrecursionlimit(depth + extra)
+        try:
+            result = int(compare(number))
+        except RecursionError:
+            result = -9
+        finally:
+            sys.setrecursionlimit(old_limit)
+        print(result)

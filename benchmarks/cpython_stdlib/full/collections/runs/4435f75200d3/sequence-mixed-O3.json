@@ -1,0 +1,106 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_revision": "4435f75200d3eaf33ab71b8f543348d46a48bbd5",
+  "opt_level": 3,
+  "tests": {
+    "test.test_collections.TestCollectionABCs.test_MutableSequence": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "mixed",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "method_sha256": "9f25a535b218fdfc944f53f949cd5a41a403ba438b548e91f6fc03f99d41c9d1",
+            "opt_level": 3,
+            "operation": "Imre evaluated eight subclass and five instance predicates. CPython checked the bytearray instance and constructed the ABC subclasses with their actual method dictionaries.",
+            "fixture": "Original CPython fixtures, method, helper and unittest assertions.",
+            "native_calls": {
+              "isinstance": 5,
+              "issubclass": 8
+            },
+            "host_calls": {
+              "bytearray isinstance": 1,
+              "type(name, bases, methods)": 6
+            },
+            "native_results": [
+              [
+                "isinstance",
+                "builtins.tuple",
+                false
+              ],
+              [
+                "issubclass",
+                "builtins.tuple",
+                false
+              ],
+              [
+                "isinstance",
+                "builtins.str",
+                false
+              ],
+              [
+                "issubclass",
+                "builtins.str",
+                false
+              ],
+              [
+                "isinstance",
+                "builtins.bytes",
+                false
+              ],
+              [
+                "issubclass",
+                "builtins.bytes",
+                false
+              ],
+              [
+                "isinstance",
+                "builtins.list",
+                true
+              ],
+              [
+                "issubclass",
+                "builtins.list",
+                true
+              ],
+              [
+                "issubclass",
+                "builtins.bytearray",
+                true
+              ],
+              [
+                "isinstance",
+                "collections.deque",
+                true
+              ],
+              [
+                "issubclass",
+                "collections.deque",
+                true
+              ],
+              [
+                "issubclass",
+                "array.array",
+                true
+              ],
+              [
+                "issubclass",
+                "builtins.str",
+                false
+              ]
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": [],
+  "controls": {
+    "issubclass array": "AssertionError: <class 'array.array'> is not a subclass of <class 'collections.abc.MutableSequence'>",
+    "isinstance list": "AssertionError: [] is not an instance of <class 'collections.abc.MutableSequence'>"
+  }
+}

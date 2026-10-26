@@ -3,6 +3,7 @@
 //! `Rc<f64>`. A nullable pointer preserves every bit pattern without reserving a
 //! NaN payload or conflating signed zero with absence.
 
+use crate::StrOwner;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -10,7 +11,7 @@ use std::rc::Rc;
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
-use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_bytes};
+use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_text};
 use crate::integer_text::decimal_digit;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
@@ -49,12 +50,12 @@ pub unsafe extern "C" fn imre_float_box_release(value: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_str(value: f64) -> *const Str {
-    Rc::into_raw(Rc::new(render(value)))
+    StrOwner::into_raw(StrOwner::new(render(value)))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_print_float(value: f64) {
-    output_bytes(render(value).as_bytes());
+    output_text(&render(value));
 }
 
 /// Ryu chooses shortest digits with ties to even; Rust's formatter, currently
@@ -131,17 +132,24 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
+    finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)
+}
+
+/// Truncate a finite float and preserve Python's distinct NaN and infinity errors.
+pub(super) fn float_to_integer(value: f64) -> Result<BigInt> {
     if value.is_nan() {
-        return Error::new(Kind::ValueError, "cannot convert float NaN to integer").returning(1);
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
     }
     if value.is_infinite() {
-        return Error::new(
+        return Err(Error::new(
             Kind::OverflowError,
             "cannot convert float infinity to integer",
-        )
-        .returning(1);
+        ));
     }
-    Int::new(BigInt::from_f64(value).unwrap()).into_raw()
+    Ok(BigInt::from_f64(value).unwrap())
 }
 
 /// Validates Python's decimal grammar before Rust performs correctly rounded

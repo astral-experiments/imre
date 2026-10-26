@@ -1,0 +1,38 @@
+{
+  "containers/ordered_dict.py": {
+    "lines": 30,
+    "stdout_sha256": "db92af73388dfc4bf4031353172efb12cebeee2365ad943559dd6d75790f6033"
+  },
+  "containers/dict_constructor.py": {
+    "lines": 27,
+    "stdout_sha256": "5105320de6003205b5055f7e72ccb083667ed07b35270163eab1d19834c7eae6"
+  },
+  "containers/dict_copy_update.py": {
+    "lines": 29,
+    "stdout_sha256": "f6f317cdb1e292beba98e75368baf0e25ad927c448ad7d5f704e8d0c3927fe7f"
+  },
+  "containers/namedtuple.py": {
+    "lines": 23,
+    "stdout_sha256": "4645b7fdead47d6b82b3ad876375228205673a0946643044b5ed81dde427ba4a"
+  },
+  "module_values/namedtuple/main.py": {
+    "lines": 3,
+    "stdout_sha256": "e30189274b7cb9fe119fb71c37300682aeb8e8c90d953ea7e22bc15631ebbb40"
+  },
+  "bytes/membership.py": {
+    "lines": 128,
+    "stdout_sha256": "ac56aaa1bfea77bb514b0f27e6e600b9c330460dba650264b8d2e2488543d7a2"
+  },
+  "text/percent_scalar.py": {
+    "lines": 121,
+    "stdout_sha256": "1e65ddc70db4253d0f99e3ec2b575c1b93602bb9ec11d0845524d8161ed36403"
+  },
+  "processes/file_redirects.py": {
+    "lines": 23,
+    "stdout_sha256": "d692c17ed7830da4653aa326469a012605954817c98f6b98127fec4d8df7053f"
+  },
+  "json_records/stdlib_deep_decode.py": {
+    "lines": 14,
+    "stdout_sha256": "ff41e7e440ea5e3a67d9bf6dc3819c9f43b1287c53adb1ffd55db120242722f2"
+  }
+}
