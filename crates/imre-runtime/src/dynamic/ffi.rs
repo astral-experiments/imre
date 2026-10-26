@@ -10,26 +10,7 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
-    pub(super) fn iterator(&mut self, value: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            return Ok(value);
-        }
-        let values = self.items(value)?;
-        Ok(self.alloc(Value::Iterator { values, offset: 0 }))
-    }
-
-    pub(super) fn next_item(&mut self, iterator: Id) -> Result<Option<Id>> {
-        let Value::Iterator { values, offset } = self.heap.get_mut(iterator) else {
-            return Err(Error::new("TypeError", "expected iterator"));
-        };
-        let item = values.get(*offset).copied();
-        if item.is_some() {
-            *offset += 1;
-        }
-        Ok(item)
-    }
-
-    fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
+    pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "lookup" => {
                 let name = self.str_value(b)?.to_owned();
@@ -169,16 +150,30 @@ impl Context {
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => self.iterator(a),
+            "iter" => {
+                if matches!(self.heap.get(a), Value::Iterator { .. }) {
+                    return Ok(a);
+                }
+                let values = self.items(a)?;
+                Ok(self.alloc(Value::Iterator { values, offset: 0 }))
+            }
             "more" => {
                 let Value::Iterator { values, offset } = self.heap.get(a) else {
                     return Err(Error::new("TypeError", "expected iterator"));
                 };
                 Ok(flag(*offset < values.len()))
             }
-            "next" => self
-                .next_item(a)?
-                .ok_or_else(|| Error::new("StopIteration", "")),
+            "next" => {
+                let Value::Iterator { values, offset } = self.heap.get_mut(a) else {
+                    return Err(Error::new("TypeError", "expected iterator"));
+                };
+                let v = values
+                    .get(*offset)
+                    .copied()
+                    .ok_or_else(|| Error::new("StopIteration", ""))?;
+                *offset += 1;
+                Ok(v)
+            }
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
