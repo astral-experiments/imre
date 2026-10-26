@@ -283,6 +283,18 @@ pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const By
     unsafe { (&*left).cmp(&*right) as i32 }
 }
 
+pub(crate) fn bytes_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    memchr::memmem::find(haystack, needle).is_some()
+}
+
+pub(crate) fn bytes_contains_int(haystack: &[u8], needle: &Int) -> Result<bool> {
+    let byte = needle
+        .as_small()
+        .and_then(|n| u8::try_from(n).ok())
+        .ok_or_else(|| Error::new(Kind::ValueError, "byte must be in range(0, 256)"))?;
+    Ok(memchr::memchr(byte, haystack).is_some())
+}
+
 /// Tests for an immutable subsequence; the empty needle matches even empty bytes.
 ///
 /// # Safety
@@ -290,7 +302,7 @@ pub unsafe extern "C" fn imre_bytes_compare(left: *const Bytes, right: *const By
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *const Bytes) -> u32 {
     // SAFETY: both byte buffers are immutable and rooted for the call.
-    u32::from(unsafe { memchr::memmem::find(&*haystack, &*needle) }.is_some())
+    unsafe { u32::from(bytes_contains(&*haystack, &*needle)) }
 }
 
 /// Integer needles are byte values, including on an empty haystack, not indices.
@@ -299,22 +311,12 @@ pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *co
 /// Root the canonical integer and immutable bytes; pending error state is clear.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
-    // Canonical integers outside the tagged small range cannot represent a byte.
-    // SAFETY: the caller roots the exact canonical integer until this call returns.
-    let byte = unsafe { Int::borrow(needle) }
-        .as_small()
-        .and_then(|n| u8::try_from(n).ok());
-    let Some(byte) = byte else {
-        return finish(
-            Err(Error::new(
-                Kind::ValueError,
-                "byte must be in range(0, 256)",
-            )),
-            0,
-        );
-    };
-    // SAFETY: the caller keeps the immutable haystack alive.
-    u32::from(memchr::memchr(byte, unsafe { &*haystack }).is_some())
+    // SAFETY: the caller keeps both the canonical integer and immutable bytes rooted.
+    let number = unsafe { Int::borrow(needle) };
+    finish(
+        unsafe { bytes_contains_int(&*haystack, &number) }.map(u32::from),
+        0,
+    )
 }
 
 /// # Safety

@@ -486,6 +486,28 @@ impl Context {
         if let Value::Str(hay) = self.heap.get(container) {
             return Ok(hay.contains(self.str_value(item)?));
         }
+        if matches!(self.heap.get(container), Value::Bytes(_)) {
+            // CPython falls back to the buffer protocol when integer conversion fails.
+            let number = self.index_value(item).ok().flatten();
+            let Value::Bytes(data) = self.heap.get(container) else {
+                unreachable!()
+            };
+            if let Some(number) = number {
+                return Ok(crate::objects::bytes_contains_int(data, &number)?);
+            }
+            return match self.heap.get(item) {
+                Value::Bytes(needle) | Value::ByteArray(needle) => {
+                    Ok(crate::objects::bytes_contains(data, needle))
+                }
+                _ => Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "a bytes-like object is required, not '{}'",
+                        self.type_name(item)
+                    ),
+                )),
+            };
+        }
         if matches!(
             self.heap.get(container),
             Value::Dict(_) | Value::DefaultDict { .. } | Value::Set(_)
