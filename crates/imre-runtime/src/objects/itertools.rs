@@ -42,7 +42,7 @@ pub unsafe extern "C" fn imre_cursor_length_hint(cursor: *const Object, default:
         let remaining = object(cursor).0.with(|storage| match storage {
             Storage::Repeat(repeat) => repeat.remaining.map(Int::from_usize),
             Storage::IteratorAdapter(state) => match state.as_ref() {
-                Adapter::Progression(progression) => progression.remaining(),
+                Adapter::Progression(progression) => Some(progression.remaining()),
                 _ => None,
             },
             _ => None,
@@ -81,6 +81,8 @@ pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *
     ))))
 }
 
+mod count;
+pub(crate) use count::CountValue;
 mod counter_elements;
 mod sources;
 mod tee;
@@ -90,7 +92,10 @@ pub(super) enum Adapter {
     CounterElements(RefCell<counter_elements::Elements>),
     Sequence(sources::Sequence),
     Progression(sources::Progression),
-    FloatCount { current: Cell<f64>, step: OwnedWord },
+    Count {
+        current: RefCell<CountValue>,
+        step: CountValue,
+    },
     Slice(Slice),
     Tee(tee::Fork),
     Cycle(Cycle),
@@ -156,21 +161,10 @@ impl Adapter {
     ) -> std::fmt::Result {
         use std::fmt::Write;
         let name = match self {
-            Self::Progression(count) if count.stop.is_none() => {
-                let current = count.current.borrow();
-                write!(output, "count({}", current.big())?;
-                if count.step.as_small() != Some(1) {
-                    write!(output, ", {}", count.step.big())?;
-                }
-                output.write_char(')')?;
-                return Ok(());
-            }
-            Self::FloatCount { current, step } => {
-                write!(output, "count({}", crate::floats::render(current.get()))?;
-                if step.kind.raw() != 2 || step.word != Int::small(1).unwrap().0 {
-                    output.write_str(", ")?;
-                    // SAFETY: step owns its exact numeric representation.
-                    unsafe { values::try_write_unchecked_repr(output, step.word, step.kind)? };
+            Self::Count { current, step } => {
+                write!(output, "count({}", current.borrow())?;
+                if !matches!(step, CountValue::Int(n) if n.as_small() == Some(1)) {
+                    write!(output, ", {step}")?;
                 }
                 output.write_char(')')?;
                 return Ok(());
@@ -246,20 +240,10 @@ impl Adapter {
             Self::CounterElements(elements) => elements.borrow_mut().next(),
             Self::Sequence(seq) => seq.next(),
             Self::Progression(count) => Ok(count.next()),
-            Self::FloatCount { current, step } => {
-                // SAFETY: a numeric step stays rooted; binary64 words carry no owner.
-                unsafe {
-                    let delta = if step.kind.raw() == 2 {
-                        crate::floats::int_to_float(&Int::borrow(step.word))?
-                    } else {
-                        f64::from_bits(step.word as u64)
-                    };
-                    let old = current.replace(current.get() + delta);
-                    Ok(Some(OwnedWord::from_owned(
-                        old.to_bits() as usize,
-                        WordKind::new(7),
-                    )))
-                }
+            Self::Count { current, step } => {
+                let mut value = current.borrow_mut();
+                let next = value.successor(step)?;
+                Ok(Some(std::mem::replace(&mut *value, next).into_word()))
             }
             Self::Tee(_) | Self::Slice(_) | Self::Cycle(_) => self.next_composed(),
             Self::PathWalk(walk) => walk.next(),
@@ -404,10 +388,14 @@ pub unsafe extern "C" fn imre_cycle(mode: u32, source: usize) -> *const Object {
 /// The step is a rooted exact int (kind 2) or an unboxed float (kind 7).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_float_count(start: f64, kind: u32, step: usize) -> *const Object {
-    // SAFETY: conversion of an integer step happens at pull time, while its owner is live.
-    let step = unsafe { WordKind::new(kind).acquire(step) };
-    crate::ObjectOwner::into_raw(adapter(Adapter::FloatCount {
-        current: Cell::new(start),
+    let step = if kind == 2 {
+        // SAFETY: the caller roots its exact integer until acquisition completes.
+        CountValue::Int(unsafe { (*Int::borrow(step)).clone() })
+    } else {
+        CountValue::Float(f64::from_bits(step as u64))
+    };
+    crate::ObjectOwner::into_raw(adapter(Adapter::Count {
+        current: RefCell::new(CountValue::Float(start)),
         step,
     }))
 }

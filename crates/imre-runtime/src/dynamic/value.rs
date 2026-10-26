@@ -156,6 +156,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
+            Value::Count { .. } => "count",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
@@ -409,6 +410,10 @@ pub(super) enum Value {
     },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Count {
+        current: Id,
+        step: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -464,6 +469,7 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Zip {
                 inputs, pending, ..
             } => {

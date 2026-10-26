@@ -353,6 +353,16 @@ impl Context {
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
+            Value::Count { current, step } => {
+                let current = self.repr(*current);
+                if matches!(self.heap.get(*step), Value::Bool(true))
+                    || matches!(self.heap.get(*step), Value::Int(n) if n.as_small() == Some(1))
+                {
+                    format!("count({current})")
+                } else {
+                    format!("count({current}, {})", self.repr(*step))
+                }
+            }
             Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
