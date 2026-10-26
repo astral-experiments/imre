@@ -933,6 +933,7 @@ pub(crate) enum Builtin {
     },
     /// Match an exception against the category list retained by an assertion context.
     ExceptionMatchesAny,
+    ExceptionSubclass(u32, u32),
     LiteralStringView,
     IntListContains,
     StringListContains,
@@ -1162,6 +1163,9 @@ pub(crate) enum Builtin {
     Decode,
     DecodeAscii,
     UrlsafeB64encode,
+    BinasciiAsciiInput,
+    BinasciiDecode,
+    BinasciiEncode,
     CodecLookup,
     CodecName,
     StrEncodeOptions,

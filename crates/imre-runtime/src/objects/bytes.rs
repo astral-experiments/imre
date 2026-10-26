@@ -11,7 +11,7 @@ use super::words::{OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, fail};
 
 /// Reserves an entire immutable result before copying any bytes into it.
-fn allocate(length: usize) -> Result<Bytes> {
+pub(super) fn allocate(length: usize) -> Result<Bytes> {
     let mut value = Vec::new();
     value
         .try_reserve_exact(length)
@@ -625,27 +625,6 @@ pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const 
             .map(|s| StrOwner::into_raw(StrOwner::new(s)))
             .map_err(|_| Error::allocation())
     };
-    finish(result, std::ptr::null())
-}
-
-/// Encode bytes with the URL-safe alphabet and include standard Base64 padding.
-///
-/// # Safety
-/// The caller roots the immutable byte input. The result owns its bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const Bytes {
-    use base64::{Engine, engine::general_purpose::URL_SAFE};
-    // SAFETY: the exact bytes remain rooted until encoding finishes.
-    let data = unsafe { &*value };
-    let result = (|| {
-        let n = base64::encoded_len(data.len(), true).ok_or_else(Error::allocation)?;
-        let mut encoded = allocate(n)?;
-        encoded.resize(n, 0);
-        URL_SAFE
-            .encode_slice(data, &mut encoded)
-            .expect("exact Base64 capacity");
-        Ok(crate::BytesOwner::into_raw(crate::BytesOwner::new(encoded)))
-    })();
     finish(result, std::ptr::null())
 }
 

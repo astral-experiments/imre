@@ -9,6 +9,7 @@ argparse = ["`ArgumentParser`, typed options, subcommands and generated help.","
 array = ["`array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`.","tests/fixtures/containers/array_registration.py"]
 asyncio = ["Run subprocess tasks, wait for a task group and handle cancellation.","tests/fixtures/processes/async_groups.py"]
 base64 = ["`urlsafe_b64encode` on bytes.","benchmarks/cpython_stdlib/native_base64.py"]
+binascii = ["Standard Base64 encoding, strict or permissive decoding of bytes and ASCII text, and the module exception hierarchy.","benchmarks/cpython_stdlib/full/binascii/README.md"]
 builtins = ["Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`.","benchmarks/cpython_stdlib/full/builtins/README.md"]
 codecs = ["`lookup`, codec names, stateless ASCII, Latin-1 and UTF-8 encoding and decoding, and byte-order marks.","benchmarks/cpython_stdlib/full/sys/BUILTINS.md"]
 collections = ["`Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations.","benchmarks/cpython_stdlib/full/collections/README.md"]

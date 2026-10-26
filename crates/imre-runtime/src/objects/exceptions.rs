@@ -66,6 +66,8 @@ pub(crate) enum Kind {
     SpecialFileError = 66,
     CsvError = 67,
     GaiError = 68,
+    BinasciiError = 69,
+    BinasciiIncomplete = 70,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -137,6 +139,8 @@ impl Kind {
             66 => Self::SpecialFileError,
             67 => Self::CsvError,
             68 => Self::GaiError,
+            69 => Self::BinasciiError,
+            70 => Self::BinasciiIncomplete,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -220,6 +224,8 @@ impl Kind {
             Self::TimeoutExpired => "TimeoutExpired",
             Self::BadGzipFile => "BadGzipFile",
             Self::CsvError => "_csv.Error",
+            Self::BinasciiError => "binascii.Error",
+            Self::BinasciiIncomplete => "binascii.Incomplete",
             Self::GaiError => "socket.gaierror",
             Self::ZlibError => "error",
             Self::TomlDecodeError => "TOMLDecodeError",
@@ -274,6 +280,7 @@ impl Kind {
                 Self::ValueError
                     | Self::JsonDecodeError
                     | Self::TomlDecodeError
+                    | Self::BinasciiError
                     | Self::UnicodeError
                     | Self::UnicodeDecodeError
                     | Self::UnicodeEncodeError
@@ -2026,7 +2033,8 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
             let exception = s.exception();
             let mut result = String::new();
             let mut output = super::values::ReprWriter(&mut result);
-            output.write_str(exception.name())?;
+            let name = exception.name();
+            output.write_str(name.rsplit('.').next().unwrap_or(name))?;
             output.write_char('(')?;
             match &exception.payload {
                 Payload::Import(err) => err.args.write_repr_args(&mut output)?,
@@ -2102,6 +2110,12 @@ pub unsafe extern "C" fn imre_exception_retain(value: *const Object) {
 pub unsafe extern "C" fn imre_exception_release(value: *const Object) {
     // SAFETY: exceptions use the ordinary Object ownership representation.
     unsafe { super::imre_object_release(value) };
+}
+
+/// The compiler emits only known builtin IDs. Use the same hierarchy as a catch.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_builtin_exception_subclass(child: u32, parent: u32) -> bool {
+    Kind::from_raw(child).matches(Kind::from_raw(parent))
 }
 
 /// # Safety

@@ -1,0 +1,135 @@
+{
+  "module": "test.test_binascii",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 93,
+  "reference": {
+    "test.test_binascii.ArrayBinASCIITest.test_b2a_base64_newline": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.ArrayBinASCIITest.test_b2a_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.ArrayBinASCIITest.test_base64_excess_data": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_base64_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.ArrayBinASCIITest.test_base64_strict_mode": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_base64errors": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_base64invalid": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_base64valid": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_c_contiguity": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_crc32": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_crc_hqx": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_empty_string": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_exceptions": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_functions": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_hex": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_hex_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.ArrayBinASCIITest.test_hex_separator": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_qp": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_returned_value": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_unicode_a2b": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_unicode_b2a": "pass",
+    "test.test_binascii.ArrayBinASCIITest.test_uu": "pass",
+    "test.test_binascii.BinASCIITest.test_b2a_base64_newline": "pass",
+    "test.test_binascii.BinASCIITest.test_b2a_qp_a2b_qp_round_trip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BinASCIITest.test_b2a_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BinASCIITest.test_base64_excess_data": "pass",
+    "test.test_binascii.BinASCIITest.test_base64_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BinASCIITest.test_base64_strict_mode": "pass",
+    "test.test_binascii.BinASCIITest.test_base64errors": "pass",
+    "test.test_binascii.BinASCIITest.test_base64invalid": "pass",
+    "test.test_binascii.BinASCIITest.test_base64valid": "pass",
+    "test.test_binascii.BinASCIITest.test_c_contiguity": "pass",
+    "test.test_binascii.BinASCIITest.test_crc32": "pass",
+    "test.test_binascii.BinASCIITest.test_crc_hqx": "pass",
+    "test.test_binascii.BinASCIITest.test_empty_string": "pass",
+    "test.test_binascii.BinASCIITest.test_exceptions": "pass",
+    "test.test_binascii.BinASCIITest.test_functions": "pass",
+    "test.test_binascii.BinASCIITest.test_hex": "pass",
+    "test.test_binascii.BinASCIITest.test_hex_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BinASCIITest.test_hex_separator": "pass",
+    "test.test_binascii.BinASCIITest.test_qp": "pass",
+    "test.test_binascii.BinASCIITest.test_returned_value": "pass",
+    "test.test_binascii.BinASCIITest.test_unicode_a2b": "pass",
+    "test.test_binascii.BinASCIITest.test_unicode_b2a": "pass",
+    "test.test_binascii.BinASCIITest.test_uu": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_b2a_base64_newline": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BytearrayBinASCIITest.test_b2a_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BytearrayBinASCIITest.test_base64_excess_data": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_base64_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BytearrayBinASCIITest.test_base64_strict_mode": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_base64errors": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_base64invalid": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_base64valid": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_c_contiguity": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_crc32": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_crc_hqx": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_empty_string": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_exceptions": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_functions": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_hex": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_hex_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.BytearrayBinASCIITest.test_hex_separator": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_qp": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_returned_value": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_unicode_a2b": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_unicode_b2a": "pass",
+    "test.test_binascii.BytearrayBinASCIITest.test_uu": "pass",
+    "test.test_binascii.ChecksumBigBufferTestCase.test_big_buffer": {
+      "skipped": "not enough memory: 4.0G minimum needed"
+    },
+    "test.test_binascii.MemoryviewBinASCIITest.test_b2a_base64_newline": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_b2a_qp_a2b_qp_round_trip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.MemoryviewBinASCIITest.test_b2a_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64_excess_data": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64_strict_mode": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64errors": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64invalid": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_base64valid": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_c_contiguity": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_crc32": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_crc_hqx": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_empty_string": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_exceptions": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_functions": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_hex": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_hex_roundtrip": {
+      "skipped": "Hypothesis required for property test with no specified examples"
+    },
+    "test.test_binascii.MemoryviewBinASCIITest.test_hex_separator": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_qp": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_returned_value": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_unicode_a2b": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_unicode_b2a": "pass",
+    "test.test_binascii.MemoryviewBinASCIITest.test_uu": "pass"
+  }
+}

@@ -4211,6 +4211,13 @@ impl Emitter<'_, '_> {
             | Builtin::TextStreamView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
+            Builtin::ExceptionSubclass(child, parent) => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!(
+                    "call i1 @imre_builtin_exception_subclass(i32 {child}, i32 {parent})"
+                )),
+                small_integer: false,
+            },
             Builtin::StringContains | Builtin::BytesContains | Builtin::ExceptionMatchesAny => {
                 let name = match builtin {
                     Builtin::BytesContains => "imre_bytes_contains",
@@ -5617,6 +5624,17 @@ impl Emitter<'_, '_> {
             ),
             Builtin::DecodeAscii => {
                 self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
+            }
+            Builtin::BinasciiAsciiInput => {
+                self.call("imre_binascii_ascii_input", Type::Bytes, &[&args[0].value])
+            }
+            Builtin::BinasciiEncode | Builtin::BinasciiDecode => {
+                let function = if matches!(builtin, Builtin::BinasciiEncode) {
+                    "imre_binascii_encode"
+                } else {
+                    "imre_binascii_decode"
+                };
+                self.call(function, Type::Bytes, &[&args[0].value, &args[1].value])
             }
             Builtin::UrlsafeB64encode => {
                 self.call("imre_urlsafe_b64encode", Type::Bytes, &[&args[0].value])
@@ -9109,6 +9127,9 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
+declare ptr @imre_binascii_ascii_input(ptr)
+declare ptr @imre_binascii_decode(ptr, i1)
+declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_sha1_hex(ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
@@ -9244,6 +9265,7 @@ declare ptr @imre_source_module_name(ptr)
 declare ptr @imre_source_module_filename(ptr)
 declare ptr @imre_named_exception_new(ptr, ptr)
 declare ptr @imre_exception_new(i32, ptr)
+declare i1 @imre_builtin_exception_subclass(i32, i32) nounwind memory(none)
 declare i32 @imre_exception_matches(ptr, i32)
 declare i32 @imre_exception_matches_any(ptr, ptr)
 declare i64 @imre_string_iterable_len(i64)
