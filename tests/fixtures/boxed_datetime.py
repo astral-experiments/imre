@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, date, datetime as dt, timedelta, timezone
+from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
 def test_http_date():
@@ -39,7 +39,51 @@ def test_cookie_timestamp():
     print(str(before), str(shifted), int(lifetime.total_seconds()))
 
 
+def test_time_of_day():
+    midnight = time()
+    assert type(midnight) is time and isinstance(midnight, time)
+    assert not isinstance(midnight, date)
+    assert midnight.tzinfo is None and midnight.fold == 0
+    day = date(2000, 2, 29)
+    # Werkzeug http_date combines a plain date with UTC midnight.
+    assert dt.combine(day, midnight, tzinfo=UTC) == dt(2000, 2, 29, tzinfo=UTC)
+    east = timezone(timedelta(hours=2), "east")
+    clock = time(12, 34, second=56, microsecond=7, tzinfo=east, fold=1)
+    assert (clock.hour, clock.minute, clock.second, clock.microsecond, clock.fold) == (12, 34, 56, 7, 1)
+    assert clock.tzinfo is east
+    combined = dt.combine(dt(2000, 2, 29, 23), clock)
+    assert combined.tzinfo is east and combined.fold == 1 and combined.hour == 12
+    assert dt.combine(day, clock, tzinfo=None).tzinfo is None
+    assert clock == time(10, 34, 56, 7, UTC)
+    assert clock > time(10, 34, 56, 6, UTC)
+    assert clock != time(12, 34, 56, 7)
+    try:
+        clock < midnight
+    except TypeError as error:
+        print(str(error))
+    else:
+        raise AssertionError("ordered aware and naive times")
+    class Hour:
+        def __index__(self):
+            return 17
+    assert time(Hour()).hour == 17
+    for args, keywords in (
+        ((24,), {}), ((0, 60), {}), ((0, 0, -1), {}), ((0, 0, 0, 1000000), {}),
+        ((), {"fold": 2}), ((0, 0, 0, 0, True), {}), ((0, 0, 0, 0, None, 1), {}),
+        (("bad",), {}), ((1 << 100,), {}), ((1,), {"hour": 2}), ((), {"span": 1}),
+        ((24, "bad"), {}), ((24,), {"tzinfo": True}),
+    ):
+        try:
+            time(*args, **keywords)
+        except (TypeError, ValueError, OverflowError) as error:
+            print(str(error))
+        else:
+            raise AssertionError("invalid time accepted")
+    print(str(midnight), repr(clock), str(clock), str(combined))
+
+
 def current():
+    test_time_of_day()
     test_http_date()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):

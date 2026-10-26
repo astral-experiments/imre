@@ -274,6 +274,9 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Instance { class, .. } => Ok(*class),
+            Value::Calendar { value, .. } => {
+                Ok(self.builtin(&format!("datetime.{}", value.class())))
+            }
             Value::NamedTuple {
                 class: Some("time.struct_time"),
                 ..
@@ -501,8 +504,10 @@ impl Context {
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
-            Value::Native(class) if class == "datetime.datetime" && name == "fromtimestamp" => {
-                return Ok(self.builtin("datetime.datetime.fromtimestamp"));
+            Value::Native(class)
+                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+            {
+                return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
