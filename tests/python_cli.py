@@ -371,6 +371,7 @@ def report(text):
         for fixture in (
             "boxed_ast.py",
             "boxed_code_objects.py",
+            "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_int_to_bytes.py",
             "boxed_bytes_octal.py",
@@ -400,6 +401,7 @@ def report(text):
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
+            "boxed_itertools_count.py",
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
