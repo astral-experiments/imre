@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::process::{Command, Stdio};
 
 use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
@@ -185,17 +185,18 @@ pub(super) fn call(
             };
             Ok(ctx.int(f.seek(pos).map_err(os_error)? as i64))
         }
-        "file.read" => {
+        "file.read" | "file.readline" => {
             let length = args
                 .get(1)
                 .map(|&id| ctx.as_integer(id))
                 .transpose()?
                 .unwrap_or(-1);
             let mut bytes = Vec::new();
-            if length < 0 {
-                f.read_to_end(&mut bytes)
+            let mut input = f.take(u64::try_from(length).unwrap_or(u64::MAX));
+            if name == "file.readline" {
+                input.read_until(b'\n', &mut bytes)
             } else {
-                f.take(length as u64).read_to_end(&mut bytes)
+                input.read_to_end(&mut bytes)
             }
             .map_err(os_error)?;
             Ok(ctx.alloc(Value::Bytes(bytes)))

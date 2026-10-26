@@ -105,10 +105,11 @@ fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) ->
         return Err(type_error("decoding requires bytes"));
     };
     strict(ctx, errors)?;
-    if encoding(ctx, encoding_id)? && !bytes.is_ascii() {
-        return Err(Error::new("UnicodeDecodeError", "non-ASCII byte"));
-    }
-    String::from_utf8(bytes.clone()).map_err(|e| Error::new("UnicodeDecodeError", e.to_string()))
+    let encoding = encoding_id
+        .map(|id| ctx.str_value(id))
+        .transpose()?
+        .unwrap_or("utf-8");
+    Ok(crate::objects::Codec::lookup(encoding)?.decode(bytes, None)?)
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {

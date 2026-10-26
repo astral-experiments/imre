@@ -111,7 +111,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::File(_)
             if matches!(
                 attr,
-                "read" | "seek" | "tell" | "close" | "__enter__" | "__exit__"
+                "read" | "readline" | "seek" | "tell" | "close" | "__enter__" | "__exit__"
             ) =>
         {
             "file"
@@ -338,7 +338,9 @@ pub(super) fn call(
                 };
                 Error::new(kind, format!("{path}: {e}"))
             })?;
-            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(file))))))
+            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
+                io::BufReader::new(file),
+            ))))))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

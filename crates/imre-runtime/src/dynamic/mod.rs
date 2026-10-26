@@ -257,6 +257,9 @@ impl Context {
             scope,
         });
         self.modules.insert(name.to_owned(), module);
+        if name == "io" {
+            stdlib::io::install(self, scope);
+        }
         if let Some((path, code)) = source {
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);

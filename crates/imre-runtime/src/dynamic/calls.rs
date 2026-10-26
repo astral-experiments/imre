@@ -27,6 +27,7 @@ impl Context {
                 | Value::Function { .. }
                 | Value::Cached { .. }
                 | Value::Native(_)
+                | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
     }
@@ -44,7 +45,7 @@ impl Context {
         if receiver != NONE {
             match self.heap.get(value) {
                 Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } => {
+                Value::Function { .. } | Value::Cached { .. } | Value::IoMethod { .. } => {
                     return Ok(self.alloc(Value::Method {
                         callable: value,
                         receiver,
@@ -313,6 +314,9 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::IoMethod { owner, name } => {
+                stdlib::io::call(self, owner, name, &args, &kwargs)
+            }
             Value::Method { callable, receiver } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);

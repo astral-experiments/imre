@@ -148,6 +148,10 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
     },
     Native(String),
+    IoMethod {
+        owner: Id,
+        name: &'static str,
+    },
     Raised(Error),
     Method {
         callable: Id,
@@ -162,7 +166,7 @@ pub(super) enum Value {
         values: Vec<Id>,
         offset: usize,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::fs::File>>>),
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -259,6 +263,7 @@ impl Value {
                 }
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
+            Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::None
             | Self::Bool(_)
             | Self::Int(_)

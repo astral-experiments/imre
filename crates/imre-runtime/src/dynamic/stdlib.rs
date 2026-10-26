@@ -10,6 +10,7 @@ use crate::objects::interpreter_stdlib as system;
 
 mod contextvars;
 mod files;
+pub(super) mod io;
 mod json;
 mod regex;
 
@@ -17,6 +18,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "io"
             | "sysconfig"
             | "os"
             | "os.path"
@@ -314,7 +316,7 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
-        | "warnings.warn" => (2, &[]),
+        | "file.readline" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exit"
         | "sysconfig.get_config_var"
