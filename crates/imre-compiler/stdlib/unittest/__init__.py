@@ -3,6 +3,7 @@
 
 import difflib
 import re
+from datetime import date, timedelta
 from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
@@ -32,6 +33,11 @@ def _short_reprs(left: str, right: str) -> tuple[str, str]:
         return (shared + left[prefix:], shared + right[prefix:])
     shared = _shorten(left[:prefix], 5, 5)
     return (shared + _shorten(left[prefix:], 41, 5), shared + _shorten(right[prefix:], 41, 5))
+
+
+def _inequality_message(first: str, second: str) -> str:
+    left, right = _short_reprs(first, second)
+    return left + " != " + right
 
 
 def _kept_lines(text: str) -> list[str]:
@@ -219,8 +225,18 @@ class TestCase:
 
     def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            left, right = _short_reprs(repr(first), repr(second))
-            raise self.failureException(self._formatMessage(msg, left + " != " + right))
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
+
+    def _assertDateEqual(self, first: date, second: date, msg: str | None = None) -> None:
+        if first != second:
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
+
+    def _assertDeltaEqual(self, first: timedelta, second: timedelta, msg: str | None = None) -> None:
+        if first != second:
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff

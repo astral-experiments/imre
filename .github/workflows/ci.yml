@@ -531,7 +531,7 @@ jobs:
           cmp benchmarks/cpython_stdlib/full/warnings/native-linux.json "$RUNNER_TEMP/test-warnings.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites socket_tcp socketserver_tcp http_server errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --log-dir /tmp/imre-suites-ordinary --suites socket_tcp socketserver_tcp http_server errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
           cat /tmp/imre-suites-ordinary/socket_tcp.log
       - name: Run original string core methods in native Imre
@@ -572,9 +572,9 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.full_asan
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o1 --suites imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+          python3 tests/run_suites.py --log-dir /tmp/imre-suites-asan-o1 --suites imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o0 --suites errno containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
+          python3 tests/run_suites.py --log-dir /tmp/imre-suites-asan-o0 --suites errno containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
             -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
       - name: Validate the route planner against an independent oracle
         run: |
@@ -698,5 +698,5 @@ jobs:
               paths processes argparse_cli
             )
           fi
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
+          python3 tests/run_suites.py --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
             -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3

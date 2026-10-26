@@ -155,7 +155,7 @@ To install a specific version, use `https://labs.astral.sh/imre/releases/<versio
 To build from source, use the [Rust toolchain](rust-toolchain.toml).
 
 ```console
-git clone https://github.com/astral-sh/imre.git
+git clone https://github.com/viarius-experiments/imre.git
 cd imre
 cargo build --workspace --release --locked
 ./target/release/imre --version
@@ -212,12 +212,17 @@ or `--verbose-link` to see the Clang command. [Link options and environment vari
 
 CI runs automatically on pull requests. Add the `ci:macos` label to run the Apple Silicon tests
 on a PR and its subsequent pushes, or select **macOS → Run workflow** to run them on a branch.
+The `viarius-experiments` repository uses GitHub-hosted Linux, Windows and macOS runners.
+Linux runs at most one native suite per available CPU, up to four at once.
 Packaging changes build the Linux archives and installer by default;
 runtime and code generation changes also run the full AddressSanitizer suites.
 To run the full release and Linux checks on a branch (including `main`), select **CI → Run workflow** and enable
 `release_artifacts`, `full_asan`, and `full_thinlto`. Each can also be selected independently.
 
 ## Releasing
+
+These workflows are restricted to `astral-sh/imre` because they publish to Astral Labs.
+In `viarius-experiments/imre`, use the CI `release_artifacts` input to build and test the archives and installer.
 
 Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.
 Then run **Release** on `main` to publish the Linux and macOS archives and their checksums to GitHub Releases.

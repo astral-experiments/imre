@@ -91,7 +91,9 @@ impl Builtin {
             Self::Calendar(op) => Contract::new(
                 matches!(
                     op,
-                    crate::ir::CalendarOp::DateTime
+                    crate::ir::CalendarOp::Date
+                        | crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Delta
                         | crate::ir::CalendarOp::Zone
                         | crate::ir::CalendarOp::Now
@@ -1025,6 +1027,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_calendar_date"
+                | "imre_calendar_combine"
                 | "imre_calendar_delta"
                 | "imre_calendar_zone"
                 | "imre_calendar_now"
@@ -1034,6 +1038,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_calendar_shift"
                 | "imre_calendar_negate"
                 | "imre_calendar_compare"
+                | "imre_calendar_date_order"
                 | "imre_log_file_close"
                 | "imre_log_file_flush"
                 | "imre_log_file_compute_int"

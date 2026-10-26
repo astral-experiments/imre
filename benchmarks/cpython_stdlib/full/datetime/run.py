@@ -20,6 +20,7 @@ from suite_inventory import (
 from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
 
 CANDIDATES = {
+    "TestDateOnly": ["test_delta_non_days_ignored"],
     "TestModule": ["test_utc_alias"],
     "TestTimeDelta": [
         "test_basic_attributes",
@@ -46,7 +47,7 @@ def prepare(tools, directory, owner, name):
     zone = owner == "TestTimeZone"
     fixture = ZONE_LAYOUT + method_bytes(SOURCE, owner, "setUp") if zone else b""
     source = (
-        b"from datetime import datetime, timedelta, timezone, UTC\nimport unittest\n"
+        b"from datetime import date, datetime, timedelta, timezone, UTC\nimport unittest\n"
         b"ZERO = timedelta(0)\nclass Case(unittest.TestCase):\n"
         + fixture
         + original
@@ -189,13 +190,20 @@ def main():
                 reports.append(report)
                 print(f"O{level}: {report['counts']}", flush=True)
     write_reports(args.result, reports, ref)
-    if any(
-        r["counts"].get("native-body-host-fixture", 0) < 4 or r["counts"].get("failed")
-        for r in reports
-    ):
-        raise SystemExit(
-            "expected the original basic_attributes and timezone test_str native bodies"
-        )
+    required = {
+        f"test.datetimetester.{owner}_{variant}.{method}"
+        for owner, method in [
+            ("TestDateOnly", "test_delta_non_days_ignored"),
+            ("TestTimeDelta", "test_basic_attributes"),
+            ("TestTimeZone", "test_str"),
+        ]
+        for variant in ("Pure", "Fast")
+    }
+    for report in reports:
+        observed = {case["id"] for case in report["records"]
+                    if case["classification"] == "native-body-host-fixture"}
+        if required - observed or report["counts"].get("failed"):
+            raise SystemExit(f"O{report['opt_level']} missing required native bodies: {sorted(required - observed)}")
 
 
 if __name__ == "__main__":

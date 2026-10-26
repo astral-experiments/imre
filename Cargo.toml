@@ -6,7 +6,7 @@ resolver = "3"
 version = "0.1.2"
 edition = "2024"
 rust-version = "1.98"
-repository = "https://github.com/astral-sh/imre"
+repository = "https://github.com/viarius-experiments/imre"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]

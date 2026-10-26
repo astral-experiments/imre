@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -123,19 +124,26 @@ with server:
 @contextmanager
 def listener(command, wrong=False, requests=1, *, legacy=False):
     with tempfile.TemporaryFile() as errors:
+        def diagnostic(message):
+            errors.seek(0)
+            return f"{command[0]} {message}\n{errors.read().decode(errors='replace')}".rstrip()
+
         variant = "legacy" if legacy else "wrong" if wrong else "normal"
         with subprocess.Popen([*command, variant, str(requests)], stdout=subprocess.PIPE, stderr=errors) as child:
             try:
-                if not select.select([child.stdout], [], [], 10)[0]:
-                    raise AssertionError("listener did not publish its port")
+                # HTTPServer.server_bind performs a reverse lookup before the
+                # port can be published, even for a loopback listener.
+                if not select.select([child.stdout], [], [], 60)[0]:
+                    child.kill()
+                    child.wait()
+                    raise TimeoutError(diagnostic("did not publish its TCP port within 60 seconds"))
                 line = child.stdout.readline()
                 if not line:
-                    errors.seek(0)
-                    raise AssertionError(errors.read().decode())
+                    status = child.wait(timeout=8)
+                    raise AssertionError(diagnostic(f"exited with status {status} before publishing a TCP port"))
                 yield int(line)
-                if child.wait(timeout=8):
-                    errors.seek(0)
-                    raise AssertionError(errors.read().decode())
+                if status := child.wait(timeout=8):
+                    raise AssertionError(diagnostic(f"exited with status {status} after publishing its port"))
             finally:
                 if child.poll() is None:
                     child.kill()
@@ -187,24 +195,39 @@ def date_case(command, wrong=False):
 
 
 def public_contracts(command):
+    # Compare the child's bound name with an independent CPython lookup.
+    start = time.monotonic()
+    command = [*command, socket.getfqdn("127.0.0.1")]
+    lookup = time.monotonic() - start
+    start = time.monotonic()
     with listener(command) as port:
+        legacy_start = time.monotonic() - start
         with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
             conn.sendall(b"GET /old\r\n")
             with conn.makefile("rb") as stream:
                 assert stream.read() == b"lower=0.9\n"
+    start = time.monotonic()
     with listener(command) as port:
+        persistent_start = time.monotonic() - start
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         try:
-            conn.putrequest("CHECK", "/new")
-            conn.putheader("X-Value", "one")
-            conn.putheader("x-value", "two")
-            conn.endheaders()
-            response = conn.getresponse()
-            assert response.status == 200, response.reason
-            assert response.getheader("Server").startswith("Overridden/10 ")
-            assert response.read() == b"X-Value=one\nx-value=two\n"
+            conn.connect()
+            first_socket = conn.sock
+            for connection in ("keep-alive", "close"):
+                conn.putrequest("CHECK", "/new")
+                conn.putheader("Connection", connection)
+                conn.putheader("X-Value", "one")
+                conn.putheader("x-value", "two")
+                conn.endheaders()
+                assert conn.sock is first_socket
+                response = conn.getresponse()
+                assert response.status == 200, response.reason
+                assert response.getheader("Connection") == connection
+                assert response.getheader("Server").startswith("Overridden/10 ")
+                assert response.read() == b"X-Value=one\nx-value=two\n"
         finally:
             conn.close()
+    return lookup, legacy_start, persistent_start
 
 
 def run_methods(tests, command):

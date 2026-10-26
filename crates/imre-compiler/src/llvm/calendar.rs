@@ -73,7 +73,9 @@ impl Emitter<'_, '_> {
             Op::ZoneName => self.call("imre_calendar_zonename", returns, &[get(0)]),
             _ => {
                 let name = match op {
+                    Op::Date => "imre_calendar_date",
                     Op::DateTime => "imre_calendar_datetime",
+                    Op::Combine => "imre_calendar_combine",
                     Op::Zone => "imre_calendar_zone",
                     Op::Utc => "imre_calendar_utc",
                     Op::ZoneLimit => "imre_calendar_zone_limit",
