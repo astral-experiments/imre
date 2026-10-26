@@ -435,6 +435,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
     finish(ctx, result)
 }
 
+/// Preserve the native function ABI used by previously compiled modules.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_def(
     ctx: *mut Context,
@@ -444,26 +445,47 @@ pub(super) unsafe extern "C" fn imre_dyn_def(
     parameters: Id,
     defaults: Id,
 ) -> Id {
+    // SAFETY: this entry point receives the same context-owned handles and native code.
+    unsafe {
+        imre_dyn_def_with_metadata(
+            ctx, code, scope, name, parameters, defaults, name, NONE, NONE, false,
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
+    ctx: *mut Context,
+    code: Code,
+    scope: Id,
+    name: Id,
+    parameters: Id,
+    defaults: Id,
+    qualname: Id,
+    doc: Id,
+    annotate: Id,
+    annotation_scope: bool,
+) -> Id {
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
     let owner = ctx.scope_data(scope);
     let class_cell = owner.class_cell;
-    let scope = if owner.class_body.is_some() {
+    let scope = if owner.class_body.is_some() && !annotation_scope {
         owner.parent.unwrap_or(scope)
     } else {
         scope
     };
-    let result = ctx.str_value(name).map(str::to_owned).map(|name| {
-        ctx.alloc(Value::Function {
-            name,
-            code,
-            scope,
-            class_cell,
-            parameters,
-            defaults,
-        })
+    let fields =
+        super::function_fields::FunctionFields::new(ctx, scope, name, qualname, doc, annotate);
+    let result = ctx.alloc(Value::Function {
+        fields,
+        code,
+        scope,
+        class_cell,
+        parameters,
+        defaults,
     });
-    finish(ctx, result)
+    finish(ctx, Ok(result))
 }
 
 #[unsafe(no_mangle)]

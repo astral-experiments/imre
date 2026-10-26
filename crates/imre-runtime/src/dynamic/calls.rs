@@ -412,6 +412,19 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
+            Value::Function { fields, .. } => {
+                if let Some(value) = self.function_attr(obj, fields, name)? {
+                    return Ok(value);
+                }
+            }
+            Value::Method { callable, receiver } => match name {
+                "__func__" => return Ok(callable),
+                "__self__" => return Ok(receiver),
+                _ if matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    return self.lookup_attr(callable, name);
+                }
+                _ => {}
+            },
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
@@ -588,6 +601,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Function { .. }) {
+            return self.set_function_attr(obj, name, value);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -811,13 +827,14 @@ impl Context {
                 Ok(instance)
             }
             Value::Function {
-                name,
+                fields,
                 scope,
                 class_cell,
                 code,
                 parameters,
                 defaults,
             } => {
+                let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
