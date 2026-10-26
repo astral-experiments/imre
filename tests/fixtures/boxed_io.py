@@ -60,6 +60,14 @@ def exercise(path):
             print(stream.read(1), stream.readline(), stream.readline())
         reader.close()
         print(reader.closed, reader.flushes, stream.seek(0), stream.read(2))
+        try:
+            stream.read(-2)
+        except ValueError:
+            print(stream.tell(), stream.readline(-2))
+    try:
+        stream.read(1 << 100)
+    except OverflowError:
+        print("closed read validates the size")
     raw = RawIOBase()
     try:
         raw.readinto(b"")

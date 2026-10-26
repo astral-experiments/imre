@@ -200,9 +200,32 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    let f = slot
+    let reader = slot
         .as_mut()
-        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
+        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"));
+    if matches!(name, "file.read" | "file.readline") {
+        let length = args
+            .get(1)
+            .map(|&id| ctx.as_integer(id))
+            .transpose()?
+            .unwrap_or(-1);
+        if name == "file.read" && length < -1 {
+            return Err(Error::new(
+                "ValueError",
+                "read length must be non-negative or -1",
+            ));
+        }
+        let mut bytes = Vec::new();
+        let mut input = reader?.take(u64::try_from(length).unwrap_or(u64::MAX));
+        if name == "file.readline" {
+            input.read_until(b'\n', &mut bytes)
+        } else {
+            input.read_to_end(&mut bytes)
+        }
+        .map_err(os_error)?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
+    let f = reader?;
     match name {
         "file.__enter__" => Ok(first),
         "file.fileno" => Ok(ctx.int(i64::from(f.get_ref().as_raw_fd()))),
@@ -241,22 +264,6 @@ pub(super) fn call(
                 }
             }
             Ok(ctx.int(count as i64))
-        }
-        "file.read" | "file.readline" => {
-            let length = args
-                .get(1)
-                .map(|&id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(-1);
-            let mut bytes = Vec::new();
-            let mut input = f.take(u64::try_from(length).unwrap_or(u64::MAX));
-            if name == "file.readline" {
-                input.read_until(b'\n', &mut bytes)
-            } else {
-                input.read_to_end(&mut bytes)
-            }
-            .map_err(os_error)?;
-            Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         _ => Err(Error::new(
             "AttributeError",
