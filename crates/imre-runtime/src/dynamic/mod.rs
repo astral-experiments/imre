@@ -3,6 +3,7 @@
 
 mod builtins;
 mod calls;
+mod enums;
 mod ffi;
 mod function_fields;
 mod operators;
@@ -115,7 +116,10 @@ impl Context {
     fn string_storage(&self, id: Id) -> Option<Id> {
         match self.heap.get(id) {
             Value::Str(_) => Some(id),
-            Value::Instance { text, .. } => *text,
+            Value::Instance {
+                scalar: Some(value),
+                ..
+            } if matches!(self.heap.get(*value), Value::Str(_)) => Some(*value),
             _ => None,
         }
     }
@@ -143,7 +147,7 @@ impl Context {
         Ok(value)
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
-        match self.heap.get(id) {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Int(n) => Ok(n.clone()),
             Value::Bool(b) => Ok(crate::Int::from(i64::from(*b))),
             _ => Err(Error::new("TypeError", "expected an integer")),
@@ -286,6 +290,15 @@ impl Context {
                 items.push(item);
             }
             return Ok(items);
+        }
+        if let Some(values) = self.enum_values(id) {
+            let Value::Dict(entries) = self.heap.get(values) else {
+                unreachable!()
+            };
+            return Ok(entries.iter().map(|&(_, member)| member).collect());
+        }
+        if let Value::MappingProxy(dict) = *self.heap.get(id) {
+            return self.items(dict);
         }
         match self.heap.get(id).clone() {
             Value::List(items)
