@@ -240,12 +240,44 @@ impl Function<'_, '_> {
         returns: Option<&ast::Expr>,
         body: Body<'_>,
     ) -> String {
+        let qualname = format!("{}{name}", self.prefix);
+        let prefix = if matches!(body, Body::Namespace(_)) {
+            format!("{qualname}.")
+        } else {
+            format!("{qualname}.<locals>.")
+        };
+        let doc = match &body {
+            Body::Statements(stmts) if self.output.keep_docstrings => {
+                crate::frontend::docstring(stmts)
+            }
+            Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
+                crate::frontend::docstring(&f.body)
+            }
+            _ => None,
+        };
+        let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
+        let entries = params.map_or_else(Vec::new, |p| {
+            crate::frontend::parameter_annotations(p, returns)
+        });
+        let annotate = if entries.is_empty() {
+            "0".into()
+        } else {
+            let code = self
+                .output
+                .code(self.source, String::new(), Body::Annotations(entries));
+            let aname = self.text("__annotate__");
+            let aqname = self.text(&format!("{qualname}.__annotate__"));
+            let sig = self.text(r#"{"posonly":["format"]}"#);
+            let defaults = self.op("dict", &[]);
+            self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+        };
+        let qualname = self.text(&qualname);
         let mut signature =
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let code = self.output.code(self.source, body);
+        let code = self.output.code(self.source, prefix, body);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
@@ -278,7 +310,33 @@ impl Function<'_, '_> {
         }
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
-        self.checked(&format!("call i64 @imre_dyn_def(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults})", self.scope))
+        self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope))
+    }
+
+    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+        // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
+        let format = self.lookup("format");
+        let two = self.integer(2);
+        let unsupported = self.op(">", &[&format, &two]);
+        let bad = self.name("b");
+        let good = self.name("b");
+        let condition = self.truth(&unsupported);
+        self.branch(&condition, &bad, &good);
+        self.label(&bad);
+        let error = self.lookup("NotImplementedError");
+        self.raise(&error, "0");
+        self.label(&good);
+        let values = self.op("dict", &[]);
+        for &(name, expression) in entries {
+            let key = self.text(name);
+            let value = if self.source.string_annotations {
+                self.text(&crate::frontend::annotation_spelling(expression))
+            } else {
+                self.expr(expression)
+            };
+            self.op("put", &[&values, &key, &value]);
+        }
+        self.end(&format!("ret i64 {values}"));
     }
 
     fn decorated(&mut self, name: &ast::Identifier, decorators: &[String], mut value: String) {
@@ -562,7 +620,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     match body {
         Body::Statements(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
-        Body::Namespace(_) | Body::Unsupported(..) => {}
+        Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
     }
     captures.0
 }

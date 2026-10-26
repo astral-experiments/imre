@@ -485,18 +485,19 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
 
 pub(super) fn method(
     ctx: &mut Context,
+    owner: &str,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if STR_METHODS.contains(&name) {
+        if owner == "str" {
             type_error(format!("unbound method str.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
     })?;
-    if STR_METHODS.contains(&name) && ctx.str_value(receiver).is_err() {
+    if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
@@ -537,7 +538,7 @@ pub(super) fn method(
         }
         let mut bound = |arg: Option<&Id>| match arg {
             None | Some(&NONE) => Ok(None),
-            Some(&arg) => ctx.try_index_integer(arg)?.map(Some).ok_or_else(|| {
+            Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
                 type_error("slice indices must be integers or None or have an __index__ method")
             }),
         };
@@ -550,6 +551,28 @@ pub(super) fn method(
             end.as_ref(),
         );
         return Ok(ctx.alloc(Value::Int(found)));
+    }
+    if name == "rstrip"
+        && let Value::Bytes(data) = ctx.heap.get(receiver)
+    {
+        positional(name, kwargs)?;
+        arity(name, args, 0, 1)?;
+        let chars: &[u8] = match args.first().filter(|&&id| id != NONE) {
+            None => b" \t\n\x0b\x0c\r",
+            Some(&id) => match ctx.heap.get(id) {
+                Value::Bytes(chars) | Value::ByteArray(chars) => chars,
+                _ => {
+                    return Err(type_error(format!(
+                        "a bytes-like object is required, not '{}'",
+                        ctx.type_name(id)
+                    )));
+                }
+            },
+        };
+        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
+            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+            None => receiver,
+        });
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {

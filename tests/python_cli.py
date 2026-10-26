@@ -94,6 +94,7 @@ def main():
 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -316,6 +317,7 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
+            "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
@@ -364,6 +366,8 @@ def report(text):
         compare("-IB", "-c", imports + "arithmetic.exercise('port.txt')")
         if Path("/dev/full").exists():
             compare("-IB", "-c", imports + "arithmetic.full_device()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_urlsafe_base64.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,
             "-IB",

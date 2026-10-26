@@ -26,6 +26,11 @@ def current():
             method(None, ":")
         except TypeError as error:
             print(error)
+    print(b"token==".rstrip(b"="))
+    try:
+        str.rstrip(b"token==", "=")
+    except TypeError as error:
+        print(error)
     for method in (text.partition, text.rpartition):
         separator = ":"
         result = method(separator)

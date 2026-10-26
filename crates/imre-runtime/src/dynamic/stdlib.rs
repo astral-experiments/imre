@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
+mod functools;
 mod hashlib;
 mod hmac;
 mod time;
@@ -36,6 +37,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "site"
             | "selectors"
             | "struct"
+            | "base64"
             | "json"
             | "datetime"
             | "time"
@@ -270,6 +272,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 ],
             )
         }
+        ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
+        ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("os", "name") => ctx.text("posix"),
         ("os" | "os.path", "sep") => ctx.text("/"),
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
@@ -315,6 +319,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_implementation",
         )
         | ("struct", "calcsize" | "unpack" | "error")
+        | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | (
             "urllib.parse",
@@ -325,7 +330,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
-        | ("functools", "lru_cache" | "partial")
+        | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -417,6 +422,7 @@ pub(super) fn call(
         }));
     }
     let (max_args, keywords): (usize, &[&str]) = match name {
+        "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.loads" => (1, &["s"]),
@@ -425,6 +431,7 @@ pub(super) fn call(
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
         "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
+        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => (1, &["s"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -466,6 +473,38 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
+            let id = option(args, 0, kwargs, "s")?
+                .ok_or_else(|| Error::new("TypeError", "missing required argument 's'"))?;
+            let decode = name == "base64.urlsafe_b64decode";
+            let bytes = match ctx.heap.get(id) {
+                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+                Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
+                Value::Str(_) if decode => {
+                    return Err(Error::new(
+                        "ValueError",
+                        "string argument should contain only ASCII characters",
+                    ));
+                }
+                _ => {
+                    let ty = ctx.type_name(id);
+                    let message = if decode {
+                        format!(
+                            "argument should be a bytes-like object or ASCII string, not '{ty}'"
+                        )
+                    } else {
+                        format!("a bytes-like object is required, not '{ty}'")
+                    };
+                    return Err(Error::new("TypeError", message));
+                }
+            };
+            let result = if decode {
+                crate::objects::urlsafe_decode(bytes)?
+            } else {
+                crate::objects::urlsafe_encode(bytes)?
+            };
+            ctx.alloc(Value::Bytes(result))
+        }
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
@@ -640,6 +679,7 @@ pub(super) fn call(
             let text = json::dumps(ctx, input, kwargs)?;
             ctx.text(text)
         }
+        "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools.lru_cache" => {
             if args.is_empty() && kwargs.is_empty() {
                 ctx.alloc(Value::Native("functools._cached".into()))

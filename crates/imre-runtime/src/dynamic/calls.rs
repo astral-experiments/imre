@@ -119,8 +119,10 @@ impl Context {
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
                 Value::Native(name) => {
-                    matches!(name.as_str(), "object.__setattr__" | "object.__init__")
-                        || name.starts_with("dict.")
+                    matches!(
+                        name.as_str(),
+                        "object.__getattribute__" | "object.__setattr__" | "object.__init__"
+                    ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -145,7 +147,7 @@ impl Context {
         name: &str,
     ) -> Result<Id> {
         let member = self.class_attr(class, name);
-        let attribute = match (member, field) {
+        match (member, field) {
             (Some(member), _)
                 if self.data_descriptor(member)
                     && (self.slot(member, "__get__").is_some()
@@ -153,25 +155,18 @@ impl Context {
             {
                 self.bind_attribute(member, object, class)
             }
+            // Without a Python class member, object.__class__ is a data descriptor.
+            (None, _) if name == "__class__" => Ok(class),
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) => Err(Error::new(
-                "AttributeError",
-                format!("{} has no attribute {name:?}", self.display(object)),
-            )),
-        };
-        match attribute {
-            Err(error) if error.kind == "AttributeError" => {
-                let Some(hook) = self.class_attr(class, "__getattr__") else {
-                    return Err(error);
-                };
-                let callable = self.bind_attribute(hook, object, class)?;
-                let name = self.text(name);
-                self.call(callable, vec![name], Vec::new())
+            (None, None) if name == "__getattribute__" => {
+                let method = self.builtin("object.__getattribute__");
+                self.bind_attribute(method, object, class)
             }
-            value => value,
+            (None, None) => Err(self.missing_attribute(object, name)),
         }
     }
+
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
@@ -375,7 +370,8 @@ impl Context {
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
                     || (name == "RuntimeError" && kind == "RecursionError")
-                    || (name == "ValueError" && kind == "JSONDecodeError")
+                    || (name == "ValueError"
+                        && matches!(kind, "JSONDecodeError" | "binascii.Error"))
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (matches!(name.as_str(), "OSError" | "ConnectionError")
@@ -405,7 +401,47 @@ impl Context {
             _ => false,
         }
     }
+    fn missing_attribute(&self, obj: Id, name: &str) -> Error {
+        Error::new(
+            "AttributeError",
+            format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
+        )
+    }
+
+    fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
+        let callable = self.bind_attribute(hook, obj, class)?;
+        let key = self.text(name);
+        self.call(callable, vec![key], Vec::new())
+    }
+
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return self.default_get_attr(obj, name);
+        };
+        let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
+            self.attribute_hook(hook, obj, class, name)
+        } else {
+            self.default_get_attr(obj, name)
+        };
+        match attribute {
+            Err(error) if error.kind == "AttributeError" => {
+                let Some(hook) = self.class_attr(class, "__getattr__") else {
+                    return Err(error);
+                };
+                self.attribute_hook(hook, obj, class, name)
+            }
+            result => result,
+        }
+    }
+
+    /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
+    pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+            return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
+        }
+        if name == "__class__" {
+            return self.exact_type(obj);
+        }
         match self.heap.get(obj).clone() {
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
@@ -415,6 +451,19 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
+            Value::Function { fields, .. } => {
+                if let Some(value) = self.function_attr(obj, fields, name)? {
+                    return Ok(value);
+                }
+            }
+            Value::Method { callable, receiver } => match name {
+                "__func__" => return Ok(callable),
+                "__self__" => return Ok(receiver),
+                _ if matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    return self.lookup_attr(callable, name);
+                }
+                _ => {}
+            },
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
@@ -518,7 +567,8 @@ impl Context {
                 }
             }
             Value::Native(class)
-                if class == "object" && matches!(name, "__setattr__" | "__init__") =>
+                if class == "object"
+                    && matches!(name, "__getattribute__" | "__setattr__" | "__init__") =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
@@ -544,9 +594,6 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-            }
-            Value::Instance { class, fields, .. } => {
-                return self.instance_attribute(obj, class, fields.get(name).copied(), name);
             }
             Value::NamedTuple {
                 class,
@@ -578,10 +625,7 @@ impl Context {
                 receiver: obj,
             }));
         }
-        Err(Error::new(
-            "AttributeError",
-            format!("{} has no attribute {name:?}", self.display(obj)),
-        ))
+        Err(self.missing_attribute(obj, name))
     }
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
@@ -593,6 +637,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Function { .. }) {
+            return self.set_function_attr(obj, name, value);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -816,13 +863,14 @@ impl Context {
                 Ok(instance)
             }
             Value::Function {
-                name,
+                fields,
                 scope,
                 class_cell,
                 code,
                 parameters,
                 defaults,
             } => {
+                let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
