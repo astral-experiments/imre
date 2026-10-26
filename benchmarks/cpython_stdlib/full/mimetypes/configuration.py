@@ -20,6 +20,11 @@ print(db.guess_file_type("some.imre-custom"))
 db.readfp(StringIO("application/local one two # comment\n"))
 print(db.guess_type("another.ONE"))
 print(db.guess_all_extensions("application/local"))
+table = "text/stream-first cr-first\rtext/stream-second cr-second"
+db.readfp(StringIO(table, newline="\n"))
+assert db.guess_file_type("a.cr-second")[0] == "text/stream-first"
+db.readfp(StringIO(table, newline=""))
+assert db.guess_file_type("a.cr-second")[0] == "text/stream-second"
 db.add_type("text/local", ".two", False)
 print(db.guess_type("name.two", False))
 db.add_type("text/local", ".three", False)

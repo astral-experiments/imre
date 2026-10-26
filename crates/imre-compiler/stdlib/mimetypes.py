@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import codecs
 import posixpath
-from io import StringIO
 from pathlib import Path
+from typing import TextIO
 from urllib.parse import urlsplit
 
 
@@ -91,8 +91,8 @@ class _Registry:
             return extensions[0]
         return None
 
-    def _read_text(self, data: str, strict: bool) -> None:
-        for line in data.split('\n'):
+    def readfp(self, fp: TextIO, strict: bool = True) -> None:
+        while line := fp.readline():
             words = line.split()
             if words and not words[0].startswith('#'):
                 for extension in words[1:]:
@@ -102,10 +102,7 @@ class _Registry:
 
     def read(self, filename: str, strict: bool = True) -> None:
         with open(filename, encoding='utf-8') as fp:
-            self._read_text(fp.read(), strict)
-
-    def readfp(self, fp: StringIO, strict: bool = True) -> None:
-        self._read_text(fp.read(), strict)
+            self.readfp(fp, strict)
 
 
 def _filename(path: str | bytes | Path) -> str:
@@ -231,7 +228,7 @@ def read_mime_types(file: str) -> dict[str, str] | None:
         return None
     with fp:
         db = MimeTypes()
-        db._read_text(fp.read(), True)
+        db.readfp(fp, True)
         return db.types_map[1]
 
 
