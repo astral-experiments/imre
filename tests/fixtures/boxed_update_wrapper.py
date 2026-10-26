@@ -66,3 +66,17 @@ def subclass_annotations(fmt):
 wrapper.__annotate__ = subclass_annotations
 lazy_annotations = wrapper.__annotations__
 print(isinstance(lazy_annotations, Annotations), lazy_annotations["format"])
+
+
+class FunctionNamespace(dict):
+    def __getitem__(self, key):
+        raise AssertionError("attribute lookup called __getitem__")
+
+    def __setitem__(self, key, value):
+        raise AssertionError("attribute assignment called __setitem__")
+
+
+namespace = FunctionNamespace(existing=7)
+wrapper.__dict__ = namespace
+wrapper.added = 8
+print(wrapper.__dict__ is namespace, wrapper.existing, dict.__getitem__(namespace, "added"))
