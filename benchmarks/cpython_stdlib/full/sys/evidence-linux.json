@@ -8,7 +8,7 @@
   "denominator": 97,
   "distinct_ids": 97,
   "counts": {
-    "blocked": 75,
+    "blocked": 74,
     "failed": 1,
     "host-driven-native-operation": 5,
     "mixed": 2,
@@ -124,7 +124,7 @@
   "denominator": 97,
   "distinct_ids": 97,
   "counts": {
-    "blocked": 75,
+    "blocked": 74,
     "failed": 1,
     "host-driven-native-operation": 5,
     "mixed": 2,
