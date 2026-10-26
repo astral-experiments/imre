@@ -1,0 +1,77 @@
+{
+  "upstream_id": "test.test_sys.SysModuleTest.test_ioencoding",
+  "whole_methods_added": 0,
+  "files": {
+    "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/encodings/cp424.py": "6753daf122df44ab9a4fb28b4fc493e2a521ddde"
+  },
+  "defined_bytes": 218,
+  "undefined_bytes": [
+    "70",
+    "72",
+    "73",
+    "75",
+    "76",
+    "77",
+    "80",
+    "8c",
+    "8d",
+    "8e",
+    "9a",
+    "9b",
+    "9c",
+    "9e",
+    "aa",
+    "ab",
+    "ac",
+    "ad",
+    "ae",
+    "cb",
+    "cc",
+    "cd",
+    "ce",
+    "cf",
+    "db",
+    "dc",
+    "dd",
+    "de",
+    "df",
+    "eb",
+    "ec",
+    "ed",
+    "ee",
+    "ef",
+    "fb",
+    "fc",
+    "fd",
+    "fe"
+  ],
+  "source_sha256": "7c91db3561b6fed1f1eca551293407d7d55ea43c26352b441ad0822e7c0eba87",
+  "reference_child": {
+    "source": "print(chr(0xa2))",
+    "stdout_hex": "4a25"
+  },
+  "levels": {
+    "0": {
+      "stdout_sha256": "ce9abc14e139255ed124c616df6bf8392c5cebb39fc00b09c7efc90c7b04d34c",
+      "bytes": 11066,
+      "lines": 249,
+      "original_child": {
+        "stdout_hex": "4a25",
+        "status": 0,
+        "outcome": "pass"
+      }
+    },
+    "3": {
+      "stdout_sha256": "ce9abc14e139255ed124c616df6bf8392c5cebb39fc00b09c7efc90c7b04d34c",
+      "bytes": 11066,
+      "lines": 249,
+      "original_child": {
+        "stdout_hex": "4a25",
+        "status": 0,
+        "outcome": "pass"
+      }
+    }
+  }
+}
