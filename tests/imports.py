@@ -35,6 +35,19 @@ REJECTED = {
     "local_module_shadow": ({"main.py": "import helper\ndef g() -> None:\n    helper = 1\n", "helper.py": HELPER}, "rebinding"),
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
+    "cached_target_early_alias": ({
+        "main.py": "import pkg.parent\n", "pkg/__init__.py": "", "pkg/child.py": HELPER,
+        "pkg/parent.py": "from . import child\nvalue = late(1)\nfrom .child import f as late\n",
+    }, "import before its binding is available"),
+    "cached_target_early_alias_through_function": ({
+        "main.py": "import pkg.parent\n", "pkg/__init__.py": "", "pkg/child.py": HELPER,
+        "pkg/parent.py": ("from . import child\ndef read() -> int:\n    return late(1)\n"
+                          "value = read()\nfrom .child import f as late\n"),
+    }, "import before its binding is available"),
+    "unpublished_child_attribute": ({
+        "main.py": "import pkg.child\n", "pkg/__init__.py": "", "pkg/other.py": "",
+        "pkg/child.py": "import pkg\n" + HELPER + "observed = pkg.child.f(1)\nfrom . import other\n",
+    }, "import before its binding is available"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
@@ -77,6 +90,17 @@ ACCEPTED = {
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
+    "ordered_library_effects": {
+        "main.py": "from pkg.parent import value\nprint(value)\n", "pkg/__init__.py": "",
+        "pkg/parent.py": 'print("parent prefix")\nfrom . import child\nprint("parent suffix")\nvalue = child.value\n',
+        "pkg/child.py": 'print("child init")\nvalue = 42\n',
+    },
+    "delayed_cached_alias": {
+        "main.py": "from pkg.parent import read\nprint(read())\n", "pkg/__init__.py": "",
+        "pkg/child.py": 'print("child once")\n' + HELPER,
+        "pkg/parent.py": ('from . import child\ndef read() -> int:\n    return late(41)\n'
+                          'print("before alias")\nfrom .child import f as late\n'),
+    },
     "guard_before_import": {
         "main.py": "import pkg.guard\n",
         "pkg/__init__.py": "",

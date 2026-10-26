@@ -154,7 +154,7 @@ struct Checkpoint {
     body: Range<usize>,
     initialized: usize,
     definitions: HashSet<DefinitionId>,
-    class_reads: HashSet<DefinitionId>,
+    binding_reads: HashSet<DefinitionId>,
 }
 
 impl Checker<'_> {
@@ -249,7 +249,7 @@ impl Checker<'_> {
                 body: start..body.len(),
                 initialized,
                 definitions: available.clone(),
-                class_reads: std::mem::take(self.class_reads.get_mut()),
+                binding_reads: std::mem::take(self.class_reads.get_mut()),
             });
         }
         for (name, slot, previous) in locals.into_iter().rev() {
@@ -385,19 +385,41 @@ impl Initialization {
         let module = &checker.graph.modules[checker.module];
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
+        let complete = range.end == module.parsed.syntax().body.len();
         for index in range {
             let statement = &module.parsed.syntax().body[index];
-            if module.type_guards.binary_search(&index).is_ok()
-                || local_functions::type_variable(checker.graph, checker.module, statement)
-            {
-                continue;
-            }
             let definition = DefinitionId {
                 module: checker.module,
                 statement: index,
             };
             if checker.graph.unused_literal_global(definition) {
                 continue;
+            }
+            let mut imports = HashSet::new();
+            checker.graph.ordered_reads(
+                checker.module,
+                std::slice::from_ref(statement),
+                false,
+                &mut imports,
+            );
+            if !imports.is_empty() {
+                checkpoints.push(Checkpoint {
+                    statement: index,
+                    body: body.len()..body.len(),
+                    initialized: checker.globals.types.borrow().len(),
+                    definitions: available.clone(),
+                    binding_reads: imports,
+                });
+            }
+            if module.type_guards.binary_search(&index).is_ok()
+                || local_functions::type_variable(checker.graph, checker.module, statement)
+            {
+                continue;
+            }
+            if checker.graph.has_ordered_imports()
+                && matches!(statement, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))
+            {
+                available.insert(definition);
             }
             match statement {
                 ast::Stmt::ClassDef(_) => {
@@ -449,7 +471,7 @@ impl Initialization {
                         body: start..body.len(),
                         initialized: checker.globals.types.borrow().len(),
                         definitions: available.clone(),
-                        class_reads: std::mem::take(checker.class_reads.get_mut()),
+                        binding_reads: std::mem::take(checker.class_reads.get_mut()),
                     });
                     continue;
                 }
@@ -489,7 +511,13 @@ impl Initialization {
                 body: start..body.len(),
                 initialized,
                 definitions: available.clone(),
-                class_reads: std::mem::take(checker.class_reads.get_mut()),
+                binding_reads: std::mem::take(checker.class_reads.get_mut()),
+            });
+        }
+        if complete && checker.graph.has_ordered_imports() {
+            available.insert(DefinitionId {
+                module: checker.module,
+                statement: module.parsed.syntax().body.len(),
             });
         }
         Ok(Self {
@@ -511,7 +539,7 @@ impl Initialization {
         &self,
         graph: &SourceGraph,
         functions: &[ir::Function],
-        class_reads: &[HashSet<DefinitionId>],
+        binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
     ) -> Result<(), String> {
@@ -521,7 +549,7 @@ impl Initialization {
             let mut calls = Vec::new();
             let mut references = Vec::new();
             let mut visited = HashSet::new();
-            let mut required_classes = checkpoint.class_reads.clone();
+            let mut required_bindings = checkpoint.binding_reads.clone();
             collect(
                 &self.function.body[checkpoint.body.clone()],
                 &mut reads,
@@ -541,7 +569,7 @@ impl Initialization {
                         "module initialization calls a definition before it is available",
                     ));
                 }
-                required_classes.extend(&class_reads[id]);
+                required_bindings.extend(&binding_reads[id]);
                 collect(
                     &functions[id].body,
                     &mut reads,
@@ -550,11 +578,27 @@ impl Initialization {
                     targets,
                 );
             }
-            if !required_classes.is_subset(&checkpoint.definitions) {
-                return Err(module.error(
-                    &module.parsed.syntax().body[checkpoint.statement],
-                    "module initialization references a class before it is available",
-                ));
+            if let Some(read) = required_bindings
+                .difference(&checkpoint.definitions)
+                .min_by_key(|read| (read.module, read.statement))
+            {
+                let reason = match graph.modules[read.module]
+                    .parsed
+                    .syntax()
+                    .body
+                    .get(read.statement)
+                {
+                    None | Some(ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)) => {
+                        "module initialization references an import before its binding is available"
+                    }
+                    Some(ast::Stmt::FunctionDef(_)) => {
+                        "module initialization references a function before it is available"
+                    }
+                    _ => "module initialization references a class before it is available",
+                };
+                return Err(
+                    module.error(&module.parsed.syntax().body[checkpoint.statement], reason)
+                );
             }
             if references.iter().any(|&id| {
                 callables
