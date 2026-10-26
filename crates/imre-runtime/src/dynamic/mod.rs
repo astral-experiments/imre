@@ -21,6 +21,21 @@ struct SourceModule {
     code: Code,
 }
 
+enum IteratorSlice<'a> {
+    Values(&'a [Id]),
+    Bytes(&'a [u8]),
+}
+
+impl IteratorSlice<'_> {
+    /// Counts positions without allocating boxed integers for bytes.
+    fn len(&self) -> usize {
+        match self {
+            Self::Values(values) => values.len(),
+            Self::Bytes(bytes) => bytes.len(),
+        }
+    }
+}
+
 pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
@@ -90,6 +105,18 @@ impl Context {
             Err(Error::new("TypeError", "expected str"))
         }
     }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
+        }
+    }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
             Value::Int(n) => Ok(n.clone()),
@@ -111,7 +138,7 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
             Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
-            Value::List(_) | Value::Tuple(_) => id,
+            Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
             Value::Instance {
                 dictionary: Some(_),
                 ..
@@ -147,31 +174,34 @@ impl Context {
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
-    fn iterator_remaining(&self, id: Id) -> Result<&[Id]> {
+    fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
         let Value::Iterator { sequence, offset } = self.heap.get(id) else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
         let Some(sequence) = sequence else {
-            return Ok(&[]);
+            return Ok(IteratorSlice::Values(&[]));
         };
-        let (Value::List(values) | Value::Tuple(values)) = self.heap.get(*sequence) else {
-            unreachable!("iterator sequence")
-        };
-        Ok(values.get(*offset..).unwrap_or_default())
+        Ok(match self.heap.get(*sequence) {
+            Value::List(values) | Value::Tuple(values) => {
+                IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+            }
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => {
+                IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
+            }
+            _ => unreachable!("iterator sequence"),
+        })
     }
 
     /// Reads the current position and permanently detaches the source on exhaustion.
-    fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+    fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
         if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(queue.front().copied());
+            return Ok(!queue.is_empty());
         }
-        let item = self.iterator_remaining(id)?.first().copied();
-        if item.is_none()
-            && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
-        {
+        let more = self.iterator_remaining(id)?.len() != 0;
+        if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
         }
-        Ok(item)
+        Ok(more)
     }
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
@@ -179,13 +209,17 @@ impl Context {
         if matches!(self.heap.get(id), Value::AstWalk(_)) {
             return stdlib::ast::advance(self, id);
         }
-        let item = self.peek_item(id)?;
-        if item.is_some()
-            && let Value::Iterator { offset, .. } = self.heap.get_mut(id)
-        {
+        if !self.iterator_has_item(id)? {
+            return Ok(None);
+        }
+        let item = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+        };
+        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
             *offset += 1;
         }
-        Ok(item)
+        Ok(Some(item))
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -212,7 +246,16 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let values = self.iterator_remaining(id)?.to_vec();
+                let values = match self.iterator_remaining(id)? {
+                    IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Bytes(bytes) => {
+                        let mut values = Vec::with_capacity(bytes.len());
+                        while let Some(byte) = self.next_item(id)? {
+                            values.push(byte);
+                        }
+                        return Ok(values);
+                    }
+                };
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
                 }
@@ -391,10 +434,10 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            match name {
-                "urllib" => locations.push(PathBuf::from("<imre stdlib>/urllib")),
-                "collections" => locations.push(stdlib::package_path(self, name)?),
-                _ => {}
+            if matches!(name, "email" | "urllib") {
+                locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
+            } else if name == "collections" {
+                locations.push(stdlib::package_path(self, name)?);
             }
             None
         } else {
@@ -494,6 +537,17 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "sys" => {
+                for (name, original, stderr) in [
+                    ("stdout", "__stdout__", false),
+                    ("stderr", "__stderr__", true),
+                ] {
+                    let stream =
+                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    self.bind(scope, name, stream);
+                    self.bind(scope, original, stream);
+                }
+            }
             "collections" => {
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);
