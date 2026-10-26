@@ -45,3 +45,12 @@ On Linux, add `--prove-native` to the compiler invocation to require runtime evi
 A separate [typed WSGI environment fixture](../../tests/fixtures/files/boxed_memory_streams.py) stores real memory streams alongside strings, tuples and flags in `dict[str, object]`. The application checks a retrieved value with `isinstance(value, BytesIO)` or `isinstance(value, StringIO)` before using its stream methods. `typing.cast` returns its operand and supplies no runtime class check. Ordinary binary file descriptors and unannotated heterogeneous dictionary inference are outside this fixture's scope.
 
 The [handler scan probe](emit_werkzeug_handler_scan.py) copies `_has_level_handler` from the locked Werkzeug wheel. It tests four handler chains, including a property that must remain unevaluated after a match. The logger and handler inputs are fixture classes. Run the emitted file under CPython and with `imre build --runtime-imports` at O0 and O3.
+
+### Werkzeug access logging
+
+The [access-log fixture](werkzeug_access_log_consumer.py) calls the original Werkzeug `_log` twice. It checks logger identity, the INFO level, one cached StreamHandler, its stream identity and both lines written to stderr. The [driver](werkzeug_access_log.py) imports the complete, hash-checked `werkzeug/_internal.py` under a neutral name. This isolates logging from earlier imports in `werkzeug.__init__`. Run it with the same seven-wheel directory and compiler/runtime pair as the TCP gate.
+
+```sh
+python3.14 benchmarks/flask/werkzeug_access_log.py --compiler /path/to/imre \
+  --runtime /path/to/libimre_runtime.a --wheelhouse /path/to/wheels --output access-log.json
+```

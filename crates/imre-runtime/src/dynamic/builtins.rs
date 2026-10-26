@@ -370,7 +370,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
     Ok(values)
 }
 
-fn boolean(value: bool) -> Id {
+pub(super) fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 

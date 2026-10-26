@@ -23,6 +23,7 @@ mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
+mod logging;
 mod marshal;
 mod operator;
 mod pickle;
@@ -54,6 +55,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "json"
+            | "_imre_logging"
             | "marshal"
             | "pickle"
             | "datetime"
@@ -208,6 +210,9 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    if module == "_imre_logging" && logging::is_function(name) {
+        return Ok(ctx.builtin(&format!("{module}.{name}")));
+    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
@@ -429,6 +434,9 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("_imre_logging.") {
+        return logging::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);

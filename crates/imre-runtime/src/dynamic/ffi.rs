@@ -367,6 +367,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         modules: HashMap::new(),
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
+        logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -727,6 +728,7 @@ impl Context {
             self.modules
                 .values()
                 .chain(self.classes.values())
+                .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_code_objects.values())
