@@ -1772,6 +1772,7 @@ fn resolve_binding(
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
+const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
 const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
@@ -1796,6 +1797,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     }
     module.symbol(name).or_else(|| {
         let implementation = match module {
+            IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
             IntrinsicModule::LoggingHandlers if !name.starts_with('_') => LOGGING_HANDLER_CLASSES,
             IntrinsicModule::Textwrap => textwrap_implementation(name)?,
@@ -1808,7 +1810,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
+                    (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Textwrap, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))))
         })
@@ -2555,6 +2558,9 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Inspect)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
+            .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 include_str!("../stdlib/logging/classes.py"),
@@ -2646,6 +2652,9 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if name == INSPECT_FUNCTIONS {
+            return Err("the private inspect implementation is not an importable module".into());
+        }
         if matches!(name, LOGGING_CLASSES | LOGGING_HANDLER_CLASSES) {
             return Err("the private logging implementation is not an importable module".into());
         }
