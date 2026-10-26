@@ -15,6 +15,7 @@ mod binascii;
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::concat_bytes;
 mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};

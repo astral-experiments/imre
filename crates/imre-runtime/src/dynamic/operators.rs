@@ -635,6 +635,22 @@ impl Context {
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
+                (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                    if y.is_empty() {
+                        return Ok(a);
+                    }
+                    if x.is_empty() && matches!(self.heap.get(b), Value::Bytes(_)) {
+                        return Ok(b);
+                    }
+                    let bytes = crate::objects::concat_bytes(x, y)?;
+                    return Ok(self.alloc(Value::Bytes(bytes)));
+                }
+                (Value::Bytes(_), _) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("can't concat {} to bytes", self.type_name(b)),
+                    ));
+                }
                 (Value::List(x), Value::List(y)) => {
                     return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
                 }
