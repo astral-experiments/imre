@@ -1,7 +1,7 @@
 use super::*;
 
 impl Context {
-    fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+    pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return self.own_class_attr(class, name);
         };
