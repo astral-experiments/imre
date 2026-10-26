@@ -18,6 +18,7 @@ declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
 declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
+declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -49,6 +50,7 @@ pub(crate) fn emit(
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let location = SourceMap {
             package,
+            text: source,
             string_annotations: parsed.syntax().body.iter().any(|s| {
                 matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
                 && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
@@ -87,6 +89,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    text: &'a str,
     package: &'a str,
     string_annotations: bool,
     file: &'a str,
@@ -103,6 +106,7 @@ impl SourceMap<'_> {
 struct Output {
     keep_docstrings: bool,
     strings: HashMap<Vec<u8>, u32>,
+    positions: HashMap<[usize; 4], usize>,
     constants: String,
     functions: String,
     count: u32,
@@ -151,6 +155,16 @@ impl Output {
         format!("@str{index}")
     }
 
+    fn position(&mut self, span: [usize; 4]) -> String {
+        let next = self.positions.len();
+        let index = *self.positions.entry(span).or_insert(next);
+        if index == next {
+            let [line, start, split, end] = span;
+            writeln!(self.constants, "@pos{index} = private unnamed_addr constant [4 x i32] [i32 {line}, i32 {start}, i32 {split}, i32 {end}]").unwrap();
+        }
+        format!("@pos{index}")
+    }
+
     fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
@@ -169,6 +183,7 @@ impl Output {
             loops: Vec::new(),
             exits: Vec::new(),
             caught: Vec::new(),
+            simple_call: None,
         };
         match body {
             Body::Namespace(stmts) => {
@@ -222,6 +237,7 @@ struct Function<'a, 'p> {
     loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
+    simple_call: Option<ruff_text_size::TextRange>,
 }
 
 #[derive(Clone)]
@@ -284,14 +300,25 @@ impl Function<'_, '_> {
     }
 
     fn op(&mut self, name: &str, args: &[&str]) -> String {
+        self.op_at(name, args, None)
+    }
+
+    fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
-        self.checked(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {})",
+        let fixed = format!(
+            "ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}",
             arg(0),
             arg(1),
             arg(2)
-        ))
+        );
+        let invocation = if let Some(span) = span {
+            let position = self.output.position(span);
+            format!("call i64 @imre_dyn_op_at({fixed}, ptr {position})")
+        } else {
+            format!("call i64 @imre_dyn_op({fixed})")
+        };
+        self.checked(&invocation)
     }
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
@@ -356,6 +383,37 @@ impl Function<'_, '_> {
     fn unsupported(&mut self, what: &str) -> String {
         let what = self.text(what);
         self.op("unsupported", &[&what])
+    }
+
+    fn expression_span(
+        &self,
+        expr: &ast::Expr,
+        prefix: &ast::Expr,
+        opener: u8,
+    ) -> Option<[usize; 4]> {
+        let range = expr.range();
+        if self.simple_call == Some(range) {
+            return None;
+        }
+        let start = range.start().to_usize();
+        let end = range.end().to_usize();
+        let prefix_end = prefix.end().to_usize();
+        let text = self.source.text.as_bytes();
+        if text.get(start..end)?.contains(&b'\n') {
+            return None;
+        }
+        let split = prefix_end
+            + text
+                .get(prefix_end..end)?
+                .iter()
+                .position(|&b| b == opener)?;
+        let line = self.source.line(range.start());
+        let beginning = if line == 1 {
+            0
+        } else {
+            self.source.newlines[line - 2] + 1
+        };
+        Some([line, start - beginning, split - beginning, end - beginning])
     }
 
     fn checkpoint(&mut self, node: &impl Ranged) {
