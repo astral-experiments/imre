@@ -1054,6 +1054,8 @@ pub(crate) enum Builtin {
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
+    /// object.__repr__ for a rooted source instance, bypassing its __repr__ override.
+    DefaultRecordRepr,
     Len,
     LengthResult,
     Abs,

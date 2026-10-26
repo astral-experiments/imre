@@ -119,6 +119,7 @@ mod unions;
 mod unittest;
 mod unittest_bound;
 mod unittest_equality;
+mod unittest_identity;
 mod unittest_loader;
 mod unittest_main;
 mod unittest_mock;
@@ -6464,46 +6465,7 @@ impl<'a> Checker<'a> {
                         }
                         _ => unreachable!(),
                     };
-                    let mut result = Expr {
-                        ty: Type::Bool,
-                        kind: match value.kind {
-                            ExprKind::Builtin(
-                                Builtin::RegexCapture {
-                                    operation: RegexCapture::Group,
-                                    known,
-                                },
-                                args,
-                            ) => ExprKind::Builtin(
-                                Builtin::RegexCapture {
-                                    operation: RegexCapture::Absent,
-                                    known,
-                                },
-                                args,
-                            ),
-                            _ if matches!(value.ty, Type::Document(_)) => ExprKind::Builtin(
-                                Builtin::Document(ir::DocumentOp::IsNull),
-                                vec![value],
-                            ),
-                            _ if value.ty == Type::ObjectValue => ExprKind::Builtin(
-                                Builtin::ExceptionFieldIdentity { reversed: false },
-                                vec![
-                                    value,
-                                    Expr {
-                                        ty: Type::None,
-                                        kind: ExprKind::None,
-                                    },
-                                ],
-                            ),
-                            _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
-                        },
-                    };
-                    if compare.ops[0] == ast::CmpOp::IsNot {
-                        result = Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Not(Box::new(result)),
-                        };
-                    }
-                    return Ok(result);
+                    return Ok(Self::identity_is_none(value, compare.ops[0]));
                 }
                 let mut values = Vec::new();
                 let mut exit = None;

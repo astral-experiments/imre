@@ -142,7 +142,7 @@ def main():
         sources = [source]
     else:
         sources = [
-            FIXTURES / name for name in ("discover.py", "lifecycle.py", "setup_fields.py", "identity.py", "empty.py")
+            FIXTURES / name for name in ("discover.py", "lifecycle.py", "setup_fields.py", "identity.py", "assert_identity.py", "empty.py")
         ]
     with tempfile.TemporaryDirectory() as td:
         checks = sum(

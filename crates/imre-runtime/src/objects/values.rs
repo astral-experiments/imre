@@ -973,6 +973,32 @@ unsafe fn write_mock_history(
     Ok(true)
 }
 
+/// Format an instance without calling its Python display methods.
+///
+/// # Safety
+/// The payload must remain rooted and have public source-class metadata.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_record_default_repr(payload: *const usize) -> *const Str {
+    // SAFETY: source instances have an immutable concrete layout and qualified name.
+    let semantics = unsafe { descriptor(payload).semantics.as_ref() }
+        .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
+    let mut output = String::new();
+    let result = write_default_record_repr(&mut ReprWriter(&mut output), payload, semantics);
+    super::exceptions::finish_display(
+        result.and_then(|()| super::exceptions::rendered(output.into())),
+    )
+}
+
+fn write_default_record_repr(
+    output: &mut ReprWriter<'_>,
+    payload: *const usize,
+    semantics: &super::records::RecordSemantics,
+) -> std::fmt::Result {
+    // SAFETY: the compiler emits immutable UTF-8 identifiers for public record layouts.
+    let name = unsafe { text(semantics.qualified_name, semantics.qualified_name_len) };
+    write!(output, "<{name} object at {payload:p}>")
+}
+
 unsafe fn fields_repr(
     output: &mut ReprWriter<'_>,
     payload: *const usize,
@@ -992,11 +1018,7 @@ unsafe fn fields_repr(
             return Ok(None);
         }
         if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR == 0 {
-            write!(
-                output,
-                "<{} object at {payload:p}>",
-                text(semantics.qualified_name, semantics.qualified_name_len)
-            )?;
+            write_default_record_repr(output, payload, semantics)?;
             return Ok(None);
         }
         let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();

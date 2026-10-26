@@ -204,6 +204,20 @@ impl<'a> Visitor<'a> for References<'_> {
                     }
                 }
             }
+            if matches!(name.as_str(), "assertIs" | "assertIsNot") {
+                if let Some(Binding::Definition(def)) = self
+                    .graph
+                    .modules
+                    .iter()
+                    .find(|m| m.bundled && m.name == "unittest")
+                    .and_then(|m| m.bindings.get("_raise_identity_failure"))
+                {
+                    self.found.definitions.insert(*def);
+                }
+                self.found.attributes.insert(format!("_bound_{name}"));
+                self.found.attributes.insert("__repr__".into());
+                self.found.instance_attributes.insert("__repr__".into());
+            }
             if matches!(name.as_str(), "assertIn" | "assertNotIn") {
                 self.found.attributes.extend(
                     [

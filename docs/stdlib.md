@@ -8,7 +8,7 @@ Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 395 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,542 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 397 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,542 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -77,7 +77,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `tomllib` | Yes | Read selected TOML table keys with `load` on a binary stream. [Evidence](../tests/fixtures/paths/toml_discovery.py) | — | — | — |
 | `types` | Yes | Fixed-layout `SimpleNamespace` construction and attributes. [Evidence](../benchmarks/cpython_stdlib/full/types/README.md) | [0 / 129](../benchmarks/cpython_stdlib/full/types/) | 3 | 0 |
 | `typing` | Yes | Use selected annotations and aliases; register, look up and clear overloads for supported named functions. [Evidence](../benchmarks/cpython_stdlib/full/typing/README.md) | [0 / 712](../benchmarks/cpython_stdlib/full/typing/) | 3 | 2 |
-| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 9 | 12 |
+| `unittest` | Yes | Selected `TestCase` assertions, fixtures, discovery and result handling. [Evidence](../benchmarks/cpython_stdlib/full/unittest/README.md) | [17 / 1,090](../benchmarks/cpython_stdlib/full/unittest/) | 11 | 12 |
 | `urllib` | Yes | `urllib.parse.urlsplit` on string and bytes URLs, including named result fields, and `unquote` on strings. [Evidence](../benchmarks/cpython_stdlib/full/urllib/README.md) | [1 / 77](../benchmarks/cpython_stdlib/full/urllib/) | 0 | 5 |
 | `warnings` | Yes | Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`. [Evidence](../benchmarks/cpython_stdlib/full/warnings/README.md) | [0 / 187](../benchmarks/cpython_stdlib/full/warnings/) | 0 | 6 |
 | `zipfile` | Yes | Read stored and deflated members and report CRC failures. [Evidence](../benchmarks/cpython_stdlib/native_zip_members.py) | — | — | — |

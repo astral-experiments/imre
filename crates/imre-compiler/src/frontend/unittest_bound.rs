@@ -13,8 +13,10 @@ impl Checker<'_> {
             return None;
         };
         let name = attr.attr.as_str();
-        if !matches!(name, "assertEqual" | "assertListEqual" | "assertRaises")
-            || !self.unittest_case(class)
+        if !matches!(
+            name,
+            "assertEqual" | "assertListEqual" | "assertRaises" | "assertIs" | "assertIsNot"
+        ) || !self.unittest_case(class)
         {
             return None;
         }
@@ -38,6 +40,8 @@ impl Checker<'_> {
             "_BoundEqual" => Some("assertEqual"),
             "_BoundListEqual" => Some("assertListEqual"),
             "_BoundRaises" => Some("assertRaises"),
+            "_BoundIs" => Some("assertIs"),
+            "_BoundIsNot" => Some("assertIsNot"),
             _ => None,
         }
     }
@@ -69,6 +73,13 @@ impl Checker<'_> {
             ty,
             kind: ExprKind::Field(Box::new(callable.clone()), field),
         };
+        // The bound object already captured TestCase's implementation at lookup.
+        // Re-dispatching on its base-typed receiver could select a later override.
+        if matches!(name, "assertIs" | "assertIsNot") {
+            return self
+                .unittest_identity(call, &receiver, name == "assertIsNot")
+                .map(Some);
+        }
         let attribute = ast::ExprAttribute {
             node_index: ast::AtomicNodeIndex::NONE,
             range: call.range(),
