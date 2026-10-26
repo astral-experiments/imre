@@ -12,6 +12,8 @@ The same unchanged Flask application and Werkzeug server run under CPython and I
 
 The checked-in oracle records status, content type and length, allowed methods, cookie presence, body and its SHA-256 from a prior CPython 3.14.5 TCP session. The client opens real HTTP connections.
 
+The [HTTP performance comparison](comparison/README.md) times this application against route-equivalent Node, Bun and Rust servers. It also supports paired Werkzeug, Waitress and CPython-hosted LLVM measurements of the same Flask app.
+
 ## Reproduce
 
 Use Linux x86-64 with CPython 3.14.5. Acquire the seven release wheels once on a networked machine. The lock pins their published URLs and SHA-256 hashes, including MarkupSafe's CPython 3.14 Linux extension.
