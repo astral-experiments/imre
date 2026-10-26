@@ -17,6 +17,7 @@ mod builtins;
 mod bytes;
 mod cache_paths;
 mod calendar;
+pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;

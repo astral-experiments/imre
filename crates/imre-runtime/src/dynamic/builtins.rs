@@ -169,7 +169,7 @@ fn positional(name: &str, kwargs: &[(String, Id)]) -> Result<()> {
     }
 }
 
-fn bind<const N: usize>(
+pub(super) fn bind<const N: usize>(
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],

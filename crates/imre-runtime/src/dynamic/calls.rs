@@ -156,6 +156,7 @@ impl Context {
             ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
+            | ("float", Value::Float(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("list", Value::List(_))
@@ -169,6 +170,11 @@ impl Context {
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (class, Value::Calendar { value, .. }) => {
+                class.strip_prefix("datetime.").is_some_and(|c| {
+                    c == value.class() || (c == "date" && value.class() == "datetime")
+                })
+            }
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
             _ => false,
         }
@@ -199,6 +205,15 @@ impl Context {
     }
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         match self.heap.get(obj).clone() {
+            Value::Calendar { value, tzinfo } => {
+                return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
+            }
+            Value::Native(class) if class == "datetime.datetime" && name == "fromtimestamp" => {
+                return Ok(self.builtin("datetime.datetime.fromtimestamp"));
+            }
+            Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
+                return Ok(stdlib::datetime::utc(self));
+            }
             Value::Partial {
                 function,
                 args,

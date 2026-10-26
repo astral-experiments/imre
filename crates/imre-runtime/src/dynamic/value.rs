@@ -48,6 +48,7 @@ impl Context {
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
+            Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
             Value::List(_) => "list",
@@ -135,6 +136,10 @@ pub(super) enum Value {
     Bool(bool),
     Int(crate::Int),
     Float(f64),
+    Calendar {
+        value: crate::objects::Calendar,
+        tzinfo: Id,
+    },
     Range {
         start: i64,
         stop: i64,
@@ -262,6 +267,7 @@ impl Value {
                 visit.extend(old);
             }
             Self::Range { .. } => {}
+            Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
