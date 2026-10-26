@@ -901,7 +901,7 @@ pub(super) fn call(
         }
         name if is_exception(name) => {
             positional(name, kwargs)?;
-            let error = ctx.exception(name, args);
+            let error = ctx.exception(name, args, None);
             Ok(ctx.alloc(Value::Raised(error)))
         }
         name => Err(type_error(format!("unsupported builtin {name}"))),

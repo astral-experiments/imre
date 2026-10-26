@@ -825,16 +825,16 @@ pub(super) fn call(
             // arguments and propagates a supplied SystemExit instance directly.
             if let [arg] = args {
                 match ctx.heap.get(*arg) {
-                    Value::None => return Err(ctx.exception("SystemExit", &[])),
+                    Value::None => return Err(ctx.exception("SystemExit", &[], None)),
                     Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
                         let items = items.clone();
-                        return Err(ctx.exception("SystemExit", &items));
+                        return Err(ctx.exception("SystemExit", &items, None));
                     }
                     Value::Raised(error) if error.kind == "SystemExit" => return Err(error.clone()),
                     _ => {}
                 }
             }
-            return Err(ctx.exception("SystemExit", args));
+            return Err(ctx.exception("SystemExit", args, None));
         }
         name if name.starts_with("os.path.")
             || name.starts_with("file.")

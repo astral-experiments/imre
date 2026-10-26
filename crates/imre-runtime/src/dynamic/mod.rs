@@ -304,7 +304,7 @@ impl Context {
 
     fn is_stop_iteration(&mut self, error: &Error) -> bool {
         let stop = self.builtin("StopIteration");
-        self.error_matches(&error.kind, stop)
+        self.error_matches(error, stop)
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
