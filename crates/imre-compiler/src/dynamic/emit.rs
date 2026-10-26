@@ -16,7 +16,7 @@ declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
-declare i64 @imre_dyn_def(ptr, ptr, i64, i64, i64, i64)
+declare i64 @imre_dyn_def_with_metadata(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare void @imre_dyn_statement(ptr, ptr, i64, ptr, i32)
 ";
@@ -49,13 +49,22 @@ pub(crate) fn emit(
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let location = SourceMap {
             package,
+            string_annotations: parsed.syntax().body.iter().any(|s| {
+                matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
+                && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
+                && i.names.iter().any(|n| n.name.as_str() == "annotations"))
+            }),
             file: &file,
             newlines: source
                 .match_indices('\n')
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, Body::Namespace(&parsed.syntax().body));
+        let code = output.code(
+            &location,
+            String::new(),
+            Body::Namespace(&parsed.syntax().body),
+        );
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -72,12 +81,14 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
+    Annotations(Vec<(&'a str, &'a ast::Expr)>),
     Expression(&'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
 
 struct SourceMap<'a> {
     package: &'a str,
+    string_annotations: bool,
     file: &'a str,
     newlines: Vec<usize>,
 }
@@ -114,12 +125,13 @@ impl Output {
         format!("@str{index}")
     }
 
-    fn code(&mut self, source: &SourceMap<'_>, body: Body<'_>) -> String {
+    fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
         let mut f = Function {
             output: self,
             source,
+            prefix,
             ir: String::new(),
             block: "entry".into(),
             error: "failed".into(),
@@ -143,6 +155,7 @@ impl Output {
                 f.statements(stmts);
             }
             Body::Statements(stmts) => f.statements(stmts),
+            Body::Annotations(entries) => f.annotations(&entries),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
@@ -170,6 +183,7 @@ impl Output {
 struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
+    prefix: String,
     ir: String,
     block: String,
     error: String,
@@ -180,14 +194,20 @@ struct Function<'a, 'p> {
     live: Vec<String>,
     max_live: usize,
     loops: Vec<LoopTarget>,
-    exits: Vec<(String, String)>,
+    exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
+}
+
+#[derive(Clone)]
+enum Cleanup {
+    With(String),
+    Finally(std::rc::Rc<[ast::Stmt]>),
 }
 
 struct LoopTarget {
     step: String,
     done: String,
-    with_depth: usize,
+    cleanup_depth: usize,
 }
 
 impl Function<'_, '_> {

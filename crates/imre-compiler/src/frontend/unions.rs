@@ -456,6 +456,12 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if let Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) =
+            self.collection_binding(classes)
+        {
+            return Ok(self.weak_proxy_instance(value, callable));
+        }
+        let value = Self::weak_target(value);
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {

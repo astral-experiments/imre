@@ -12,16 +12,20 @@ mod argparse;
 mod args;
 mod asyncio;
 mod binascii;
+pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::{
+    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
+};
 mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
-pub(crate) use codecs::Codec;
+pub(crate) use codecs::{Codec, CodecInfo};
 mod contexts;
 mod contextvars;
 mod copying;
@@ -32,7 +36,9 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-mod fnmatch;
+mod text_file;
+pub(crate) use text_file::TextFile;
+pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
@@ -64,7 +70,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod shutil;
-mod socket;
+pub(crate) mod socket;
 mod source_modules;
 pub(crate) mod stdio;
 mod stdlib;
@@ -72,8 +78,9 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
-mod time;
-pub(crate) use text::split_parts;
+pub(crate) mod time;
+pub(crate) use text::{UrlInput, urlquote, urlsplit};
+pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
 mod unions;
@@ -117,6 +124,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    WeakProxy(records::weak::WeakRecord, bool),
     FunctoolsPlaceholder {
         class: bool,
     },

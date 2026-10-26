@@ -4,8 +4,11 @@
 mod builtins;
 mod calls;
 mod ffi;
+mod function_fields;
 mod operators;
+mod property;
 mod stdlib;
+mod super_object;
 mod value;
 
 use std::collections::HashMap;
@@ -18,6 +21,21 @@ struct SourceModule {
     code: Code,
 }
 
+enum IteratorSlice<'a> {
+    Values(&'a [Id]),
+    Bytes(&'a [u8]),
+}
+
+impl IteratorSlice<'_> {
+    /// Counts positions without allocating boxed integers for bytes.
+    fn len(&self) -> usize {
+        match self {
+            Self::Values(values) => values.len(),
+            Self::Bytes(bytes) => bytes.len(),
+        }
+    }
+}
+
 pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
@@ -27,6 +45,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     builtins: HashMap<String, Id>,
@@ -44,6 +63,22 @@ impl Context {
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
+    /// The builtin mapping payload is independent of a subclass instance's attributes.
+    fn dict_storage(&self, value: Id) -> Option<Id> {
+        match self.heap.get(value) {
+            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
+            Value::Instance { dictionary, .. } => *dictionary,
+            _ => None,
+        }
+    }
+
+    fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        match self.heap.get(self.dict_storage(value)?) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
+            _ => unreachable!("dictionary payload"),
+        }
+    }
+
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
         self.alloc(Value::Dict(entries))
     }
@@ -70,6 +105,18 @@ impl Context {
             Err(Error::new("TypeError", "expected str"))
         }
     }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
+        }
+    }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
             Value::Int(n) => Ok(n.clone()),
@@ -87,7 +134,102 @@ impl Context {
             )
         })
     }
+    /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
+    fn iterator(&mut self, id: Id) -> Result<Id> {
+        let sequence = match self.heap.get(id) {
+            Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
+            Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
+            Value::Instance {
+                dictionary: Some(_),
+                ..
+            } => {
+                let method = self
+                    .bound_slot(id, "__iter__")?
+                    .expect("dict iterator slot");
+                let result = self.call(method, Vec::new(), Vec::new())?;
+                return if matches!(
+                    self.heap.get(result),
+                    Value::Iterator { .. } | Value::AstWalk(_)
+                ) {
+                    Ok(result)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "iter() returned non-iterator of type '{}'",
+                            self.type_name(result)
+                        ),
+                    ))
+                };
+            }
+            _ => {
+                let values = self.items(id)?;
+                self.alloc(Value::Tuple(values))
+            }
+        };
+        Ok(self.alloc(Value::Iterator {
+            sequence: Some(sequence),
+            offset: 0,
+        }))
+    }
+
+    /// Borrows the unconsumed part of the iterator's current sequence.
+    fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
+        let Value::Iterator { sequence, offset } = self.heap.get(id) else {
+            return Err(Error::new("TypeError", "expected iterator"));
+        };
+        let Some(sequence) = sequence else {
+            return Ok(IteratorSlice::Values(&[]));
+        };
+        Ok(match self.heap.get(*sequence) {
+            Value::List(values) | Value::Tuple(values) => {
+                IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+            }
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => {
+                IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
+            }
+            _ => unreachable!("iterator sequence"),
+        })
+    }
+
+    /// Reads the current position and permanently detaches the source on exhaustion.
+    fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::AstWalk(queue) = self.heap.get(id) {
+            return Ok(!queue.is_empty());
+        }
+        let more = self.iterator_remaining(id)?.len() != 0;
+        if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+            *sequence = None;
+        }
+        Ok(more)
+    }
+
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+            return stdlib::ast::advance(self, id);
+        }
+        if !self.iterator_has_item(id)? {
+            return Ok(None);
+        }
+        let item = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+        };
+        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
+            *offset += 1;
+        }
+        Ok(Some(item))
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+            let mut items = Vec::new();
+            while let Some(item) = self.next_item(id)? {
+                items.push(item);
+            }
+            return Ok(items);
+        }
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
@@ -103,13 +245,30 @@ impl Context {
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
-            Value::Iterator { values, offset } => {
-                if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
-                    *offset = values.len();
+            Value::Iterator { .. } => {
+                let values = match self.iterator_remaining(id)? {
+                    IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Bytes(bytes) => {
+                        let mut values = Vec::with_capacity(bytes.len());
+                        while let Some(byte) = self.next_item(id)? {
+                            values.push(byte);
+                        }
+                        return Ok(values);
+                    }
+                };
+                if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+                    *sequence = None;
                 }
-                Ok(values[offset..].to_vec())
+                Ok(values)
             }
-            Value::Instance { class, fields } if self.namedtuple_fields(class).is_some() => {
+            Value::Instance {
+                dictionary: Some(_),
+                ..
+            } => {
+                let iterator = self.iterator(id)?;
+                self.items(iterator)
+            }
+            Value::Instance { class, fields, .. } if self.namedtuple_fields(class).is_some() => {
                 Ok(self
                     .namedtuple_fields(class)
                     .unwrap()
@@ -117,13 +276,19 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
-            _ => Err(Error::new("TypeError", "object is not iterable")),
+            _ => Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not iterable", self.type_name(id)),
+            )),
         }
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {
         self.alloc(Value::Scope(Scope {
             class_body: None,
-            names: HashMap::new(),
+            class_cell: None,
+            first_argument: None,
+            names: Default::default(),
+            namespace: None,
             parent,
             module: module.to_owned(),
         }))
@@ -134,7 +299,50 @@ impl Context {
         };
         s
     }
+    fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
+        let scope = self.scope_data(scope);
+        if let Some(namespace) = scope.namespace {
+            return self
+                .dict_entries(namespace)?
+                .iter()
+                .find_map(|&(key, value)| {
+                    matches!(self.heap.get(key), Value::Str(key) if key == name).then_some(value)
+                });
+        }
+        scope.names.get(name).copied()
+    }
+
+    /// Materialize once and keep that exact dict as the module's binding storage.
+    fn module_globals(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled scope handle")
+        };
+        if let Some(dict) = frame.namespace {
+            return dict;
+        }
+        let names = std::mem::take(&mut frame.names);
+        let entries = names
+            .into_iter()
+            .map(|(name, v)| (self.text(name), v))
+            .collect();
+        let dict = self.dict(entries);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        dict
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            let key = self.text(name);
+            self.put_item(namespace, key, value)
+                .expect("string key in module dictionary");
+            return;
+        }
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -148,8 +356,15 @@ impl Context {
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
             let s = self.scope_data(scope);
-            if let Some(id) = s.names.get(name) {
-                return Ok(*id);
+            if let Some(id) = self.scope_name(scope, name) {
+                return Ok(id);
+            }
+            if name == "__class__"
+                && s.class_body.is_none()
+                && let Some(cell) = s.class_cell
+                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+            {
+                return Ok(*class);
             }
             if let Some(parent) = s.parent {
                 scope = parent;
@@ -160,12 +375,15 @@ impl Context {
         if name == "Ellipsis" {
             return Ok(value::ELLIPSIS);
         }
+        if name == "NotImplemented" {
+            return Ok(value::NOT_IMPLEMENTED);
+        }
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }
         Err(Error::new(
             "NameError",
-            format!("name {name:?} is not defined"),
+            format!("name '{name}' is not defined"),
         ))
     }
     fn builtin(&mut self, name: &str) -> Id {
@@ -174,6 +392,14 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        let methods = match name {
+            "dict" => builtins::DICT_METHODS,
+            "str" => builtins::STR_METHODS,
+            _ => &[],
+        };
+        for method in methods {
+            self.builtin(&format!("{name}.{method}"));
+        }
         value
     }
     fn execute(&mut self, code: Code, scope: Id) -> Result<Id> {
@@ -208,6 +434,9 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
+            if name == "urllib" {
+                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            }
             None
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
@@ -225,12 +454,20 @@ impl Context {
             };
             let mut selected = None;
             let mut namespace = None;
-            for root in self.items(search)? {
-                let Ok(root) = self.str_value(root) else {
-                    continue;
-                };
-                let root = if root.is_empty() {
+            // A bundled package contributes its own __path__. A first-party
+            // regular package can never acquire one of its children implicitly.
+            let search = self.items(search)?;
+            let bundle = self.config["bundled_root"]
+                .as_str()
+                .map(std::path::Path::new);
+            let roots = search
+                .iter()
+                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
+            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
+                let root = if root.as_os_str().is_empty() {
                     std::env::current_dir()
+                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
+                    Ok(root.to_owned())
                 } else {
                     std::path::absolute(root)
                 };
@@ -265,6 +502,9 @@ impl Context {
         let scope = self.scope(name, None);
         let name_id = self.text(name);
         self.bind(scope, "__name__", name_id);
+        if source.is_some() {
+            self.bind(scope, "__doc__", NONE);
+        }
         if !locations.is_empty() {
             let dirs = locations
                 .iter()
@@ -288,11 +528,11 @@ impl Context {
         self.modules.insert(name.to_owned(), module);
         match name {
             "io" => stdlib::io::install(self, scope),
+            "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
             _ => {}
         }
         if let Some((path, code)) = source {
-            self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {

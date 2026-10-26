@@ -16,7 +16,7 @@ impl Context {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
-            Value::Instance { class, fields } => Some(
+            Value::Instance { class, fields, .. } => Some(
                 self.namedtuple_fields(*class)?
                     .iter()
                     .map(|k| fields[k])
@@ -29,33 +29,44 @@ impl Context {
         value.map_or(Ok(default), |id| self.truth(id))
     }
 
-    pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
-        let Some(hook) = self.bound_slot(id, "__len__")? else {
+    pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        if let Ok(integer) = self.as_int(value) {
+            return Ok(Some(integer));
+        }
+        let Some(index) = self.bound_slot(value, "__index__")? else {
             return Ok(None);
         };
-        let value = self.call(hook, Vec::new(), Vec::new())?;
-        let length = if let Ok(integer) = self.as_int(value) {
-            integer
-        } else if let Some(index) = self.bound_slot(value, "__index__")? {
-            let result = self.call(index, Vec::new(), Vec::new())?;
-            self.as_int(result).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "__index__ returned non-int (type {})",
-                        self.type_name(result)
-                    ),
-                )
-            })?
-        } else {
-            return Err(Error::new(
+        let result = self.call(index, Vec::new(), Vec::new())?;
+        self.as_int(result).map(Some).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "__index__ returned non-int (type {})",
+                    self.type_name(result)
+                ),
+            )
+        })
+    }
+
+    /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
+    pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
+        self.index_value(value)?.ok_or_else(|| {
+            Error::new(
                 "TypeError",
                 format!(
                     "'{}' object cannot be interpreted as an integer",
                     self.type_name(value)
                 ),
-            ));
+            )
+        })
+    }
+
+    pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
+        let Some(hook) = self.bound_slot(id, "__len__")? else {
+            return Ok(None);
         };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        let length = self.index_integer(value)?;
         let length = length
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())
@@ -74,6 +85,12 @@ impl Context {
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
         Ok(match self.heap.get(id) {
             Value::None => false,
+            Value::NotImplemented => {
+                return Err(Error::new(
+                    "TypeError",
+                    "NotImplemented should not be used in a boolean context",
+                ));
+            }
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
             Value::Float(f) => *f != 0.0,
@@ -87,7 +104,10 @@ impl Context {
             | Value::Set(v)
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
-            Value::DictView { dict, .. } => return self.truth(*dict),
+            Value::DictView { dict, .. } => !self
+                .dict_entries(*dict)
+                .expect("dict view backing")
+                .is_empty(),
             Value::Context(bindings) => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
@@ -144,7 +164,9 @@ impl Context {
             return false;
         }
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
-        match (self.heap.get(a), self.heap.get(b)) {
+        let left = self.dict_storage(a).unwrap_or(a);
+        let right = self.dict_storage(b).unwrap_or(b);
+        match (self.heap.get(left), self.heap.get(right)) {
             (Value::None, Value::None) => true,
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => self
                 .as_int(a)
@@ -168,7 +190,10 @@ impl Context {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
             (Value::List(_), _) | (_, Value::List(_)) => false,
-            (Value::Dict(x), Value::Dict(y)) => {
+            (
+                Value::Dict(x) | Value::DefaultDict { entries: x, .. },
+                Value::Dict(y) | Value::DefaultDict { entries: y, .. },
+            ) => {
                 x.len() == y.len()
                     && x.iter()
                         .all(|&(k, v)| y.iter().any(|&(j, w)| equal(k, j) && equal(v, w)))
@@ -254,6 +279,7 @@ impl Context {
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
+            Value::NotImplemented => "NotImplemented".into(),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
@@ -263,6 +289,7 @@ impl Context {
                 class: Some(class),
                 names,
                 values,
+                ..
             } => {
                 let fields = names
                     .iter()
@@ -299,6 +326,10 @@ impl Context {
                 output.push(')');
                 output
             }
+            Value::Instance {
+                dictionary: Some(backing),
+                ..
+            } => self.display(*backing),
             Value::Dict(entries) => format!(
                 "{{{}}}",
                 entries
@@ -324,7 +355,9 @@ impl Context {
             Value::Raised(Error { message, .. }) => message.clone(),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
-            Value::Function { name, .. } => format!("<function {name}>"),
+            Value::Function { fields, .. } => {
+                format!("<function {}>", self.display(fields.qualname))
+            }
             Value::AttrGetter(paths) => {
                 let arguments = paths
                     .iter()
@@ -355,12 +388,15 @@ impl Context {
         }
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
+            return self.call(getter, vec![key], Vec::new());
+        }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;
             return bindings
                 .get(&key)
                 .copied()
-                .ok_or_else(|| self.context_lookup_error("KeyError", key));
+                .ok_or_else(|| self.lookup_error("KeyError", key));
         }
         if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
             if !builtins::hashable(self, key) {
@@ -376,7 +412,7 @@ impl Context {
                 self.put_item(obj, key, v)?;
                 return Ok(v);
             }
-            return Err(Error::new("KeyError", self.repr(key)));
+            return Err(self.lookup_error("KeyError", key));
         }
         if matches!(self.heap.get(obj), Value::DictView { .. } | Value::Set(_)) {
             return Err(Error::new("TypeError", "object is not subscriptable"));
@@ -439,12 +475,27 @@ impl Context {
         Ok(())
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
+        if let Some(hook) = self.bound_slot(container, "__contains__")? {
+            let result = self.call(hook, vec![item], Vec::new())?;
+            return self.truth(result);
+        }
         if let Value::Context(bindings) = self.heap.get(container) {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));
         }
         if let Value::Str(hay) = self.heap.get(container) {
             return Ok(hay.contains(self.str_value(item)?));
+        }
+        if matches!(self.heap.get(container), Value::Bytes(_)) {
+            // CPython falls back to the buffer protocol when integer conversion fails.
+            let number = self.index_value(item).ok().flatten();
+            let Value::Bytes(data) = self.heap.get(container) else {
+                unreachable!()
+            };
+            if let Some(number) = number {
+                return Ok(crate::objects::bytes_contains_int(data, &number)?);
+            }
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
         if matches!(
             self.heap.get(container),
@@ -573,7 +624,30 @@ impl Context {
         }
         Ok(())
     }
+
+    fn repeat_bytes(&mut self, bytes: Id, multiplier: Id) -> Result<Id> {
+        let count = self.index_value(multiplier)?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "can't multiply sequence by non-int of type '{}'",
+                    self.type_name(multiplier)
+                ),
+            )
+        })?;
+        let Value::Bytes(data) = self.heap.get(bytes) else {
+            unreachable!()
+        };
+        Ok(match crate::objects::repeat_bytes(data, &count)? {
+            Some(repeated) => self.alloc(Value::Bytes(repeated)),
+            None => bytes,
+        })
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        if let Some(result) = self.binary_special(op, a, b)? {
+            return Ok(result);
+        }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
             "%" if let Value::Str(text) = self.heap.get(a) => {
@@ -601,6 +675,22 @@ impl Context {
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
+                (Value::Bytes(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                    if y.is_empty() {
+                        return Ok(a);
+                    }
+                    if x.is_empty() && matches!(self.heap.get(b), Value::Bytes(_)) {
+                        return Ok(b);
+                    }
+                    let bytes = crate::objects::concat_bytes(x, y)?;
+                    return Ok(self.alloc(Value::Bytes(bytes)));
+                }
+                (Value::Bytes(_), _) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("can't concat {} to bytes", self.type_name(b)),
+                    ));
+                }
                 (Value::List(x), Value::List(y)) => {
                     return Ok(self.alloc(Value::List([x.as_slice(), y.as_slice()].concat())));
                 }
@@ -609,9 +699,42 @@ impl Context {
                 }
                 _ => {}
             },
+            "*" if matches!(self.heap.get(a), Value::Bytes(_)) => return self.repeat_bytes(a, b),
+            "*" if matches!(self.heap.get(b), Value::Bytes(_)) => return self.repeat_bytes(b, a),
             _ => {}
         }
+        if op == "*" {
+            let (sequence, count) = if matches!(self.heap.get(a), Value::List(_) | Value::Tuple(_))
+            {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            if let Value::List(items) | Value::Tuple(items) = self.heap.get(sequence) {
+                let out = repeat_values(items, self.as_integer(count)?)?;
+                return Ok(
+                    self.alloc(if matches!(self.heap.get(sequence), Value::List(_)) {
+                        Value::List(out)
+                    } else {
+                        Value::Tuple(out)
+                    }),
+                );
+            }
+        }
+        if op == "@" {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for @: '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
+        if op == "/" {
+            return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
+        }
         let result = if op == "**" {
             let (x, y) = (x.big(), y.big());
             if y.is_negative() {
@@ -662,4 +785,167 @@ impl Context {
         };
         Ok(self.alloc(Value::Int(result)))
     }
+}
+
+/// Special-method names for the two operands of a Python binary expression.
+fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    Some(match op {
+        "+" => ("__add__", "__radd__", "__iadd__"),
+        "-" => ("__sub__", "__rsub__", "__isub__"),
+        "*" => ("__mul__", "__rmul__", "__imul__"),
+        "@" => ("__matmul__", "__rmatmul__", "__imatmul__"),
+        "/" => ("__truediv__", "__rtruediv__", "__itruediv__"),
+        "//" => ("__floordiv__", "__rfloordiv__", "__ifloordiv__"),
+        "%" => ("__mod__", "__rmod__", "__imod__"),
+        "**" => ("__pow__", "__rpow__", "__ipow__"),
+        "<<" => ("__lshift__", "__rlshift__", "__ilshift__"),
+        ">>" => ("__rshift__", "__rrshift__", "__irshift__"),
+        "&" => ("__and__", "__rand__", "__iand__"),
+        "^" => ("__xor__", "__rxor__", "__ixor__"),
+        "|" => ("__or__", "__ror__", "__ior__"),
+        "<" => ("__lt__", "__gt__", ""),
+        "<=" => ("__le__", "__ge__", ""),
+        "==" => ("__eq__", "__eq__", ""),
+        "!=" => ("__ne__", "__ne__", ""),
+        ">=" => ("__ge__", "__le__", ""),
+        ">" => ("__gt__", "__lt__", ""),
+        _ => return None,
+    })
+}
+
+impl Context {
+    fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        let Some(method) = self.bound_slot(obj, name)? else {
+            return Ok(None);
+        };
+        let result = self.call(method, vec![other], vec![])?;
+        Ok((result != value::NOT_IMPLEMENTED).then_some(result))
+    }
+
+    fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        let Some((left, right, inplace)) = binary_slots(op) else {
+            return Ok(None);
+        };
+        let class = |id| match self.heap.get(id) {
+            Value::Instance { class, .. } => Some(*class),
+            _ => None,
+        };
+        let (ac, bc) = (class(a), class(b));
+        if ac.is_none() && bc.is_none() {
+            return Ok(None);
+        }
+        let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
+            ac != bc
+                && self.subclass(bc, ac)
+                && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
+        } else {
+            false
+        };
+        if reflected_first && let Some(result) = self.operator_slot(b, right, a)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.operator_slot(a, left, b)? {
+            return Ok(Some(result));
+        }
+        if !reflected_first && (ac != bc || inplace.is_empty()) {
+            return self.operator_slot(b, right, a);
+        }
+        Ok(None)
+    }
+
+    pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        if let Some((_, _, slot)) = binary_slots(op)
+            && let Some(result) = self.operator_slot(a, slot, b)?
+        {
+            return Ok(result);
+        }
+        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
+            let extra = self.items(b)?;
+            let Value::List(values) = self.heap.get_mut(a) else {
+                unreachable!()
+            };
+            values.extend(extra);
+            return Ok(a);
+        }
+        if op == "*"
+            && let Value::List(values) = self.heap.get(a)
+        {
+            let values = repeat_values(values, self.as_integer(b)?)?;
+            let Value::List(items) = self.heap.get_mut(a) else {
+                unreachable!()
+            };
+            *items = values;
+            return Ok(a);
+        }
+        self.binary(op, a, b)
+    }
+
+    pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        if let Some(method) = self.bound_slot(obj, "__delitem__")? {
+            self.call(method, vec![key], vec![])?;
+            return Ok(());
+        }
+        match self.heap.get(obj) {
+            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+                if !builtins::hashable(self, key) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("unhashable type: '{}'", self.type_name(key)),
+                    ));
+                }
+                let i = entries
+                    .iter()
+                    .position(|(k, _)| self.equal(*k, key))
+                    .ok_or_else(|| Error::new("KeyError", self.repr(key)))?;
+                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                    self.heap.get_mut(obj)
+                else {
+                    unreachable!()
+                };
+                entries.remove(i);
+            }
+            Value::List(entries) => {
+                let i = self.as_integer(key)?;
+                let i = if i < 0 { entries.len() as i64 + i } else { i };
+                if !(0..entries.len() as i64).contains(&i) {
+                    return Err(Error::new(
+                        "IndexError",
+                        "list assignment index out of range",
+                    ));
+                }
+                let Value::List(entries) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                entries.remove(i as usize);
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "'{}' object doesn't support item deletion",
+                        self.type_name(obj)
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn repeat_values(values: &[Id], times: i64) -> Result<Vec<Id>> {
+    if values.is_empty() || times <= 0 {
+        return Ok(Vec::new());
+    }
+    let size = usize::try_from(times)
+        .ok()
+        .and_then(|n| values.len().checked_mul(n))
+        .ok_or_else(|| Error::new("MemoryError", ""))?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(size)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for _ in 0..times {
+        output.extend_from_slice(values);
+    }
+    Ok(output)
 }

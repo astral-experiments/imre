@@ -10,7 +10,7 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
-    fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
+    pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "lookup" => {
                 let name = self.str_value(b)?.to_owned();
@@ -21,12 +21,28 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
-            "delname" => {
+            "delname" | "clearname" => {
                 let name = self.str_value(b)?.to_owned();
+                if let Some(namespace) = self.scope_data(a).namespace {
+                    if self.scope_name(a, &name).is_some() {
+                        self.delete_item(namespace, b)?;
+                    } else if op == "delname" {
+                        return Err(Error::new(
+                            "NameError",
+                            format!("name '{name}' is not defined"),
+                        ));
+                    }
+                    return Ok(NONE);
+                }
                 let Value::Scope(s) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                s.names.remove(&name);
+                if s.names.shift_remove(&name).is_none() && op == "delname" {
+                    return Err(Error::new(
+                        "NameError",
+                        format!("name '{name}' is not defined"),
+                    ));
+                }
                 if let Some(order) = &mut s.class_body {
                     order.retain(|member| member != &name);
                 }
@@ -58,6 +74,10 @@ impl Context {
                 Ok(c)
             }
             "get" => self.get_item(a, b),
+            "delitem" => {
+                self.delete_item(a, b)?;
+                Ok(NONE)
+            }
             "put" | "keyword" => {
                 if op == "keyword" && self.contains(b, a)? {
                     return Err(Error::new(
@@ -97,16 +117,18 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let Value::Dict(items) = self.heap.get(b).clone() else {
-                    return Err(Error::new("TypeError", "expected a mapping"));
-                };
-                for (key, val) in items {
+                let mapping = self.for_each_mapping_item(b, |ctx, key, val| {
                     if op == "keywords" {
-                        self.str_value(key)?;
-                        self.op("keyword", a, key, val)?;
+                        ctx.str_value(key)
+                            .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                        ctx.op("keyword", a, key, val)?;
                     } else {
-                        self.put_item(a, key, val)?;
+                        ctx.put_item(a, key, val)?;
                     }
+                    Ok(())
+                })?;
+                if !mapping {
+                    return Err(Error::new("TypeError", "expected a mapping"));
                 }
                 Ok(a)
             }
@@ -144,38 +166,30 @@ impl Context {
             }
             "class" => self.class(a, b, c),
             "annotate" => {
-                if let Some(mapping) = self.scope_data(a).names.get("__annotations__").copied() {
+                if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
-            "iter" => {
-                let values = self.items(a)?;
-                Ok(self.alloc(Value::Iterator { values, offset: 0 }))
-            }
-            "more" => {
-                let Value::Iterator { values, offset } = self.heap.get(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                Ok(flag(*offset < values.len()))
-            }
-            "next" => {
-                let Value::Iterator { values, offset } = self.heap.get_mut(a) else {
-                    return Err(Error::new("TypeError", "expected iterator"));
-                };
-                let v = values
-                    .get(*offset)
-                    .copied()
-                    .ok_or_else(|| Error::new("StopIteration", ""))?;
-                *offset += 1;
-                Ok(v)
-            }
+            "iter" => self.iterator(a),
+            "more" => Ok(flag(self.iterator_has_item(a)?)),
+            "next" => self
+                .next_item(a)?
+                .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
             "neg" | "pos" | "~" => {
+                let slot = match op {
+                    "neg" => "__neg__",
+                    "pos" => "__pos__",
+                    _ => "__invert__",
+                };
+                if let Some(method) = self.bound_slot(a, slot)? {
+                    return self.call(method, vec![], vec![]);
+                }
                 let v = self.as_int(a)?;
                 let result = match op {
                     "neg" => crate::integer_binary(&crate::Int::from(0), &v, 1)?,
@@ -302,6 +316,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         token_missing: NONE,
+        codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
         builtins: HashMap::new(),
@@ -430,6 +445,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
     finish(ctx, result)
 }
 
+/// Preserve the native function ABI used by previously compiled modules.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_def(
     ctx: *mut Context,
@@ -439,24 +455,47 @@ pub(super) unsafe extern "C" fn imre_dyn_def(
     parameters: Id,
     defaults: Id,
 ) -> Id {
+    // SAFETY: this entry point receives the same context-owned handles and native code.
+    unsafe {
+        imre_dyn_def_with_metadata(
+            ctx, code, scope, name, parameters, defaults, name, NONE, NONE, false,
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
+    ctx: *mut Context,
+    code: Code,
+    scope: Id,
+    name: Id,
+    parameters: Id,
+    defaults: Id,
+    qualname: Id,
+    doc: Id,
+    annotate: Id,
+    annotation_scope: bool,
+) -> Id {
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
     let owner = ctx.scope_data(scope);
-    let scope = if owner.class_body.is_some() {
+    let class_cell = owner.class_cell;
+    let scope = if owner.class_body.is_some() && !annotation_scope {
         owner.parent.unwrap_or(scope)
     } else {
         scope
     };
-    let result = ctx.str_value(name).map(str::to_owned).map(|name| {
-        ctx.alloc(Value::Function {
-            name,
-            code,
-            scope,
-            parameters,
-            defaults,
-        })
+    let fields =
+        super::function_fields::FunctionFields::new(ctx, scope, name, qualname, doc, annotate);
+    let result = ctx.alloc(Value::Function {
+        fields,
+        code,
+        scope,
+        class_cell,
+        parameters,
+        defaults,
     });
-    finish(ctx, result)
+    finish(ctx, Ok(result))
 }
 
 #[unsafe(no_mangle)]
@@ -488,6 +527,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
             .values()
             .chain(ctx.classes.values())
             .chain(ctx.builtins.values())
+            .chain(ctx.codec_entries.roots())
             .copied()
             .chain(ctx.contexts.iter().copied())
             .chain(

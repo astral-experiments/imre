@@ -2,10 +2,8 @@ use super::super::value::DictViewKind;
 use super::*;
 
 pub(super) fn entries(ctx: &Context, dict: Id) -> Result<&[(Id, Id)]> {
-    match ctx.heap.get(dict) {
-        Value::Dict(entries) | Value::DefaultDict { entries, .. } => Ok(entries),
-        _ => Err(type_error("expected a dictionary")),
-    }
+    ctx.dict_entries(dict)
+        .ok_or_else(|| type_error("expected a dictionary"))
 }
 
 pub(in super::super) fn view_items(
@@ -25,32 +23,25 @@ pub(in super::super) fn view_items(
 }
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
-    if let Some(input) = input {
-        let source = match ctx.heap.get(input) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries.clone()),
-            Value::Context(bindings) => {
-                Some(bindings.iter().map(|(&key, &value)| (key, value)).collect())
-            }
-            _ => None,
-        };
-        if let Some(source) = source {
-            for (key, value) in source {
-                ctx.put_item(dict, key, value)?;
-            }
-        } else {
-            for (index, pair) in ctx.items(input)?.into_iter().enumerate() {
-                let pair = ctx.items(pair)?;
-                let [key, value] = pair.as_slice() else {
-                    return Err(Error::new(
-                        "ValueError",
-                        format!(
-                            "dictionary update sequence element #{index} has length {}; 2 is required",
-                            pair.len()
-                        ),
-                    ));
-                };
-                ctx.put_item(dict, *key, *value)?;
-            }
+    if let Some(input) = input
+        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+    {
+        let iterator = ctx.iterator(input)?;
+        for index in 0.. {
+            let Some(pair) = ctx.next_item(iterator)? else {
+                break;
+            };
+            let pair = ctx.items(pair)?;
+            let [key, value] = pair.as_slice() else {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "dictionary update sequence element #{index} has length {}; 2 is required",
+                        pair.len()
+                    ),
+                ));
+            };
+            ctx.put_item(dict, *key, *value)?;
         }
     }
     for (key, value) in kwargs {
@@ -70,6 +61,10 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
         | Value::Set(_)
         | Value::Dict(_)
         | Value::DefaultDict { .. }
+        | Value::Instance {
+            dictionary: Some(_),
+            ..
+        }
         | Value::DictView {
             kind: DictViewKind::Keys | DictViewKind::Items,
             ..
@@ -77,7 +72,7 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
         Value::Tuple(values) | Value::NamedTuple { values, .. } => {
             values.iter().all(|&x| hashable(ctx, x))
         }
-        Value::Instance { class, fields } => ctx
+        Value::Instance { class, fields, .. } => ctx
             .namedtuple_fields(*class)
             .is_none_or(|names| names.iter().all(|name| hashable(ctx, fields[name]))),
         _ => true,
@@ -143,10 +138,36 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&receiver, args) = args
+    let slot = matches!(
+        name,
+        "dict.__init__" | "dict.__len__" | "dict.__iter__" | "dict.__setitem__"
+    );
+    let (&object, args) = args
         .split_first()
-        .ok_or_else(|| type_error("missing collection receiver"))?;
-    if name != "dict.update" {
+        .ok_or_else(|| match name.strip_prefix("dict.") {
+            Some(method) if slot => type_error(format!(
+                "descriptor '{method}' of 'dict' object needs an argument"
+            )),
+            Some(_) => type_error(format!("unbound method {name}() needs an argument")),
+            None => type_error("missing collection receiver"),
+        })?;
+    let receiver = if let Some(method) = name.strip_prefix("dict.") {
+        ctx.dict_storage(object).ok_or_else(|| {
+            let kind = ctx.type_name(object);
+            if slot {
+                type_error(format!(
+                    "descriptor '{method}' requires a 'dict' object but received a '{kind}'"
+                ))
+            } else {
+                type_error(format!(
+                    "descriptor '{method}' for 'dict' objects doesn't apply to a '{kind}' object"
+                ))
+            }
+        })?
+    } else {
+        object
+    };
+    if !matches!(name, "dict.update" | "dict.__init__") {
         positional(name, kwargs)?;
     }
     match name {
@@ -157,10 +178,7 @@ pub(super) fn method(
                 "dict.values" => DictViewKind::Values,
                 _ => DictViewKind::Items,
             };
-            Ok(ctx.alloc(Value::DictView {
-                dict: receiver,
-                kind,
-            }))
+            Ok(ctx.alloc(Value::DictView { dict: object, kind }))
         }
         "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
@@ -179,7 +197,37 @@ pub(super) fn method(
             }
             Ok(default)
         }
-        "dict.update" => {
+        "dict.__len__" => {
+            arity(name, args, 0, 0)?;
+            Ok(ctx.int(entries(ctx, receiver)?.len() as i64))
+        }
+        "dict.__iter__" => {
+            arity(name, args, 0, 0)?;
+            ctx.iterator(receiver)
+        }
+        "dict.__contains__" => {
+            arity(name, args, 1, 1)?;
+            Ok(boolean(ctx.contains(args[0], receiver)?))
+        }
+        "dict.__getitem__" => {
+            arity(name, args, 1, 1)?;
+            match ctx.get_item(receiver, args[0]) {
+                Err(error) if error.kind == "KeyError" => {
+                    if let Some(hook) = ctx.bound_slot(object, "__missing__")? {
+                        ctx.call(hook, vec![args[0]], Vec::new())
+                    } else {
+                        Err(error)
+                    }
+                }
+                result => result,
+            }
+        }
+        "dict.__setitem__" => {
+            arity(name, args, 2, 2)?;
+            ctx.put_item(receiver, args[0], args[1])?;
+            Ok(NONE)
+        }
+        "dict.update" | "dict.__init__" => {
             arity(name, args, 0, 1)?;
             update(ctx, receiver, args.first().copied(), kwargs)?;
             Ok(NONE)

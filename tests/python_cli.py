@@ -92,7 +92,12 @@ def main():
                 expected.stderr,
             )
 
+        getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
+        compare("-IB", getters / "fields.py")
+        compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -127,6 +132,20 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
+        compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
+
+        # Bundled children must respect the selected package's __path__.
+        shadow = root / "shadow"
+        (shadow / "http").mkdir(parents=True)
+        (shadow / "http" / "__init__.py").write_text("marker = 17\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys, http\nsys.path\nassert http.marker == 17\n"
+            "try:\n    import http.client\nexcept ModuleNotFoundError:\n    print('local package')\n"
+        )
+        compare("-B", shadow_entry)
+
         # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
         compare(
             "-c",
@@ -267,6 +286,12 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        (helpers / "uuid").mkdir()
+        uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
+        compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
+        (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
+        compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -308,13 +333,27 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_ast.py",
+            "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
+            "boxed_time.py",
+            "boxed_codecs.py",
+            "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
+            "boxed_class_attribute.py",
+            "boxed_request_strings.py",
+            "boxed_module_globals.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
+            "boxed_super.py",
+            "boxed_property_setter.py",
             "boxed_item_assignment.py",
+            "boxed_bytecache.py",
+            "boxed_fnmatch.py",
+            "boxed_dict_subclasses.py",
+            "boxed_bytes_separators.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -338,13 +377,25 @@ def report(text):
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"
             "def factory(data=b''):\n    return hashlib.sha1(data)\n"
+            "class Flag:\n    def __bool__(self):\n        raise ValueError('hash flag')\n"
             "h = factory(b'\\x00a')\nalias = h\nalias.update(b'\\xff')\n"
             "copy = h.copy()\ncopy.update(b'next')\n"
             "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
+            "print(hashlib.sha1(usedforsecurity=False).hexdigest() == factory().hexdigest())\n"
+            "try:\n    hashlib.sha1(b'a', data=b'b', usedforsecurity=Flag())\n"
+            "except TypeError:\n    print('duplicate data')\n"
+            "try:\n    hashlib.sha1('bad', usedforsecurity=Flag())\n"
+            "except ValueError as exc:\n    print(str(exc))\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_text_output.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('port.txt')")
+        if Path("/dev/full").exists():
+            compare("-IB", "-c", imports + "arithmetic.full_device()")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_urlsafe_base64.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,

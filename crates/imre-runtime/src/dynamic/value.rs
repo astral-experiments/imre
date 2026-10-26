@@ -20,6 +20,7 @@ pub(super) const NONE: Id = 0;
 pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
+pub(super) const NOT_IMPLEMENTED: Id = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -32,6 +33,7 @@ pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
+    pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -42,6 +44,7 @@ impl Error {
             kind: kind.to_owned(),
             message: message.into(),
             args: None,
+            os_args: None,
             trace: Vec::new(),
             exit_status: None,
         }
@@ -53,12 +56,16 @@ impl Context {
         match self.heap.get(value) {
             Value::None => "NoneType",
             Value::Ellipsis => "ellipsis",
+            Value::NotImplemented => "NotImplementedType",
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Bytes(_) => "bytes",
+            Value::ByteArray(_) => "bytearray",
+            Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -72,6 +79,8 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::Property(_) => "property",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {
@@ -80,6 +89,12 @@ impl Context {
             },
             _ => "object",
         }
+    }
+
+    pub(super) fn lookup_error(&self, kind: &str, key: Id) -> Error {
+        let mut error = Error::new(kind, self.repr(key));
+        error.args = Some(vec![key]);
+        error
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
@@ -110,9 +125,13 @@ impl Context {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
+        let os_args = error.os_args();
         let (kind, message) = error.into_parts();
         match message {
-            Ok(message) => Self::new(kind, message.to_string()),
+            Ok(message) => Self {
+                os_args: os_args.map(Box::new),
+                ..Self::new(kind, message.to_string())
+            },
             Err(_) => Self::new("MemoryError", String::new()),
         }
     }
@@ -135,7 +154,10 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
-    pub names: HashMap<String, Id>,
+    pub class_cell: Option<Id>,
+    pub first_argument: Option<String>,
+    pub names: indexmap::IndexMap<String, Id>,
+    pub namespace: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -144,6 +166,7 @@ pub(super) struct Scope {
 pub(super) enum Value {
     None,
     Ellipsis,
+    NotImplemented,
     Bool(bool),
     Int(crate::Int),
     Float(f64),
@@ -160,14 +183,21 @@ pub(super) enum Value {
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
+    CodecInfo {
+        entry: crate::objects::CodecInfo,
+        decode: Id,
+    },
+    CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
         class: Option<&'static str>,
         names: Vec<String>,
         values: Vec<Id>,
+        extras: Vec<(&'static str, Id)>,
     },
     Set(Vec<Id>),
     Dict(Vec<(Id, Id)>),
@@ -180,25 +210,33 @@ pub(super) enum Value {
         entries: Vec<(Id, Id)>,
     },
     Scope(Scope),
+    ClassCell(Option<Id>),
+    Super {
+        start: Id,
+        receiver: Id,
+        owner: Id,
+    },
     Module {
         name: String,
         scope: Id,
     },
     Function {
-        name: String,
+        fields: super::function_fields::FunctionFields,
         code: Code,
         scope: Id,
+        class_cell: Option<Id>,
         parameters: Id,
         defaults: Id,
     },
     Class {
         name: String,
         scope: Id,
-        bases: Vec<Id>,
+        ancestors: Vec<Id>,
     },
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
+        dictionary: Option<Id>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -207,7 +245,12 @@ pub(super) enum Value {
         callable: Id,
         receiver: Id,
     },
-    Property(Id),
+    Property(super::property::Property),
+    ReadOnlyDescriptor {
+        get: Id,
+        owner: &'static str,
+        name: &'static str,
+    },
     Partial {
         function: Id,
         args: Id,
@@ -217,15 +260,17 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    AstWalk(std::collections::VecDeque<Id>),
     Iterator {
-        values: Vec<Id>,
+        sequence: Option<Id>,
         offset: usize,
     },
     IoMethod {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -256,11 +301,12 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v)
-            | Self::Tuple(v)
-            | Self::Set(v)
-            | Self::NamedTuple { values: v, .. }
-            | Self::Iterator { values: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::NamedTuple { values, extras, .. } => {
+                visit.extend(values);
+                visit.extend(extras.iter().map(|&(_, id)| id));
+            }
             Self::Dict(entries) => {
                 for (key, value) in entries {
                     visit.extend([*key, *value]);
@@ -288,6 +334,7 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Range { .. } => {}
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -298,26 +345,48 @@ impl Value {
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
+                visit.extend(scope.class_cell);
                 visit.extend(scope.parent);
+                visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
             }
+            Self::ClassCell(class) => visit.extend(class),
+            Self::Super {
+                start,
+                receiver,
+                owner,
+            } => visit.extend([*start, *receiver, *owner]),
             Self::Module { scope, .. } => visit.push(*scope),
             Self::Function {
                 scope,
+                class_cell,
                 parameters,
                 defaults,
+                fields,
                 ..
-            } => visit.extend([*scope, *parameters, *defaults]),
-            Self::Class { scope, bases, .. } => {
-                visit.push(*scope);
-                visit.extend(bases);
+            } => {
+                visit.extend([*scope, *parameters, *defaults]);
+                visit.extend(class_cell);
+                fields.children(visit);
             }
-            Self::Instance { class, fields } => {
+            Self::Class {
+                scope, ancestors, ..
+            } => {
+                visit.push(*scope);
+                visit.extend(ancestors);
+            }
+            Self::Instance {
+                class,
+                fields,
+                dictionary,
+            } => {
                 visit.push(*class);
+                visit.extend(dictionary);
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
-            Self::Property(val) => visit.push(*val),
+            Self::Property(property) => property.children(visit),
+            Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
                 function,
                 args,
@@ -333,19 +402,24 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::IoMethod { owner, .. } => visit.push(*owner),
+            Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
             | Self::Ellipsis
+            | Self::NotImplemented
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
+            | Self::CodecDecoder(_)
             | Self::Hash(_)
+            | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
+            | Self::TextFile(_)
             | Self::RegexPattern(_)
             | Self::RegexMatch { .. } => {}
         }
@@ -392,6 +466,7 @@ impl Heap {
                 Some(Value::Bool(false)),
                 Some(Value::Bool(true)),
                 Some(Value::Ellipsis),
+                Some(Value::NotImplemented),
             ],
             free: Vec::new(),
             frames: vec![Frame::new(NONE)],
@@ -437,6 +512,10 @@ impl Heap {
         self.frames.last()?.location
     }
 
+    pub fn current_scope(&self) -> Id {
+        self.frames.last().unwrap().scope
+    }
+
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
@@ -451,7 +530,7 @@ impl Heap {
             return;
         }
         let mut pending: Vec<_> = globals.collect();
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS]);
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
             pending.push(frame.scope);
             pending.extend(&frame.live);

@@ -23,6 +23,7 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "NotImplementedError"
             | "TypeError"
             | "ValueError"
+            | "EOFError"
             | "UnicodeError"
             | "UnicodeDecodeError"
             | "UnicodeEncodeError"
@@ -37,7 +38,16 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "ImportError"
             | "ModuleNotFoundError"
             | "OSError"
+            | "ConnectionError"
+            | "ConnectionRefusedError"
+            | "ConnectionResetError"
+            | "ConnectionAbortedError"
+            | "BrokenPipeError"
+            | "BlockingIOError"
+            | "TimeoutError"
             | "FileNotFoundError"
+            | "IsADirectoryError"
+            | "NotADirectoryError"
             | "PermissionError"
             | "AssertionError"
             | "MemoryError"
@@ -53,9 +63,11 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "ord"
                 | "callable"
                 | "isinstance"
                 | "getattr"
+                | "globals"
                 | "setattr"
                 | "hasattr"
                 | "open"
@@ -82,48 +94,92 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "str"
             | "tuple"
             | "type"
+            | "super"
     ) || is_exception(name)
 }
 
+pub(super) const DICT_METHODS: &[&str] = &[
+    "__init__",
+    "__len__",
+    "__iter__",
+    "__contains__",
+    "__getitem__",
+    "__setitem__",
+    "get",
+    "items",
+    "keys",
+    "setdefault",
+    "update",
+    "values",
+];
+
+pub(super) const STR_METHODS: &[&str] = &[
+    "encode",
+    "endswith",
+    "find",
+    "format",
+    "join",
+    "lower",
+    "lstrip",
+    "partition",
+    "removeprefix",
+    "removesuffix",
+    "replace",
+    "rpartition",
+    "rsplit",
+    "rstrip",
+    "split",
+    "splitlines",
+    "startswith",
+    "strip",
+    "upper",
+];
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
-        Value::Str(_)
-            if matches!(
-                attr,
-                "format"
-                    | "split"
-                    | "rsplit"
-                    | "splitlines"
-                    | "strip"
-                    | "lstrip"
-                    | "rstrip"
-                    | "startswith"
-                    | "endswith"
-                    | "replace"
-                    | "join"
-                    | "lower"
-                    | "upper"
-                    | "removeprefix"
-                    | "removesuffix"
-                    | "encode"
-            ) =>
-        {
-            "str"
-        }
-        Value::Bytes(_) if attr == "decode" => "bytes",
+        Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Property(_) if attr == "setter" => "property",
+        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
+        Value::NamedTuple {
+            class: Some("SplitResult" | "SplitResultBytes"),
+            ..
+        } if attr == "geturl" => "urllib.parse.SplitResult",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
-        Value::Set(_) if matches!(attr, "add" | "update") => "set",
-        Value::Dict(_) | Value::DefaultDict { .. }
+        Value::Socket(_)
             if matches!(
                 attr,
-                "items" | "values" | "keys" | "get" | "setdefault" | "update"
+                "bind"
+                    | "listen"
+                    | "accept"
+                    | "connect"
+                    | "getsockname"
+                    | "fileno"
+                    | "close"
+                    | "recv"
+                    | "recv_into"
+                    | "makefile"
+                    | "send"
+                    | "sendall"
+                    | "shutdown"
+                    | "setsockopt"
+                    | "setblocking"
+                    | "getblocking"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
-            "dict"
+            "socket.socket"
         }
+        Value::TextFile(_)
+            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+        {
+            "TextIOWrapper"
+        }
+        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
+        Value::Set(_) if matches!(attr, "add" | "update") => "set",
+        Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
                 attr,
@@ -143,6 +199,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "read"
+                    | "fileno"
                     | "readline"
                     | "readinto"
                     | "seek"
@@ -229,6 +286,15 @@ fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 
+fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
+    ctx.str_value(value).map(str::to_owned).map_err(|_| {
+        type_error(format!(
+            "attribute name must be string, not '{}'",
+            ctx.type_name(value)
+        ))
+    })
+}
+
 fn set_attribute(
     ctx: &mut Context,
     name: &str,
@@ -258,13 +324,7 @@ fn set_attribute(
             format!("setattr expected 3 arguments, got {}", args.len())
         }));
     };
-    let Value::Str(attr_name) = ctx.heap.get(*attr) else {
-        return Err(type_error(format!(
-            "attribute name must be string, not '{}'",
-            ctx.type_name(*attr)
-        )));
-    };
-    let attr_name = attr_name.clone();
+    let attr_name = attribute_name(ctx, *attr)?;
     if base {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
@@ -310,12 +370,40 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "object.__getattribute__" {
+        let Some((&object, values)) = args.split_first() else {
+            return Err(type_error(
+                "descriptor '__getattribute__' of 'object' object needs an argument",
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __getattribute__() takes no keyword arguments",
+            ));
+        }
+        let [key] = values else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                values.len()
+            )));
+        };
+        let attr = attribute_name(ctx, *key)?;
+        return ctx.default_get_attr(object, &attr);
+    }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
+    if name == "object.__init__" {
+        if args.len() != 1 || !kwargs.is_empty() {
+            return Err(type_error(
+                "object.__init__() takes exactly one argument (the instance to initialize)",
+            ));
+        }
+        return Ok(NONE);
+    }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
-            "str" | "bytes" => text::method(ctx, method, args, kwargs),
+            "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 2)?;
@@ -330,6 +418,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -359,15 +448,33 @@ pub(super) fn call(
             }
             ctx.exact_type(*object)
         }
+        "super" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("super() takes no keyword arguments"));
+            }
+            ctx.make_super(args)
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
         }
+        "globals" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("globals() takes no keyword arguments"));
+            }
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "globals() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            Ok(ctx.module_globals(ctx.heap.current_scope()))
+        }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
-            let attr = ctx.str_value(args[1])?.to_owned();
+            let attr = attribute_name(ctx, args[1])?;
             match ctx.lookup_attr(args[0], &attr) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),
@@ -379,6 +486,30 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.instance_of(args[0], args[1])))
+        }
+        "ord" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("ord() takes no keyword arguments"));
+            }
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "ord() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let code = match ctx.heap.get(*value) {
+                Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
+                _ => {
+                    let text = ctx.str_value(*value).map_err(|_| {
+                        type_error(format!(
+                            "ord() expected string of length 1, but {} found",
+                            ctx.type_name(*value)
+                        ))
+                    })?;
+                    crate::objects::ord_char(text)?
+                }
+            };
+            Ok(ctx.int(i64::from(code)))
         }
         "len" => {
             positional(name, kwargs)?;
@@ -439,18 +570,21 @@ pub(super) fn call(
             Ok(ctx.text(value))
         }
         "property" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::Property(args[0])))
+            let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
+            super::property::construct(ctx, fields)
         }
         "open" => {
             let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
+            if matches!(mode, "w" | "wt" | "tw") {
+                let file = crate::objects::TextFile::create(path)?;
+                return Ok(ctx.alloc(Value::TextFile(file)));
+            }
             if mode != "rb" {
                 return Err(Error::new(
                     "ValueError",
-                    "only binary read mode is supported for dynamic files",
+                    "unsupported mode for dynamic files",
                 ));
             }
             let file = File::open(path).map_err(|e| {
@@ -462,7 +596,7 @@ pub(super) fn call(
                 Error::new(kind, format!("{path}: {e}"))
             })?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
-                io::BufReader::new(file),
+                io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))
         }
         "__import__" => {

@@ -9,7 +9,7 @@ const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
-    let object = ctx.alloc(Value::Native("object".into()));
+    let object = ctx.builtin("object");
     let io = class(
         ctx,
         module,
@@ -37,15 +37,20 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
     let scope = ctx.scope("io", Some(module));
+    let ancestors = ctx.lineage(base);
     let owner = ctx.alloc(Value::Class {
         name: format!("io.{name}"),
         scope,
-        bases: vec![base],
+        ancestors,
     });
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
-            ctx.alloc(Value::Property(method))
+            ctx.alloc(Value::ReadOnlyDescriptor {
+                get: method,
+                owner: "_io._IOBase",
+                name,
+            })
         } else {
             method
         };

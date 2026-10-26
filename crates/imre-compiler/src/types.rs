@@ -255,6 +255,7 @@ impl Types {
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
             Type::Class(id)
+            | Type::WeakProxy(id)
             | Type::NamedException(id)
             | Type::IntEnum(id)
             | Type::StrEnum(id)

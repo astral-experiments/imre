@@ -86,7 +86,7 @@ impl Builtin {
             Self::Str if args.first().is_some_and(|e| e.ty == Type::Int) => {
                 Contract::new(true, PreservesOwners)
             }
-            Self::Str => Contract::new(true, PreservesLists),
+            Self::Str | Self::DecimalIntegerText => Contract::new(true, PreservesLists),
             Self::Linecache(..) | Self::CachePath(_) => Contract::new(true, Unknown),
             Self::Calendar(op) => Contract::new(
                 matches!(
@@ -614,6 +614,8 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::WeakProxyNew
+            | Self::WeakProxyTarget
             | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
@@ -718,6 +720,7 @@ impl Builtin {
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
+            | Self::WeakProxyCallable
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
@@ -999,7 +1002,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || name.starts_with("fn_")
         || matches!(
             name,
-            "imre_mktime"
+            "imre_weak_proxy_new"
+                | "imre_weak_proxy_target"
+                | "imre_mktime"
                 | "imre_mktime_indexed"
                 | "imre_mktime_offset"
                 | "imre_time_sequence_length"
@@ -1250,7 +1255,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_zip_namelist"
                 | "imre_zip_close"
                 | "imre_int_str"
+                | "imre_decimal_int_text"
                 | "imre_int_parse"
+                | "imre_int_parse_hex"
                 | "imre_int_float"
                 | "imre_float_int"
                 | "imre_float_parse"

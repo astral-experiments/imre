@@ -66,6 +66,9 @@ impl Checker<'_> {
     pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
         match self.collection_binding(expression) {
             Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
+            Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) => {
+                Some(Self::weak_proxy_type_name(callable))
+            }
             Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
             Some(Binding::Intrinsic(Intrinsic::Mapping {
                 typing_alias: false,
@@ -98,8 +101,14 @@ pub(super) fn type_name(value: Expr) -> Expr {
 }
 
 fn function_entries(function: &ast::StmtFunctionDef) -> Vec<(&str, &ast::Expr)> {
+    parameter_annotations(&function.parameters, function.returns.as_deref())
+}
+
+pub(crate) fn parameter_annotations<'a>(
+    p: &'a ast::Parameters,
+    returns: Option<&'a ast::Expr>,
+) -> Vec<(&'a str, &'a ast::Expr)> {
     // CPython emits ordinary arguments before the separate positional-only group.
-    let p = &function.parameters;
     p.args
         .iter()
         .chain(&p.posonlyargs)
@@ -108,7 +117,7 @@ fn function_entries(function: &ast::StmtFunctionDef) -> Vec<(&str, &ast::Expr)> 
         .chain(p.kwonlyargs.iter().map(|p| &p.parameter))
         .chain(p.kwarg.as_deref())
         .filter_map(|p| p.annotation.as_deref().map(|a| (p.name.as_str(), a)))
-        .chain(function.returns.as_deref().map(|a| ("return", a)))
+        .chain(returns.map(|a| ("return", a)))
         .collect()
 }
 
@@ -133,7 +142,7 @@ fn field_entries(body: &[ast::Stmt]) -> Vec<(&str, &ast::Expr)> {
         .collect()
 }
 
-fn spelling(annotation: &ast::Expr) -> String {
+pub(crate) fn spelling(annotation: &ast::Expr) -> String {
     fn items(items: &[ast::Expr]) -> String {
         items.iter().map(spelling).collect::<Vec<_>>().join(", ")
     }

@@ -1,23 +1,71 @@
 use super::*;
 
 impl Context {
-    fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
-        let Value::Class { scope, bases, .. } = self.heap.get(class) else {
-            return None;
+    pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return self.own_class_attr(class, name);
         };
-        self.scope_data(*scope)
-            .names
-            .get(name)
-            .copied()
-            .or_else(|| bases.iter().find_map(|&base| self.class_attr(base, name)))
+        std::iter::once(&class)
+            .chain(ancestors)
+            .find_map(|&base| self.own_class_attr(base, name))
     }
 
+    pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        match self.heap.get(class) {
+            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
+            }
+            _ => None,
+        }
+    }
     /// Special methods are looked up on the type, even if the instance shadows them.
     fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
             return None;
         };
         self.class_attr(*class, name)
+    }
+
+    /// Dict copying uses raw entries for a dict with its original iterator.
+    /// An overridden iterator opts into the mapping protocol, including key lookup.
+    pub(super) fn for_each_mapping_item(
+        &mut self,
+        input: Id,
+        mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
+    ) -> Result<bool> {
+        if self.slot(input, "__iter__").is_none_or(
+            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
+        {
+            for (key, value) in entries {
+                visit(self, key, value)?;
+            }
+            return Ok(true);
+        }
+        if matches!(
+            self.heap.get(input),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::Set(_)
+                | Value::Str(_)
+                | Value::Bytes(_)
+                | Value::Range { .. }
+                | Value::Iterator { .. }
+        ) {
+            return Ok(false);
+        }
+        let keys = match self.lookup_attr(input, "keys") {
+            Ok(keys) => keys,
+            Err(error) if error.kind == "AttributeError" => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let result = self.call(keys, Vec::new(), Vec::new())?;
+        for key in self.items(result)? {
+            let value = self.get_item(input, key)?;
+            visit(self, key, value)?;
+        }
+        Ok(true)
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
@@ -38,13 +86,21 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
     }
 
+    fn native_data_descriptor(&self, descriptor: Id) -> bool {
+        matches!(
+            self.heap.get(descriptor),
+            Value::Property(_) | Value::ReadOnlyDescriptor { .. }
+        )
+    }
+
     fn data_descriptor(&self, descriptor: Id) -> bool {
-        matches!(self.heap.get(descriptor), Value::Property(_))
+        self.native_data_descriptor(descriptor)
             || self.slot(descriptor, "__set__").is_some()
             || self.slot(descriptor, "__delete__").is_some()
     }
@@ -55,12 +111,26 @@ impl Context {
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
-                Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
+                Value::Property(property) => return property.read(self, receiver),
+                Value::ReadOnlyDescriptor { get, .. } => {
+                    return self.call(*get, vec![receiver], Vec::new());
+                }
                 Value::Function { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
-                Value::Native(name) => name == "object.__setattr__",
+                Value::Native(name) => {
+                    matches!(
+                        name.as_str(),
+                        "ast.AST.__init__"
+                            | "object.__getattribute__"
+                            | "object.__setattr__"
+                            | "object.__init__"
+                    ) || name.starts_with("dict.")
+                        || name
+                            .strip_prefix("str.")
+                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
+                }
                 _ => false,
             };
             if method {
@@ -81,39 +151,38 @@ impl Context {
         name: &str,
     ) -> Result<Id> {
         let member = self.class_attr(class, name);
-        let attribute = match (member, field) {
+        match (member, field) {
             (Some(member), _)
                 if self.data_descriptor(member)
                     && (self.slot(member, "__get__").is_some()
-                        || matches!(self.heap.get(member), Value::Property(_))) =>
+                        || self.native_data_descriptor(member)) =>
             {
                 self.bind_attribute(member, object, class)
             }
+            // Without a Python class member, object.__class__ is a data descriptor.
+            (None, _) if name == "__class__" => Ok(class),
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) => Err(Error::new(
-                "AttributeError",
-                format!("{} has no attribute {name:?}", self.display(object)),
-            )),
-        };
-        match attribute {
-            Err(error) if error.kind == "AttributeError" => {
-                let Some(hook) = self.class_attr(class, "__getattr__") else {
-                    return Err(error);
-                };
-                let callable = self.bind_attribute(hook, object, class)?;
-                let name = self.text(name);
-                self.call(callable, vec![name], Vec::new())
+            (None, None) if name == "__getattribute__" => {
+                let method = self.builtin("object.__getattribute__");
+                self.bind_attribute(method, object, class)
             }
-            value => value,
+            (None, None) => Err(self.missing_attribute(object, name)),
         }
     }
-    fn subclass(&self, class: Id, target: Id) -> bool {
+
+    pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
         }
-        if let Value::Class { bases, .. } = self.heap.get(class) {
-            return bases.iter().any(|&b| self.subclass(b, target));
+        if let Value::Class { ancestors, .. } = self.heap.get(class) {
+            return ancestors.iter().any(|&b| self.equal_class(b, target));
+        }
+        if let (Value::Native(actual), Value::Native(parent)) =
+            (self.heap.get(class), self.heap.get(target))
+        {
+            return self.builtin_type_name(class) == Some("type")
+                && (parent == "object" || (actual == "bool" && parent == "int"));
         }
         false
     }
@@ -123,7 +192,9 @@ impl Context {
     }
     fn has_base(&self, class: Id, target: &str) -> bool {
         match self.heap.get(class) {
-            Value::Class { bases, .. } => bases.iter().any(|&b| self.has_base(b, target)),
+            Value::Class { ancestors, .. } => ancestors
+                .iter()
+                .any(|&b| matches!(self.heap.get(b), Value::Native(name) if name == target)),
             Value::Native(name) => name == target,
             _ => false,
         }
@@ -162,6 +233,8 @@ impl Context {
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Property(_) => "property",
+            Value::Super { .. } => "super",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
                 Value::Native(_) => "builtin_function_or_method",
@@ -178,6 +251,7 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "getset_descriptor"
                             | "operator.attrgetter"
                     )
                 {
@@ -196,6 +270,10 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Instance { class, .. } => Ok(*class),
+            Value::NamedTuple {
+                class: Some("time.struct_time"),
+                ..
+            } => Ok(self.builtin("time.struct_time")),
             Value::Raised(error) => {
                 let name = error.kind.clone();
                 Ok(self
@@ -246,6 +324,7 @@ impl Context {
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("hmac.HMAC", Value::Hmac(_))
+            | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -257,7 +336,28 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            (
+                "urllib.parse.SplitResult",
+                Value::NamedTuple {
+                    class: Some("SplitResult"),
+                    ..
+                },
+            )
+            | (
+                "urllib.parse.SplitResultBytes",
+                Value::NamedTuple {
+                    class: Some("SplitResultBytes"),
+                    ..
+                },
+            ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (
+                "time.struct_time",
+                Value::NamedTuple {
+                    class: Some("time.struct_time"),
+                    ..
+                },
+            ) => true,
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
                     c == value.class() || (c == "date" && value.class() == "datetime")
@@ -278,13 +378,28 @@ impl Context {
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
                     || (name == "RuntimeError" && kind == "RecursionError")
-                    || (name == "ValueError" && kind == "JSONDecodeError")
+                    || (name == "ValueError"
+                        && matches!(kind, "JSONDecodeError" | "binascii.Error"))
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
+                    || (matches!(name.as_str(), "OSError" | "ConnectionError")
+                        && matches!(
+                            kind,
+                            "BrokenPipeError"
+                                | "ConnectionRefusedError"
+                                | "ConnectionResetError"
+                                | "ConnectionAbortedError"
+                        ))
                     || (name == "OSError"
                         && matches!(
                             kind,
-                            "FileNotFoundError" | "PermissionError" | "IsADirectoryError"
+                            "FileNotFoundError"
+                                | "PermissionError"
+                                | "IsADirectoryError"
+                                | "NotADirectoryError"
+                                | "BlockingIOError"
+                                | "TimeoutError"
+                                | "socket.gaierror"
                         ))
                     || self
                         .classes
@@ -294,8 +409,72 @@ impl Context {
             _ => false,
         }
     }
+    fn missing_attribute(&self, obj: Id, name: &str) -> Error {
+        Error::new(
+            "AttributeError",
+            format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
+        )
+    }
+
+    fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
+        let callable = self.bind_attribute(hook, obj, class)?;
+        let key = self.text(name);
+        self.call(callable, vec![key], Vec::new())
+    }
+
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return self.default_get_attr(obj, name);
+        };
+        let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
+            self.attribute_hook(hook, obj, class, name)
+        } else {
+            self.default_get_attr(obj, name)
+        };
+        match attribute {
+            Err(error) if error.kind == "AttributeError" => {
+                let Some(hook) = self.class_attr(class, "__getattr__") else {
+                    return Err(error);
+                };
+                self.attribute_hook(hook, obj, class, name)
+            }
+            result => result,
+        }
+    }
+
+    /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
+    pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+            return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
+        }
+        if name == "__class__" {
+            return self.exact_type(obj);
+        }
         match self.heap.get(obj).clone() {
+            Value::Property(property) => {
+                if let Some(attribute) = property.attribute(self, name)? {
+                    return Ok(attribute);
+                }
+            }
+            Value::Native(class) if class == "property" && name == "setter" => {
+                return Ok(self.builtin("property.setter"));
+            }
+            Value::Function { scope, fields, .. } => {
+                if name == "__globals__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.function_attr(obj, fields, name)? {
+                    return Ok(value);
+                }
+            }
+            Value::Method { callable, receiver } => match name {
+                "__func__" => return Ok(callable),
+                "__self__" => return Ok(receiver),
+                _ if matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    return self.lookup_attr(callable, name);
+                }
+                _ => {}
+            },
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
@@ -305,6 +484,11 @@ impl Context {
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
+            Value::Super {
+                start,
+                receiver,
+                owner,
+            } => return self.super_attribute(start, receiver, owner, name),
             Value::Partial {
                 function,
                 args,
@@ -313,6 +497,39 @@ impl Context {
                 "func" => return Ok(function),
                 "args" => return Ok(args),
                 "keywords" => return Ok(keywords),
+                _ => {}
+            },
+            Value::File(handle) if name == "closed" => {
+                return Ok(if handle.borrow().is_none() {
+                    TRUE
+                } else {
+                    FALSE
+                });
+            }
+            Value::Native(class) if class == "socket.socket" && name == "__name__" => {
+                return Ok(self.text("socket"));
+            }
+            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::TextFile(file) if name == "closed" => {
+                return Ok(if file.closed() { TRUE } else { FALSE });
+            }
+            Value::Raised(Error {
+                os_args: Some(args),
+                ..
+            }) => match name {
+                "errno" => return Ok(self.int(args.errno)),
+                "strerror" => return Ok(self.text(args.description)),
+                "args" => {
+                    let fields = vec![self.int(args.errno), self.text(args.description)];
+                    return Ok(self.alloc(Value::Tuple(fields)));
+                }
+                "filename" | "filename2" => {
+                    if let Some([first, second]) = args.text_paths {
+                        let path = if name == "filename" { first } else { second };
+                        return Ok(path.map_or(NONE, |path| self.text(path)));
+                    }
+                }
                 _ => {}
             },
             Value::Raised(error) if name == "args" => {
@@ -329,6 +546,11 @@ impl Context {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
                 "block_size" => return Ok(self.int(64)),
+                _ => {}
+            },
+            Value::CodecInfo { entry, decode } => match name {
+                "name" => return Ok(self.text(entry.codec().name())),
+                "decode" => return Ok(decode),
                 _ => {}
             },
             Value::Hmac(mac) => match name {
@@ -353,15 +575,28 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
-            Value::Native(class) if class == "object" && name == "__setattr__" => {
-                return Ok(self.builtin("object.__setattr__"));
+            Value::Native(class)
+                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+            {
+                if let Some(method) = self.own_class_attr(obj, name) {
+                    return Ok(method);
+                }
+            }
+            Value::Native(class)
+                if class == "object"
+                    && matches!(name, "__getattribute__" | "__setattr__" | "__init__") =>
+            {
+                return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Module {
                 name: module,
                 scope,
             } => {
-                if let Some(value) = self.scope_data(scope).names.get(name) {
-                    return Ok(*value);
+                if name == "__dict__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.scope_name(scope, name) {
+                    return Ok(value);
                 }
                 if stdlib::is_module(&module) {
                     let value = stdlib::attribute(self, &module, name)?;
@@ -379,19 +614,25 @@ impl Context {
                     return self.bind_attribute(value, NONE, obj);
                 }
             }
-            Value::Instance { class, fields } => {
-                return self.instance_attribute(obj, class, fields.get(name).copied(), name);
-            }
             Value::NamedTuple {
                 class,
                 names,
                 values,
+                extras,
             } => {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if class == Some("time.struct_time") && matches!(name, "tm_zone" | "tm_gmtoff") {
-                    return Ok(NONE);
+                if let Some((_, value)) = extras.iter().find(|(key, _)| *key == name) {
+                    return Ok(*value);
+                }
+                if class == Some("time.struct_time") && name == "__class__" {
+                    return Ok(self.builtin("time.struct_time"));
+                }
+                if matches!(class, Some("SplitResult" | "SplitResultBytes"))
+                    && let Some(property) = stdlib::urllib::property(self, values[1], name)?
+                {
+                    return Ok(property);
                 }
             }
             _ => {}
@@ -403,10 +644,7 @@ impl Context {
                 receiver: obj,
             }));
         }
-        Err(Error::new(
-            "AttributeError",
-            format!("{} has no attribute {name:?}", self.display(obj)),
-        ))
+        Err(self.missing_attribute(obj, name))
     }
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
@@ -418,9 +656,21 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Function { .. }) {
+            return self.set_function_attr(obj, name, value);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
+            if let Value::Property(property) = *self.heap.get(descriptor) {
+                return property.write(self, obj, value);
+            }
+            if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("attribute '{name}' of '{owner}' objects is not writable"),
+                ));
+            }
             if let Some(setter) = self.slot(descriptor, "__set__") {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
@@ -438,10 +688,18 @@ impl Context {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
         match self.heap.get_mut(obj) {
+            Value::Property(property) if name == "__name__" => property.name = Some(value),
+            Value::Property(property) if name == "__doc__" => property.doc = value,
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Module {
                 name: module,
                 scope,
             } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
@@ -493,12 +751,14 @@ impl Context {
                                 | "range"
                                 | "function"
                                 | "object"
+                                | "property"
                         )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
@@ -601,10 +861,15 @@ impl Context {
                     return Ok(self.alloc(Value::Instance {
                         class: callable,
                         fields,
+                        dictionary: None,
                     }));
                 }
+                let dictionary = self
+                    .has_base(callable, "dict")
+                    .then(|| self.dict(Vec::new()));
                 let instance = self.alloc(Value::Instance {
                     class: callable,
+                    dictionary,
                     fields: HashMap::new(),
                 });
                 if self.class_attr(callable, "__init__").is_some() {
@@ -621,12 +886,14 @@ impl Context {
                 Ok(instance)
             }
             Value::Function {
-                name,
+                fields,
                 scope,
+                class_cell,
                 code,
                 parameters,
                 defaults,
             } => {
+                let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
@@ -700,6 +967,13 @@ impl Context {
                         }
                     }
                 }
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.first_argument = pos.into_iter().next();
+                if sig["class_cell"] == true {
+                    frame.class_cell = class_cell;
+                }
                 let value = self.execute(code, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
@@ -723,6 +997,7 @@ impl Context {
             (expected, self.heap.get(value)),
             ("None", Value::None)
                 | ("int", Value::Int(_))
+                | ("float", Value::Float(_))
                 | ("bytes", Value::Bytes(_))
                 | ("str", Value::Str(_))
                 | ("bool", Value::Bool(_))
@@ -749,18 +1024,25 @@ impl Context {
         };
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
+        let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.class_cell = Some(cell);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        let ancestors = self.linearized_bases(&bases)?;
         let class = self.alloc(Value::Class {
             name: name.clone(),
             scope,
-            bases,
+            ancestors,
         });
+        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -782,7 +1064,13 @@ impl Context {
             self.heap.keep(value);
         }
         for (value, name) in members {
-            if let Some(set_name) = self.slot(value, "__set_name__") {
+            if matches!(self.heap.get(value), Value::Property(_)) {
+                let name = self.text(name);
+                let Value::Property(property) = self.heap.get_mut(value) else {
+                    unreachable!()
+                };
+                property.name = Some(name);
+            } else if let Some(set_name) = self.slot(value, "__set_name__") {
                 let name = self.text(name);
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }

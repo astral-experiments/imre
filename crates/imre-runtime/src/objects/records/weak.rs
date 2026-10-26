@@ -1,5 +1,7 @@
 //! Weak observers of fixed records. Unobserved records keep their two-word header.
 use super::{Header, RecordDescriptor, imre_record_retain};
+use crate::objects::{Object, Storage, object};
+use crate::{Error, Kind, ObjectOwner, StorageCell, finish};
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
@@ -10,6 +12,7 @@ struct Anchor {
     layout: *const RecordDescriptor,
     payload: *const usize,
     observers: RefCell<Vec<Weak<dyn Fn()>>>,
+    proxy: RefCell<crate::shared::Weak<Object>>,
 }
 
 impl Drop for Anchor {
@@ -46,6 +49,7 @@ impl WeakRecord {
             layout,
             payload,
             observers: RefCell::default(),
+            proxy: RefCell::default(),
         });
         let observer = Self(Rc::downgrade(&anchor));
         header.descriptor.set(
@@ -77,6 +81,73 @@ impl WeakRecord {
             observers.retain(|observer| observer.strong_count() != 0);
             observers.push(Rc::downgrade(notify));
         }
+    }
+}
+
+/// Return the shared callback-free proxy, without making the proxy own its target.
+///
+/// # Safety
+/// `payload` points to a rooted Python class record throughout this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_weak_proxy_new(
+    payload: *const usize,
+    callable: bool,
+) -> *const Object {
+    // SAFETY: the caller roots the referent while its weak anchor is installed.
+    let target = unsafe { WeakRecord::new(payload) };
+    let anchor = target.0.upgrade().expect("rooted referent");
+    if let Some(cached) = anchor.proxy.borrow().upgrade() {
+        return ObjectOwner::into_raw(cached);
+    }
+    let handle = ObjectOwner::try_new(Object(StorageCell::new(Storage::WeakProxy(
+        target, callable,
+    ))))
+    .map_err(|_| Error::memory_error());
+    finish(
+        handle.map(|handle| {
+            *anchor.proxy.borrow_mut() = ObjectOwner::downgrade(&handle);
+            ObjectOwner::into_raw(handle)
+        }),
+        std::ptr::null(),
+    )
+}
+
+/// Own the referent for one operation, raising `ReferenceError` after final release.
+///
+/// # Safety
+/// `proxy` is a rooted weak proxy created by `imre_weak_proxy_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_weak_proxy_target(proxy: *const Object) -> *const usize {
+    // SAFETY: the borrow only upgrades the weak record; it cannot invoke Python.
+    let target = unsafe {
+        object(proxy).0.with(|storage| match storage {
+            Storage::WeakProxy(target, _) => target.upgrade(),
+            _ => unreachable!("expected a weak proxy"),
+        })
+    };
+    finish(
+        target.ok_or_else(|| {
+            Error::new(
+                Kind::ReferenceError,
+                "weakly-referenced object no longer exists",
+            )
+        }),
+        std::ptr::null(),
+    )
+}
+
+/// The Python type of a proxy remains observable after its referent has expired.
+///
+/// # Safety
+/// `proxy` is a rooted native weak proxy.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_weak_proxy_callable(proxy: *const Object) -> bool {
+    // SAFETY: reads one immutable flag without upgrading or mutating the referent.
+    unsafe {
+        object(proxy).0.with(|storage| match storage {
+            Storage::WeakProxy(_, callable) => *callable,
+            _ => unreachable!("expected a weak proxy"),
+        })
     }
 }
 
@@ -119,6 +190,37 @@ mod tests {
     use crate::objects::records::{
         RecordBatch, descriptor, imre_record_cached_result, imre_record_new, imre_record_release,
     };
+
+    #[test]
+    fn proxy_cache_is_weak_in_both_directions() {
+        let layout = RecordDescriptor {
+            length: 0,
+            kinds: std::ptr::null(),
+            semantics: std::ptr::null(),
+        };
+        // SAFETY: each raw ownership transfer is balanced below; the descriptor outlives the record.
+        unsafe {
+            let target = imre_record_new(&layout);
+            let first = ObjectOwner::from_raw(imre_weak_proxy_new(target, true));
+            let alias = ObjectOwner::from_raw(imre_weak_proxy_new(target, true));
+            assert_eq!(ObjectOwner::as_ptr(&first), ObjectOwner::as_ptr(&alias));
+            let prior = ObjectOwner::downgrade(&first);
+            drop((first, alias));
+            assert!(prior.upgrade().is_none());
+            let proxy = ObjectOwner::from_raw(imre_weak_proxy_new(target, true));
+            let temporary = imre_weak_proxy_target(ObjectOwner::as_ptr(&proxy));
+            assert_eq!(target.cast_const(), temporary);
+            imre_record_release(target);
+            assert!(imre_weak_proxy_callable(ObjectOwner::as_ptr(&proxy)));
+            imre_record_release(temporary);
+            assert!(imre_weak_proxy_target(ObjectOwner::as_ptr(&proxy)).is_null());
+            let error = ObjectOwner::from_raw(crate::objects::exceptions::imre_error_take());
+            assert_eq!(
+                crate::objects::exceptions::kind_of(error.as_ref()),
+                Kind::ReferenceError
+            );
+        }
+    }
 
     #[test]
     fn observers_track_identity_through_retain_cache_and_final_release() {

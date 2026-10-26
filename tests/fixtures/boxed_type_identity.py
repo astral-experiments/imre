@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 
@@ -13,6 +14,8 @@ class ReportsString:
 
 
 def current():
+    identifier = uuid.UUID("12345678-1234-5678-9ABC-DEF001234567")
+    print(type(identifier) is uuid.UUID, isinstance(1, uuid.UUID), str(identifier), identifier.hex)
     value = ReportsString()
     print(type("Málaga <&> 東京") is str, type(value) is str, value.__class__ is str)
     print(type(value) is ReportsString, type(ReportsString) is type, type(type) is type)

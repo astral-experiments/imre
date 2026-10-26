@@ -812,6 +812,7 @@ fn namespace_class(
                 module: definition.module,
                 name: field.name.clone(),
                 annotation: field.annotation.clone(),
+                weak_proxy: false,
                 default: None,
                 kw_only: false,
                 repr: true,

@@ -5,8 +5,8 @@ mod expandtabs;
 mod lowercase;
 mod normalization;
 mod translate;
-mod urlquote;
-mod urlsplit;
+pub(crate) mod urlquote;
+pub(crate) mod urlsplit;
 
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
@@ -16,6 +16,41 @@ use std::mem::ManuallyDrop;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+#[derive(Clone, Copy)]
+pub(crate) enum UrlInput<'a> {
+    Text(&'a str),
+    Bytes(&'a [u8]),
+}
+
+impl<'a> UrlInput<'a> {
+    pub(crate) fn is_unescaped_text(self) -> bool {
+        matches!(self, Self::Text(s) if !s.contains('%'))
+    }
+
+    pub(crate) fn as_bytes(self) -> &'a [u8] {
+        match self {
+            Self::Text(s) => s.as_bytes(),
+            Self::Bytes(b) => b,
+        }
+    }
+
+    /// URL splitting accepts Unicode text and decodes byte components as strict ASCII.
+    pub(crate) fn decoded(self) -> Result<&'a str> {
+        match self {
+            Self::Text(s) => Ok(s),
+            Self::Bytes(b) => {
+                if let Some(i) = b.iter().position(|c| !c.is_ascii()) {
+                    return Err(super::bytes::ascii_decode_error(
+                        super::bytes::owned_input(b)?,
+                        i,
+                    ));
+                }
+                Ok(std::str::from_utf8(b).expect("ASCII is UTF-8"))
+            }
+        }
+    }
+}
 
 /// Borrow the string or bytes layout selected by a URL operation's type tag.
 ///
@@ -99,6 +134,29 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+fn ord_length(length: usize) -> Error {
+    Error::new(
+        Kind::TypeError,
+        format!("ord() expected a character, but string of length {length} found"),
+    )
+}
+
+pub(crate) fn ord_char(text: &str) -> Result<u32> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(ch), None) => Ok(u32::from(ch)),
+        (None, None) => Err(ord_length(0)),
+        _ => Err(ord_length(2 + chars.count())),
+    }
+}
+
+pub(crate) fn ord_byte(bytes: &[u8]) -> Result<u32> {
+    match bytes {
+        [byte] => Ok(u32::from(*byte)),
+        _ => Err(ord_length(bytes.len())),
+    }
+}
+
 /// Returns the scalar value of one character or the unsigned value of one byte.
 ///
 /// # Safety
@@ -118,30 +176,19 @@ pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
             word = payload;
             kind = member.base();
         }
-        let length = match kind {
+        let code = match kind {
             3 => {
                 // SAFETY: the representation identifies a rooted UTF-8 string.
-                let mut chars = unsafe { &*(word as *const Str) }.chars();
-                match (chars.next(), chars.next()) {
-                    (Some(ch), None) => return Ok(Int::from_usize(ch as usize).into_raw()),
-                    (None, None) => 0,
-                    _ => 2 + chars.count(),
-                }
+                ord_char(unsafe { &*(word as *const Str) })?
             }
             8 => {
                 // SAFETY: the representation identifies an immutable rooted bytes value.
                 let bytes = unsafe { &*(word as *const crate::Bytes) };
-                if let [byte] = bytes.as_slice() {
-                    return Ok(Int::from_usize(usize::from(*byte)).into_raw());
-                }
-                bytes.len()
+                ord_byte(bytes.as_slice())?
             }
             _ => unreachable!("ord's checked character layout"),
         };
-        Err(Error::new(
-            Kind::TypeError,
-            format!("ord() expected a character, but string of length {length} found"),
-        ))
+        Ok(Int::from_usize(code as usize).into_raw())
     })();
     finish(result, 0)
 }
@@ -822,14 +869,36 @@ pub unsafe extern "C" fn imre_str_find(
     let (source, needle) = unsafe { (&*value, &*needle) };
     // SAFETY: a nonzero start is an exact canonical integer handle.
     let start = (start != 0).then(|| unsafe { Int::borrow(start) });
-    let found = search_start(source, start.as_deref()).and_then(|(byte, scalar)| {
-        source[byte..]
-            .find(needle.as_str())
-            .map(|offset| scalar + source[byte..byte + offset].chars().count())
+    find_text(source, needle, start.as_deref(), None).into_raw()
+}
+
+/// Search a Python slice without converting its Unicode-scalar bounds to byte indices twice.
+pub(crate) fn find_text(source: &str, needle: &str, start: Option<&Int>, end: Option<&Int>) -> Int {
+    let found = search_start(source, start).and_then(|(begin, scalar)| {
+        let end = end
+            .and_then(|i| search_start(source, Some(i)))
+            .map_or(source.len(), |(b, _)| b);
+        let window = source.get(begin..end)?;
+        window
+            .find(needle)
+            .map(|offset| scalar + window[..offset].chars().count())
     });
-    found
-        .map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
-        .into_raw()
+    found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)
+}
+
+pub(crate) fn partition_text<'a>(
+    source: &'a str,
+    separator: &str,
+    reverse: bool,
+) -> Result<Option<(&'a str, &'a str)>> {
+    if separator.is_empty() {
+        return Err(Error::new(Kind::ValueError, "empty separator"));
+    }
+    Ok(if reverse {
+        source.rsplit_once(separator)
+    } else {
+        source.split_once(separator)
+    })
 }
 
 /// Partitions around the first separator into three independently owned fields.
@@ -845,28 +914,29 @@ pub unsafe extern "C" fn imre_str_partition(
 ) {
     // SAFETY: immutable input strings remain rooted through every output write.
     let (source, separator_value) = unsafe { (&*value, &*separator) };
-    if separator_value.is_empty() {
-        Error::new(Kind::ValueError, "empty separator").raise();
-        return;
-    }
-    let parts = if let Some(at) = source.find(separator_value.as_str()) {
-        // SAFETY: separator is rooted; the tuple acquires an independent owner.
-        unsafe { StrOwner::increment_strong_count(separator) };
-        [
-            StrOwner::into_raw(StrOwner::new(Str::new(&source[..at]))),
-            separator,
-            StrOwner::into_raw(StrOwner::new(Str::new(
-                &source[at + separator_value.len()..],
-            ))),
-        ]
-    } else {
-        // SAFETY: an unsuccessful partition retains the complete original string.
-        unsafe { StrOwner::increment_strong_count(value) };
-        [
-            value,
-            StrOwner::into_raw(StrOwner::new(Str::new(""))),
-            StrOwner::into_raw(StrOwner::new(Str::new(""))),
-        ]
+    let parts = match partition_text(source, separator_value, false) {
+        Ok(Some((before, after))) => {
+            // SAFETY: separator is rooted; the tuple acquires an independent owner.
+            unsafe { StrOwner::increment_strong_count(separator) };
+            [
+                StrOwner::into_raw(StrOwner::new(Str::new(before))),
+                separator,
+                StrOwner::into_raw(StrOwner::new(Str::new(after))),
+            ]
+        }
+        Ok(None) => {
+            // SAFETY: an unsuccessful partition retains the complete original string.
+            unsafe { StrOwner::increment_strong_count(value) };
+            [
+                value,
+                StrOwner::into_raw(StrOwner::new(Str::new(""))),
+                StrOwner::into_raw(StrOwner::new(Str::new(""))),
+            ]
+        }
+        Err(error) => {
+            error.raise();
+            return;
+        }
     };
     for (index, part) in parts.into_iter().enumerate() {
         // SAFETY: output has three fresh pointer-typed slots, owned by the caller.
