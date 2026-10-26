@@ -1663,6 +1663,7 @@ pub(crate) enum TextOperation {
     Translate,
     Unquote,
     UrlQuote,
+    UrlQuotePlus,
     UrlUnquote,
     UrlSplit,
     UrlProperty(UrlProperty),
