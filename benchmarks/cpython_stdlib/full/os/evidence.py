@@ -22,6 +22,8 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 BODY_OPERATIONS = {
     "MiscTests.test_getcwd": "os.getcwd",
     "EnvironTests.test_items": "os.environ.get",
+    "FSEncodingTests.test_nop": "os.fsencode and os.fsdecode",
+    "FSEncodingTests.test_identity": "os.fsencode and os.fsdecode",
     "TestPEP519.test_return_string": "os.fspath",
     "TestPEP519.test_return_bytes": "os.fspath",
     "BlockingTests.test_blocking": "os.get_blocking and os.set_blocking",

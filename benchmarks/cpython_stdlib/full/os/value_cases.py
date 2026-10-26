@@ -17,7 +17,8 @@ from suite_evidence import roles
 from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
 
-CASES = ("TestPEP519.test_return_bytes", "TestPEP519.test_return_string", "EnvironTests.test_items")
+CASES = ("TestPEP519.test_return_bytes", "TestPEP519.test_return_string", "EnvironTests.test_items",
+         "FSEncodingTests.test_nop", "FSEncodingTests.test_identity")
 
 
 def getcwd_body(case, method, binary, tools, root, path):
@@ -83,6 +84,19 @@ class NativeCase:
         assert actual is not None and actual == expected
 '''
         hooks = ["EnvironTests.setUp and tearDown", "EnvironTests._reference", "test_os.tearDownModule"]
+    elif owner == "FSEncodingTests":
+        fixture = "import os\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n"
+        hooks = ["test_os.tearDownModule"]
+        if case._testMethodName == "test_nop":
+            fixture = '''import os
+
+class NativeCase:
+    def assertEqual(self, actual: str | bytes, expected: str | bytes) -> None:
+        if isinstance(actual, bytes):
+            assert isinstance(expected, bytes) and actual == expected
+        else:
+            assert isinstance(expected, str) and actual == expected
+'''
     else:
         ty = "bytes" if case._testMethodName == "test_return_bytes" else "str"
         fixture = f'''import os
@@ -97,7 +111,8 @@ class NativeCase:
         hooks = ["test_os.tearDownModule"]
     directory = root / case.id()
     directory.mkdir()
-    operation = "os.environ.get" if owner == "EnvironTests" else "os.fspath"
+    operation = {"EnvironTests": "os.environ.get", "FSEncodingTests": "os.fsencode and os.fsdecode",
+                 "TestPEP519": "os.fspath"}[owner]
     run = native_method(toolchain, directory, path, owner, case.id(), fixture, operation=("imre", operation))
     evidence = run(case, method)
     evidence.update(status="native_body_host_fixture", host_fixtures=hooks)
