@@ -97,7 +97,7 @@ pub(super) fn is_module(name: &str) -> bool {
 }
 
 fn os_error(err: std::io::Error) -> Error {
-    Error::new("OSError", err.to_string())
+    crate::objects::errno_error(err).into()
 }
 
 fn argument(args: &[Id], index: usize) -> Result<Id> {
