@@ -8878,6 +8878,8 @@ impl<'a> Checker<'a> {
                 )?;
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
+            Some(Binding::Intrinsic(Intrinsic::UrlJoin)) => return self.url_join(call),
+            Some(Binding::Intrinsic(Intrinsic::ParseQsl)) => return self.parse_qsl(call),
             Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
             Some(Binding::Intrinsic(Intrinsic::UrlUnsplit)) => return self.url_unsplit(call),
             Some(Binding::Intrinsic(Intrinsic::UrlEncode)) => return self.url_encode(call),

@@ -362,6 +362,8 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 
 `urllib.parse.quote`, `quote_plus`, and `unquote` accept strings or bytes and the native text codecs. `urlencode` accepts concrete dictionaries and sequences of key/value tuples in insertion order. It supports `doseq`, `safe`, `encoding`, `errors`, and the built-in `quote` or `quote_plus` callback. `urlunsplit` reconstructs a URL from a `SplitResult` or a fixed tuple of five strings or five byte strings.
 
+`urllib.parse.parse_qsl` returns ordered name/value pairs from text or byte queries, including repeated names. It accepts blank-value and strict-parsing flags, native codec names and error policies, a field limit, and a string or bytes separator. `urljoin` resolves relative text and byte references and preserves an explicitly empty query or fragment.
+
 ## Datetime and fixed UTC offsets
 
 `datetime.datetime`, `timedelta`, `timezone` and the `UTC` singleton have native immutable

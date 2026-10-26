@@ -156,6 +156,8 @@ impl Builtin {
                     | TextOperation::UrlQuote
                     | TextOperation::UrlQuotePlus
                     | TextOperation::UrlUnquote
+                    | TextOperation::UrlJoin
+                    | TextOperation::ParseQsl
                     | TextOperation::UrlSplit
                     | TextOperation::UrlProperty(_)
                     | TextOperation::UrlGetUrl
