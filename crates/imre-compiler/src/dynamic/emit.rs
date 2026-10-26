@@ -194,14 +194,20 @@ struct Function<'a, 'p> {
     live: Vec<String>,
     max_live: usize,
     loops: Vec<LoopTarget>,
-    exits: Vec<(String, String)>,
+    exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
+}
+
+#[derive(Clone)]
+enum Cleanup {
+    With(String),
+    Finally(std::rc::Rc<[ast::Stmt]>),
 }
 
 struct LoopTarget {
     step: String,
     done: String,
-    with_depth: usize,
+    cleanup_depth: usize,
 }
 
 impl Function<'_, '_> {

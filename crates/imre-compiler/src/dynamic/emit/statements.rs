@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 use serde_json::json;
 
-use super::{Body, Function, LoopTarget};
+use super::{Body, Cleanup, Function, LoopTarget};
 
 enum Place {
     Name(String),
@@ -94,7 +94,9 @@ impl Function<'_, '_> {
                         .value
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.close_contexts(0);
+                    self.live.push(value.clone());
+                    self.run_cleanups(0);
+                    self.live.pop();
                     self.end(&format!("ret i64 {value}"));
                 }
                 ast::Stmt::If(v) => {
@@ -147,7 +149,7 @@ impl Function<'_, '_> {
                             &target.step
                         }
                         .clone();
-                        self.close_contexts(target.with_depth);
+                        self.run_cleanups(target.cleanup_depth);
                         self.jump(&dest);
                     } else {
                         self.unsupported("loop control outside a loop");
@@ -190,7 +192,13 @@ impl Function<'_, '_> {
                         );
                     }
                 }
-                ast::Stmt::Try(v) if !v.is_star && v.finalbody.is_empty() => self.try_except(v),
+                ast::Stmt::Try(v) if !v.is_star => {
+                    if v.finalbody.is_empty() {
+                        self.try_except(v);
+                    } else {
+                        self.try_finally(v);
+                    }
+                }
                 ast::Stmt::With(v) if !v.is_async => self.with(&v.items, &v.body),
                 ast::Stmt::Raise(v) => {
                     let exc = if let Some(e) = &v.exc {
@@ -447,7 +455,7 @@ impl Function<'_, '_> {
         self.loops.push(LoopTarget {
             step: step.clone(),
             done: done.clone(),
-            with_depth: self.exits.len(),
+            cleanup_depth: self.exits.len(),
         });
         self.statements(body);
         self.loops.pop();
@@ -509,13 +517,59 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn close_contexts(&mut self, depth: usize) {
-        let exits = self.exits[depth..].to_vec();
-        for (exit, outer) in exits.iter().rev() {
+    /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
+    fn try_finally(&mut self, stmt: &ast::StmtTry) {
+        let handler = self.name("b");
+        let done = self.name("b");
+        let outer = std::mem::replace(&mut self.error, handler.clone());
+        self.exits.push((
+            Cleanup::Finally(stmt.finalbody.as_slice().into()),
+            outer.clone(),
+        ));
+        if stmt.handlers.is_empty() {
+            self.statements(&stmt.body);
+        } else {
+            self.try_except(stmt);
+        }
+        self.exits.pop();
+        self.error = outer;
+        if !self.terminated {
+            self.statements(&stmt.finalbody);
+            self.jump(&done);
+        }
+
+        self.label(&handler);
+        let exception = self.op("take_error", &[]);
+        self.live.push(exception.clone());
+        self.caught.push(exception.clone());
+        self.statements(&stmt.finalbody);
+        self.caught.pop();
+        self.live.pop();
+        if !self.terminated {
+            self.raise(&exception, "0");
+        }
+        self.label(&done);
+    }
+
+    /// A return, break or continue inside a finally may replace the pending exit.
+    fn run_cleanups(&mut self, depth: usize) {
+        let active = self.exits.clone();
+        for index in (depth..active.len()).rev() {
+            if self.terminated {
+                break;
+            }
+            self.exits.truncate(index);
+            let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
-            self.invoke(exit, &["0", "0", "0"]);
+            match cleanup {
+                Cleanup::With(exit) => {
+                    self.invoke(exit, &["0", "0", "0"]);
+                }
+                Cleanup::Finally(body) => self.statements(body),
+            }
             self.error = previous;
         }
+        self.exits = active;
     }
 
     fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt]) {
@@ -530,7 +584,8 @@ impl Function<'_, '_> {
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
-        self.exits.push((exit.clone(), outer.clone()));
+        self.exits
+            .push((Cleanup::With(exit.clone()), outer.clone()));
         self.live.push(exit.clone());
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);

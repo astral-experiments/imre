@@ -132,6 +132,20 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
+        compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
+
+        # Bundled children must respect the selected package's __path__.
+        shadow = root / "shadow"
+        (shadow / "http").mkdir(parents=True)
+        (shadow / "http" / "__init__.py").write_text("marker = 17\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys, http\nsys.path\nassert http.marker == 17\n"
+            "try:\n    import http.client\nexcept ModuleNotFoundError:\n    print('local package')\n"
+        )
+        compare("-B", shadow_entry)
+
         # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
         compare(
             "-c",

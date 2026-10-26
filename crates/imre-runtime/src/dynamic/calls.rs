@@ -976,6 +976,7 @@ impl Context {
             (expected, self.heap.get(value)),
             ("None", Value::None)
                 | ("int", Value::Int(_))
+                | ("float", Value::Float(_))
                 | ("bytes", Value::Bytes(_))
                 | ("str", Value::Str(_))
                 | ("bool", Value::Bool(_))
