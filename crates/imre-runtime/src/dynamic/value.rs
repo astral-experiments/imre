@@ -156,7 +156,8 @@ pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub class_cell: Option<Id>,
     pub first_argument: Option<String>,
-    pub names: HashMap<String, Id>,
+    pub names: indexmap::IndexMap<String, Id>,
+    pub namespace: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -346,6 +347,7 @@ impl Value {
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
                 visit.extend(scope.parent);
+                visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
             }
             Self::ClassCell(class) => visit.extend(class),
