@@ -310,6 +310,37 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Logging(Log::Get), Type::Logger, args))
     }
 
+    /// Validate the level inside the constructor, after all caller expressions ran.
+    pub(super) fn new_logger(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let params = [
+            required("name", Type::Str),
+            parameter(
+                "level",
+                Type::Int,
+                ParameterKind::PositionalOrKeyword,
+                number(0),
+            ),
+        ];
+        let mut scope = calls::ArgumentScope::default();
+        let args = self.bind_supplied(
+            call,
+            &params,
+            None,
+            Some(&mut scope),
+            None,
+            |checker, index, arg| {
+                if index == 0 {
+                    arg.checked(checker, Type::Str, false)
+                } else {
+                    Ok(Self::string_value(arg.value(checker)?))
+                }
+            },
+        )?;
+        let name = args.values[args.order[0]].clone();
+        let level = self.checked_level_value(args.values[args.order[1]].clone(), call)?;
+        Ok(scope.finish(operation(Log::New, Type::Logger, vec![name, level])))
+    }
+
     pub(super) fn configure_logging(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let level = self.types.optional(Type::Int);
         let string = self.types.optional(Type::Str);
@@ -355,6 +386,10 @@ impl Checker<'_> {
     /// Share _checkLevel between global suppression and logger thresholds.
     fn checked_logging_level(&mut self, arg: &ast::Expr) -> Result<Expr, String> {
         let value = Self::string_value(self.expr(arg)?);
+        self.checked_level_value(value, arg)
+    }
+
+    fn checked_level_value(&self, value: Expr, arg: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Int => Ok(value),
             Type::Bool => Ok(Expr {

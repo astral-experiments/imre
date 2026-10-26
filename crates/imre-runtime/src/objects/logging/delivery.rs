@@ -2,7 +2,7 @@
 use crate::{ObjectOwner, StrOwner};
 
 use super::super::{Error, Int, Object, Storage, Str, finish, object};
-use super::{LOGGERS, name};
+use super::state;
 
 /// Write the whole string. Text streams return a character count; codec writers return None.
 ///
@@ -46,11 +46,10 @@ pub unsafe extern "C" fn imre_text_output_flush(stream: *const Object) {
 }
 
 /// # Safety
-/// The caller roots a registered logger for the lookup.
+/// The caller roots the exact logger during the list read.
 unsafe fn handler_list(logger: *const Object) -> ObjectOwner {
-    // SAFETY: the supplied object remains live for its exact name read.
-    let key = unsafe { name(logger) };
-    LOGGERS.with_borrow(|logs| logs.entries[key.as_str()].handlers.clone())
+    // SAFETY: the caller retains the owner while the list acquires a reference.
+    unsafe { state(logger) }.handlers.clone()
 }
 
 /// # Safety
