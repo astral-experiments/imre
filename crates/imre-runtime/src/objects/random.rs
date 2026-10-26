@@ -233,7 +233,7 @@ fn sequence_index(length: &BigUint, secure: bool) -> Result<BigUint> {
     // The interval [threshold, 2^64) contains an equal number of each residue.
     let threshold = limit.wrapping_neg() % limit;
     loop {
-        let draw = getrandom::u64().map_err(|error| super::files::os_error(error.into()))?;
+        let draw = getrandom::u64().map_err(|error| super::files::errno_error(error.into()))?;
         if draw >= threshold {
             return Ok(BigUint::from(draw % limit));
         }
