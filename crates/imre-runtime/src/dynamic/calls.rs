@@ -831,9 +831,9 @@ impl Context {
                 _ => {}
             }
             let delete = self
-                .slot(descriptor, "__delete__")
+                .bound_slot(descriptor, "__delete__")?
                 .ok_or_else(|| Error::new("AttributeError", "__delete__"))?;
-            self.call(delete, vec![descriptor, obj], Vec::new())?;
+            self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
         if name == "__class__" {

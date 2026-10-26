@@ -6,8 +6,15 @@ class Descriptor:
         obj.events.append('descriptor')
 
 
+class StaticDeleter:
+    @staticmethod
+    def __delete__(obj):
+        obj.events.append('static descriptor')
+
+
 class Subject:
     descriptor = Descriptor()
+    static_deleter = StaticDeleter()
     deletable = property(None, None, lambda self: self.events.append('property'))
     constant = 1
 
@@ -28,6 +35,7 @@ def current():
     delattr(obj, 'descriptor')
     object.__delattr__(obj, 'descriptor')
     object.__delattr__(obj, 'deletable')
+    del obj.static_deleter
     print(obj.events, hasattr(obj, 'value'))
     try:
         del obj.constant
