@@ -7,6 +7,11 @@ class MissingKey(KeyError):
 
 
 def current():
+    for error in (ZeroDivisionError("divide"), UnicodeError("decode")):
+        try:
+            raise error
+        except (ArithmeticError, ValueError) as caught:
+            print(type(caught).__name__, isinstance(caught, ArithmeticError), isinstance(caught, ValueError))
     for error in (Exception(), ValueError("a'b"), TypeError(None), Missing("x", 7),
                   KeyError("missing"), MissingKey(""), KeyError(17)):
         print(repr(error), f"{error!r}", str(error), error)
