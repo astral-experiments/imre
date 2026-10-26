@@ -44,7 +44,8 @@ impl Function<'_, '_> {
                     self.op("slice", &[&object, &indices])
                 } else {
                     let key = self.expr(&v.slice);
-                    self.op("get", &[&object, &key])
+                    let span = self.expression_span(expr, &v.value, b'[');
+                    self.op_at("get", &[&object, &key], span)
                 }
             }
             ast::Expr::List(v) => self.display("list", &v.elts),
@@ -102,7 +103,8 @@ impl Function<'_, '_> {
             ast::Expr::Call(v) => {
                 let callable = self.expr(&v.func);
                 let (args, kwargs) = self.arguments(&v.arguments);
-                self.op("call", &[&callable, &args, &kwargs])
+                let span = self.expression_span(expr, &v.func, b'(');
+                self.op_at("call", &[&callable, &args, &kwargs], span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),

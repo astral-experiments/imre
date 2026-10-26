@@ -121,6 +121,60 @@ impl TextMemory {
 }
 
 impl FileState {
+    /// Create a native memory stream with the same newline rules for both call paths.
+    pub(in crate::objects) fn string_io(
+        initial: Option<&str>,
+        spelling: Option<&str>,
+    ) -> Result<crate::ObjectOwner> {
+        // The C constructor compares a NUL-terminated spelling, but quotes
+        // the entire argument in a ValueError.
+        let newline = match spelling.map(|s| s.split('\0').next().unwrap_or_default()) {
+            None => Newline::Universal,
+            Some("") => Newline::Preserve,
+            Some("\n") => Newline::Lf,
+            Some("\r") => Newline::Cr,
+            Some("\r\n") => Newline::CrLf,
+            Some(_) => {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("illegal newline value: {}", string_repr(spelling.unwrap())),
+                ));
+            }
+        };
+        let mut memory = TextMemory {
+            data: Vec::new(),
+            pos: 0,
+            newline,
+            seen: 0,
+        };
+        if let Some(initial) = initial {
+            memory.write(initial)?;
+            memory.pos = 0;
+        }
+        Ok(FileState {
+            fd: None,
+            raw: false,
+            name: None,
+            encoding: None,
+            errors: None,
+            kind: FileKind::TextMemory,
+            stream: Some(Stream::TextMemory(memory)),
+        }
+        .into_object())
+    }
+
+    pub(in crate::objects) fn read_string_io(&mut self, size: Option<usize>) -> Result<Str> {
+        self.text_memory()?.read(size, false)
+    }
+
+    pub(in crate::objects) fn string_io_position(&mut self) -> Result<usize> {
+        Ok(self.text_memory()?.pos)
+    }
+
+    pub(in crate::objects) fn string_io_value(&mut self) -> Result<Str> {
+        TextMemory::text(&self.text_memory()?.data)
+    }
+
     /// Borrow a live StringIO. Its closed-operation diagnostic has no period.
     pub(super) fn text_memory(&mut self) -> Result<&mut TextMemory> {
         match &mut self.stream {
@@ -145,47 +199,8 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
             (newline as *const Str).as_ref(),
         )
     };
-    let result = (|| {
-        // The C constructor compares a NUL-terminated spelling, but quotes
-        // the entire argument in a ValueError.
-        let spelling = newline.map(Str::as_str);
-        let newline = match spelling.map(|s| s.split('\0').next().unwrap_or_default()) {
-            None => Newline::Universal,
-            Some("") => Newline::Preserve,
-            Some("\n") => Newline::Lf,
-            Some("\r") => Newline::Cr,
-            Some("\r\n") => Newline::CrLf,
-            Some(_) => {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("illegal newline value: {}", string_repr(spelling.unwrap())),
-                ));
-            }
-        };
-        let mut memory = TextMemory {
-            data: Vec::new(),
-            pos: 0,
-            newline,
-            seen: 0,
-        };
-        if let Some(initial) = initial {
-            memory.write(initial)?;
-            memory.pos = 0;
-        }
-        Ok(crate::ObjectOwner::into_raw(
-            FileState {
-                fd: None,
-                raw: false,
-                name: None,
-                encoding: None,
-                errors: None,
-                kind: FileKind::TextMemory,
-                stream: Some(Stream::TextMemory(memory)),
-            }
-            .into_object(),
-        ))
-    })();
-    finish(result, std::ptr::null())
+    let result = FileState::string_io(initial.map(Str::as_str), newline.map(Str::as_str));
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
 
 /// Return an independent snapshot, leaving the current position untouched.
@@ -195,11 +210,7 @@ pub unsafe extern "C" fn imre_string_io(initial: usize, newline: usize) -> *cons
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_string_io_value(file: *const Object) -> *const Str {
     // SAFETY: only independently owned results escape the rooted object.
-    let result = unsafe {
-        object(file)
-            .0
-            .with_mut(|s| TextMemory::text(&s.file_mut().text_memory()?.data))
-    };
+    let result = unsafe { object(file).0.with_mut(|s| s.file_mut().string_io_value()) };
     finish(
         result.map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),

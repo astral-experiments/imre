@@ -46,6 +46,19 @@ impl Function<'_, '_> {
                 break;
             }
             self.checkpoint(stmt);
+            self.simple_call = match stmt {
+                ast::Stmt::Assign(v)
+                    if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                        && matches!(&*v.value, ast::Expr::Call(_)) =>
+                {
+                    Some(v.value.range())
+                }
+                ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+                    ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+                    _ => None,
+                }),
+                _ => None,
+            };
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
@@ -256,11 +269,8 @@ impl Function<'_, '_> {
                     } else {
                         self.caught.last().cloned().unwrap_or_else(|| "0".into())
                     };
-                    let cause = v
-                        .cause
-                        .as_deref()
-                        .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.raise(&exc, &cause, v.exc.is_none());
+                    let cause = v.cause.as_deref().map(|e| self.expr(e));
+                    self.raise(&exc, cause.as_deref(), v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
                     let test = self.expr(&v.test);
@@ -276,7 +286,7 @@ impl Function<'_, '_> {
                     } else {
                         self.invoke(&cls, &[])
                     };
-                    self.raise(&error, "0", false);
+                    self.raise(&error, None, false);
                     self.label(&pass);
                 }
                 _ => {
@@ -386,7 +396,7 @@ impl Function<'_, '_> {
         self.branch(&condition, &bad, &good);
         self.label(&bad);
         let error = self.lookup("NotImplementedError");
-        self.raise(&error, "0", false);
+        self.raise(&error, None, false);
         self.label(&good);
         let values = self.op("dict", &[]);
         for &(name, expression) in entries {
@@ -520,13 +530,15 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn raise(&mut self, exc: &str, cause: &str, reraise: bool) {
+    fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
         // Raising always transfers control to the enclosing handler.
         let op = self
             .output
             .data(if reraise { b"reraise" } else { b"raise" });
+        let explicit = if cause.is_some() { 2 } else { 0 };
+        let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 0)"
+            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
         ));
         self.jump(&self.error.clone());
     }
@@ -568,7 +580,7 @@ impl Function<'_, '_> {
             self.jump(&done);
             self.label(&next);
         }
-        self.raise(&exc, "0", true);
+        self.raise(&exc, None, true);
         self.live.pop();
         self.label(&done);
     }
@@ -602,7 +614,7 @@ impl Function<'_, '_> {
         self.caught.pop();
         self.live.pop();
         if !self.terminated {
-            self.raise(&exception, "0", true);
+            self.raise(&exception, None, true);
         }
         self.label(&done);
     }
@@ -661,7 +673,7 @@ impl Function<'_, '_> {
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);
         self.label(&propagate);
-        self.raise(&exc, "0", true);
+        self.raise(&exc, None, true);
         self.label(&done);
     }
 }
