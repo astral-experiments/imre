@@ -93,8 +93,8 @@ with open("large.txt", "w", encoding="utf-8") as stream:
 try:
     with open("failing-output", "w", encoding="utf-8") as stream:
         stream.write("prefix" + text + "suffix")
-except OSError:
-    print("discarded write failed")
+except OSError as error:
+    print((error.errno, error.strerror))
 """,
     "text_roundtrip": r"""
 with open("input.txt", "r", encoding="utf-8") as source:
@@ -480,20 +480,26 @@ with open("order.bin", "rb") as result:
     print(result.read())
 """,
     "flush_and_close_failure": r"""
+from pathlib import Path
+
 stream = open("failing-output", "w", encoding="utf-8")
 stream.write("buffered")
 try:
     stream.flush()
-except OSError:
-    print("flush failed")
+except OSError as error:
+    print((error.errno, error.strerror, repr(error.args)))
 print(stream.closed)
 try:
     stream.close()
-except OSError:
-    print("close failed")
+except OSError as error:
+    print((error.errno, error.strerror, repr(error.args)))
 print(stream.closed)
 stream.close()
 print(stream.closed)
+try:
+    Path("failing-output").write_bytes(b"buffered")
+except OSError as error:
+    print((error.errno, error.strerror, repr(error.args)))
 """,
     "close_replaces_completion": r"""
 def owned_return() -> list[int]:
@@ -630,12 +636,12 @@ input()
 try:
     stream.write("buffered")
     stream.flush()
-except OSError:
-    print("write failed")
+except OSError as error:
+    print(error.errno)
 try:
     stream.close()
-except OSError:
-    print("close failed")
+except OSError as error:
+    print(error.errno)
 print(stream.closed)
 """
 
@@ -948,7 +954,7 @@ def main() -> None:
         reference = broken_pipe(
             [args.python, "-I", str(path)], temporary / "pipe-cpython"
         )
-        assert reference == b"ready\nwrite failed\nclose failed\nTrue\n", reference
+        assert reference == f"ready\n{errno.EPIPE}\n{errno.EPIPE}\nTrue\n".encode(), reference
         for level in args.opt_levels:
             binary = temporary / f"broken-pipe-O{level}"
             built = run(
