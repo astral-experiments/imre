@@ -18,13 +18,26 @@ fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     }
 }
 
-pub(super) fn sha1(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+fn hash(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    constructor: fn(&[u8]) -> HashState,
+) -> Result<Id> {
     let data = option(args, 0, kwargs, "data")?
         .map(|id| buffer(ctx, id))
         .transpose()?
         .unwrap_or_default();
-    let state = HashState::sha1(data);
+    let state = constructor(data);
     Ok(ctx.alloc(Value::Hash(Rc::new(RefCell::new(state)))))
+}
+
+pub(super) fn sha1(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    hash(ctx, args, kwargs, HashState::sha1)
+}
+
+pub(super) fn sha256(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    hash(ctx, args, kwargs, HashState::sha256)
 }
 
 pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
