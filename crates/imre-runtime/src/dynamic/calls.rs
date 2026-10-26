@@ -165,6 +165,7 @@ impl Context {
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("hmac.HMAC", Value::Hmac(_))
+            | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -196,10 +197,23 @@ impl Context {
                     || (name == "ValueError" && kind == "JSONDecodeError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
+                    || (matches!(name.as_str(), "OSError" | "ConnectionError")
+                        && matches!(
+                            kind,
+                            "BrokenPipeError"
+                                | "ConnectionRefusedError"
+                                | "ConnectionResetError"
+                                | "ConnectionAbortedError"
+                        ))
                     || (name == "OSError"
                         && matches!(
                             kind,
-                            "FileNotFoundError" | "PermissionError" | "IsADirectoryError"
+                            "FileNotFoundError"
+                                | "PermissionError"
+                                | "IsADirectoryError"
+                                | "BlockingIOError"
+                                | "TimeoutError"
+                                | "socket.gaierror"
                         ))
                     || self
                         .classes
@@ -230,6 +244,32 @@ impl Context {
                 "keywords" => return Ok(keywords),
                 _ => {}
             },
+            Value::File(handle) if name == "closed" => {
+                return Ok(if handle.borrow().is_none() {
+                    TRUE
+                } else {
+                    FALSE
+                });
+            }
+            Value::Native(class) if class == "socket.socket" && name == "__name__" => {
+                return Ok(self.text("socket"));
+            }
+            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::Raised(Error {
+                os_args: Some(args),
+                ..
+            }) if matches!(name, "errno" | "strerror" | "args") => {
+                let (code, description) = *args;
+                return Ok(match name {
+                    "errno" => self.int(code),
+                    "strerror" => self.text(description),
+                    _ => {
+                        let fields = vec![self.int(code), self.text(description)];
+                        self.alloc(Value::Tuple(fields))
+                    }
+                });
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {

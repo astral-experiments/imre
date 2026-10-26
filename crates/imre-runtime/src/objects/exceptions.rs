@@ -855,6 +855,29 @@ impl Error {
         Self::new(Kind::IndexError, "list index out of range")
     }
 
+    /// Copy the two original OS arguments when transferring a kernel error to boxed Python.
+    pub(crate) fn os_args(&self) -> Option<(i64, String)> {
+        if !self.kind.matches(Kind::OSError) {
+            return None;
+        }
+        let Some(Payload::Arguments(arguments)) = &self.payload else {
+            return None;
+        };
+        let [code, description] = arguments.args.as_slice() else {
+            return None;
+        };
+        if code.kind.raw() != 2 || description.kind.raw() != 3 {
+            return None;
+        }
+        // SAFETY: both owned argument words have the verified integer and string kinds.
+        unsafe {
+            Some((
+                crate::Int::borrow(code.word).to_i64()?,
+                (&*(description.word as *const Str)).to_string(),
+            ))
+        }
+    }
+
     /// Preserve the native exception class and its formatted Python message.
     pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
         let kind = self.kind.name();

@@ -32,6 +32,7 @@ pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
+    pub os_args: Option<Box<(i64, String)>>,
     pub trace: Vec<Location>,
     pub exit_status: Option<ExitStatus>,
 }
@@ -42,6 +43,7 @@ impl Error {
             kind: kind.to_owned(),
             message: message.into(),
             args: None,
+            os_args: None,
             trace: Vec::new(),
             exit_status: None,
         }
@@ -110,9 +112,13 @@ impl Context {
 
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
+        let os_args = error.os_args();
         let (kind, message) = error.into_parts();
         match message {
-            Ok(message) => Self::new(kind, message.to_string()),
+            Ok(message) => Self {
+                os_args: os_args.map(Box::new),
+                ..Self::new(kind, message.to_string())
+            },
             Err(_) => Self::new("MemoryError", String::new()),
         }
     }
@@ -161,6 +167,7 @@ pub(super) enum Value {
     ByteArray(Vec<u8>),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
+    Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -224,7 +231,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -340,6 +347,7 @@ impl Value {
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::Hash(_)
+            | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
             | Self::TokenMissing

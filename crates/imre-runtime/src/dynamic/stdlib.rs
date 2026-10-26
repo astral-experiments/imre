@@ -13,10 +13,12 @@ pub(super) mod datetime;
 mod files;
 mod hashlib;
 mod hmac;
+pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
 mod operator;
 mod regex;
+mod socket;
 
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
@@ -46,6 +48,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "contextvars"
             | "warnings"
             | "subprocess"
+            | "socket"
     )
 }
 
@@ -171,6 +174,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
+        ("socket", name) => return socket::attribute(ctx, name),
         ("errno", "__doc__") => ctx.text(crate::objects::ERRNO_DOC),
         ("errno", "errorcode") => {
             let dict = ctx.dict(Vec::new());
@@ -328,6 +332,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
     }
+    if let Some(name) = name.strip_prefix("socket.") {
+        return socket::call(ctx, name, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
     }
@@ -404,6 +411,7 @@ pub(super) fn call(
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
