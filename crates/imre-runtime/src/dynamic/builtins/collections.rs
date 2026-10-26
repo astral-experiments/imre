@@ -64,6 +64,7 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
 pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
     match ctx.heap.get(value) {
         Value::List(_)
+        | Value::ByteArray(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set(_)

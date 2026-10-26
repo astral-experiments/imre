@@ -100,7 +100,9 @@ impl Context {
             Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
             Value::DictView { dict, kind } => builtins::view_items(self, dict, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
-            Value::Bytes(s) => Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect()),
+            Value::Bytes(s) | Value::ByteArray(s) => {
+                Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
+            }
             Value::Iterator { values, offset } => {
                 if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
                     *offset = values.len();
@@ -284,6 +286,9 @@ impl Context {
             scope,
         });
         self.modules.insert(name.to_owned(), module);
+        if name == "io" {
+            stdlib::io::install(self, scope);
+        }
         if let Some((path, code)) = source {
             self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {

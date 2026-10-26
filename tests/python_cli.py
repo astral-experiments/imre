@@ -330,6 +330,9 @@ def report(text):
             "errorcode[errno.EADDRINUSE] = 'changed'\n"
             "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
         )
+        (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"

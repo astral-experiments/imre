@@ -11,7 +11,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod text;
 pub(super) use collections::{hashable, view_items};
-pub(super) use text::{format_value, percent};
+pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
 pub(super) fn is_exception(name: &str) -> bool {
     matches!(
@@ -67,6 +67,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "int"
                 | "str"
                 | "bytes"
+                | "bytearray"
                 | "tuple"
                 | "list"
                 | "property"
@@ -103,6 +104,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "str"
         }
         Value::Bytes(_) if attr == "decode" => "bytes",
+        Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
@@ -118,7 +120,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::File(_)
             if matches!(
                 attr,
-                "read" | "seek" | "tell" | "close" | "__enter__" | "__exit__"
+                "read"
+                    | "readline"
+                    | "readinto"
+                    | "seek"
+                    | "tell"
+                    | "close"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
             "file"
@@ -285,6 +294,19 @@ pub(super) fn call(
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "str" | "bytes" => text::method(ctx, method, args, kwargs),
+            "bytearray" if method == "extend" => {
+                positional(name, kwargs)?;
+                arity(name, args, 2, 2)?;
+                let data = text::bytes_from_iterable(ctx, args[1])?;
+                let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected bytearray"));
+                };
+                target
+                    .try_reserve(data.len())
+                    .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
+                target.extend(data);
+                Ok(NONE)
+            }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
             "function" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -330,7 +352,7 @@ pub(super) fn call(
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
                 Value::Str(v) => v.chars().count(),
-                Value::Bytes(v) => v.len(),
+                Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
@@ -363,7 +385,9 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Range { start, stop, step }))
         }
         "dict" | "list" | "tuple" | "set" => collections::construct(ctx, name, args, kwargs),
-        "int" | "bool" | "str" | "bytes" | "repr" => text::construct(ctx, name, args, kwargs),
+        "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" => {
+            text::construct(ctx, name, args, kwargs)
+        }
         "format" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 2)?;
@@ -399,7 +423,9 @@ pub(super) fn call(
                 };
                 Error::new(kind, format!("{path}: {e}"))
             })?;
-            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(file))))))
+            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
+                io::BufReader::new(file),
+            ))))))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

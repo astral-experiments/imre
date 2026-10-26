@@ -38,6 +38,7 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
     }
@@ -55,7 +56,10 @@ impl Context {
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
-                Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. } => true,
+                Value::Function { .. }
+                | Value::Cached { .. }
+                | Value::Partial { .. }
+                | Value::IoMethod { .. } => true,
                 Value::Native(name) => name == "object.__setattr__",
                 _ => false,
             };
@@ -153,7 +157,8 @@ impl Context {
             _ => return false,
         };
         match (name, self.heap.get(value)) {
-            ("object", _)
+            ("bytearray", Value::ByteArray(_))
+            | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
@@ -387,6 +392,7 @@ impl Context {
                                 | "set"
                                 | "tuple"
                                 | "bytes"
+                                | "bytearray"
                                 | "range"
                                 | "function"
                                 | "object"
@@ -396,6 +402,7 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
                 args: bound,

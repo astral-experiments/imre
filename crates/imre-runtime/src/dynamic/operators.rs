@@ -4,6 +4,12 @@ use num_traits::{Signed, ToPrimitive, Zero};
 
 use super::*;
 
+fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
+    std::iter::successors(Some(start), move |&i| i.checked_add(step))
+        .take_while(move |&i| if step > 0 { i < end } else { i > end })
+        .map(|i| i as usize)
+}
+
 impl Context {
     fn sequence(&self, id: Id) -> Option<Vec<Id>> {
         match self.heap.get(id) {
@@ -75,7 +81,7 @@ impl Context {
                 value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
             }
             Value::Str(s) => !s.is_empty(),
-            Value::Bytes(b) => !b.is_empty(),
+            Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::List(v)
             | Value::Tuple(v)
             | Value::Set(v)
@@ -154,7 +160,9 @@ impl Context {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
             (Value::Str(a), Value::Str(b)) => a == b,
-            (Value::Bytes(a), Value::Bytes(b)) => a == b,
+            (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
+                a == b
+            }
             (Value::Native(a), Value::Native(b)) => a == b,
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
@@ -200,7 +208,9 @@ impl Context {
                 Ok(int_float(b, *f)?.map(Ordering::reverse))
             }
             (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
-            (Value::Bytes(x), Value::Bytes(y)) => Ok(Some(x.cmp(y))),
+            (Value::Bytes(x) | Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                Ok(Some(x.cmp(y)))
+            }
             _ => {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
@@ -271,6 +281,24 @@ impl Context {
                     .map(char::from)
                     .collect::<String>()
             ),
+            Value::ByteArray(bytes) => {
+                let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
+                    '"'
+                } else {
+                    '\''
+                };
+                let mut output = format!("bytearray(b{quote}");
+                for &byte in bytes {
+                    if byte == b'"' {
+                        output.push('"');
+                    } else {
+                        output.extend(std::ascii::escape_default(byte).map(char::from));
+                    }
+                }
+                output.push(quote);
+                output.push(')');
+                output
+            }
             Value::Dict(entries) => format!(
                 "{{{}}}",
                 entries
@@ -363,6 +391,17 @@ impl Context {
             } else {
                 entries.push((key, val));
             }
+        } else if let Value::ByteArray(data) = self.heap.get(obj) {
+            let i = self.as_integer(key)?;
+            let i = if i < 0 { data.len() as i64 + i } else { i };
+            let byte = u8::try_from(self.as_integer(val)?)
+                .map_err(|_| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+            let Value::ByteArray(data) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            *data
+                .get_mut(i as usize)
+                .ok_or_else(|| Error::new("IndexError", "bytearray index out of range"))? = byte;
         } else if let Value::List(items) = self.heap.get(obj) {
             let i = self.as_integer(key)?;
             let i = if i < 0 { items.len() as i64 + i } else { i };
@@ -408,10 +447,11 @@ impl Context {
         }
         Ok(false)
     }
-    pub(super) fn slice(&mut self, obj: Id, spec: Id) -> Result<Id> {
-        let indices = self.items(spec)?;
-        let vals = self.items(obj)?;
-        let len = vals.len() as i64;
+    fn slice_bounds(&self, spec: Id, len: usize) -> Result<(i64, i64, i64)> {
+        let Value::List(indices) = self.heap.get(spec) else {
+            unreachable!("compiled slice bounds")
+        };
+        let len = len as i64;
         let index = |at: usize| -> Result<Option<i64>> {
             indices
                 .get(at)
@@ -432,17 +472,19 @@ impl Context {
                 v.clamp(-1, len - 1)
             }
         };
-        let mut i = index(0)?
+        let start = index(0)?
             .map(norm)
             .unwrap_or(if step > 0 { 0 } else { len - 1 });
         let end = index(1)?
             .map(norm)
             .unwrap_or(if step > 0 { len } else { -1 });
-        let mut out = Vec::new();
-        while if step > 0 { i < end } else { i > end } {
-            out.push(vals[i as usize]);
-            i = i.saturating_add(step);
-        }
+        Ok((start, end, step))
+    }
+
+    pub(super) fn slice(&mut self, obj: Id, spec: Id) -> Result<Id> {
+        let vals = self.items(obj)?;
+        let (start, end, step) = self.slice_bounds(spec, vals.len())?;
+        let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
         match self.heap.get(obj) {
             Value::Str(_) => {
                 let s = out
@@ -452,16 +494,71 @@ impl Context {
                     .concat();
                 Ok(self.text(s))
             }
-            Value::Bytes(_) => {
+            Value::Bytes(_) | Value::ByteArray(_) => {
                 let bytes = out
                     .iter()
                     .map(|&i| self.as_integer(i).map(|x| x as u8))
                     .collect::<Result<_>>()?;
-                Ok(self.alloc(Value::Bytes(bytes)))
+                Ok(
+                    self.alloc(if matches!(self.heap.get(obj), Value::Bytes(_)) {
+                        Value::Bytes(bytes)
+                    } else {
+                        Value::ByteArray(bytes)
+                    }),
+                )
             }
             Value::List(_) => Ok(self.alloc(Value::List(out))),
             _ => Ok(self.alloc(Value::Tuple(out))),
         }
+    }
+
+    pub(super) fn set_slice(&mut self, obj: Id, spec: Id, source: Id) -> Result<()> {
+        let Value::ByteArray(target) = self.heap.get(obj) else {
+            return Err(Error::new(
+                "TypeError",
+                "object does not support slice assignment",
+            ));
+        };
+        let (start, end, step) = self.slice_bounds(spec, target.len())?;
+        let data = builtins::bytes_from_iterable(self, source)?;
+        let Value::ByteArray(target) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        if step == 1 {
+            let range = start as usize..end.max(start) as usize;
+            target
+                .try_reserve(data.len().saturating_sub(range.len()))
+                .map_err(|_| Error::new("MemoryError", "bytearray is too large"))?;
+            target.splice(range, data);
+        } else if data.is_empty() {
+            // Assigning an empty buffer deletes even the non-contiguous positions.
+            let mut i = 0_i64;
+            target.retain(|_| {
+                let selected = (if step > 0 {
+                    start <= i && i < end
+                } else {
+                    end < i && i <= start
+                }) && i.abs_diff(start).is_multiple_of(step.unsigned_abs());
+                i += 1;
+                !selected
+            });
+        } else {
+            let positions = slice_positions(start, end, step);
+            let count = positions.clone().count();
+            if count != data.len() {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "attempt to assign bytes of size {} to extended slice of size {count}",
+                        data.len()
+                    ),
+                ));
+            }
+            for (i, byte) in positions.zip(data) {
+                target[i] = byte;
+            }
+        }
+        Ok(())
     }
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         let truth = |v| if v { TRUE } else { FALSE };

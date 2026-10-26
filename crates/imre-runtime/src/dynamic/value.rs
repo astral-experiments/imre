@@ -158,6 +158,7 @@ pub(super) enum Value {
     },
     Str(String),
     Bytes(Vec<u8>),
+    ByteArray(Vec<u8>),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
     List(Vec<Id>),
@@ -219,7 +220,11 @@ pub(super) enum Value {
         values: Vec<Id>,
         offset: usize,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::fs::File>>>),
+    IoMethod {
+        owner: Id,
+        name: &'static str,
+    },
+    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::fs::File>>>>),
     RegexPattern(std::rc::Rc<regex_automata::meta::Regex>),
     RegexMatch {
         groups: Vec<Option<String>>,
@@ -325,6 +330,7 @@ impl Value {
                 }
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
+            Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::None
             | Self::Ellipsis
             | Self::Bool(_)
@@ -332,6 +338,7 @@ impl Value {
             | Self::Float(_)
             | Self::Str(_)
             | Self::Bytes(_)
+            | Self::ByteArray(_)
             | Self::Hash(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
