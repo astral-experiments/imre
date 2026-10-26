@@ -18,6 +18,7 @@ mod fnmatch;
 mod functools;
 mod hashlib;
 mod hmac;
+mod inspect;
 mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
@@ -63,6 +64,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "inspect"
             | "collections"
             | "_collections_abc"
             | "enum"
@@ -228,8 +230,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
             | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
         ) => ctx.builtin(&format!("typing.{name}")),
+        ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
-        ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
+        ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
@@ -381,6 +384,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
@@ -406,6 +410,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("inspect.") {
+        return inspect::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
@@ -488,6 +495,7 @@ pub(super) fn call(
                 function,
                 args,
                 keywords,
+                ..
             } => {
                 let Value::Dict(entries) = ctx.heap.get(keywords) else {
                     unreachable!()
@@ -507,6 +515,7 @@ pub(super) fn call(
             function,
             args,
             keywords,
+            coroutine_marker: None,
         }));
     }
     if name == "pattern.search" {

@@ -12,6 +12,7 @@ mod stdlib;
 mod super_object;
 mod typing;
 mod value;
+mod zip;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,14 +28,16 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
+    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
-    /// Counts positions without allocating boxed integers for bytes.
+    /// Counts positions without allocating boxed integer elements.
     fn len(&self) -> usize {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
+            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -149,8 +152,12 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
-            Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
+            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => return Ok(id),
+            Value::List(_)
+            | Value::Tuple(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Range { .. } => id,
             Value::Instance {
                 dictionary: Some(_),
                 ..
@@ -161,7 +168,7 @@ impl Context {
                 let result = self.call(method, Vec::new(), Vec::new())?;
                 return if matches!(
                     self.heap.get(result),
-                    Value::Iterator { .. } | Value::AstWalk(_)
+                    Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. }
                 ) {
                     Ok(result)
                 } else {
@@ -209,6 +216,10 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
+            Value::Range { start, stop, step } => IteratorSlice::Range {
+                value: i128::from(*start) + i128::from(*step) * *offset as i128,
+                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
+            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -217,6 +228,9 @@ impl Context {
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
+        }
+        if matches!(self.heap.get(id), Value::Zip { .. }) {
+            return self.zip_has_item(id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -233,10 +247,14 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
+        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
+            return Ok(pending.take());
+        }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator {
             offset, reverse, ..
@@ -252,7 +270,7 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+        if matches!(self.heap.get(id), Value::AstWalk(_) | Value::Zip { .. }) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);
@@ -278,10 +296,13 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    IteratorSlice::Bytes(bytes) => {
-                        let mut values = Vec::with_capacity(bytes.len());
-                        while let Some(byte) = self.next_item(id)? {
-                            values.push(byte);
+                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                        let mut values = Vec::new();
+                        values.try_reserve_exact(remaining.len()).map_err(|_| {
+                            Error::new("MemoryError", "iterator is too large to materialize")
+                        })?;
+                        while let Some(item) = self.next_item(id)? {
+                            values.push(item);
                         }
                         return Ok(values);
                     }
@@ -365,6 +386,23 @@ impl Context {
         };
         frame.namespace = Some(dict);
         dict
+    }
+
+    fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            if self.scope_name(scope, name).is_none() {
+                return Ok(false);
+            }
+            self.delete_item(namespace, key)?;
+            return Ok(true);
+        }
+        let Value::Scope(data) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        if let Some(order) = &mut data.class_body {
+            order.retain(|member| member != name);
+        }
+        Ok(data.names.shift_remove(name).is_some())
     }
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
@@ -603,6 +641,7 @@ impl Context {
                 filename,
                 first_line: 1,
                 module_definition: true,
+                coroutine: false,
             }));
             if let Err(error) = self.execute(code, scope) {
                 self.modules.remove(name);

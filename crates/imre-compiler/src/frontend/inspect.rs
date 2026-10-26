@@ -1,6 +1,15 @@
-//! Static reads from fixed native instance dictionaries. Do not run a descriptor
-//! or user attribute hook as part of passive inspection.
+//! Native inspect predicates and static attribute reads. Passive attribute
+//! lookup does not run descriptors or user attribute hooks.
 use super::*;
+
+pub(super) fn marks_function(
+    graph: &SourceGraph,
+    module: ModuleId,
+    function: &ast::StmtFunctionDef,
+) -> bool {
+    matches!(function.decorator_list.as_slice(), [decorator] if graph.resolve(module, &decorator.expression)
+        == Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark: true })))
+}
 
 pub(super) fn is_sentinel(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> bool {
     graph.resolve(module, value) == Some(Binding::Intrinsic(Intrinsic::InspectSentinel))
@@ -140,6 +149,76 @@ fn missing(types: &Types, name: &str, default: Option<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn inspect_coroutine(
+        &mut self,
+        call: &ast::ExprCall,
+        mark: bool,
+    ) -> Result<Expr, String> {
+        let parameter = if mark { "func" } else { "obj" };
+        let node = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some(parameter) => &kw.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "coroutine inspection requires one argument",
+                ));
+            }
+        };
+        let value = self.expr(node)?;
+        if mark {
+            // Only a module definition has one stable function for the program's
+            // lifetime. Each invocation of an enclosing function can create a
+            // new local function with the same adapter and a different marker.
+            if let ExprKind::Builtin(Builtin::StaticFunction(id), _) = &value.kind
+                && matches!(self.resolve(node), Some(Binding::Definition(_)))
+            {
+                return Ok(Expr {
+                    ty: value.ty,
+                    kind: ExprKind::Builtin(Builtin::MarkCoroutine(*id), vec![value]),
+                });
+            }
+            return Err(error(
+                self.source,
+                node,
+                "marking this coroutine function requires a dynamic function dictionary",
+            ));
+        }
+        if matches!(value.ty, Type::Callable(_)) {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsCoroutineFunction, vec![value]),
+            });
+        }
+        if functools::noncallable_type(value.ty).is_some()
+            || matches!(
+                value.ty,
+                Type::PlainObject
+                    | Type::StrDescriptor(_)
+                    | Type::StrLiteral(_)
+                    | Type::BuiltinClass
+                    | Type::Coroutine(_)
+            )
+        {
+            return Ok(evaluated(
+                value,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                },
+            ));
+        }
+        Err(error(
+            self.source,
+            node,
+            "coroutine inspection requires runtime attributes for this object",
+        ))
+    }
+
     pub(super) fn descriptor_attribute(
         &self,
         receiver: Expr,
