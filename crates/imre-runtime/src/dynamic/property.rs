@@ -22,7 +22,15 @@ impl Property {
         let name = self
             .name
             .map_or_else(String::new, |name| format!(" {}", ctx.repr(name)));
-        let owner = ctx.type_name(receiver);
+        let owner = if let Value::Instance { class, .. } = ctx.heap.get(receiver)
+            && let Value::Class { scope, .. } = ctx.heap.get(*class)
+            && let Some(&name) = ctx.scope_data(*scope).names.get("__qualname__")
+            && let Value::Str(name) = ctx.heap.get(name)
+        {
+            name
+        } else {
+            ctx.type_name(receiver)
+        };
         Error::new(
             "AttributeError",
             format!("property{name} of '{owner}' object has no {accessor}"),
