@@ -4,7 +4,9 @@ use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
 mod translate;
+mod urlquote;
 mod urlsplit;
+
 pub(super) use lowercase::{lowercase, lowercase_chars};
 
 use num_traits::{Signed, ToPrimitive};
@@ -13,6 +15,20 @@ use std::mem::ManuallyDrop;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
+
+/// Borrow the string or bytes layout selected by a URL operation's type tag.
+///
+/// # Safety
+/// The caller must root the matching owner for the lifetime of the returned borrow.
+unsafe fn url_data<'a>(word: *const std::ffi::c_void, is_bytes: bool) -> &'a [u8] {
+    if is_bytes {
+        // SAFETY: The byte flag selects a rooted Bytes owner.
+        unsafe { &*word.cast::<crate::Bytes>() }.as_slice()
+    } else {
+        // SAFETY: The other flag selects a rooted UTF-8 string owner.
+        unsafe { &*word.cast::<Str>() }.as_bytes()
+    }
+}
 
 /// Escape Unicode scalars in a Python representation using ASCII backslash replacement.
 ///
@@ -869,8 +885,7 @@ fn hexadecimal(byte: u8) -> Option<u8> {
 
 /// Decodes valid percent pairs, retaining malformed escapes and literal '+'.
 /// `first` identifies a percent byte; unchanged spans are copied in one chunk.
-fn unquote(source: &str, first: usize) -> Option<Str> {
-    let input = source.as_bytes();
+fn percent_bytes(input: &[u8], first: usize) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(input.len()).ok()?;
     bytes.extend_from_slice(&input[..first]);
@@ -892,6 +907,11 @@ fn unquote(source: &str, first: usize) -> Option<Str> {
         bytes.extend_from_slice(&input[index..index + offset]);
         index += offset;
     }
+    Some(bytes)
+}
+
+fn unquote(source: &str, first: usize) -> Option<Str> {
+    let bytes = percent_bytes(source.as_bytes(), first)?;
     match String::from_utf8(bytes) {
         Ok(decoded) => Some(Str::from(decoded)),
         Err(error) => {

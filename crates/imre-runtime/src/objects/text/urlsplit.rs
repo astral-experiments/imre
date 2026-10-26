@@ -1,6 +1,7 @@
 //! The five URL fields preserve their original spelling except for the explicit scheme.
 use super::super::bytes;
 use super::super::exceptions::{Error, Kind, Result, finish, string_repr};
+use super::url_data as data;
 use crate::{Bytes, BytesOwner, Int, Str};
 use std::{
     borrow::Cow,
@@ -10,17 +11,6 @@ use std::{
 
 fn invalid(message: impl Into<String>) -> Error {
     Error::new(Kind::ValueError, message.into())
-}
-
-// SAFETY: the caller roots the exact string or bytes layout selected by the flag.
-unsafe fn data<'a>(word: *const c_void, is_bytes: bool) -> &'a [u8] {
-    if is_bytes {
-        // SAFETY: The byte flag selects a rooted Bytes owner.
-        unsafe { &*word.cast::<Bytes>() }.as_slice()
-    } else {
-        // SAFETY: The other flag selects a rooted UTF-8 string owner.
-        unsafe { &*word.cast::<Str>() }.as_bytes()
-    }
 }
 
 unsafe fn decoded<'a>(word: *const c_void, is_bytes: bool) -> Result<&'a str> {

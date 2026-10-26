@@ -1,0 +1,148 @@
+{
+  "upstream_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "original_calls": {
+    "test.test_urllib.QuotingTests.test_never_quote": {
+      "quote": 2
+    },
+    "test.test_urllib.QuotingTests.test_safe": {
+      "quote": 7
+    },
+    "test.test_urllib.QuotingTests.test_default_quoting": {
+      "quote": 94
+    },
+    "test.test_urllib.QuotingTests.test_quoting_space": {
+      "quote": 4
+    },
+    "test.test_urllib.QuotingTests.test_quote_bytes": {
+      "quote": 2
+    },
+    "test.test_urllib.QuotingTests.test_quote_with_unicode": {
+      "quote": 7
+    },
+    "test.test_urllib.UnquotingTests.test_unquoting": {
+      "unquote": 257
+    },
+    "test.test_urllib.UnquotingTests.test_unquoting_badpercent": {
+      "unquote": 3
+    },
+    "test.test_urllib.UnquotingTests.test_unquoting_parts": {
+      "unquote": 2
+    },
+    "test.test_urllib.UnquotingTests.test_unquoting_plus": {
+      "unquote": 2
+    },
+    "test.test_urllib.UnquotingTests.test_unquote_with_unicode": {
+      "unquote": 9
+    },
+    "test.test_urllib.UnquotingTests.test_unquoting_with_bytes_input": {
+      "unquote": 3
+    }
+  },
+  "wheel_calls": {
+    "quote": 4,
+    "unquote": 9
+  },
+  "werkzeug_results": {
+    "dump_cookie": [
+      "sid=value; Path=/",
+      "sid=value; Path=/snow%20%E9%9B%AA/%2F+x=y",
+      "sid=value; Path=/%!$&'()*+,/:=@",
+      "sid=value; Path=/*%20caf%C3%A9/%3B%23%3F",
+      "sid=value"
+    ],
+    "parse_dict_header": [
+      {
+        "name": "caf\u00e9",
+        "flag": null
+      },
+      {
+        "name": "caf\u00e9"
+      },
+      {
+        "name": "\ufffd++"
+      },
+      {
+        "name": "bad%ZZ"
+      },
+      {
+        "name": "%FF"
+      }
+    ],
+    "parse_options_header": [
+      [
+        "attachment",
+        {
+          "filename": "snow-\u96ea.txt"
+        }
+      ],
+      [
+        "text/plain",
+        {
+          "title": "\u00e9+space"
+        }
+      ],
+      [
+        "text/plain",
+        {
+          "n": "\ufffd"
+        }
+      ],
+      [
+        "attachment",
+        {
+          "filename": "a/+b"
+        }
+      ],
+      [
+        "text/plain",
+        {
+          "n": "%FF"
+        }
+      ]
+    ]
+  },
+  "werkzeug_http_sha256": "e0720a5fef9f54b4d478f76f1f88ec0e6ba2519737f17ce20cf0608542456f4a",
+  "wheels": {
+    "blinker-1.9.0-py3-none-any.whl": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+    "click-8.4.2-py3-none-any.whl": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "flask-3.1.3-py3-none-any.whl": "f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c",
+    "itsdangerous-2.2.0-py3-none-any.whl": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+    "jinja2-3.1.6-py3-none-any.whl": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+    "markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
+    "werkzeug-3.1.8-py3-none-any.whl": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"
+  },
+  "modes": {
+    "normal-O0": {
+      "distinct_native_calls": 406,
+      "isolated_native_bodies": [
+        "test_quote_with_unicode",
+        "test_unquote_with_unicode",
+        "test_unquoting_with_bytes_input"
+      ]
+    },
+    "normal-O3": {
+      "distinct_native_calls": 406,
+      "isolated_native_bodies": [
+        "test_quote_with_unicode",
+        "test_unquote_with_unicode",
+        "test_unquoting_with_bytes_input"
+      ]
+    },
+    "reachable-O0": {
+      "distinct_native_calls": 406,
+      "isolated_native_bodies": [
+        "test_quote_with_unicode",
+        "test_unquote_with_unicode",
+        "test_unquoting_with_bytes_input"
+      ]
+    },
+    "reachable-O3": {
+      "distinct_native_calls": 406,
+      "isolated_native_bodies": [
+        "test_quote_with_unicode",
+        "test_unquote_with_unicode",
+        "test_unquoting_with_bytes_input"
+      ]
+    }
+  }
+}

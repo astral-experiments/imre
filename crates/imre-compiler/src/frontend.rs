@@ -8741,8 +8741,8 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::UrlsafeB64encode, Type::Bytes, args));
             }
             Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
-            Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
-                return self.text_function(call, "string", ir::TextOperation::Unquote);
+            Some(Binding::Intrinsic(op @ (Intrinsic::Quote | Intrinsic::Unquote))) => {
+                return self.url_quoting(call, op == Intrinsic::Quote);
             }
             Some(Binding::Intrinsic(Intrinsic::ShlexSplit)) => {
                 return self.shlex_split(call);
