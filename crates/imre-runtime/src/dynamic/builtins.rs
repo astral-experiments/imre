@@ -107,7 +107,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
         Value::Dict(_) | Value::DefaultDict { .. }
-            if matches!(attr, "items" | "values" | "keys" | "get" | "update") =>
+            if matches!(
+                attr,
+                "items" | "values" | "keys" | "get" | "setdefault" | "update"
+            ) =>
         {
             "dict"
         }

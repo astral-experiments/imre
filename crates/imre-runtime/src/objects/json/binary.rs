@@ -34,7 +34,7 @@ impl Encoding {
     }
 }
 
-fn decode(bytes: &crate::BytesOwner) -> Result<Cow<'_, str>, Error> {
+pub(crate) fn decode(bytes: &crate::BytesOwner) -> Result<Cow<'_, str>, Error> {
     let (encoding, mut pos) = Encoding::detect(bytes);
     let (width, little, codec) = match encoding {
         Encoding::Utf8 => {
