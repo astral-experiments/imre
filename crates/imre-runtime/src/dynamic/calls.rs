@@ -279,6 +279,7 @@ impl Context {
         Some(match self.heap.get(obj) {
             Value::None
             | Value::Ellipsis
+            | Value::NotImplemented
             | Value::Bool(_)
             | Value::Float(_)
             | Value::Int(_)
@@ -324,6 +325,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "NoneType"
+                            | "NotImplementedType"
                             | "ellipsis"
                             | "float"
                             | "code"

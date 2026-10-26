@@ -53,17 +53,22 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
+        "string" => Some((
+            "string/__init__.py",
+            include_str!("../stdlib/string/cpython.py"),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
         )),
         "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
-        // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
-        "string" => Some((
-            "string/__init__.py",
-            include_str!("../stdlib/string/cpython.py"),
+        "_imre_gettext_locale" => Some((
+            "_imre_gettext_locale.py",
+            include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
+        "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
     }
