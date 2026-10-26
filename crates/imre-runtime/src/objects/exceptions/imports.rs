@@ -332,6 +332,13 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
                     Storage::Sequence(_) => "list".into(),
                     Storage::Dictionary(_) => "dict".into(),
                     Storage::Set(_) => "set".into(),
+                    Storage::Path { .. } => if cfg!(windows) {
+                        "WindowsPath"
+                    } else {
+                        "PosixPath"
+                    }
+                    .into(),
+                    Storage::PurePath(path) => path.class().into(),
                     Storage::Exception(e) => e.name().to_owned().into(),
                     _ => "object".into(),
                 })
@@ -351,6 +358,7 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
         }
         7 => "float",
         8 => "bytes",
+        10 => return super::super::string_enums::class_name(word).into(),
         _ => unreachable!("checked exception field"),
     };
     plain.into()
@@ -426,7 +434,7 @@ pub unsafe extern "C" fn imre_exception_field_index(
             return Error::new(
                 Kind::IndexError,
                 match kind.raw() {
-                    3 => "string index out of range",
+                    3 | 10 => "string index out of range",
                     4 | 5 => "list index out of range",
                     6 => "tuple index out of range",
                     8 => "index out of range",
@@ -444,6 +452,11 @@ pub unsafe extern "C" fn imre_exception_field_index(
             4..=6 => {
                 let (k, w) = sequence_item(kind, word, i);
                 view(k, w)
+            }
+            10 => {
+                let text = super::super::string_enums::string_value(word).expect("sized StrEnum");
+                let ch = StrOwner::new(Str::from(text.chars().nth(i).unwrap().to_string()));
+                view(WordKind::new(3), StrOwner::as_ptr(&ch) as usize)
             }
             8 => view(
                 WordKind::new(2),

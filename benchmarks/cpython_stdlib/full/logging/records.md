@@ -22,3 +22,21 @@ The driver does not create Python logging records on the host. The separate
 record, copied extra fields, retained arguments, and formatting errors. It contributes
 no additional upstream ID. The asyncio task-name and multiprocessing child-process
 tests still require their respective runtime contexts; neither is excluded.
+
+## Logger.makeRecord and extra
+
+The [focused replay](make-record-extra-linux.json) runs both original
+`LoggerTest` methods under CPython’s module, class and instance fixtures at
+O0 and O3. Record creation does not dispatch an event to any handler.
+
+| Original method | Body and assertions | Native logging operations |
+| --- | --- | --- |
+| `test_make_record_with_extra_no_overwrite` | Imre runs the complete unchanged body and checks dictionary membership on its original operands. | Construct the record and expose its live dictionary. |
+| `test_make_record_with_extra_overwrite` | CPython runs the unchanged loop and `assertRaises`; the native compiler stops at `tuple(rv.__dict__.keys())`. | One native child creates the default record, enumerates its 21 fields, and rejects attempts to overwrite those fields, `message`, and `asctime`. |
+
+The [dictionary control](make_record_values.py) checks alias mutation, copied
+records, protected names, argument evaluation order and catchable errors. The
+[operand control](make_record_operands.py) checks paths, Enum and StrEnum values,
+and tagged integers, including zero. Both compare the complete process output
+against the pinned interpreter and add no test IDs. These checks exercise the
+default record factory.

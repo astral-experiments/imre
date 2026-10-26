@@ -1,7 +1,7 @@
 //! A log record owns one native Python value per attribute, including user-supplied extras.
-use crate::StrOwner;
+use super::fields::Fields;
+use crate::{ObjectOwner, StrOwner};
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::fmt::Write as _;
 thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
 use num_traits::ToPrimitive;
@@ -12,12 +12,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::super::exceptions::Result;
 use super::super::words::{NULLABLE, OwnedWord, WordKind};
 use super::super::{
-    Bytes, Error, Int, Kind, List, Object, Storage, StorageCell, Str, finish, object, records,
-    values,
+    Bytes, Error, Int, Kind, List, Object, Storage, StorageCell, Str, boxed_values, finish, object,
+    records, values,
 };
 
 pub(in crate::objects) struct Record {
-    pub(super) fields: HashMap<String, OwnedWord>,
+    pub(super) fields: Fields,
 }
 
 fn owned(word: usize, kind: u32) -> OwnedWord {
@@ -45,11 +45,15 @@ fn exact_text(v: &OwnedWord) -> Option<&str> {
 }
 
 pub(super) fn write_display(out: &mut String, v: &OwnedWord) -> Result<()> {
-    if let Some(s) = exact_text(v) {
-        return append(out, s);
+    // SAFETY: v retains its concrete payload until formatting finishes.
+    let (kind, word) = unsafe { boxed_values::concrete(v.kind, v.word) };
+    if boxed_values::write_string_value(&mut values::ReprWriter(out), kind, word)
+        .map_err(|_| Error::allocation())?
+    {
+        return Ok(());
     }
     // SAFETY: v keeps the value graph rooted until the entire field is written.
-    unsafe { values::try_write_unchecked_repr(&mut values::ReprWriter(out), v.word, v.kind) }
+    unsafe { values::try_write_unchecked_repr(&mut values::ReprWriter(out), word, kind) }
         .map_err(|_| Error::allocation())
 }
 
@@ -323,18 +327,18 @@ impl Record {
         let flags = FLAGS.get();
         let fields = [
             ("name", name),
+            ("msg", msg),
+            ("args", args),
             ("levelname", levelname),
             ("levelno", level),
             ("pathname", path),
-            ("lineno", line),
-            ("msg", msg),
-            ("args", args),
-            ("exc_info", exc),
-            ("funcName", func),
-            ("stack_info", stack),
             ("filename", filename),
             ("module", module),
+            ("exc_info", exc),
             ("exc_text", owned(0, 0)),
+            ("stack_info", stack),
+            ("lineno", line),
+            ("funcName", func),
             ("created", float(created)),
             ("msecs", float(msecs)),
             ("relativeCreated", float((ct - start) as f64 / 1e6)),
@@ -355,14 +359,6 @@ impl Record {
                 },
             ),
             (
-                "process",
-                if flags & 2 != 0 {
-                    integer(std::process::id() as usize)
-                } else {
-                    owned(0, 0)
-                },
-            ),
-            (
                 "processName",
                 if flags & 4 != 0 {
                     string("MainProcess")
@@ -370,10 +366,18 @@ impl Record {
                     owned(0, 0)
                 },
             ),
+            (
+                "process",
+                if flags & 2 != 0 {
+                    integer(std::process::id() as usize)
+                } else {
+                    owned(0, 0)
+                },
+            ),
             ("taskName", owned(0, 0)),
         ];
         Ok(Self {
-            fields: fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+            fields: Fields::new(fields),
         })
     }
 
@@ -386,15 +390,15 @@ impl Record {
             ("lineno", ", \""),
             ("msg", "\">"),
         ] {
-            write_display(&mut out, &self.fields[field])?;
+            write_display(&mut out, &self.fields.field(field)?)?;
             append(&mut out, after)?;
         }
         Ok(out)
     }
 
     pub(super) fn message(&self) -> Result<OwnedWord> {
-        let msg = &self.fields["msg"];
-        let args = &self.fields["args"];
+        let msg = &self.fields.field("msg")?;
+        let args = &self.fields.field("args")?;
         if !truth(args) {
             return if exact_text(msg).is_some() {
                 Ok(msg.clone())
@@ -479,11 +483,16 @@ fn percent_text(value: &OwnedWord, conversion: char, precision: Option<usize>) -
         append(&mut text, &s[..end(s)])?;
         return Ok(text);
     }
-    // SAFETY: the argument roots its value graph throughout representation.
-    unsafe {
-        values::try_write_unchecked_repr(&mut values::ReprWriter(&mut text), value.word, value.kind)
+    // SAFETY: the argument retains its concrete payload throughout representation.
+    let (kind, word) = unsafe { boxed_values::concrete(value.kind, value.word) };
+    if conversion != 's'
+        || !boxed_values::write_string_value(&mut values::ReprWriter(&mut text), kind, word)
+            .map_err(|_| Error::allocation())?
+    {
+        // SAFETY: the original value keeps the normalized payload alive.
+        unsafe { values::try_write_unchecked_repr(&mut values::ReprWriter(&mut text), word, kind) }
+            .map_err(|_| Error::allocation())?;
     }
-    .map_err(|_| Error::allocation())?;
     if conversion == 'a' && !text.is_ascii() {
         let mut ascii = String::new();
         let mut out = values::ReprWriter(&mut ascii);
@@ -871,11 +880,13 @@ pub unsafe extern "C" fn imre_logrecord_put(
     // SAFETY: acquire before mutation; release the displaced owner outside the storage borrow.
     unsafe {
         let value = WordKind::new(kind).acquire(word);
-        let old = object(record).0.with_mut(|s| match s {
-            Storage::LogRecord(r) => r.fields.insert((&*key).to_string(), value),
-            _ => unreachable!(),
-        });
-        drop(old);
+        finish(
+            object(record).0.with_mut(|s| match s {
+                Storage::LogRecord(r) => r.fields.insert((&*key).to_string(), value),
+                _ => unreachable!(),
+            }),
+            (),
+        );
     }
 }
 
@@ -888,12 +899,76 @@ pub unsafe extern "C" fn imre_logrecord_update(record: *const Object, mapping: *
         let fields = object(mapping)
             .0
             .with(|s| s.dictionary().owned_string_entries());
-        object(record).0.with_mut(|s| {
-            if let Storage::LogRecord(r) = s {
-                r.fields.extend(fields)
-            }
-        });
+        finish(
+            object(record).0.with_mut(|s| {
+                let Storage::LogRecord(r) = s else {
+                    unreachable!()
+                };
+                for (key, value) in fields {
+                    r.fields.insert(key, value)?;
+                }
+                Ok(())
+            }),
+            (),
+        );
     }
+}
+
+/// Expose the record's live, insertion-ordered attribute dictionary.
+///
+/// # Safety
+/// The caller holds a native record until the mapping takes its own strong owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_dictionary(record: *const Object) -> *const Object {
+    // SAFETY: no user code runs while the record switches to its dictionary representation.
+    let result = unsafe {
+        object(record).0.with_mut(|s| {
+            let Storage::LogRecord(r) = s else {
+                unreachable!()
+            };
+            r.fields.dictionary()
+        })
+    };
+    finish(result.map(ObjectOwner::into_raw), std::ptr::null())
+}
+
+/// Add Logger.makeRecord's fields without replacing existing or formatter-reserved names.
+///
+/// # Safety
+/// The caller holds the record and a string-key dictionary, or zero for None.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_logrecord_extra(record: *const Object, mapping: usize) {
+    if mapping == 0 {
+        return;
+    }
+    // SAFETY: acquiring the mapping values ends its borrow before any record is changed.
+    let fields = unsafe {
+        object(mapping as *const Object)
+            .0
+            .with(|s| s.dictionary().owned_string_entries())
+    };
+    // SAFETY: the record, original keys and all values remain rooted through mutation.
+    finish(
+        unsafe {
+            object(record).0.with_mut(|s| {
+                let Storage::LogRecord(r) = s else {
+                    unreachable!()
+                };
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "message" | "asctime") || r.fields.get(&key).is_some()
+                    {
+                        return Err(Error::key(string(&format!(
+                            "Attempt to overwrite {} in LogRecord",
+                            super::super::exceptions::string_repr(&key)
+                        ))));
+                    }
+                    r.fields.insert(key, value)?;
+                }
+                Ok(())
+            })
+        },
+        (),
+    );
 }
 
 fn read(value: &OwnedWord, want: u32) -> Result<usize> {
@@ -947,7 +1022,7 @@ pub unsafe extern "C" fn imre_logrecord_read(
                         format!("'LogRecord' object has no attribute '{key}'"),
                     )
                 })
-                .and_then(|v| read(v, kind))
+                .and_then(|v| read(&v, kind))
         })
     };
     finish(result, 0)

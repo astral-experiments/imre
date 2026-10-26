@@ -28,7 +28,38 @@ impl Checker<'_> {
     }
 
     pub(super) fn object_value_supported(&self, ty: Type) -> bool {
-        self.boxable_value(ty) || matches!(ty, Type::Class(class) if self.boxed_dataclass(class))
+        if self.boxable_value(ty) {
+            return true;
+        }
+        match ty {
+            Type::Float
+            | Type::ListInt
+            | Type::Path
+            | Type::PurePath(_)
+            | Type::Enum(_)
+            | Type::StrEnum(_) => true,
+            Type::List(_)
+            | Type::Set(_)
+            | Type::Dict(_)
+            | Type::Tuple(_)
+            | Type::Optional(_)
+            | Type::Union(_) => self
+                .types
+                .children(ty)
+                .into_iter()
+                .all(|child| self.object_value_supported(child)),
+            Type::Class(class) => {
+                let decl = &self.classes.declarations.definitions[class];
+                // A plain instance without protocol overrides keeps its concrete
+                // descriptor and identity when stored in a Python dictionary.
+                self.boxed_dataclass(class) || (decl.dataclass.is_none()
+                    && decl.bases.is_empty()
+                    && !self.classes.has_concrete_subclasses(class)
+                    && decl.node.body.iter().all(|stmt| !matches!(stmt,
+                        ast::Stmt::FunctionDef(f) if f.name.starts_with("__") && f.name.ends_with("__"))))
+            }
+            _ => false,
+        }
     }
 }
 
@@ -274,6 +305,10 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
         .enumerate()
         .map(|(id, class)| ir::ClassMetadata {
             name: class.name.clone(),
+            plain_enum: class
+                .enum_members
+                .as_ref()
+                .is_some_and(|members| members.plain),
             enum_members: class
                 .enum_members
                 .as_ref()

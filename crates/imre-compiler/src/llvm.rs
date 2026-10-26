@@ -4282,6 +4282,17 @@ impl Emitter<'_, '_> {
                         );
                         none()
                     }
+                    Dictionary => {
+                        self.call("imre_logrecord_dictionary", returns, &[&args[0].value])
+                    }
+                    AddExtra => {
+                        let mapping = self.word(&args[1].value);
+                        self.checked_line(format!(
+                            "call void @imre_logrecord_extra(ptr {}, i64 {mapping})",
+                            args[0].value.operand
+                        ));
+                        none()
+                    }
                     New | Put => {
                         let mut operands = Vec::new();
                         for (i, arg) in args.iter().enumerate() {
@@ -9310,6 +9321,8 @@ declare void @imre_formatter_set_default_time(ptr,ptr)
 declare void @imre_formatter_set_default_msec(ptr,i64)
 declare i1 @imre_logrecord_flag(i64)
 declare void @imre_logrecord_set_flag(i64,i1)
+declare ptr @imre_logrecord_dictionary(ptr)
+declare void @imre_logrecord_extra(ptr, i64)
 declare ptr @imre_logrecord_new(i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32,i64,i32)
 declare void @imre_logrecord_put(ptr,ptr,i64,i32)
 declare void @imre_logrecord_update(ptr,ptr)
@@ -9406,6 +9419,7 @@ declare i32 @imre_str_contains(ptr, ptr)
 declare i32 @imre_str_list_contains(ptr, ptr)
 declare i32 @imre_int_list_contains(i64, ptr)
 declare void @imre_str_enum_table(ptr, i64)
+declare void @imre_enum_display_table(ptr, i64, ptr)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)

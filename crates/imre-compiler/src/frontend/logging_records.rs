@@ -30,14 +30,19 @@ impl Checker<'_> {
         value: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if !dataclass_values::can_format(value.ty, self.types, self.classes) {
+        self.check_record_value_type(value.ty, node)?;
+        Ok(value)
+    }
+
+    fn check_record_value_type(&self, ty: Type, node: &impl Ranged) -> Result<(), String> {
+        if ty != Type::ObjectValue && !dataclass_values::can_format(ty, self.types, self.classes) {
             return Err(error(
                 self.source,
                 node,
                 "log record value needs a native Python representation",
             ));
         }
-        Ok(value)
+        Ok(())
     }
 
     fn empty_record(&self) -> Expr {
@@ -116,7 +121,12 @@ impl Checker<'_> {
             }
         } else {
             let value = self.expr(mapping)?;
-            let value = self.check_record_value(value, mapping)?;
+            if !matches!(
+                self.types.mapping(value.ty),
+                Some((Type::Str, Type::ObjectValue))
+            ) {
+                self.check_record_value_type(value.ty, mapping)?;
+            }
             if !matches!(self.types.mapping(value.ty), Some((Type::Str, _))) {
                 return Err(error(
                     self.source,
@@ -157,12 +167,86 @@ impl Checker<'_> {
         })
     }
 
+    /// Bind Logger.makeRecord in call order and apply extra only after the new record exists.
+    pub(super) fn logger_make_record(
+        &mut self,
+        logger: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let params: Vec<_> = [
+            "name", "level", "fn", "lno", "msg", "args", "exc_info", "func", "extra", "sinfo",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| Parameter {
+            name: name.into(),
+            ty: Type::None,
+            kind: ParameterKind::PositionalOrKeyword,
+            default: (i >= 7).then(none),
+            sign_only: false,
+        })
+        .collect();
+        let args = self.arguments_with(call, &params, Some(logger), |checker, i, arg| {
+            let value = checker.expr(arg)?;
+            if i == 8 {
+                let concrete = checker.types.payload(value.ty).unwrap_or(value.ty);
+                if concrete != Type::None
+                    && !matches!(checker.types.mapping(concrete), Some((Type::Str, _)))
+                {
+                    return Err(error(
+                        checker.source,
+                        arg,
+                        "logging extra needs a string-key mapping",
+                    ));
+                }
+                if let Some((_, field)) = checker.types.mapping(concrete) {
+                    checker.check_record_value_type(field, arg)?;
+                }
+                return Ok(value);
+            }
+            checker.check_record_value(value, arg)
+        })?;
+        let mut scope = calls::ArgumentScope::default();
+        let held: Vec<_> = args
+            .values
+            .into_iter()
+            .map(|v| scope.hold(self, v))
+            .collect();
+        let bound: Vec<_> = args.order.iter().map(|&slot| held[slot].clone()).collect();
+        let new = op(
+            Op::New,
+            Type::LogRecord,
+            [1, 2, 3, 4, 5, 6, 7, 8, 10]
+                .map(|i| bound[i].clone())
+                .into(),
+        );
+        let record = scope.hold(self, new);
+        if bound[9].ty != Type::None {
+            scope.hold(
+                self,
+                op(
+                    Op::AddExtra,
+                    Type::None,
+                    vec![record.clone(), bound[9].clone()],
+                ),
+            );
+        }
+        Ok(scope.finish(record))
+    }
+
     pub(super) fn log_record_field(
         &self,
         record: Expr,
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
+        if name == "__dict__" {
+            return Ok(op(
+                Op::Dictionary,
+                self.types.dict(Type::Str, Type::ObjectValue),
+                vec![record],
+            ));
+        }
         let ty = match name {
             "name" | "funcName" | "exc_text" | "stack_info" | "processName" | "threadName"
             | "taskName" => self.types.optional(Type::Str),

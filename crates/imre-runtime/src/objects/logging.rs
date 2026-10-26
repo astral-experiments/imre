@@ -8,6 +8,7 @@ mod levels;
 pub(super) mod locks;
 pub(super) mod timed;
 
+mod fields;
 pub(super) mod formatter;
 pub(super) mod record;
 use std::cell::RefCell;

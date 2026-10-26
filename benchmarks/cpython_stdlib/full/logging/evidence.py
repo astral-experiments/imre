@@ -27,6 +27,7 @@ import native_handlers
 import native_hierarchy
 import native_levels
 import native_logging
+import native_make_record
 import native_records
 import native_rotation
 import native_timed
@@ -154,6 +155,7 @@ def known_cases(toolchain, work, original):
     executions[daily] = native_daily
     executions.update(native_config.config_cases(toolchain, directory("config"), original))
     executions.update(native_handlers.handler_cases(toolchain, directory("handlers"), original))
+    executions.update(native_make_record.record_cases(toolchain, directory("make-record")))
     executions.update(native_filters.filter_cases(toolchain, directory("name-filter")))
     executions.update(native_hierarchy.hierarchy_cases(toolchain, directory("children")))
     executions.update(native_files.file_cases(toolchain, directory("file-handlers")))
