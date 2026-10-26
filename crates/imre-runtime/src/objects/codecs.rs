@@ -35,9 +35,25 @@ impl CodePage {
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 
+const CODEC_NAMES: [&str; 6] = [
+    "ascii",
+    "iso8859-1",
+    "utf-8",
+    "utf-8-sig",
+    "cp1251",
+    "cp424",
+];
+
 thread_local! {
     static REGISTRY: RefCell<HashMap<String, ObjectOwner>> = RefCell::default();
-    static NAMES: [StrOwner; 6] = ["ascii", "iso8859-1", "utf-8", "utf-8-sig", "cp1251", "cp424"].map(|s| StrOwner::new(Str::new(s)));
+    static NAMES: [StrOwner; CODEC_NAMES.len()] = CODEC_NAMES.map(|name| {
+        // Python interns identifiers in encoding modules, such as ascii and cp1251.
+        if name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+            crate::sys::canonical(name)
+        } else {
+            StrOwner::new(Str::const_new(name))
+        }
+    });
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
@@ -210,6 +226,10 @@ impl Codec {
     /// Return the retained canonical name shared with registry entries.
     pub(crate) fn name_owner(self) -> StrOwner {
         NAMES.with(|names| names[self.index()].clone())
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        CODEC_NAMES[self.index()]
     }
 
     pub(crate) fn lookup(value: &str) -> Result<Self> {

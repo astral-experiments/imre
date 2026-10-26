@@ -682,7 +682,7 @@ pub unsafe extern "C" fn imre_async_gather(
             // consumed coroutine whose exception appears in multiple slots.
             let mut unique = std::collections::HashMap::new();
             storage
-                .sequence()
+                .sequence_storage()
                 .values
                 .iter()
                 .map(|&handle| {

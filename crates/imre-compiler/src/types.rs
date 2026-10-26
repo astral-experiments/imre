@@ -729,6 +729,18 @@ impl Types {
         }
     }
 
+    /// A string list can defer its rows; testing a boxed value or a union may read that list.
+    pub(crate) fn truth_may_materialize(&self, ty: Type) -> bool {
+        let ty = self.payload(ty).unwrap_or(ty);
+        ty == Type::ObjectValue
+            || (matches!(ty, Type::List(_)) && self.element(ty) == Some(Type::Str))
+            || self.members(ty).is_some_and(|members| {
+                members
+                    .iter()
+                    .any(|member| self.truth_may_materialize(*member))
+            })
+    }
+
     /// Fixed tuples and nominal objects have no user-defined truth protocol.
     /// Unknown means the value must be inspected, including nullable payloads.
     pub(crate) fn truthiness(&self, ty: Type) -> Option<bool> {
@@ -1303,6 +1315,7 @@ impl Types {
                     *underlying
                 }
                 Shape::CachedCallable(cache) => cache.callable,
+                Shape::DispatchCallable(dispatcher) => dispatcher.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
             };

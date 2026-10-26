@@ -78,6 +78,12 @@ thread_local! {
     static INTERNED: RefCell<Interned> = RefCell::default();
 }
 
+/// Keep module metadata in the same table as interned literals and sys.intern.
+pub(crate) fn canonical(name: &'static str) -> StrOwner {
+    let value = StrOwner::new(Str::const_new(name));
+    INTERNED.with_borrow_mut(|table| table.intern(&value))
+}
+
 /// # Safety
 /// The caller roots one live native string; the return transfers a separate owner.
 #[unsafe(no_mangle)]

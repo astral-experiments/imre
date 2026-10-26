@@ -368,8 +368,9 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
     // SAFETY: the view retains the original value.
     let (kind, word) = unsafe { exit_word(value) };
     match super::super::boxed_values::python_length(kind, word) {
-        Some(n) => Int::from_usize(n).into_raw(),
-        None => Error::new(
+        Ok(Some(n)) => Int::from_usize(n).into_raw(),
+        Err(error) => error.returning(0),
+        Ok(None) => Error::new(
             Kind::TypeError,
             format!("object of type '{}' has no len()", type_name(kind, word)),
         )
@@ -405,7 +406,10 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 std::ptr::null(),
             );
         }
-        let Some(len) = length(kind, word) else {
+        let Some(len) = (match length(kind, word) {
+            Ok(length) => length,
+            Err(error) => return error.returning(std::ptr::null()),
+        }) else {
             return Error::new(
                 Kind::TypeError,
                 format!("'{}' object is not subscriptable", type_name(kind, word)),
@@ -441,10 +445,10 @@ pub unsafe extern "C" fn imre_exception_field_index(
                 let s = StrOwner::new(Str::from(ch.to_string()));
                 view(WordKind::new(3), StrOwner::as_ptr(&s) as usize)
             }
-            4..=6 => {
-                let (k, w) = sequence_item(kind, word, i);
-                view(k, w)
-            }
+            4..=6 => finish(
+                sequence_item(kind, word, i).map(|(k, w)| view(k, w)),
+                std::ptr::null(),
+            ),
             8 => view(
                 WordKind::new(2),
                 Int::from_usize((&*(word as *const Bytes))[i] as usize).into_raw(),

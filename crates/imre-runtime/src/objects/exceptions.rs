@@ -342,6 +342,7 @@ pub(super) struct Exception {
 #[derive(Clone, Default)]
 struct ExceptionDetails {
     cause: Option<crate::ObjectOwner>,
+    origins: Vec<(StrOwner, u64)>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
@@ -501,6 +502,7 @@ impl Exception {
         if let Some(previous) = self.details.as_deref() {
             let fresh = Rc::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
+            fresh.origins.clone_from(&previous.origins);
             fresh.named = previous.named;
             fresh.layout.clone_from(&previous.layout);
             fresh.args.clone_from(&previous.args);
@@ -829,6 +831,15 @@ impl Error {
 
     pub(crate) fn index() -> Self {
         Self::new(Kind::IndexError, "list index out of range")
+    }
+
+    /// Preserve the native exception class and its formatted Python message.
+    pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
+        let kind = self.kind.name();
+        let error = self.into_object();
+        // SAFETY: the local owner keeps the exception payload alive throughout the read.
+        let message = unsafe { error.0.with(Storage::exception_message) };
+        (kind, message)
     }
 
     /// Copytree aggregates only OS failures; language errors still escape intact.
@@ -1709,7 +1720,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        4 | 5 => super::boxed_values::python_length(kind, word) != Some(0),
+        4 | 5 => super::boxed_values::python_length(kind, word)
+            .map_or_else(|error| error.returning(false), |length| length != Some(0)),
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
@@ -2153,6 +2165,34 @@ pub unsafe extern "C" fn imre_exception_message(value: *const Object) -> *const 
     unsafe { display(value, false) }
 }
 
+/// Record a Python raise site without changing the exception's message or identity.
+///
+/// # Safety
+/// Both inputs are live borrowed Imre values. The result owns an additional
+/// reference to the same exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_with_origin(
+    value: *const Object,
+    filename: *const Str,
+    line: u64,
+) -> *const Object {
+    // SAFETY: both input owners outlive this call. A stored filename owns its reference.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Exception(exception) = storage else {
+                fail("SystemError", "expected an exception object");
+            };
+            let origins = &mut exception.details_mut().origins;
+            if origins.try_reserve(1).is_ok() {
+                crate::imre_str_retain(filename);
+                origins.push((StrOwner::from_raw(filename), line));
+            }
+        });
+        imre_exception_retain(value);
+    }
+    value
+}
+
 /// Attaches an explicit cause before publishing a fresh exception and returns
 /// an additional owned reference to that same exception. Null represents `from None`.
 ///
@@ -2259,6 +2299,29 @@ pub extern "C" fn imre_exception_reraise() {
     }
 }
 
+/// An integer passed to SystemExit first has to fit the platform's C long.
+#[derive(Clone, Debug)]
+pub(crate) enum ExitStatus {
+    Code(i32),
+    Overflow,
+}
+
+impl ExitStatus {
+    pub(crate) fn from_i64(value: Option<i64>) -> Self {
+        value.map_or(Self::Overflow, |code| Self::Code(code as i32))
+    }
+
+    pub(crate) fn report(self) -> i32 {
+        match self {
+            Self::Code(code) => code,
+            Self::Overflow => {
+                eprintln!("OverflowError: Python int too large to convert to C long");
+                -1
+            }
+        }
+    }
+}
+
 /// Reports and consumes the pending error after generated-code cleanup. Returning
 /// the exit status lets the C entry point finish normally, including sanitizer
 /// teardown. A failed best-effort stdout flush preserves the original error.
@@ -2356,10 +2419,14 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
     let mut current = Some(exception.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
-        let (name, cause) = unsafe {
+        let (name, cause, origins) = unsafe {
             exception.0.with(|storage| {
                 let e = storage.exception();
-                (e.name().to_owned(), e.cause().cloned())
+                (
+                    e.name().to_owned(),
+                    e.cause().cloned(),
+                    e.details.as_deref().map(|details| details.origins.clone()),
+                )
             })
         };
         // SAFETY: the local owner outlives custom formatting and any resulting error.
@@ -2382,17 +2449,23 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
                     _ => None,
                 })
         };
-        chain.push((name, message, suggestion));
+        chain.push((name, message, suggestion, origins));
         current = cause;
     }
     drop(exception);
     let mut diagnostic = crate::sys::stderr_writer();
-    for (index, (name, message, suggestion)) in chain.into_iter().rev().enumerate() {
+    for (index, (name, message, suggestion, origins)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
                 diagnostic,
                 "\nThe above exception was the direct cause of the following exception:\n"
             );
+        }
+        if let Some(origins) = origins.filter(|frames| !frames.is_empty()) {
+            let _ = writeln!(diagnostic, "Traceback (most recent call last):");
+            for (filename, line) in origins.iter().rev() {
+                let _ = writeln!(diagnostic, "  File \"{filename}\", line {line}");
+            }
         }
         if let Some(hint) = suggestion {
             let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");

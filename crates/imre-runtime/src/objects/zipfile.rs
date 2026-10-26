@@ -187,7 +187,7 @@ impl Archive {
 
     fn for_infos<T>(&self, f: impl FnOnce(&[usize]) -> T) -> T {
         // SAFETY: the sealed operations here never invoke user code.
-        unsafe { self.filelist.0.with(|s| f(&s.sequence().values)) }
+        unsafe { self.filelist.0.with(|s| f(&s.sequence_storage().values)) }
     }
 
     fn source(&self) -> Result<Source> {

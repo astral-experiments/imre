@@ -2650,7 +2650,7 @@ pub unsafe extern "C" fn imre_frozenset_strings(source: *const Object) -> *const
     let result = unsafe {
         object(source).0.with(|s| {
             Set::frozen_strings(
-                s.sequence()
+                s.sequence()?
                     .strings()
                     .map(|(word, _)| Ok(WordKind::new(3).acquire(word))),
             )

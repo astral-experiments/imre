@@ -201,7 +201,7 @@ pub(super) fn brace_item(value: &OwnedWord, key: &str) -> Result<OwnedWord> {
                     let Storage::Sequence(_) = storage else {
                         return Err(unsupported("object"));
                     };
-                    let words = storage.sequence();
+                    let words = storage.sequence()?;
                     Ok((
                         "list",
                         words

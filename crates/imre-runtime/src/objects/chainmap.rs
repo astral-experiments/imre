@@ -76,9 +76,11 @@ pub unsafe extern "C" fn imre_chainmap_truth(value: *const Object) -> u32 {
 unsafe fn with_layers<T>(value: *const Object, f: impl FnOnce(&[usize]) -> T) -> T {
     // SAFETY: the caller roots the ChainMap and its list for the whole visit.
     unsafe {
-        object(value)
-            .0
-            .with(|s| s.chainmap().0.with(|maps| f(&maps.sequence().values)))
+        object(value).0.with(|s| {
+            s.chainmap()
+                .0
+                .with(|maps| f(&maps.sequence_storage().values))
+        })
     }
 }
 

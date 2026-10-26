@@ -376,22 +376,28 @@ pub unsafe extern "C" fn imre_linecache_line_int(
     missing: *const Str,
 ) -> *const Str {
     // SAFETY: input owners survive lookup; a missing row acquires the caller's pooled empty string.
-    StrOwner::into_raw(unsafe {
-        line_at(super::object(lines), n).unwrap_or_else(|| StrOwner::acquire_word(missing as usize))
-    })
+    unsafe {
+        crate::finish(
+            line_at(super::object(lines), n).map(|row| {
+                StrOwner::into_raw(row.unwrap_or_else(|| StrOwner::acquire_word(missing as usize)))
+            }),
+            std::ptr::null(),
+        )
+    }
 }
 
 /// # Safety
 /// The caller roots an exact str list and a tagged Python integer.
-pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Option<crate::StrOwner> {
+pub(super) unsafe fn line_at(lines: &Object, n: usize) -> Result<Option<crate::StrOwner>> {
     // SAFETY: the borrowed list roots each selected string until acquired.
     unsafe {
         lines.0.with(|s| {
-            Int::borrow(n)
+            let values = s.sequence()?;
+            Ok(Int::borrow(n)
                 .as_small()
                 .and_then(|i| usize::try_from(i).ok()?.checked_sub(1))
-                .and_then(|i| s.sequence().values.get(i))
-                .map(|&word| crate::StrOwner::acquire_word(word))
+                .and_then(|i| values.values.get(i))
+                .map(|&word| crate::StrOwner::acquire_word(word)))
         })
     }
 }
@@ -405,7 +411,15 @@ pub unsafe extern "C" fn imre_linecache_line_float(
     missing: *const Str,
 ) -> *const Str {
     // SAFETY: the list lives during its length query.
-    let len = unsafe { super::object(lines).0.with(|s| s.sequence().values.len()) };
+    let len = unsafe {
+        super::object(lines)
+            .0
+            .with(|s| s.sequence().map(|words| words.values.len()))
+    };
+    let len = match len {
+        Ok(len) => len,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
     if 1.0 <= n && n <= len as f64 {
         Error::new(
             Kind::TypeError,

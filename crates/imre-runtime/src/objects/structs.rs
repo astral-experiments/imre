@@ -447,7 +447,7 @@ pub unsafe extern "C" fn imre_struct_seek_span(list: *const Object, at: usize, o
                     start: at,
                     len: 1,
                     index_mask: 0,
-                    data: seq.resolved().values[at] as *const usize,
+                    data: seq.values[at] as *const usize,
                 }
             };
             out.write(span);
@@ -467,7 +467,7 @@ pub unsafe extern "C" fn imre_struct_row(list: *const Object, at: usize) -> *con
             if let Some(rows) = words.rows() {
                 rows.row(at).as_ptr()
             } else {
-                words.resolved().values[at] as *const usize
+                words.values[at] as *const usize
             }
         })
     }
@@ -589,7 +589,7 @@ pub unsafe extern "C" fn imre_struct_list_contains(
                 let needle = rows.payload(needle);
                 u32::from(rows.contains(needle))
             } else {
-                u32::from(s.sequence().values.iter().any(|word| {
+                u32::from(s.sequence_storage().values.iter().any(|word| {
                     super::values::imre_record_equal(needle, *word as *const usize) != 0
                 }))
             }
@@ -611,7 +611,7 @@ pub unsafe extern "C" fn imre_struct_row_checked(list: *const Object, at: usize)
                 if let Some(rows) = w.rows() {
                     Ok(rows.row(super::index(at, rows.len())?).as_ptr())
                 } else {
-                    let words = w.resolved();
+                    let words = w;
                     Ok(words.values[super::index(at, words.values.len())?] as *const usize)
                 }
             })

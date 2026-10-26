@@ -55,7 +55,8 @@ fn compressed_and_raw_blocks_preserve_cross_block_prefixes_and_duplicates() {
     right.extend([first.clone(), next.clone()]);
     left.extend([first.clone(), first, next]);
 
-    let packed = Packed::new(&words(&left), &words(&right));
+    let packed =
+        Packed::new(&words(&left), &words(&right)).unwrap_or_else(|_| panic!("pack test rows"));
     assert!(
         packed
             .blocks
@@ -77,7 +78,9 @@ fn compressed_and_raw_blocks_preserve_cross_block_prefixes_and_duplicates() {
             .any(|b| matches!(b, Block::Raw(s) if s.len() > BLOCK_BYTES))
     );
 
-    let (a, b) = packed.unpack();
+    let (a, b) = packed
+        .unpack()
+        .unwrap_or_else(|_| panic!("restore packed rows"));
     assert!(
         a.strings()
             .map(|(_, s)| s.as_str())
