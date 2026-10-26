@@ -46,12 +46,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
     let scope = ctx.scope("io", Some(module));
-    let ancestors = ctx.lineage(base);
-    let owner = ctx.alloc(Value::Class {
-        name: name.into(),
-        scope,
-        ancestors,
-    });
+    let owner = ctx
+        .allocate_class(name.into(), scope, vec![base])
+        .expect("a single I/O base has a linearization");
     let module_name = ctx.text(if name == "StringIO" { "_io" } else { "io" });
     ctx.bind(scope, "__module__", module_name);
     let qualname = ctx.text(name);

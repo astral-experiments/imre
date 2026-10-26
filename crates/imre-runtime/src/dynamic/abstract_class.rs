@@ -22,13 +22,7 @@ impl Context {
             })
     }
 
-    pub(super) fn init_abstract_class(
-        &mut self,
-        class: Id,
-        name: &str,
-        scope: Id,
-        bases: &[Id],
-    ) -> Result<()> {
+    pub(super) fn init_abstract_class(&mut self, class: Id, name: &str, scope: Id) -> Result<()> {
         if !(name == "ABC" && self.scope_data(scope).module == "abc")
             && !self
                 .module_class("abc", "ABC")
@@ -37,6 +31,10 @@ impl Context {
             return Ok(());
         }
         let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
+        let (bases, _) = self.scope_data(scope).class_lineage.expect("class bases");
+        let Value::Tuple(bases) = self.heap.get(bases) else {
+            unreachable!()
+        };
         for &base in bases {
             if let Some(methods) = self.own_class_attr(base, "__abstractmethods__")
                 && let Value::Set { items, .. } = self.heap.get(methods)
