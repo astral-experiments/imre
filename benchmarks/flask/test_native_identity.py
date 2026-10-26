@@ -1,6 +1,8 @@
 """Regression controls for the standalone gate's Linux process trace."""
 from pathlib import Path
 import sys
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -40,6 +42,35 @@ class TraceTests(unittest.TestCase):
     def test_transient_libpython(self):
         with self.assertRaisesRegex(ValueError, "mapped libpython"):
             self.audit("41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3</lib/libpython3.14.so.1.0>, 0) = 0x1000")
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("cc") and
+                         (shutil.which("readelf") or shutil.which("llvm-readelf")), "Linux ELF toolchain")
+    def test_renamed_mapped_elf(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            for label, soname, source, rejected in [
+                ("named", "libpython3.14.so.1.0", "int ordinary(void) { return 1; }", True),
+                ("unnamed", None, "void Py_Initialize(void) {} int Py_IsInitialized(void) {return 1;} "
+                                  "const char *Py_GetVersion(void) {return \"x\";}", True),
+                ("extension", "extension.so", "extern void Py_Initialize(void); "
+                                             "void use(void) {Py_Initialize();}", False),
+            ]:
+                with self.subTest(label=label):
+                    path = folder / f"{label} image.so"
+                    flags = [f"-Wl,-soname,{soname}"] if soname else []
+                    subprocess.run(["cc", "-shared", "-fPIC", *flags, "-x", "c", "-", "-o", path],
+                                   check=True, input=source.encode())
+                    event = f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{path}>, 0) = 0x1000"
+                    if rejected:
+                        with self.assertRaisesRegex(ValueError, "mapped libpython"):
+                            self.audit(event)
+                    else:
+                        self.assertEqual(self.audit(event)["libpython_mappings"], 0)
+
+    def test_unavailable_file_backed_mapping(self):
+        for descriptor in ("3", "3</nonexistent/path/to/an/image>"):
+            with self.subTest(descriptor=descriptor), self.assertRaises(ValueError):
+                self.audit(f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, {descriptor}, 0) = 0x1000")
 
     def test_incomplete_worker_lifetime(self):
         with patch("native_identity.time.monotonic", side_effect=[0, 1, 5]):
