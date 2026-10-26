@@ -222,13 +222,13 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
-            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Method { callable, receiver } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);
                 all.extend(args);
                 self.call(callable, all, kwargs)
             }
+            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()

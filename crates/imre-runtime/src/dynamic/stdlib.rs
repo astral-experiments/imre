@@ -21,6 +21,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "os"
             | "os.path"
+            | "operator"
             | "platform"
             | "site"
             | "struct"
@@ -29,7 +30,6 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
-            | "operator"
             | "collections"
             | "enum"
             | "typing"
@@ -243,6 +243,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "fsdecode" | "uname")
         | ("os.path", "join" | "abspath" | "dirname")
+        | ("operator", "attrgetter")
         | (
             "platform",
             "system"
@@ -261,7 +262,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache")
-        | ("operator", "attrgetter")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
