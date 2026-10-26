@@ -28,6 +28,7 @@ mod pickle;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
+mod structure;
 pub(super) mod urllib;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -350,7 +351,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_version_tuple"
             | "python_implementation",
         )
-        | ("struct", "calcsize" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("codecs", "lookup")
@@ -389,6 +390,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "struct.Struct" {
+        return structure::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("struct.Struct.") {
+        return structure::method(ctx, method, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
     }
@@ -712,11 +719,7 @@ pub(super) fn call(
             };
             let values =
                 system::struct_unpack(format, bytes).map_err(|e| Error::new("struct.error", e))?;
-            let items = values
-                .into_iter()
-                .map(|n| ctx.alloc(Value::Int(crate::Int::from_usize(n as usize))))
-                .collect();
-            ctx.alloc(Value::Tuple(items))
+            structure::unsigned_tuple(ctx, values)
         }
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {

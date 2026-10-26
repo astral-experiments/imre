@@ -159,6 +159,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
         } if attr == "geturl" => "urllib.parse.SplitResult",
+        Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::Socket(_)

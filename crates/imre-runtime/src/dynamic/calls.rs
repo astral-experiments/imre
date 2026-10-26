@@ -374,6 +374,7 @@ impl Context {
             | ("float", Value::Float(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
@@ -649,6 +650,11 @@ impl Context {
                 });
                 return Ok(self.alloc(Value::Tuple(args)));
             }
+            Value::Struct { format, layout } => match name {
+                "format" => return Ok(self.text(format)),
+                "size" => return Ok(self.int(layout.size as i64)),
+                _ => {}
+            },
             Value::Hash(hash) => match name {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
