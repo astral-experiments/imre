@@ -309,6 +309,7 @@ def report(text):
             "copy = h.copy()\ncopy.update(b'next')\n"
             "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
+            "print(hashlib.sha1(usedforsecurity=False).hexdigest() == factory().hexdigest())\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
         checked = run(
