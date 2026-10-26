@@ -48,6 +48,7 @@ Four additional unchanged rotation bodies check actual files and rollover decisi
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
 The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
 Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
+FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
 CPython output helper. The 40 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

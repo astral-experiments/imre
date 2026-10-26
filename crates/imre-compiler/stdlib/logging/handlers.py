@@ -3,15 +3,6 @@
 import os
 from logging import FileHandler, Handler, LogRecord
 from pathlib import Path
-from typing import TextIO
-
-
-def _can_seek(stream: TextIO) -> bool:
-    try:
-        os.lseek(stream.fileno(), 0, os.SEEK_CUR)
-    except OSError:
-        return False
-    return True
 
 
 class BaseRotatingHandler(FileHandler):
@@ -43,7 +34,11 @@ class RotatingFileHandler(BaseRotatingHandler):
         if stream is None:
             stream = self._open()
             self.stream = stream
-        if self.maxBytes <= 0 or not _can_seek(stream):
+        if self.maxBytes <= 0:
+            return False
+        try:
+            os.lseek(stream.fileno(), 0, os.SEEK_CUR)
+        except OSError:
             return False
         stream.flush()
         pos = os.lseek(stream.fileno(), 0, os.SEEK_CUR)

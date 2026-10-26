@@ -1,5 +1,6 @@
 """Check exact direct semantics and explicit unsupported operations outside the upstream ledger."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +41,13 @@ def check(lang, root):
         ),
         (prefix + "print(a == b)", "True", "ModuleSpec rich comparison"),
         (prefix + "print((a,) == (b,))", "True", "ModuleSpec rich comparison"),
+        (
+            "import importlib.machinery as loaders\n"
+            "a = loaders.ModuleSpec('x', None)\n"
+            "print(a == a)\n",
+            "True",
+            "ModuleSpec rich comparison",
+        ),
         (prefix + "print(a[0])", "TypeError", "indexing requires"),
         (
             prefix + "a.parent = 'new'",
@@ -78,6 +86,17 @@ def check(lang, root):
                 raise
         else:
             raise AssertionError(f"lost explicit unsupported operation: {source}")
+
+    # The object runtime answers machinery's installation query for this target.
+    directory = root / "native-suffix"
+    directory.mkdir()
+    binary = lang.build(
+        b"from importlib import machinery as loaders\nprint(loaders.EXTENSION_SUFFIXES[0])\n",
+        directory,
+    )
+    target = json.loads(subprocess.check_output([lang.imre, "build-target"]))
+    actual = subprocess.run([binary], check=True, capture_output=True, text=True)
+    assert (actual.stdout, actual.stderr) == (target["archive_suffix"] + "\n", "")
 
     # Imre has no native bytecode, so select the same tag for the peer processes.
     source = "import sys\nfrom importlib.util import cache_from_source\n" + prefix + """sys.implementation.cache_tag = None

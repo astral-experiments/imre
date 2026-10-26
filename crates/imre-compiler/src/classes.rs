@@ -1267,7 +1267,11 @@ fn check_initializer(
                     &format!("field {name:?} is not declared in the class"),
                 ));
             }
-            if !initialized.insert(name) {
+            // A completed base initializer owns these fields. A subclass assignment
+            // replaces their values through the same field store as an ordinary method.
+            if !initialized.insert(name)
+                && !(called_super && inherited.iter().any(|field| field.name == name))
+            {
                 return Err(module.error(
                     target,
                     &format!("field {name:?} is initialized more than once"),
