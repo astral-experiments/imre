@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime, formatdate, parsedate_to_datetime
+from http import HTTPStatus
 
 
 def parse(value: str) -> None:
@@ -26,6 +27,14 @@ def optional_float(value: float | None) -> str:
 
 
 def optional_int(value: int | None) -> str:
+    return formatdate(value, usegmt=True)
+
+
+def optional_status(value: HTTPStatus | None) -> str:
+    return formatdate(value, usegmt=True)
+
+
+def optional_bool(value: bool | None) -> str:
     return formatdate(value, usegmt=True)
 
 
@@ -65,3 +74,9 @@ print(optional_float(0.0))
 print(optional_int(0))
 print(optional_float(None).endswith(" GMT"))
 print(optional_int(None).endswith(" GMT"))
+print(formatdate(HTTPStatus.OK, usegmt=True))
+print(optional_status(HTTPStatus.CONTINUE))
+print(optional_status(None).endswith(" GMT"))
+print(optional_bool(True))
+print(optional_bool(False))
+print(optional_bool(None).endswith(" GMT"))
