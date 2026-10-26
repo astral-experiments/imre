@@ -1396,6 +1396,8 @@ pub(crate) enum Builtin {
     JsonErrorField(u32),
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
+    /// Record the source location of a raised Python exception.
+    ExceptionOrigin(u64),
     ExceptionCause,
     ActiveException,
     ExceptionSuppressContext,

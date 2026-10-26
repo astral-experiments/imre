@@ -370,7 +370,7 @@ pub fn native_toolchain(
 
 impl Cache {
     pub fn open(
-        entry: &Path,
+        entry: (&Path, &imre_compiler::CompileOptions),
         module_root: Option<&Path>,
         opt: &OsStr,
         runtime: &Path,
@@ -404,10 +404,25 @@ impl Cache {
         } else if dpkg.is_none() || loader_cache.is_none() {
             return None;
         }
+        let (entry, options) = entry;
+        let command_hash = options
+            .command
+            .as_ref()
+            .map(|command| blake3::hash(command.source.as_bytes()).to_hex().to_string());
+        let file = if command_hash.is_none() {
+            Some(entry.canonicalize().ok()?)
+        } else {
+            None
+        };
         let recipe = serde_json::to_vec(&(
-            3,
+            4,
             module_objects,
-            entry.canonicalize().ok()?,
+            (
+                file,
+                command_hash,
+                options.python_startup(),
+                &options.extension_paths,
+            ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,
             opt.to_str()?,

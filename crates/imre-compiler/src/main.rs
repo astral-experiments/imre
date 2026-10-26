@@ -105,7 +105,12 @@ fn run() -> Result<ExitCode, String> {
             return Ok(ExitCode::SUCCESS);
         }
         (BuildOptions::parse(&command, &mut args)?, command == "run")
-    } else if command.as_encoded_bytes().starts_with(b"-") {
+    } else if command.as_encoded_bytes().starts_with(b"-")
+        || Path::new(&command).is_file()
+        || Path::new(&command)
+            .extension()
+            .is_some_and(|ext| ext == "py")
+    {
         let invocation = match python_command::parse(command.clone(), &mut args) {
             Ok(value) => value,
             Err(message) => {
@@ -113,7 +118,13 @@ fn run() -> Result<ExitCode, String> {
                 return Ok(ExitCode::from(2));
             }
         };
-        (BuildOptions::for_command(invocation)?, true)
+        if let python_command::Invocation::Script { path, .. } = &invocation
+            && let Err(error) = std::fs::metadata(path)
+        {
+            eprintln!("imre: can't open file '{}': {error}", path.display());
+            return Ok(ExitCode::from(2));
+        }
+        (BuildOptions::for_python(invocation)?, true)
     } else {
         return Err(USAGE.to_owned());
     };
@@ -240,7 +251,7 @@ fn run() -> Result<ExitCode, String> {
         .filter(|_| !no_cache && !options.reachable_only)
         .and_then(|native| {
             build_cache::Cache::open(
-                &source_path,
+                (&source_path, &options),
                 module_root.as_deref(),
                 &optimization,
                 &runtime,

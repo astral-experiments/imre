@@ -95,10 +95,16 @@ pub(super) fn decimal_string(value: &crate::Int) -> crate::Result<Str> {
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]
 pub(super) fn invalid_literal(value: &str) -> Error {
+    invalid_literal_in_base(value, 10)
+}
+
+/// Render an invalid integer using the base supplied by the caller.
+#[cold]
+pub(super) fn invalid_literal_in_base(value: &str, base: u32) -> Error {
     let literal = literal_repr_prefix(value);
     Error::new(
         Kind::ValueError,
-        compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
+        compact_str::format_compact!("invalid literal for int() with base {base}: {literal}"),
     )
 }
 

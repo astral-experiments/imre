@@ -4731,6 +4731,7 @@ impl<'a> Checker<'a> {
                                 vec![raised, group],
                             ),
                         };
+                        let member = self.exception_origin(member, raise);
                         return Ok((vec![Statement::Raise(Some(member))], false));
                     }
                     if !matches!(
@@ -4760,6 +4761,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![raised, cause]),
                     });
                 }
+                let value = value.map(|exception| self.exception_origin(exception, raise));
                 return Ok((vec![Statement::Raise(value)], false));
             }
             ast::Stmt::Pass(_) => None,
@@ -5000,6 +5002,32 @@ impl<'a> Checker<'a> {
                 message: arg.map(Box::new),
             },
         })
+    }
+
+    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
+        if self.graph.command_startup.is_none() {
+            return exception;
+        }
+        let filename = if self.graph.virtual_command && self.module == self.graph.entry {
+            "<string>".to_owned()
+        } else {
+            self.graph
+                .module_filename(self.module)
+                .to_string_lossy()
+                .into_owned()
+        };
+        let line = self.source[..usize::from(site.start())]
+            .bytes()
+            .filter(|&byte| byte == b'\n')
+            .count() as u64
+            + 1;
+        Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Builtin(
+                Builtin::ExceptionOrigin(line),
+                vec![exception, unpacking::string(filename)],
+            ),
+        }
     }
 
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
@@ -5968,7 +5996,7 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name)
                 if name.id == "__file__"
                     && self.module == self.graph.entry
-                    && self.graph.command_startup.is_some() =>
+                    && self.graph.virtual_command =>
             {
                 let exception = Expr {
                     ty: Type::Exception,
@@ -7493,6 +7521,16 @@ impl<'a> Checker<'a> {
                     "unsupported expression in the Imre subset",
                 ));
             }
+        };
+        let kind = match kind {
+            ExprKind::Builtin(Builtin::RaiseException, mut operands) => {
+                let exception = operands
+                    .pop()
+                    .expect("a failing expression carries an exception");
+                operands.push(self.exception_origin(exception, expression));
+                ExprKind::Builtin(Builtin::RaiseException, operands)
+            }
+            kind => kind,
         };
         Ok(Expr { ty, kind })
     }

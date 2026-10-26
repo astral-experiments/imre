@@ -45,15 +45,19 @@ pub(super) enum Relro {
 }
 
 impl BuildOptions {
+    fn initial() -> Self {
+        Self {
+            clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
+            optimization: "3".into(),
+            ..Self::default()
+        }
+    }
+
     pub fn parse(
         command: &OsStr,
         args: &mut impl Iterator<Item = OsString>,
     ) -> Result<Self, String> {
-        let mut options = Self {
-            clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
-            optimization: "3".into(),
-            ..Self::default()
-        };
+        let mut options = Self::initial();
         if command != "check" {
             options.read(command, &mut environment_flags()?.into_iter(), false)?;
         }
@@ -62,9 +66,23 @@ impl BuildOptions {
     }
 
     /// Code generation and linker flags stay separate from Python's environment and arguments.
-    pub(super) fn for_command(command: imre_compiler::PythonCommand) -> Result<Self, String> {
-        let mut options = Self::parse(OsStr::new("run"), &mut std::iter::empty())?;
-        if !command.flags.isolated
+    pub(super) fn for_python(
+        invocation: crate::python_command::Invocation,
+    ) -> Result<Self, String> {
+        use crate::python_command::Invocation;
+        let flags = match &invocation {
+            Invocation::Command(command) => command.flags,
+            Invocation::Script { flags, .. } => *flags,
+        };
+        let mut options = Self::initial();
+        if !flags.isolated {
+            options.read(
+                OsStr::new("run"),
+                &mut environment_flags()?.into_iter(),
+                false,
+            )?;
+        }
+        if !flags.isolated
             && let Some(paths) = env::var_os("PYTHONPATH")
         {
             for path in env::split_paths(&paths) {
@@ -84,11 +102,21 @@ impl BuildOptions {
                     .into(),
             );
         }
-        options.source_path = Some("-c".into());
         options.verbosity = Verbosity::Quiet;
-        // The command's source is not a file and has no filesystem cache identity.
-        options.no_cache = true;
-        options.compile.command = Some(command);
+        match invocation {
+            Invocation::Command(command) => {
+                options.source_path = Some("-c".into());
+                options.compile.command = Some(command);
+            }
+            Invocation::Script {
+                path,
+                flags,
+                executable,
+            } => {
+                options.source_path = Some(path);
+                options.compile.script_startup = Some((flags, executable));
+            }
+        }
         Ok(options)
     }
 

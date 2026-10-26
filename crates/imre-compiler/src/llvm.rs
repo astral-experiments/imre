@@ -6036,6 +6036,14 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
+            Builtin::ExceptionOrigin(line) => Value {
+                ty: Type::Exception,
+                operand: self.instruction(format!(
+                    "call ptr @imre_exception_with_origin(ptr {}, ptr {}, i64 {line})",
+                    args[0].value.operand, args[1].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::ExceptionWithCause => {
                 let cause =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -8973,6 +8981,7 @@ declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_exception_with_cause(ptr, ptr)
+declare ptr @imre_exception_with_origin(ptr, ptr, i64)
 declare ptr @imre_exception_cause(ptr)
 declare i32 @imre_exception_suppress_context(ptr)
 declare ptr @imre_exception_current()

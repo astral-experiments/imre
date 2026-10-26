@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-use imre_compiler::{NATIVE_ARCHIVE_EXTENSION, PYTHON_VERSION};
+use imre_compiler::{IMPLEMENTATION_NAME, NATIVE_ARCHIVE_EXTENSION, PYTHON_VERSION};
 use serde_json::json;
 
 use super::{PYTHON_HEADER, program_exit_code};
@@ -55,14 +55,13 @@ fn build_target(directory: Option<&Path>) -> Result<String, String> {
         }
         (os, arch) => return Err(format!("unsupported native wheel platform: {os}/{arch}")),
     };
-    let implementation = "imre";
     let python_tag = format!(
-        "{implementation}{}{}",
+        "{IMPLEMENTATION_NAME}{}{}",
         PYTHON_VERSION.major, PYTHON_VERSION.minor
     );
     let abi_tag = "imre1";
     let mut target = json!({
-        "implementation": implementation,
+        "implementation": IMPLEMENTATION_NAME,
         "python_version": PYTHON_VERSION.to_string(),
         "python_tag": python_tag,
         "abi_tag": abi_tag,

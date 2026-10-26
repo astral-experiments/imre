@@ -1018,6 +1018,7 @@ impl SourceModule {
 
 pub(crate) struct SourceGraph {
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
+    pub(crate) virtual_command: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
@@ -1058,7 +1059,7 @@ impl SourceGraph {
         let mut modules = self.modules.iter().enumerate();
         inputs.files.retain(|_| {
             let (id, module) = modules.next().expect("one input per module");
-            !module.bundled && !(id == self.entry && self.command_startup.is_some())
+            !module.bundled && !(id == self.entry && self.virtual_command)
         });
         let paths = inputs
             .files
@@ -1459,6 +1460,39 @@ impl SourceGraph {
             options.entry_profile.as_deref(),
         )?;
         graph.command_startup = Some((command.flags, command.executable.clone()));
+        graph.virtual_command = true;
+        Ok(graph)
+    }
+
+    /// A directly invoked file is __main__; its enclosing package is not imported.
+    pub(crate) fn script(
+        path: &Path,
+        flags: crate::CommandFlags,
+        executable: &str,
+        options: &crate::CompileOptions,
+        mut fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let filename = std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(path);
+        let entry = fs
+            .canonicalize(path)
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let source = fs
+            .read_to_string(&entry)
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let root = entry
+            .parent()
+            .ok_or("script has no parent directory")?
+            .to_path_buf();
+        let mut loader = Loader::new(root, &options.extension_paths, fs)?;
+        loader.skip_current_root = flags.safe_path;
+        let reachable = options.reachable_only || options.entry_profile.is_some();
+        loader.reachable_only = reachable;
+        let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
+        loader.scan(id)?;
+        let mut graph = loader.finish(id, filename, reachable, options.entry_profile.as_deref())?;
+        graph.command_startup = Some((flags, executable.to_owned()));
         Ok(graph)
     }
 
@@ -1888,6 +1922,7 @@ impl<'a> Loader<'a> {
         }
         let mut graph = SourceGraph {
             command_startup: None,
+            virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             entry_profile: profile
