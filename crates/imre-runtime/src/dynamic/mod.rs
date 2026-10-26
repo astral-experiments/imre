@@ -6,6 +6,7 @@ mod calls;
 mod enums;
 mod ffi;
 mod function_fields;
+mod iterators;
 mod operators;
 mod property;
 mod source_code;
@@ -181,12 +182,12 @@ impl Context {
         if self.is_native_iterator(id) {
             return Ok(id);
         }
-        let sequence = match *self.heap.get(id) {
-            Value::List(_)
-            | Value::Tuple(_)
-            | Value::Bytes(_)
-            | Value::ByteArray(_)
-            | Value::Range { .. } => id,
+        let (sequence, kind) = match *self.heap.get(id) {
+            Value::List(_) => (id, "list_iterator"),
+            Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::Bytes(_) => (id, "bytes_iterator"),
+            Value::ByteArray(_) => (id, "bytearray_iterator"),
+            Value::Range { .. } => (id, "range_iterator"),
             Value::Instance { class, .. }
                 if let Some(slot) = self.class_attr(class, "__iter__") =>
             {
@@ -211,13 +212,14 @@ impl Context {
             }
             _ => {
                 let values = self.items(id)?;
-                self.alloc(Value::Tuple(values))
+                (self.alloc(Value::Tuple(values)), "iterator")
             }
         };
         Ok(self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
             reverse: false,
+            kind,
         }))
     }
 
@@ -242,6 +244,7 @@ impl Context {
             sequence,
             offset,
             reverse,
+            ..
         } = self.heap.get(id)
         else {
             return Err(Error::new("TypeError", "expected iterator"));
@@ -332,7 +335,13 @@ impl Context {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
-            Value::Generator { .. } => return self.resume_source(id),
+            Value::Generator { code, .. } => {
+                let code = *code;
+                return match self.code_object(code).body {
+                    value::Body::Native(_) => self.next_generator_item(id),
+                    value::Body::Source(_) => self.resume_source(id),
+                };
+            }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::CallableIterator(None) => return Ok(None),
             Value::CallableIterator(Some(state)) => {
@@ -442,6 +451,10 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
+            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+                let iter = self.iterator(id)?;
+                self.items(iter)
+            }
             _ => Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not iterable", self.type_name(id)),
@@ -455,7 +468,8 @@ impl Context {
             first_argument: None,
             names: Default::default(),
             namespace: None,
-            globals: None,
+            globals: Default::default(),
+            exec_globals: None,
             exec_locals: None,
             parent,
             module: module.to_owned(),
@@ -467,6 +481,15 @@ impl Context {
         };
         s
     }
+    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).globals.contains(name) {
+            while let Some(parent) = self.scope_data(scope).parent {
+                scope = parent;
+            }
+        }
+        scope
+    }
+
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(namespace) = scope.namespace {
@@ -483,7 +506,7 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
-        if let Some(globals) = frame.globals {
+        if let Some(globals) = frame.exec_globals {
             return globals.dict;
         }
         if let Some(dict) = frame.namespace {
@@ -510,7 +533,8 @@ impl Context {
             if self.scope_name(scope, name).is_none() {
                 return Ok(false);
             }
-            self.delete_item(namespace, key)?;
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.delete_item(storage, key)?;
             return Ok(true);
         }
         let Value::Scope(data) = self.heap.get_mut(scope) else {
@@ -523,9 +547,11 @@ impl Context {
     }
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        let scope = self.binding_scope(scope, name);
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
-            self.put_item(namespace, key, value)
+            let storage = self.dict_storage(namespace).expect("module namespace");
+            self.put_item(storage, key, value)
                 .expect("string key in module dictionary");
             return;
         }
@@ -541,6 +567,7 @@ impl Context {
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
+            scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {
                 match self.load_exec_name(locals, name) {
                     Err(error) if self.is_builtin_error(&error, "KeyError") => {}
@@ -548,7 +575,7 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if let Some(globals) = s.globals {
+            if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
             if let Some(id) = self.scope_name(scope, name) {

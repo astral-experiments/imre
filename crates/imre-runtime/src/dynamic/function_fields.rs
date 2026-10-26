@@ -56,7 +56,7 @@ impl Context {
             scope = parent;
         }
         let root = self.scope_data(scope);
-        if let Some(globals) = root.globals {
+        if let Some(globals) = root.exec_globals {
             return self
                 .dict_named_item(globals.dict, "__name__")
                 .unwrap_or(NONE);

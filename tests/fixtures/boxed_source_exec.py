@@ -13,6 +13,24 @@ def ordinary():
     pass
 
 
+def install_global():
+    global exec_probe
+    exec_probe = any(item for item in [False, True])
+
+
+def remove_global():
+    global exec_probe
+    del exec_probe
+
+
+class GlobalDict(dict):
+    def __setitem__(self, key, value):
+        raise AssertionError("global assignment called __setitem__")
+
+    def __delitem__(self, key):
+        raise AssertionError("global deletion called __delitem__")
+
+
 def current():
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     local = {"default": 1}
@@ -49,6 +67,15 @@ def current():
     except StopIteration as error:
         print(error.args, next(sequence, "exhausted"))
     print(list(namespace["sequence"]()))
+    expression = (item for item in namespace["sequence"]())
+    print(type(expression) is type(sequence), type(expression.gi_code) is type(module))
+    print(next(expression), list(expression), next(expression, "exhausted"))
+    supplied = GlobalDict()
+    separate = {"exec_probe": "local"}
+    exec(install_global.__code__, supplied, separate)
+    print(supplied["exec_probe"], separate["exec_probe"], supplied["__builtins__"]["any"] is any)
+    exec(remove_global.__code__, supplied, separate)
+    print("exec_probe" in supplied, separate["exec_probe"])
     other = {}
     exec(module, {"default": 2}, other)
     print(other["root"] is not root, other["root"].__code__ is root.__code__)

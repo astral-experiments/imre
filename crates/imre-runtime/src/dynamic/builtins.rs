@@ -71,6 +71,7 @@ const FUNCTIONS: &[&str] = &[
     "reversed",
     "ord",
     "callable",
+    "any",
     "isinstance",
     "issubclass",
     "getattr",
@@ -704,6 +705,7 @@ pub(super) fn call(
                     sequence: Some(object),
                     offset: items.len(),
                     reverse: true,
+                    kind: "list_reverseiterator",
                 }));
             }
             if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
@@ -877,6 +879,17 @@ pub(super) fn call(
                 return Ok(result);
             }
             ctx.module(name.split('.').next().unwrap())
+        }
+        "any" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let iter = ctx.iterator(args[0])?;
+            while let Some(item) = ctx.next_item(iter)? {
+                if ctx.truth(item)? {
+                    return Ok(TRUE);
+                }
+            }
+            Ok(FALSE)
         }
         "print" => {
             let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;

@@ -322,7 +322,7 @@ impl Context {
             unreachable!()
         };
         environment.namespace = Some(globals);
-        environment.globals = Some(ExecGlobals {
+        environment.exec_globals = Some(ExecGlobals {
             dict: globals,
             builtins,
         });
@@ -442,6 +442,7 @@ impl Context {
     }
 
     pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+        let scope = self.binding_scope(scope, name);
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
@@ -451,9 +452,12 @@ impl Context {
             }
             let key = self.text(name);
             self.put_item(locals, key, value)
-        } else if let Some(globals) = self.scope_data(scope).globals {
+        } else if let Some(globals) = self.scope_data(scope).exec_globals {
             let key = self.text(name);
-            self.put_item(globals.dict, key, value)
+            let storage = self
+                .dict_storage(globals.dict)
+                .expect("exec globals dictionary");
+            self.put_item(storage, key, value)
         } else {
             self.bind(scope, name, value);
             Ok(())
@@ -520,7 +524,7 @@ impl Context {
                     root = parent;
                 }
                 let globals = self.module_globals(root);
-                let builtins = match self.scope_data(root).globals {
+                let builtins = match self.scope_data(root).exec_globals {
                     Some(supplied) => supplied.builtins,
                     None => self.default_source_builtins()?,
                 };

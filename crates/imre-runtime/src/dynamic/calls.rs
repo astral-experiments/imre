@@ -279,6 +279,7 @@ impl Context {
             | Value::Dict(_)
             | Value::Set { .. }
             | Value::Range { .. }
+            | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
@@ -310,6 +311,12 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "generator"
+                            | "list_iterator"
+                            | "tuple_iterator"
+                            | "bytes_iterator"
+                            | "bytearray_iterator"
+                            | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
                             | "traceback"
