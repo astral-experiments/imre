@@ -994,6 +994,7 @@ pub(crate) enum Builtin {
     WallTime,
     ClockParts(bool),
     Mktime,
+    MktimeOffset,
     TimeComponent,
     TimeSequenceLength,
     TimeExtras,

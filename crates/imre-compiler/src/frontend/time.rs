@@ -89,22 +89,50 @@ impl Checker<'_> {
                 "mktime(): illegal time tuple argument".into(),
             ));
         }
-        if fields.iter().all(|&ty| ty == Type::Int) {
+        let ints = fields.iter().all(|&ty| ty == Type::Int);
+        let offset = self.types.time_attributes(value.ty).and_then(|[_, ty]| {
+            let payload = self.types.payload(ty)?;
+            matches!(payload, Type::Class(_)).then_some((ty, payload))
+        });
+        if ints && offset.is_none() {
             return Ok(op(Builtin::Mktime, Type::Float, vec![value]));
         }
         let mut scope = calls::ArgumentScope::default();
         let record = scope.hold(self, value);
-        let mut words = Vec::new();
-        for (i, ty) in fields.into_iter().enumerate() {
-            let input = field(record.clone(), i, ty);
-            let word = self.index_word(input, arg, false)?;
-            words.push(op(Builtin::TimeComponent, Type::Int, vec![word]));
-        }
-        let tuple = Expr {
-            ty: self.types.tuple(vec![Type::Int; 9]),
-            kind: ExprKind::Tuple(words),
+        let civil = if ints {
+            record.clone()
+        } else {
+            let mut words = Vec::new();
+            for (i, ty) in fields.into_iter().enumerate() {
+                let input = field(record.clone(), i, ty);
+                let word = self.index_word(input, arg, false)?;
+                words.push(op(Builtin::TimeComponent, Type::Int, vec![word]));
+            }
+            let tuple = Expr {
+                ty: self.types.tuple(vec![Type::Int; 9]),
+                kind: ExprKind::Tuple(words),
+            };
+            scope.hold(self, tuple)
         };
-        Ok(scope.finish(op(Builtin::Mktime, Type::Float, vec![tuple, record])))
+        let mut args = vec![civil, record];
+        if let Some((ty, payload)) = offset {
+            let offset = scope.hold(self, op(Builtin::MktimeOffset, ty, args.clone()));
+            let absent = op(Builtin::IsNone, Type::Bool, vec![offset.clone()]);
+            let present = Expr {
+                ty: payload,
+                kind: ExprKind::Unwrap(Box::new(offset)),
+            };
+            let indexed = self.index_word(present, arg, false)?;
+            args.push(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Conditional(
+                    Box::new(absent),
+                    Box::new(pipelines::integer(0)),
+                    Box::new(indexed),
+                ),
+            });
+        }
+        Ok(scope.finish(op(Builtin::Mktime, Type::Float, args)))
     }
 
     pub(super) fn struct_time_new(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

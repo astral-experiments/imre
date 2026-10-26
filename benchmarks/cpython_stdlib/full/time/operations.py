@@ -33,6 +33,10 @@ def timestamp(value: struct_time | float) -> float:
     return value
 
 
+def indexed_offset(value: Indexed | None) -> float:
+    return mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 1, -1, "UTC", value)))
+
+
 print(struct_time.__module__)
 print(struct_time.__name__)
 print(struct_time.n_fields)
@@ -120,6 +124,24 @@ except TypeError as exc:
 try:
     mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 0, -1, "UTC", 2**100)))
 except OverflowError as exc:
+    print(str(exc))
+print(indexed_offset(None))
+for n in (0, -3600, 1 << 100):
+    try:
+        print(indexed_offset(Indexed(n)))
+    except OverflowError as exc:
+        print(str(exc))
+try:
+    mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 1, -1, "UTC", Reject())))
+except ValueError as exc:
+    print(str(exc))
+try:
+    mktime(struct_time((-2147483648, 1, 1, 0, 0, 0, 0, 1, -1, "UTC", Reject())))
+except OverflowError as exc:
+    print(str(exc))
+try:
+    mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 1, -1, 2, Reject())))
+except TypeError as exc:
     print(str(exc))
 # Run this last: glibc's mktime on an extreme year may affect its private offset guess.
 try:
