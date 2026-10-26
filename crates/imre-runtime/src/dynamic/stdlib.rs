@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
+mod fnmatch;
 mod hashlib;
 mod hmac;
 pub(super) use files::ReadSource;
@@ -30,6 +31,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "os"
             | "os.path"
+            | "fnmatch"
             | "operator"
             | "platform"
             | "site"
@@ -319,6 +321,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
+        | ("fnmatch", "filter")
         | ("functools", "lru_cache" | "partial")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
@@ -341,6 +344,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "fnmatch.filter" {
+        return fnmatch::filter(ctx, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
     }

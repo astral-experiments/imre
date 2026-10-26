@@ -145,7 +145,10 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
-            _ => Err(Error::new("TypeError", "object is not iterable")),
+            _ => Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not iterable", self.type_name(id)),
+            )),
         }
     }
     fn scope(&mut self, module: &str, parent: Option<Id>) -> Id {

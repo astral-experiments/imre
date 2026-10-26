@@ -153,6 +153,9 @@ impl Context {
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "iter" => {
+                if matches!(self.heap.get(a), Value::Iterator { .. }) {
+                    return Ok(a);
+                }
                 let values = self.items(a)?;
                 Ok(self.alloc(Value::Iterator { values, offset: 0 }))
             }
