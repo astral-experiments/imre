@@ -3345,7 +3345,8 @@ impl<'a> Checker<'a> {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
-            && matches!(args[0].ty, Type::Str | Type::Bytes)
+            && (matches!(args[0].ty, Type::Str | Type::Bytes)
+                || args[0].ty == Type::Int && value.ty == self.types.string_or_int())
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -5347,14 +5348,10 @@ impl<'a> Checker<'a> {
     }
 
     fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {
-        if op == ast::Operator::Add
-            && value.ty == Type::Bool
+        if matches!(op, ast::Operator::Add | ast::Operator::Sub)
             && matches!(other, Type::Int | Type::Bool)
         {
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-            }
+            powers::integer(value)
         } else {
             value
         }
@@ -5974,13 +5971,31 @@ impl<'a> Checker<'a> {
                 }
                 let mut values = Vec::new();
                 let mut element = Type::Int;
+                let mut mixed = false;
                 for value in &list.elts {
                     let item = self.expr(value)?;
                     if values.is_empty() {
                         element = item.ty;
                     }
-                    self.expect(element, item.ty, value)?;
+                    if !self.module_scope
+                        && matches!(element, Type::Int | Type::Str)
+                        && matches!(item.ty, Type::Int | Type::Str)
+                    {
+                        mixed |= item.ty != element;
+                    } else {
+                        self.expect(element, item.ty, value)?;
+                    }
                     values.push(item);
+                }
+                if mixed {
+                    // Local storage can infer this closed layout. Module globals and
+                    // lists with a declared element type retain their storage contract.
+                    element = self.types.string_or_int();
+                    values = values
+                        .into_iter()
+                        .zip(&list.elts)
+                        .map(|(item, at)| self.coerce(item, element, at))
+                        .collect::<Result<_, _>>()?;
                 }
                 (self.types.list(element), ExprKind::List(values))
             }
@@ -9568,6 +9583,13 @@ impl<'a> Checker<'a> {
                     ) =>
             {
                 (Builtin::Str, Type::Str)
+            }
+            "int"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Union(_))
+                    && args[0].ty == self.types.string_or_int() =>
+            {
+                return Ok(self.integer_from_text_or_int(args.into_iter().next().unwrap()));
             }
             "int"
                 if args.len() == 1
