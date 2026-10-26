@@ -316,7 +316,7 @@ impl OptionSpec {
         let metavar = if self.has_choices {
             let mut text = ProgramPrefix::default();
             match &self.range {
-                Some(range) => text.choices(range.iter()),
+                Some(range) => range.write_choices(&mut text),
                 None => text.choices(self.choices.iter()),
             }
             .map_err(|_| Error::allocation())?;
