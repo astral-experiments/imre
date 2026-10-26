@@ -1,7 +1,17 @@
 """Cross-check clipping, omitted bounds, negative strides, and arbitrary integers."""
 
 
+def same_pair(original: object, sliced: tuple[int, int]) -> bool:
+    return original is sliced
+
+
 def main() -> None:
+    values = (1, 2)[:]
+    print(values)
+    print(same_pair(values, values[:]))
+    print(same_pair(values, values[-99:100:1]))
+    print(values[::2])
+    print(values[::-1])
     bounds: list[int | None] = [
         None,
         -1000000000000000000000000000000,
