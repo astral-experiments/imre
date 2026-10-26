@@ -275,6 +275,7 @@ impl Context {
             | Value::NotImplemented
             | Value::Bool(_)
             | Value::Float(_)
+            | Value::Complex(_)
             | Value::Int(_)
             | Value::Str(_)
             | Value::Bytes(_)
@@ -414,6 +415,7 @@ impl Context {
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("complex", Value::Complex(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("struct.Struct", Value::Struct { .. })
@@ -569,6 +571,9 @@ impl Context {
             return value;
         }
         match self.heap.get(obj).clone() {
+            Value::Complex(z) if matches!(name, "real" | "imag") => {
+                return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
+            }
             Value::Raised(error)
                 if matches!(
                     name,
@@ -608,11 +613,13 @@ impl Context {
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
-            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame") => match name {
-                "__name__" | "__qualname__" => return Ok(self.text(class)),
-                "__module__" => return Ok(self.text("builtins")),
-                _ => {}
-            },
+            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame" | "complex") => {
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(class)),
+                    "__module__" => return Ok(self.text("builtins")),
+                    _ => {}
+                }
+            }
             Value::StaticMethod {
                 callable,
                 dictionary,
@@ -946,6 +953,9 @@ impl Context {
         }
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Complex(_) if matches!(name, "real" | "imag") => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -1130,6 +1140,9 @@ impl Context {
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
+            Value::Complex(_) if matches!(name, "real" | "imag") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
             Value::Module {

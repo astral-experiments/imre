@@ -186,6 +186,16 @@ impl Context {
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
+            "neg" | "pos" if let Value::Complex(z) = self.heap.get(a) => {
+                if op == "pos" {
+                    Ok(a)
+                } else {
+                    Ok(self.alloc(Value::Complex(super::complex::Complex {
+                        real: -z.real,
+                        imag: -z.imag,
+                    })))
+                }
+            }
             "neg" | "pos" | "~" => {
                 let slot = match op {
                     "neg" => "__neg__",
@@ -465,6 +475,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
             .map_err(|_| Error::new("SystemError", "invalid float literal")),
+        4 if data.len() == 16 => Ok(Value::Complex(super::complex::Complex {
+            real: f64::from_le_bytes(data[..8].try_into().unwrap()),
+            imag: f64::from_le_bytes(data[8..].try_into().unwrap()),
+        })),
         _ => Err(Error::new("SystemError", "invalid literal kind")),
     };
     let value = value.map(|v| ctx.alloc(v));

@@ -96,6 +96,7 @@ impl Context {
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
             Value::Float(f) => *f != 0.0,
+            Value::Complex(z) => z.real != 0.0 || z.imag != 0.0,
             Value::Calendar { value, .. } => {
                 value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
             }
@@ -177,6 +178,8 @@ impl Context {
                 .cmp(&self.as_int(b).unwrap())
                 .is_eq(),
             (Value::Float(x), Value::Float(y)) => x == y,
+            (Value::Complex(z), _) => self.complex_equal(*z, right),
+            (_, Value::Complex(z)) => self.complex_equal(*z, left),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. }) => a.equal(b),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
@@ -353,6 +356,7 @@ impl Context {
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
+            Value::Complex(z) => z.repr(),
             Value::Count { current, step } => {
                 let current = self.repr(*current);
                 if matches!(self.heap.get(*step), Value::Bool(true))
@@ -806,7 +810,8 @@ impl Context {
             }
             "==" | "!=" => {
                 let equal = self.checked_equal(a, b)?
-                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan());
+                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
+                    && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
             "is" => return Ok(truth(a == b)),
@@ -823,6 +828,12 @@ impl Context {
                     ">" => c.is_gt(),
                     _ => c.is_ge(),
                 }));
+            }
+            "+" | "-"
+                if matches!(self.heap.get(a), Value::Complex(_))
+                    || matches!(self.heap.get(b), Value::Complex(_)) =>
+            {
+                return self.complex_sum(op == "+", a, b);
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
