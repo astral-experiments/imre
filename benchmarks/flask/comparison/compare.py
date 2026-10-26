@@ -6,10 +6,13 @@ import json
 import os
 import platform
 import random
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -19,6 +22,8 @@ import gate
 
 JSON = "application/json"
 HTML = "text/html; charset=utf-8"
+WAITRESS = "waitress-3.0.2-py3-none-any.whl"
+WAITRESS_HASH = "c56d67fd6e87c2ee598b76abdd4e96cfad1f24cacdea5078d382b1f9d7b5ed2e"
 
 
 def cases():
@@ -64,7 +69,7 @@ def serve(command, core, *, capture_errors=True):
                         log.seek(0)
                         raise RuntimeError(f"{command[0]} did not start: {log.read()[-2000:]}")
                     time.sleep(0.01)
-                yield int(port), process
+                yield int(port), process, log
             finally:
                 process.terminate()
                 try:
@@ -100,7 +105,14 @@ def preflight(port, items, expected, flask):
     for name, method, route, body in gate.CASES:
         value = gate.request(port, method, route, body)
         assert value == expected["loopback_tcp"][name], (name, value)
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        response = http.client.HTTPResponse(sock)
+        response.begin()
+        assert response.status == 200 and response.read() == b'{"ok":true}\n'
+        assert sock.recv(1) == b"", "server did not close the TCP connection"
     return {"response_sha256": checked, "oracle_controls": [name for name, *_ in gate.CASES],
+            "closed_connection": True, "response_http_version": response.version,
             "visits_fresh_replay_fresh": sessions(port) if flask else None}
 
 
@@ -123,14 +135,25 @@ def executable(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("wheelhouse", "node", "bun", "rust", "client", "output"):
+    for name in ("wheelhouse", "client", "output"):
         parser.add_argument(f"--{name}", required=True, type=Path)
+    for name in ("node", "bun", "rust"):
+        parser.add_argument(f"--{name}", type=Path)
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
+    parser.add_argument("--wsgi-pair", action="store_true",
+                        help="compare CPython/Werkzeug with CPython/Waitress using the extra pinned wheel")
+    parser.add_argument("--hosted-launcher", type=Path,
+                        help="compare CPython/Werkzeug with a Python-hosted LLVM launcher script (SITE, READY)")
+    parser.add_argument("--hosted-artifact", type=Path, action="append", default=[],
+                        help="hash a binary or source consumed by the separately built hosted launcher")
     parser.add_argument("--rounds", type=int, default=8, help="0 only checks correctness")
+    parser.add_argument("--first-round", type=int, default=1, help="reproduce a specific round using its original order")
     parser.add_argument("--requests", type=int, default=2016)
     parser.add_argument("--warmup", type=int, default=252)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--mixed-only", action="store_true",
+                        help="run the equal-weight mix at the selected concurrency only")
     parser.add_argument("--server-cpu", type=int, default=28)
     parser.add_argument("--client-cpus", default="29,30,31")
     args = parser.parse_args()
@@ -139,6 +162,11 @@ def main():
         parser.error(f"run with CPython {expected['python']}")
     if bool(args.compiler) != bool(args.runtime):
         parser.error("supply both --compiler and --runtime")
+    paired = args.wsgi_pair or args.hosted_launcher
+    if not paired and not all((args.node, args.bun, args.rust)):
+        parser.error("the cross-language comparison requires --node, --bun and --rust")
+    if args.first_round < 1 or args.rounds < 0:
+        parser.error("first round must be positive and rounds nonnegative")
     if any(n < args.concurrency or n % 9 for n in (args.warmup, args.requests)):
         parser.error("requests and warmup must each be a multiple of nine and cover all clients")
     if args.output.exists():
@@ -147,18 +175,20 @@ def main():
     items = cases()
     sources = [HERE.parent / f for f in ("tiny_flask_app.py", "serve.py", "gate.py", "requirements.txt", "expected.json")]
     sources.extend(HERE / f for f in ("compare.py", "control.mjs", "client.go", "rust/Cargo.toml", "rust/Cargo.lock", "rust/src/main.rs"))
+    if args.wsgi_pair:
+        sources.append(HERE / "serve_waitress.py")
     inventory = {name: executable(path) for name, path in
                  {"cpython": sys.executable, "node": args.node, "bun": args.bun,
-                  "rust": args.rust, "client": args.client}.items()}
+                  "rust": args.rust, "client": args.client}.items() if path}
     versions = {name: subprocess.check_output([inventory[name]["path"], "--version"], text=True).strip()
-                for name in ("cpython", "node", "bun")}
+                for name in ("cpython", "node", "bun") if name in inventory}
     host = {"kernel": platform.release(), "machine": platform.machine(),
             "cpu": next(line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
                         if line.startswith("model name"))}
     report = {"base": subprocess.check_output(["git", "-C", HERE, "rev-parse", "HEAD"], text=True).strip(),
               "sources": {str(path.relative_to(HERE.parent)): gate.digest(path) for path in sources},
               "host": host, "versions": versions, "executables": inventory,
-              "settings": {k: getattr(args, k) for k in ("rounds", "requests", "warmup", "concurrency", "server_cpu", "client_cpus")},
+              "settings": {k: getattr(args, k) for k in ("first_round", "rounds", "requests", "warmup", "concurrency", "server_cpu", "client_cpus", "mixed_only")},
               "cases": items, "preflight": {}, "trials": []}
     assert report["sources"]["tiny_flask_app.py"] == expected["app_sha256"]
 
@@ -176,9 +206,23 @@ def main():
                     "from markupsafe import _speedups; print(_speedups.__file__)"], cwd=site, text=True).strip()
         assert Path(speedup) == site / "markupsafe" / expected["speedups"]
         report["markupsafe_extension"] = expected["speedups"]
-        commands = {"cpython": [sys.executable, "-ESB", site / "serve.py"],
-                    "node": [args.node.resolve(), HERE / "control.mjs"],
-                    "bun": [args.bun.resolve(), HERE / "control.mjs"], "rust": [args.rust.resolve()]}
+        commands = {"cpython": [sys.executable, "-ESB", site / "serve.py"]}
+        if not paired:
+            commands.update(node=[args.node.resolve(), HERE / "control.mjs"],
+                            bun=[args.bun.resolve(), HERE / "control.mjs"], rust=[args.rust.resolve()])
+        if args.wsgi_pair:
+            wheel = args.wheelhouse / WAITRESS
+            if gate.digest(wheel) != WAITRESS_HASH:
+                raise ValueError(f"incorrect {WAITRESS}")
+            with zipfile.ZipFile(wheel) as archive:
+                archive.extractall(site)
+            report["wheel_sha256"][WAITRESS] = WAITRESS_HASH
+            shutil.copyfile(HERE / "serve_waitress.py", site / "serve_waitress.py")
+            commands["waitress"] = [sys.executable, "-ESB", site / "serve_waitress.py"]
+        if args.hosted_launcher:
+            inventory["hosted_llvm"] = executable(args.hosted_launcher)
+            report["hosted_artifacts"] = [executable(path) for path in args.hosted_artifact]
+            commands["hosted_llvm"] = [sys.executable, "-ISB", args.hosted_launcher.resolve(), site]
         fixtures = work / "fixtures.json"
         fixtures.write_text(json.dumps(items))
         if args.compiler:
@@ -195,8 +239,16 @@ def main():
             report["imre_build"] = {"status": None, "reason": "compiler and runtime not supplied"}
         for name, command in list(commands.items()):
             try:
-                with serve(command, args.server_cpu) as (port, _):
-                    report["preflight"][name] = preflight(port, items, expected, name in ("cpython", "imre"))
+                with serve(command, args.server_cpu) as (port, _, log):
+                    flask = name in ("cpython", "imre", "waitress", "hosted_llvm")
+                    checks = preflight(port, items, expected, flask)
+                    if flask:
+                        cls, (key,) = expected["view_exception"]
+                        log.seek(0)
+                        line = f"{cls}: {key!r}"
+                        assert log.read().splitlines().count(line) == 1, f"missing traceback: {line}"
+                        checks["view_exception"] = line
+                    report["preflight"][name] = checks
             except (OSError, RuntimeError, ValueError, AssertionError, http.client.HTTPException) as exc:
                 report["preflight"][name] = {"error": repr(exc)}
                 save()
@@ -210,15 +262,17 @@ def main():
         rng.shuffle(order)
         profiles = [("mixed", 1), ("mixed", args.concurrency)]
         profiles.extend((name, args.concurrency) for name in ("health", "hello", "total"))
-        for r in range(args.rounds):
+        for r in range(args.first_round - 1 + args.rounds):
             offset = r % len(order)
             baseline = order if (r // len(order)) % 2 == 0 else list(reversed(order))
             for name in baseline[offset:] + baseline[:offset]:
-                experiments = list(profiles)
-                if name in ("cpython", "imre"):
+                experiments = [("mixed", args.concurrency)] if args.mixed_only else list(profiles)
+                if not args.mixed_only and name in ("cpython", "imre", "waitress", "hosted_llvm"):
                     experiments.extend([("session-new", 1), ("session-replay", 1)])
                 rng.shuffle(experiments)
-                with serve(commands[name], args.server_cpu, capture_errors=False) as (port, process):
+                if r < args.first_round - 1:
+                    continue
+                with serve(commands[name], args.server_cpu, capture_errors=False) as (port, process, _):
                     for profile, c in experiments:
                         call = ["taskset", "-c", args.client_cpus, args.client.resolve(),
                                 "-addr", f"127.0.0.1:{port}", "-cases", fixtures,
