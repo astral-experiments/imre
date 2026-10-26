@@ -312,6 +312,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
+        text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -469,6 +470,7 @@ impl Value {
                 class,
                 fields,
                 dictionary,
+                ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
