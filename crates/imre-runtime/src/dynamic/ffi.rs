@@ -367,6 +367,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         classes: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
+        call_depth: 0,
         pending: None,
     };
     // SAFETY: ABI main supplies argc pointers, valid to the end of the call.

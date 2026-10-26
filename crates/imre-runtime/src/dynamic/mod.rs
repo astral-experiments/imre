@@ -58,6 +58,7 @@ pub(crate) struct Context {
     classes: HashMap<String, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
 }
 
