@@ -1,7 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::rc::Rc;
-
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
@@ -1013,7 +1011,7 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             let file = super::stdlib::BinaryFile::open(path, mode)?;
-            Ok(ctx.alloc(Value::File(Rc::new(file))))
+            Ok(ctx.alloc(file.into_value()?))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

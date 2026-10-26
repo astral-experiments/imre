@@ -530,7 +530,7 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<super::stdlib::BinaryFile>),
+    File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {

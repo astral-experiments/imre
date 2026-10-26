@@ -49,16 +49,30 @@ impl Drop for Socket {
 }
 
 /// The raw input for socket.makefile borrows the same descriptor until its last reader closes.
-pub(crate) struct SocketInput(Option<crate::ObjectOwner>);
+pub(crate) struct SocketInput {
+    socket: Option<crate::ObjectOwner>,
+    buffer: io::Cursor<Vec<u8>>,
+}
+
+const SOCKET_BUFFER_SIZE: usize = 128 * 1024;
 
 impl SocketInput {
-    pub(crate) fn new(socket: crate::ObjectOwner) -> Self {
+    /// Reserve the read buffer before retaining a reference to the descriptor.
+    pub(crate) fn try_new(socket: crate::ObjectOwner) -> Result<Self> {
+        // CPython uses io.DEFAULT_BUFFER_SIZE for the default buffered reader.
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(SOCKET_BUFFER_SIZE)
+            .map_err(|_| Error::memory_error())?;
         state(&socket, |s| s.readers += 1);
-        Self(Some(socket))
+        Ok(Self {
+            socket: Some(socket),
+            buffer: io::Cursor::new(bytes),
+        })
     }
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
-        let Some(socket) = self.0.take() else {
+        let Some(socket) = self.socket.take() else {
             return Ok(());
         };
         state(&socket, |s| {
@@ -74,14 +88,44 @@ impl SocketInput {
 
 impl AsRawFd for SocketInput {
     fn as_raw_fd(&self) -> RawFd {
-        self.0.as_ref().map_or(-1, |s| fd(s))
+        self.socket.as_ref().map_or(-1, |s| fd(s))
     }
 }
 
 impl io::Read for SocketInput {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        // SAFETY: buffer exposes this many exclusively writable bytes.
-        unsafe { receive(self.as_raw_fd(), buffer.as_mut_ptr(), buffer.len(), 0) }
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.buffer.position() >= self.buffer.get_ref().len() as u64
+            && buffer.len() >= SOCKET_BUFFER_SIZE
+        {
+            // SAFETY: buffer exposes this many exclusively writable bytes.
+            return unsafe { receive(self.as_raw_fd(), buffer.as_mut_ptr(), buffer.len(), 0) };
+        }
+        let count = io::Read::read(&mut io::BufRead::fill_buf(self)?, buffer)?;
+        io::BufRead::consume(self, count);
+        Ok(count)
+    }
+}
+
+impl io::BufRead for SocketInput {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        if self.buffer.position() >= self.buffer.get_ref().len() as u64 {
+            let raw = self.as_raw_fd();
+            let bytes = self.buffer.get_mut();
+            bytes.clear();
+            // SAFETY: try_new reserved this many bytes, and recv initializes the returned prefix.
+            let count = unsafe { receive(raw, bytes.as_mut_ptr(), SOCKET_BUFFER_SIZE, 0)? };
+            // SAFETY: receive initialized exactly count bytes in the reserved buffer.
+            unsafe { bytes.set_len(count) };
+            self.buffer.set_position(0);
+        }
+        self.buffer.fill_buf()
+    }
+
+    fn consume(&mut self, count: usize) {
+        self.buffer.consume(count);
     }
 }
 
