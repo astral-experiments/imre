@@ -26,6 +26,8 @@ enum Instruction {
     Yield(Option<ast::Expr>),
     Return(Option<ast::Expr>),
     Unless(ast::Expr, usize),
+    Iter(ast::Expr),
+    Next(Option<ast::Expr>, usize),
     Jump(usize),
 }
 
@@ -64,6 +66,12 @@ impl Program {
                         self.generator = true;
                         Instruction::Yield(y.value.as_deref().cloned())
                     }
+                    ast::Expr::YieldFrom(y) if function => {
+                        self.generator = true;
+                        self.instructions
+                            .push((line, Instruction::Iter((*y.value).clone())));
+                        Instruction::Next(None, self.instructions.len() + 1)
+                    }
                     e => Instruction::Eval(e.clone()),
                 },
                 Stmt::Assign(s) => {
@@ -73,6 +81,16 @@ impl Program {
                     let n = n.id.to_string();
                     self.locals.insert(n.clone());
                     Instruction::Assign(n, (*s.value).clone())
+                }
+                Stmt::AnnAssign(s) if function => {
+                    let ast::Expr::Name(name) = &*s.target else {
+                        return Err(unsupported("annotated assignment target"));
+                    };
+                    let name = name.id.to_string();
+                    self.locals.insert(name.clone());
+                    // Local annotations establish the binding without evaluating the annotation.
+                    let Some(value) = &s.value else { continue };
+                    Instruction::Assign(name, (**value).clone())
                 }
                 Stmt::Return(s) => {
                     if !function {
@@ -108,6 +126,19 @@ impl Program {
                     self.locals.insert(child.name.clone());
                     Instruction::Define(Rc::new(child), s.parameters.clone())
                 }
+                Stmt::For(s) if !s.is_async => {
+                    self.loop_target(&s.target)?;
+                    self.instructions
+                        .push((line, Instruction::Iter((*s.iter).clone())));
+                    let head = self.instructions.len();
+                    self.instructions.push((line, Instruction::Jump(0)));
+                    self.lower(&s.body, lines, function)?;
+                    self.instructions.push((line, Instruction::Jump(head)));
+                    self.instructions[head].1 =
+                        Instruction::Next(Some((*s.target).clone()), self.instructions.len());
+                    self.lower(&s.orelse, lines, function)?;
+                    continue;
+                }
                 Stmt::If(s) => {
                     let mut ends = Vec::new();
                     let mut arm = Some((&*s.test, s.body.as_slice()));
@@ -138,6 +169,21 @@ impl Program {
                 }
             };
             self.instructions.push((line, op));
+        }
+        Ok(())
+    }
+
+    fn loop_target(&mut self, target: &ast::Expr) -> Result<()> {
+        match target {
+            ast::Expr::Name(n) => {
+                self.locals.insert(n.id.to_string());
+            }
+            ast::Expr::Tuple(t) => {
+                for e in &t.elts {
+                    self.loop_target(e)?;
+                }
+            }
+            _ => return Err(unsupported("for target")),
         }
         Ok(())
     }
@@ -353,22 +399,55 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id) -> Result<Id> {
-        let Body::Source(program) = &self.code_object(code).body else {
-            unreachable!("source function")
+        let generator = match &self.code_object(code).body {
+            Body::Source(program) => program.generator,
+            Body::PendingGenerator { .. } => true,
+            Body::Native(_) => unreachable!("source function"),
         };
-        if program.generator {
+        if generator {
             Ok(self.alloc(Value::Generator {
                 code,
                 scope,
+                iterators: Vec::new(),
                 offset: Some(0),
                 running: false,
             }))
         } else {
-            match self.run_source(code, scope, 0)? {
+            match self.run_source(code, scope, 0, &mut Vec::new())? {
                 Step::Return(v) => Ok(v),
                 Step::Yield(..) => unreachable!("classified generator"),
             }
         }
+    }
+
+    fn prepare_generator(&mut self, id: Id) -> Result<()> {
+        let code = self.code_object(id);
+        let Body::PendingGenerator { source, body_line } = &code.body else {
+            return Ok(());
+        };
+        let parsed = ruff_python_parser::parse_module(source)
+            .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
+        let [ast::Stmt::FunctionDef(def)] = parsed.syntax().body.as_slice() else {
+            return Err(Error::new("SystemError", "invalid generator body"));
+        };
+        let lines = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
+            .collect::<Vec<_>>();
+        let mut program = Program::new(
+            self.str_value(code.filename)?.into(),
+            self.str_value(code.name)?,
+        );
+        program.first_line = code.first_line;
+        program.generator = true;
+        program.lower(&def.body, &lines, true)?;
+        for (line, _) in &mut program.instructions {
+            *line = body_line + line.saturating_sub(2);
+        }
+        let Value::Code(code) = self.heap.get_mut(id) else {
+            unreachable!()
+        };
+        code.body = Body::Source(Rc::new(program));
+        Ok(())
     }
 
     pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
@@ -376,6 +455,7 @@ impl Context {
         let Value::Generator {
             code,
             scope,
+            iterators,
             running,
             offset,
         } = self.heap.get_mut(id)
@@ -390,17 +470,29 @@ impl Context {
         };
         *running = true;
         let (code, scope) = (*code, *scope);
-        let result = self.run_source(code, scope, ip);
+        let mut active = std::mem::take(iterators);
+        let result = self
+            .prepare_generator(code)
+            .and_then(|()| self.run_source(code, scope, ip, &mut active))
+            .map_err(|error| self.generator_error(error));
         let Value::Generator {
-            running, offset, ..
+            running,
+            offset,
+            scope,
+            iterators,
+            ..
         } = self.heap.get_mut(id)
         else {
             unreachable!()
         };
         *running = false;
+        if !matches!(result, Ok(Step::Yield(..))) {
+            *scope = NONE;
+        }
         match result? {
             Step::Yield(value, ip) => {
                 *offset = Some(ip);
+                *iterators = active;
                 Ok(Some(value))
             }
             Step::Return(NONE) => Ok(None),
@@ -408,7 +500,13 @@ impl Context {
         }
     }
 
-    fn run_source(&mut self, owner: Id, scope: Id, mut ip: usize) -> Result<Step> {
+    fn run_source(
+        &mut self,
+        owner: Id,
+        scope: Id,
+        mut ip: usize,
+        iterators: &mut Vec<Id>,
+    ) -> Result<Step> {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
@@ -421,9 +519,10 @@ impl Context {
                     line: *line,
                     span: None,
                 };
-                self.checkpoint(&[owner], loc, NONE);
+                // The frame owns its code and scope. Active iterators must also survive nested calls.
+                self.checkpoint(iterators, loc, NONE);
                 ip += 1;
-                match self.source_step(&code, owner, scope, op, &mut ip) {
+                match self.source_step(&code, owner, scope, op, &mut ip, iterators) {
                     Ok(Some(step)) => return Ok(step),
                     Ok(None) => (),
                     Err(mut e) => {
@@ -489,6 +588,7 @@ impl Context {
         scope: Id,
         op: &Instruction,
         ip: &mut usize,
+        iterators: &mut Vec<Id>,
     ) -> Result<Option<Step>> {
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
@@ -506,6 +606,26 @@ impl Context {
                 }
             }
             Instruction::Jump(destination) => *ip = *destination,
+            Instruction::Iter(e) => {
+                let v = eval(self, e)?;
+                iterators.push(self.iterator(v)?);
+            }
+            Instruction::Next(target, end) => {
+                let iter = *iterators.last().expect("active source loop");
+                match self.next_item(iter)? {
+                    Some(v) => {
+                        if let Some(target) = target {
+                            self.bind_loop_target(scope, target, v)?;
+                        } else {
+                            return Ok(Some(Step::Yield(v, *ip - 1)));
+                        }
+                    }
+                    None => {
+                        iterators.pop();
+                        *ip = *end;
+                    }
+                }
+            }
             Instruction::Yield(e) | Instruction::Return(e) => {
                 let v = e
                     .as_ref()
@@ -605,6 +725,42 @@ impl Context {
         Ok(None)
     }
 
+    fn bind_loop_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
+        match target {
+            ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
+            ast::Expr::Tuple(t) => {
+                let count = t.elts.len();
+                let iter = self.iterator(value)?;
+                let mut unpacked = Vec::with_capacity(count);
+                for i in 0..count {
+                    unpacked.push(self.next_item(iter)?.ok_or_else(|| {
+                        Error::new(
+                            "ValueError",
+                            format!("not enough values to unpack (expected {count}, got {i})"),
+                        )
+                    })?);
+                }
+                if self.next_item(iter)?.is_some() {
+                    let size = match self.heap.get(value) {
+                        Value::List(items) | Value::Tuple(items) => Some(items.len()),
+                        Value::Dict(items) => Some(items.len()),
+                        _ => None,
+                    };
+                    let detail = size.map_or_else(String::new, |n| format!(", got {n}"));
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("too many values to unpack (expected {count}{detail})"),
+                    ));
+                }
+                for (element, item) in t.elts.iter().zip(unpacked) {
+                    self.bind_loop_target(scope, element, item)?;
+                }
+            }
+            _ => unreachable!("validated loop target"),
+        }
+        Ok(())
+    }
+
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         let value = self.source_expr_inner(code, scope, expr)?;
         self.heap.keep(value);
@@ -640,6 +796,22 @@ impl Context {
                 let n = crate::parse_integer_literal(&n.to_string())
                     .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
                 Ok(self.alloc(Value::Int(crate::Int::new(n))))
+            }
+            Expr::List(v) => {
+                let items = v
+                    .elts
+                    .iter()
+                    .map(|x| eval(self, x))
+                    .collect::<Result<_>>()?;
+                Ok(self.alloc(Value::List(items)))
+            }
+            Expr::Tuple(v) => {
+                let items = v
+                    .elts
+                    .iter()
+                    .map(|x| eval(self, x))
+                    .collect::<Result<_>>()?;
+                Ok(self.alloc(Value::Tuple(items)))
             }
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);

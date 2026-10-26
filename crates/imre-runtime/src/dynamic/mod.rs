@@ -353,7 +353,9 @@ impl Context {
                 let code = *code;
                 return match self.code_object(code).body {
                     value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) => self.resume_source(id),
+                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                        self.resume_source(id)
+                    }
                 };
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
@@ -652,7 +654,9 @@ impl Context {
     fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
-            value::Body::Source(_) => return self.call_source(code, scope),
+            value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                return self.call_source(code, scope);
+            }
         };
         self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
