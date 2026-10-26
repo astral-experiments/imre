@@ -669,15 +669,15 @@ impl Context {
             }
             Expr::Compare(v) => {
                 let mut left = eval(self, &v.operands[0])?;
-                for (op, right) in v.ops.iter().zip(&v.operands[1..]) {
+                for (index, (op, right)) in v.ops.iter().zip(&v.operands[1..]).enumerate() {
                     let right = eval(self, right)?;
                     let result = self.op(op.as_str(), left, right, NONE)?;
-                    if !self.truth(result)? {
+                    if index + 1 == v.ops.len() || !self.truth(result)? {
                         return Ok(result);
                     }
                     left = right;
                 }
-                Ok(TRUE)
+                unreachable!("comparison has at least one operator")
             }
             Expr::If(v) => {
                 let test = eval(self, &v.test)?;
