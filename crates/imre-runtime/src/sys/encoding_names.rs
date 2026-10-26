@@ -1,7 +1,7 @@
 //! Stable owners for the Unicode and filesystem configuration of a native process.
 use super::{Codec, canonical, encoding};
-use crate::{Str, StrOwner};
 use crate::objects::exceptions::{Error, Kind};
+use crate::{Str, StrOwner};
 
 struct Names {
     unicode: StrOwner,
