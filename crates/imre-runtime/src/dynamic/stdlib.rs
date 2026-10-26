@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
+mod fnmatch;
 mod functools;
 mod hashlib;
 mod hmac;
@@ -32,6 +33,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "os"
             | "os.path"
+            | "fnmatch"
             | "operator"
             | "platform"
             | "site"
@@ -335,6 +337,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
+        | ("fnmatch", "filter")
         | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
         _ => {
             return Err(Error::new(
@@ -352,6 +355,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "fnmatch.filter" {
+        return fnmatch::filter(ctx, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
     }

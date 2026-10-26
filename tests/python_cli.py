@@ -322,6 +322,7 @@ def report(text):
             "boxed_super.py",
             "boxed_property_setter.py",
             "boxed_item_assignment.py",
+            "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
