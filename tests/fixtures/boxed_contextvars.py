@@ -44,6 +44,24 @@ def current():
         list(saved.values())[0] is req,
     )
 
+    left = Context()
+    right = Context()
+    assert left == right
+    left.run(var.set, [1])
+    right.run(var.set, [1])
+    assert left == right and left == left.copy()
+    right.run(var.set, [2])
+    assert left != right
+    left.run(var.set, left)
+    right.run(var.set, right)
+    assert left == left.copy()
+    try:
+        left == right
+    except RecursionError as error:
+        assert isinstance(error, RuntimeError)
+    else:
+        raise AssertionError("recursive comparison")
+
     class Payload:
         def __init__(self, tag):
             self.tag = tag

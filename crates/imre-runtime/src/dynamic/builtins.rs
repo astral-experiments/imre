@@ -19,6 +19,7 @@ pub(super) fn is_exception(name: &str) -> bool {
         "BaseException"
             | "Exception"
             | "RuntimeError"
+            | "RecursionError"
             | "NotImplementedError"
             | "TypeError"
             | "ValueError"
