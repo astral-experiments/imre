@@ -34,6 +34,16 @@ print((scheme, authority, path, query, fragment))
 print((parsed[2], len(parsed), parsed == ("", "", "/foo", "", ""), isinstance(parsed, SplitResult)))
 print(SplitResultBytes(b"https", b"host", b"path", b"q", b"f").geturl())
 print(isinstance(urlsplit(b"/"), SplitResultBytes))
+print(urlsplit("/café").encode("utf-8").decode("utf-8"))
+print(urlsplit("/café").encode(errors="replace"))
+try:
+    print(urlsplit("/café").encode())
+except UnicodeEncodeError as error:
+    print(str(error))
+try:
+    print(SplitResultBytes(b"", b"", b"/\xff", b"", b"").decode())
+except UnicodeDecodeError as error:
+    print(str(error))
 for invalid in ("//[", "//[127.0.0.1]", "//[a::b::c]", "//[v.h]", "//[::1]junk",
                 "//\uff0f", "//user\u2100example:443"):
     try:

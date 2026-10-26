@@ -136,6 +136,12 @@ impl Emitter<'_, '_> {
                     property as u32
                 ))
             }
+            TextOperation::UrlTranscode { encode } => {
+                let bytes = i32::from(encode);
+                let result = self.record(returns);
+                self.checked_line(format!("call void @imre_url_transcode(ptr {source}, i32 {bytes}, ptr {}, ptr {}, ptr {})", args[1].value.operand, args[2].value.operand, result.operand));
+                return result;
+            }
             TextOperation::UrlGetUrl => {
                 let bytes = i32::from(returns == Type::Bytes);
                 self.checked_pointer(format!(

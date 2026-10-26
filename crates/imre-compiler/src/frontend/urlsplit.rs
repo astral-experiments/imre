@@ -88,6 +88,24 @@ impl Checker<'_> {
             Some(SPLIT_RESULT_BYTES) => Type::Bytes,
             _ => return Ok(None),
         };
+        if (ty == Type::Str && name == "encode") || (ty == Type::Bytes && name == "decode") {
+            let params =
+                [("encoding", "ascii"), ("errors", "strict")].map(|(name, default)| Parameter {
+                    name: name.into(),
+                    ty: Type::Str,
+                    default: Some(unpacking::string(default)),
+                    kind: ParameterKind::PositionalOrKeyword,
+                    sign_only: false,
+                });
+            let args = self.arguments(call, &params, Some(receiver.clone()))?;
+            return Ok(Some(self.ordered_builtin(
+                Builtin::Text(TextOperation::UrlTranscode {
+                    encode: ty == Type::Str,
+                }),
+                self.types.url_split_result(ty == Type::Str),
+                args,
+            )));
+        }
         if name != "geturl" {
             return Ok(None);
         }

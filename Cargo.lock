@@ -715,7 +715,6 @@ dependencies = [
  "toml_parser",
  "triomphe",
  "unicode-case-mapping",
- "unicode-normalization",
  "unicode_names2",
 ]
 

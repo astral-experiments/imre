@@ -7,7 +7,6 @@ use std::{
     ffi::c_void,
     net::{Ipv4Addr, Ipv6Addr},
 };
-use unicode_normalization::UnicodeNormalization;
 
 fn invalid(message: impl Into<String>) -> Error {
     Error::new(Kind::ValueError, message.into())
@@ -97,15 +96,32 @@ fn check_netloc(netloc: &str) -> Result<()> {
         }
         _ => {}
     }
-    // The authority cannot contain a slash. Remove its known delimiters before
-    // checking whether a Unicode compatibility character introduces a new one.
-    if !netloc.is_ascii()
-        && netloc
-            .chars()
-            .filter(|c| !matches!(c, '@' | ':' | '#' | '?'))
-            .nfkc()
-            .any(|c| matches!(c, '/' | '?' | '#' | '@' | ':'))
-    {
+    // The non-ASCII Unicode 16 characters whose NFKC introduces /?#@:.
+    // No canonical composition consumes any of those five ASCII characters.
+    // Existing delimiters in the authority are allowed. See test_urlsplit_normalization.
+    if netloc.chars().any(|c| {
+        matches!(
+            c,
+            '\u{2047}'
+                ..='\u{2049}'
+                    | '\u{2100}'
+                    | '\u{2101}'
+                    | '\u{2105}'
+                    | '\u{2106}'
+                    | '\u{2a74}'
+                    | '\u{fe13}'
+                    | '\u{fe16}'
+                    | '\u{fe55}'
+                    | '\u{fe56}'
+                    | '\u{fe5f}'
+                    | '\u{fe6b}'
+                    | '\u{ff03}'
+                    | '\u{ff0f}'
+                    | '\u{ff1a}'
+                    | '\u{ff1f}'
+                    | '\u{ff20}'
+        )
+    }) {
         return Err(invalid(format!(
             "netloc '{netloc}' contains invalid characters under NFKC normalization"
         )));
@@ -209,9 +225,10 @@ fn port(word: &[u8], is_bytes: bool) -> Result<usize> {
         )));
     }
     let number = std::str::from_utf8(word).unwrap().trim_start_matches('0');
-    if word.len() > 4300 {
+    if !crate::integer_text::decimal_digits_allowed(word.len()) {
         return Err(invalid(format!(
-            "Exceeds the limit (4300 digits) for integer string conversion: value has {} digits; use sys.set_int_max_str_digits() to increase the limit",
+            "Exceeds the limit ({} digits) for integer string conversion: value has {} digits; use sys.set_int_max_str_digits() to increase the limit",
+            crate::integer_text::decimal_digit_limit(),
             word.len()
         )));
     }
@@ -272,7 +289,8 @@ pub unsafe extern "C" fn imre_url_property(
                     let (name, zone) = partition(hostname, b'%');
                     if !is_bytes {
                         let name = std::str::from_utf8(name).unwrap();
-                        let mut lower = name.to_lowercase();
+                        let mut lower =
+                            super::lowercase::lowercase(name).map_err(|_| Error::allocation())?;
                         if let Some(zone) = zone {
                             lower.push('%');
                             lower.push_str(std::str::from_utf8(zone).unwrap());
@@ -293,6 +311,47 @@ pub unsafe extern "C" fn imre_url_property(
         })(),
         0,
     )
+}
+
+/// # Safety
+/// The input is a rooted five-field result of the receiver's declared type. The
+/// fresh output record owns initialized fields on both normal and exception exits.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_url_transcode(
+    input: *const usize,
+    encode: i32,
+    encoding: *const Str,
+    errors: *const Str,
+    out: *mut usize,
+) {
+    use super::super::codecs::{Codec, encoded_bytes};
+    let (encoding, errors) = unsafe { (&*encoding, &*errors) };
+    finish(
+        (|| {
+            if encoding.contains('\0') || errors.contains('\0') {
+                return Err(invalid("embedded null character"));
+            }
+            let codec = Codec::lookup(encoding)?;
+            for i in 0..5 {
+                // SAFETY: each source word is still rooted by the input record.
+                let word = unsafe { *input.add(i) };
+                let converted = if encode != 0 {
+                    let text = unsafe { &*(word as *const Str) };
+                    let data = codec.encode(text, Some(errors), || {
+                        Ok(unsafe { crate::StrOwner::acquire_word(word) })
+                    })?;
+                    encoded_bytes(data)? as usize
+                } else {
+                    let data = unsafe { &*(word as *const Bytes) };
+                    let text = codec.decode(data, Some(errors))?;
+                    crate::checked_owned_str(text.into())? as usize
+                };
+                unsafe { out.add(i).write(converted) };
+            }
+            Ok(())
+        })(),
+        (),
+    );
 }
 
 fn uses_netloc(scheme: &str) -> bool {

@@ -1615,6 +1615,9 @@ pub(crate) enum TextOperation {
     UrlSplit,
     UrlProperty(UrlProperty),
     UrlGetUrl,
+    UrlTranscode {
+        encode: bool,
+    },
     Dedent,
     ShlexSplit,
     ShlexQuote,

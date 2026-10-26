@@ -150,7 +150,7 @@ pub unsafe extern "C" fn imre_codec_encode(
 }
 
 /// Return an owned byte buffer for a borrowed or freshly encoded result.
-fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
+pub(super) fn encoded_bytes(bytes: Cow<'_, [u8]>) -> Result<*const Bytes> {
     let owner = match bytes {
         Cow::Borrowed(bytes) => owned_input(bytes)?,
         Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error())?,
