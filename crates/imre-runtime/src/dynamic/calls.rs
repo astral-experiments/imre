@@ -841,6 +841,20 @@ impl Context {
         }
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
+            Value::Property(_) if matches!(name, "__doc__" | "__name__") => {
+                let Value::Property(property) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                if name == "__doc__" {
+                    property.doc = NONE;
+                } else {
+                    property.name = None;
+                }
+                Ok(())
+            }
             Value::StaticMethod { dictionary, .. } => {
                 super::static_method::update_attribute(self, obj, dictionary, name, None)
             }
@@ -861,7 +875,8 @@ impl Context {
                 ..
             } => {
                 let error = match name {
-                    "__name__" | "__qualname__" | "__bases__" | "__type_params__" => Error::new(
+                    "__name__" | "__qualname__" | "__bases__" | "__type_params__"
+                    | "__module__" | "__doc__" => Error::new(
                         "TypeError",
                         format!("cannot delete '{name}' attribute of immutable type '{class}'"),
                     ),

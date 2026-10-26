@@ -8,6 +8,7 @@ class Descriptor:
 
 class Subject:
     descriptor = Descriptor()
+    deletable = property(None, None, lambda self: self.events.append('property'))
     constant = 1
 
     def __delattr__(self, name):
@@ -26,6 +27,7 @@ def current():
     del obj.value
     delattr(obj, 'descriptor')
     object.__delattr__(obj, 'descriptor')
+    object.__delattr__(obj, 'deletable')
     print(obj.events, hasattr(obj, 'value'))
     try:
         del obj.constant
@@ -33,6 +35,12 @@ def current():
         print(str(error))
     del Subject.constant
     print(hasattr(Subject, 'constant'))
+
+    module = __import__(__name__)
+    module.temporary = 1
+    namespace = module.__dict__
+    del module.temporary
+    print('temporary' not in namespace, not hasattr(module, 'temporary'))
 
     wrapper = staticmethod(function)
     for target in (wrapper, function):
