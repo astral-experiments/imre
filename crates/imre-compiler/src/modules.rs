@@ -2145,6 +2145,7 @@ impl<'a> Loader<'a> {
                                     && module_value(stmt).is_some_and(literal_export))
                         });
                         let ordered = !module.is_package
+                            && module.name.contains('.')
                             && !module.bundled
                             && module.archive.is_none()
                             && prefix.clone().all(|stmt| {

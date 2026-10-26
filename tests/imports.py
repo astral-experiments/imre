@@ -46,7 +46,7 @@ REJECTED = {
     }, "import before its binding is available"),
     "unpublished_child_attribute": ({
         "main.py": "import pkg.child\n", "pkg/__init__.py": "", "pkg/other.py": "",
-        "pkg/child.py": "import pkg\n" + HELPER + "value = pkg.child.f(1)\nfrom . import other\n",
+        "pkg/child.py": "import pkg\n" + HELPER + "observed = pkg.child.f(1)\nfrom . import other\n",
     }, "import before its binding is available"),
     "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
