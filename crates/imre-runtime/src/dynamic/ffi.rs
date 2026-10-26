@@ -89,23 +89,19 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
-            "set" => Ok(self.alloc(Value::Set(Vec::new()))),
+            "set" => Ok(self.alloc(Value::Set {
+                items: Vec::new(),
+                frozen: false,
+            })),
             "dict" => Ok(self.dict(Vec::new())),
             "tuple" => {
                 let vs = self.items(a)?;
                 Ok(self.alloc(Value::Tuple(vs)))
             }
             "append" => {
-                if matches!(self.heap.get(a), Value::Set(_)) {
-                    if !builtins::hashable(self, b) {
-                        return Err(Error::new("TypeError", "unhashable set element"));
-                    }
-                    if self.contains(b, a)? {
-                        return Ok(a);
-                    }
-                }
                 match self.heap.get_mut(a) {
-                    Value::List(v) | Value::Set(v) => v.push(b),
+                    Value::List(v) => v.push(b),
+                    Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
                 Ok(a)
