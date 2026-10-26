@@ -43,10 +43,11 @@ def current():
         print(repr(bounded), length_hint(bounded, 92), list(bounded), list(bounded), repr(bounded))
     print(length_hint(forever, 92))
     keys = ("first", "second", "first")
-    entries = dict(zip(keys, repeat(value)))
+    instance = {}
+    instance.__init__(zip(keys, repeat(value)))
     value.append("later")
-    print(list(entries), entries["first"] is entries["second"], entries["first"] is value)
-    print(entries["second"], dict(zip((), repeat(value))))
+    print(list(instance), instance["first"] is instance["second"], instance["first"] is value)
+    print(instance["second"], dict(zip((), repeat(value))))
     retained = repeat([42], 1)
     for index in range(1600):
         unused = [index]

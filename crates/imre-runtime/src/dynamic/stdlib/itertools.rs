@@ -110,7 +110,9 @@ pub(super) fn method(
     }
     match name {
         "__iter__" => Ok(*receiver),
-        "__next__" => super::super::builtins::call(ctx, "next", &[*receiver], &[]),
+        "__next__" => ctx
+            .next_result(*receiver)?
+            .ok_or_else(|| Error::new("StopIteration", "")),
         _ => unreachable!("itertools method"),
     }
 }
