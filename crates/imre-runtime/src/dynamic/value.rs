@@ -321,6 +321,8 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
+    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -648,6 +650,8 @@ impl Value {
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
+            | Self::LoggerHandle(_)
+            | Self::HandlerLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)

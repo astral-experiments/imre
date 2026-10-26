@@ -52,6 +52,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
+        "logging" => Some((
+            "logging/__init__.py",
+            concat!(
+                include_str!("../stdlib/logging/stream.py"),
+                "\n",
+                include_str!("../stdlib/logging/boxed.py"),
+            ),
+        )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
         "http" => Some((
             "http/__init__.py",
@@ -2752,7 +2760,11 @@ impl<'a> Loader<'a> {
             .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
-                include_str!("../stdlib/logging/classes.py"),
+                concat!(
+                    include_str!("../stdlib/logging/stream.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/classes.py")
+                ),
             )),
             (module == Some(IntrinsicModule::LoggingHandlers)).then_some((
                 LOGGING_HANDLER_CLASSES,
