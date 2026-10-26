@@ -759,7 +759,7 @@ pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
     let result = if metadata.is_file() {
         file.read_to_end(&mut bytes)
             .map(|_| bytes)
-            .map_err(os_error)
+            .map_err(errno_error)
     } else {
         let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
         let mut input = Input::new(file, false, true, capacity);
@@ -767,7 +767,7 @@ pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
         file = input.into_file();
         result
     };
-    close_file(file).map_err(os_error).and(result)
+    close_file(file).map_err(errno_error).and(result)
 }
 
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {
