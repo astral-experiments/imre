@@ -279,6 +279,22 @@ impl Context {
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::Function { name, .. } => format!("<function {name}>"),
+            Value::AttrGetter(paths) => {
+                let arguments = paths
+                    .iter()
+                    .map(|path| {
+                        let mut quoted = String::new();
+                        crate::objects::exceptions::write_string_repr(
+                            &path.join("."),
+                            &mut quoted,
+                        )
+                        .expect("writing into a string cannot fail");
+                        quoted
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("operator.attrgetter({arguments})")
+            }
             _ => "<object>".to_owned(),
         }
     }
