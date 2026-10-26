@@ -4,6 +4,7 @@ use super::words::WordKind;
 use super::{Bytes, Object, Storage, StorageCell, Str, object, records, values};
 use crate::Int;
 use crate::StrOwner;
+use num_traits::ToPrimitive;
 
 // A tuple may store an optional scalar in its nullable representation. Views
 // expose the contained Python value, not the slot's storage tag.
@@ -11,6 +12,22 @@ use crate::StrOwner;
 /// The word is rooted and has the native representation given by its tag.
 pub(super) unsafe fn concrete(kind: WordKind, word: usize) -> (WordKind, usize) {
     if kind.raw() & crate::objects::words::NULLABLE == 0 {
+        if kind.raw() == 9 {
+            let (mut word, member) = super::unions::member(word);
+            if member.raw() == 2 {
+                // A union gives small integers aligned storage for its tag.
+                // SAFETY: the union roots the untagged integer until acquisition.
+                if let Some(small) = unsafe { Int::borrow(word) }
+                    .big()
+                    .to_i64()
+                    .and_then(Int::small)
+                {
+                    word = small.into_raw();
+                }
+            }
+            // SAFETY: the tagged union owns its concrete member throughout this borrow.
+            return unsafe { concrete(member, word) };
+        }
         if kind.raw() == 5 {
             // SAFETY: kind 5 denotes a rooted native object supplied by a typed caller.
             let projected = unsafe {
@@ -51,7 +68,44 @@ pub(super) fn word_text(kind: WordKind, word: usize, repr: bool) -> Rendered {
         // SAFETY: the owning field roots the exact string.
         return Ok(unsafe { StrOwner::acquire_word(word) });
     }
+    if !repr {
+        let mut out = String::new();
+        if write_string_value(&mut values::ReprWriter(&mut out), kind, word)? {
+            return rendered(out.into());
+        }
+    }
     rendered(word_repr(kind, word)?.into())
+}
+
+/// Write the string form of a rooted string, path or enum. Other values use their repr.
+pub(super) fn write_string_value(
+    out: &mut values::ReprWriter<'_>,
+    kind: WordKind,
+    word: usize,
+) -> Result<bool, std::fmt::Error> {
+    use std::fmt::Write as _;
+    match kind.raw() {
+        3 => {
+            // SAFETY: the caller roots this exact string throughout the write.
+            out.write_str(unsafe { &*(word as *const Str) }.as_str())?;
+        }
+        5 => {
+            // SAFETY: the object and its path text live throughout this borrow.
+            return unsafe {
+                object(word as *const Object).0.with(|s| {
+                    if matches!(s, Storage::Path { .. } | Storage::PurePath(_)) {
+                        out.write_str(s.path())?;
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                })
+            };
+        }
+        10 => super::string_enums::write_display(out, word)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 /// Render directly into the buffer used by a short-lived consumer such as stderr.
@@ -137,6 +191,7 @@ pub(super) fn length(kind: WordKind, word: usize) -> Result<Option<usize>, Error
                 layout.class_semantics().is_none().then_some(layout.length)
             }
             8 => Some((&*(word as *const Bytes)).len()),
+            10 => super::string_enums::string_value(word).map(|s| s.chars().count()),
             _ => None,
         })
     }
@@ -242,6 +297,23 @@ pub(super) unsafe fn try_equal(
                     next = (sequence_item(ka, wa, 0)?, sequence_item(kb, wb, 0)?);
                     continue;
                 }
+            }
+        } else if matches!((ka.raw(), kb.raw()), (3, 10) | (10, 3)) {
+            let (text, tag) = if ka.raw() == 3 { (wa, wb) } else { (wb, wa) };
+            // SAFETY: the input owns the string while we compare the StrEnum's value.
+            let text = unsafe { &*(text as *const Str) };
+            if !super::string_enums::string_value(tag).is_some_and(|s| *s == *text) {
+                return Ok(false);
+            }
+        } else if ka.raw() == 10 && kb.raw() == 10 && wa != wb {
+            let (Some(a), Some(b)) = (
+                super::string_enums::string_value(wa),
+                super::string_enums::string_value(wb),
+            ) else {
+                return Ok(false);
+            };
+            if a != b {
+                return Ok(false);
             }
         } else if ka != kb {
             let (integer, float) = match (ka.raw(), kb.raw()) {

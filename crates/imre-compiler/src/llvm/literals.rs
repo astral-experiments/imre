@@ -266,7 +266,7 @@ ready:
         if !self.enum_members.is_empty() {
             writeln!(
                 self.output.entry_buffer(),
-                "  call void @imre_str_enum_table(ptr @str_enum_members, i64 {})",
+                "  call void @imre_enum_display_table(ptr @str_enum_members, i64 {}, ptr @enum_display_styles)",
                 self.enum_members.len()
             )
             .unwrap();

@@ -1,0 +1,492 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 272,
+  "levels": {
+    "0": {
+      "original_methods": {
+        "test.test_logging.LoggerTest.test_make_record_with_extra_no_overwrite": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create a native record with extra and check the live dictionary",
+            "fixture": "Original CPython LoggerTest setup, recording handler, teardown and cleanups; native creation uses a logger with the observed name. makeRecord does not dispatch to handlers.",
+            "opt_level": 0,
+            "method_sha256": "1b9d882e495fa611932eae0a35638d6c003229a65bd7471d4b826b1f2d5e4f92",
+            "assertion": "Native dictionary membership on the two original operands",
+            "shared_assertion_blocker": "unsupported native unittest membership container",
+            "native_body_statement": "self.assertIn('valid_key', result.__dict__)"
+          }
+        },
+        "test.test_logging.LoggerTest.test_make_record_with_extra_overwrite": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create the default record, read its keys and reject each protected extra",
+            "opt_level": 0,
+            "native_calls": [
+              [
+                "factory",
+                "my record",
+                13,
+                "0"
+              ],
+              [
+                "keys",
+                0,
+                "['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename', 'module', 'exc_info', 'exc_text', 'stack_info', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated', 'thread', 'threadName', 'processName', 'process', 'taskName']"
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "message",
+                "some value",
+                "key-error \"Attempt to overwrite 'message' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "asctime",
+                "some value",
+                "key-error \"Attempt to overwrite 'asctime' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "name",
+                "some value",
+                "key-error \"Attempt to overwrite 'name' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "msg",
+                "some value",
+                "key-error \"Attempt to overwrite 'msg' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "args",
+                "some value",
+                "key-error \"Attempt to overwrite 'args' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "levelname",
+                "some value",
+                "key-error \"Attempt to overwrite 'levelname' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "levelno",
+                "some value",
+                "key-error \"Attempt to overwrite 'levelno' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "pathname",
+                "some value",
+                "key-error \"Attempt to overwrite 'pathname' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "filename",
+                "some value",
+                "key-error \"Attempt to overwrite 'filename' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "module",
+                "some value",
+                "key-error \"Attempt to overwrite 'module' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "exc_info",
+                "some value",
+                "key-error \"Attempt to overwrite 'exc_info' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "exc_text",
+                "some value",
+                "key-error \"Attempt to overwrite 'exc_text' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "stack_info",
+                "some value",
+                "key-error \"Attempt to overwrite 'stack_info' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "lineno",
+                "some value",
+                "key-error \"Attempt to overwrite 'lineno' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "funcName",
+                "some value",
+                "key-error \"Attempt to overwrite 'funcName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "created",
+                "some value",
+                "key-error \"Attempt to overwrite 'created' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "msecs",
+                "some value",
+                "key-error \"Attempt to overwrite 'msecs' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "relativeCreated",
+                "some value",
+                "key-error \"Attempt to overwrite 'relativeCreated' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "thread",
+                "some value",
+                "key-error \"Attempt to overwrite 'thread' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "threadName",
+                "some value",
+                "key-error \"Attempt to overwrite 'threadName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "processName",
+                "some value",
+                "key-error \"Attempt to overwrite 'processName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "process",
+                "some value",
+                "key-error \"Attempt to overwrite 'process' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "taskName",
+                "some value",
+                "key-error \"Attempt to overwrite 'taskName' in LogRecord\""
+              ]
+            ],
+            "native_body_diagnostic": "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+            "native_body_statement": "for key in ('message', 'asctime') + tuple(rv.__dict__.keys()):",
+            "fixture": "Original CPython LoggerTest setup, recording handler, teardown and cleanups; native creation uses a logger with the observed name. makeRecord does not dispatch to handlers."
+          }
+        }
+      },
+      "controls": {
+        "make_record_values.py": {
+          "observations": 58,
+          "stdout_sha256": "f69d49f1385c6120b14fc4510940905d7ef6e5f325a4def49b39ff946b017776"
+        },
+        "make_record_operands.py": {
+          "observations": 39,
+          "stdout_sha256": "0fb9b2bb118d41002c931911a2d135f229274d43cd7b44b18f0d68c1705c9f91"
+        }
+      }
+    },
+    "3": {
+      "original_methods": {
+        "test.test_logging.LoggerTest.test_make_record_with_extra_no_overwrite": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create a native record with extra and check the live dictionary",
+            "fixture": "Original CPython LoggerTest setup, recording handler, teardown and cleanups; native creation uses a logger with the observed name. makeRecord does not dispatch to handlers.",
+            "opt_level": 3,
+            "method_sha256": "1b9d882e495fa611932eae0a35638d6c003229a65bd7471d4b826b1f2d5e4f92",
+            "assertion": "Native dictionary membership on the two original operands",
+            "shared_assertion_blocker": "unsupported native unittest membership container",
+            "native_body_statement": "self.assertIn('valid_key', result.__dict__)"
+          }
+        },
+        "test.test_logging.LoggerTest.test_make_record_with_extra_overwrite": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Create the default record, read its keys and reject each protected extra",
+            "opt_level": 3,
+            "native_calls": [
+              [
+                "factory",
+                "my record",
+                13,
+                "0"
+              ],
+              [
+                "keys",
+                0,
+                "['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename', 'module', 'exc_info', 'exc_text', 'stack_info', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated', 'thread', 'threadName', 'processName', 'process', 'taskName']"
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "message",
+                "some value",
+                "key-error \"Attempt to overwrite 'message' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "asctime",
+                "some value",
+                "key-error \"Attempt to overwrite 'asctime' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "name",
+                "some value",
+                "key-error \"Attempt to overwrite 'name' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "msg",
+                "some value",
+                "key-error \"Attempt to overwrite 'msg' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "args",
+                "some value",
+                "key-error \"Attempt to overwrite 'args' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "levelname",
+                "some value",
+                "key-error \"Attempt to overwrite 'levelname' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "levelno",
+                "some value",
+                "key-error \"Attempt to overwrite 'levelno' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "pathname",
+                "some value",
+                "key-error \"Attempt to overwrite 'pathname' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "filename",
+                "some value",
+                "key-error \"Attempt to overwrite 'filename' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "module",
+                "some value",
+                "key-error \"Attempt to overwrite 'module' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "exc_info",
+                "some value",
+                "key-error \"Attempt to overwrite 'exc_info' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "exc_text",
+                "some value",
+                "key-error \"Attempt to overwrite 'exc_text' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "stack_info",
+                "some value",
+                "key-error \"Attempt to overwrite 'stack_info' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "lineno",
+                "some value",
+                "key-error \"Attempt to overwrite 'lineno' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "funcName",
+                "some value",
+                "key-error \"Attempt to overwrite 'funcName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "created",
+                "some value",
+                "key-error \"Attempt to overwrite 'created' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "msecs",
+                "some value",
+                "key-error \"Attempt to overwrite 'msecs' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "relativeCreated",
+                "some value",
+                "key-error \"Attempt to overwrite 'relativeCreated' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "thread",
+                "some value",
+                "key-error \"Attempt to overwrite 'thread' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "threadName",
+                "some value",
+                "key-error \"Attempt to overwrite 'threadName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "processName",
+                "some value",
+                "key-error \"Attempt to overwrite 'processName' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "process",
+                "some value",
+                "key-error \"Attempt to overwrite 'process' in LogRecord\""
+              ],
+              [
+                "make",
+                "my record",
+                13,
+                "taskName",
+                "some value",
+                "key-error \"Attempt to overwrite 'taskName' in LogRecord\""
+              ]
+            ],
+            "native_body_diagnostic": "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+            "native_body_statement": "for key in ('message', 'asctime') + tuple(rv.__dict__.keys()):",
+            "fixture": "Original CPython LoggerTest setup, recording handler, teardown and cleanups; native creation uses a logger with the observed name. makeRecord does not dispatch to handlers."
+          }
+        }
+      },
+      "controls": {
+        "make_record_values.py": {
+          "observations": 58,
+          "stdout_sha256": "f69d49f1385c6120b14fc4510940905d7ef6e5f325a4def49b39ff946b017776"
+        },
+        "make_record_operands.py": {
+          "observations": 39,
+          "stdout_sha256": "0fb9b2bb118d41002c931911a2d135f229274d43cd7b44b18f0d68c1705c9f91"
+        }
+      }
+    }
+  }
+}

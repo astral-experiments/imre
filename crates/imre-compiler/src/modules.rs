@@ -587,7 +587,7 @@ impl IntrinsicModule {
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "gmtime") => Intrinsic::ClockConverter(true),
             (Self::Time, "localtime") => Intrinsic::ClockConverter(false),
-            (Self::Logging, "LogRecord") => Intrinsic::LogRecord,
+            (Self::Logging, "LogRecord" | "_logRecordFactory") => Intrinsic::LogRecord,
             (Self::Logging, "logThreads") => Intrinsic::LogRecordFlag(1),
             (Self::Logging, "logProcesses") => Intrinsic::LogRecordFlag(2),
             (Self::Logging, "logMultiprocessing") => Intrinsic::LogRecordFlag(4),

@@ -53,6 +53,28 @@ impl Emitter<'_, '_> {
         if self.enum_members.is_empty() {
             return;
         }
+        let styles = self
+            .module
+            .class_metadata
+            .iter()
+            .flat_map(|class| {
+                std::iter::repeat_n(
+                    if class.plain_enum { "i8 1" } else { "i8 0" },
+                    class.enum_members.len(),
+                )
+            })
+            .collect::<Vec<_>>();
+        writeln!(
+            self.output.global(
+                self.output.entry,
+                "enum_display_styles",
+                "constant",
+                format_args!("[{} x i8]", styles.len())
+            ),
+            "[{}]",
+            styles.join(", ")
+        )
+        .unwrap();
         let rows = self
             .enum_members
             .iter()

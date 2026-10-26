@@ -457,6 +457,8 @@ pub(crate) struct ClassMetadata {
     pub qualified_name: String,
     /// Canonical members of a string enum, in declaration order.
     pub enum_members: Vec<(String, String)>,
+    /// Plain Enum names its class and member; StrEnum displays the value.
+    pub plain_enum: bool,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
     pub value_struct: bool,
@@ -1783,6 +1785,8 @@ pub(crate) enum FormatterOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LogRecordOperation {
     New,
+    AddExtra,
+    Dictionary,
     Put,
     Update,
     Read,
