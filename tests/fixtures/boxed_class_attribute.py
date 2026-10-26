@@ -80,6 +80,8 @@ def current():
         lambda: object.__getattribute__(1, 3),
         lambda: object.__getattribute__(1, name="a"),
         lambda: object.__getattribute__(1, "foo"),
+        lambda: getattr(Plain(), 1),
+        lambda: hasattr(Plain(), 1),
     ):
         try:
             call()
