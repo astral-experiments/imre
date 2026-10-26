@@ -355,6 +355,9 @@ impl Context {
             Value::Raised(Error { message, .. }) => message.clone(),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
+            Value::StaticMethod { callable, .. } => {
+                format!("<staticmethod({})>", self.repr(*callable))
+            }
             Value::Function { fields, .. } => {
                 format!("<function {}>", self.display(fields.qualname))
             }
@@ -485,6 +488,17 @@ impl Context {
         }
         if let Value::Str(hay) = self.heap.get(container) {
             return Ok(hay.contains(self.str_value(item)?));
+        }
+        if matches!(self.heap.get(container), Value::Bytes(_)) {
+            // CPython falls back to the buffer protocol when integer conversion fails.
+            let number = self.index_value(item).ok().flatten();
+            let Value::Bytes(data) = self.heap.get(container) else {
+                unreachable!()
+            };
+            if let Some(number) = number {
+                return Ok(crate::objects::bytes_contains_int(data, &number)?);
+            }
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
         if matches!(
             self.heap.get(container),

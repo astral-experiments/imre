@@ -18,7 +18,7 @@ declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
 declare i64 @imre_dyn_def_with_metadata(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
-declare void @imre_dyn_statement(ptr, ptr, i64, ptr, i32)
+declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
 /// All module source has already been resolved. Import execution remains conditional.
@@ -353,8 +353,8 @@ impl Function<'_, '_> {
             .partition_point(|&newline| newline < offset)
             + 1;
         self.line(&format!(
-            "call void @imre_dyn_statement(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line})",
-            self.source.file
+            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
+            self.source.file, self.caught.last().map_or("0", String::as_str)
         ));
     }
 

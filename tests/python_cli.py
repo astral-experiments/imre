@@ -48,6 +48,14 @@ def main():
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
+        streams = root / "streams.py"
+        streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
+        expected = run(sys.executable, "-B", streams)
+        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout == "stdout π\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -98,6 +106,7 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -337,6 +346,7 @@ def report(text):
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
+            "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_urlsplit.py",
@@ -351,10 +361,12 @@ def report(text):
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
+            "boxed_staticmethod.py",
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
+            "boxed_bytes_separators.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

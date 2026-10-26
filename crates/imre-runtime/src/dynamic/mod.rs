@@ -8,6 +8,7 @@ mod function_fields;
 mod iterators;
 mod operators;
 mod property;
+mod static_method;
 mod stdlib;
 mod super_object;
 mod value;
@@ -104,6 +105,18 @@ impl Context {
             Ok(value)
         } else {
             Err(Error::new("TypeError", "expected str"))
+        }
+    }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
         }
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
@@ -422,8 +435,8 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if name == "urllib" {
-                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            if matches!(name, "email" | "urllib") {
+                locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             }
             None
         } else {
@@ -518,6 +531,17 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => stdlib::readiness::initialize(self, scope),
+            "sys" => {
+                for (name, original, stderr) in [
+                    ("stdout", "__stdout__", false),
+                    ("stderr", "__stderr__", true),
+                ] {
+                    let stream =
+                        self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
+                    self.bind(scope, name, stream);
+                    self.bind(scope, original, stream);
+                }
+            }
             _ => {}
         }
         if let Some((path, code)) = source {

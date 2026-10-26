@@ -83,6 +83,7 @@ impl Context {
             Value::Class { .. }
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
+                | Value::StaticMethod { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
@@ -108,6 +109,9 @@ impl Context {
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
         if let Some(get) = self.slot(value, "__get__") {
             return self.call(get, vec![value, receiver, owner], Vec::new());
+        }
+        if let Value::StaticMethod { callable, .. } = *self.heap.get(value) {
+            return Ok(callable);
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
@@ -171,18 +175,58 @@ impl Context {
         }
     }
 
+    pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+        if let Value::Tuple(classes) = self.heap.get(parent) {
+            for &class in classes {
+                if self.python_subclass_check(child, class)? {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+        let is_class = |id| self.builtin_type_name(id) == Some("type");
+        if !is_class(child) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 1 must be a class",
+            ));
+        }
+        if !is_class(parent) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            ));
+        }
+        Ok(self.subclass(child, parent))
+    }
+
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
         }
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
-            return ancestors.iter().any(|&b| self.equal_class(b, target));
+            return ancestors.iter().any(|&base| {
+                self.equal_class(base, target)
+                    || (matches!(self.heap.get(base), Value::Native(_))
+                        && self.subclass(base, target))
+            });
         }
-        if let (Value::Native(actual), Value::Native(parent)) =
+        if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            return self.builtin_type_name(class) == Some("type")
-                && (parent == "object" || (actual == "bool" && parent == "int"));
+            if parent == "object" {
+                return self.builtin_type_name(class) == Some("type");
+            }
+            if let (Some(child), Some(parent)) = (
+                builtins::exception_kind(child),
+                builtins::exception_kind(parent),
+            ) {
+                return crate::objects::exceptions::imre_builtin_exception_subclass(
+                    child as u32,
+                    parent as u32,
+                );
+            }
+            return child == "bool" && parent == "int";
         }
         false
     }
@@ -233,8 +277,11 @@ impl Context {
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
+            | Value::Traceback { .. }
+            | Value::PythonFrame { .. }
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -262,6 +309,8 @@ impl Context {
                             | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
+                            | "traceback"
+                            | "frame"
                     )
                 {
                     "type"
@@ -290,6 +339,10 @@ impl Context {
                     .get(&name)
                     .copied()
                     .unwrap_or_else(|| self.builtin(&name)))
+            }
+            Value::Calendar { value, .. } => {
+                let class = format!("datetime.{}", value.class());
+                Ok(self.builtin(&class))
             }
             _ => {
                 let name = self.builtin_type_name(obj).ok_or_else(|| {
@@ -456,10 +509,45 @@ impl Context {
             return self.exact_type(obj);
         }
         match self.heap.get(obj).clone() {
+            Value::Raised(_) if name == "__traceback__" => return self.exception_traceback(obj),
+            Value::Traceback {
+                frame,
+                next,
+                lineno,
+            } => match name {
+                "tb_frame" => return Ok(frame),
+                "tb_next" => return Ok(next),
+                "tb_lineno" => return Ok(self.int(lineno)),
+                _ => {}
+            },
+            Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
+                return Ok(self.int(i64::from(lineno)));
+            }
+            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame") => match name {
+                "__name__" | "__qualname__" => return Ok(self.text(class)),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
+            Value::StaticMethod {
+                callable,
+                dictionary,
+            } => {
+                if let Some(value) =
+                    super::static_method::attribute(self, callable, dictionary, name)?
+                {
+                    return Ok(value);
+                }
+            }
+            Value::None if name == "__doc__" => {
+                return Ok(self.text("The type of the None singleton."));
+            }
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
                 }
+            }
+            Value::Native(class) if class == "staticmethod" && name == "__get__" => {
+                return Ok(self.builtin("staticmethod.__get__"));
             }
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
@@ -661,6 +749,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
+            return super::static_method::set_attribute(self, obj, dictionary, name, value);
+        }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);
         }
@@ -692,6 +783,7 @@ impl Context {
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
+        let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
@@ -711,7 +803,7 @@ impl Context {
                 let scope = *scope;
                 self.bind(scope, name, value);
             }
-            Value::Instance { fields, .. } => {
+            Value::Instance { class, fields, .. } if Some(*class) != object_class => {
                 fields.insert(name.to_owned(), value);
             }
             Value::Class { scope, .. } => {
@@ -731,6 +823,14 @@ impl Context {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
+        self.alloc(Value::Instance {
+            class,
+            dictionary,
+            fields: HashMap::new(),
+        })
     }
 
     pub(super) fn call(
@@ -757,12 +857,14 @@ impl Context {
                                 | "function"
                                 | "object"
                                 | "property"
+                                | "staticmethod"
                         )
                     ) =>
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
@@ -872,11 +974,7 @@ impl Context {
                 let dictionary = self
                     .has_base(callable, "dict")
                     .then(|| self.dict(Vec::new()));
-                let instance = self.alloc(Value::Instance {
-                    class: callable,
-                    dictionary,
-                    fields: HashMap::new(),
-                });
+                let instance = self.instance(callable, dictionary);
                 if self.class_attr(callable, "__init__").is_some() {
                     let init = self.lookup_attr(instance, "__init__")?;
                     if self.call(init, args, kwargs)? != NONE {

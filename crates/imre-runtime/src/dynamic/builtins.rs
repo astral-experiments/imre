@@ -13,49 +13,58 @@ mod text;
 pub(super) use collections::{hashable, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
-pub(super) fn is_exception(name: &str) -> bool {
-    matches!(
-        name,
-        "BaseException"
-            | "Exception"
-            | "RuntimeError"
-            | "RecursionError"
-            | "NotImplementedError"
-            | "TypeError"
-            | "ValueError"
-            | "EOFError"
-            | "UnicodeError"
-            | "UnicodeDecodeError"
-            | "UnicodeEncodeError"
-            | "ArithmeticError"
-            | "OverflowError"
-            | "ZeroDivisionError"
-            | "LookupError"
-            | "IndexError"
-            | "KeyError"
-            | "NameError"
-            | "AttributeError"
-            | "ImportError"
-            | "ModuleNotFoundError"
-            | "OSError"
-            | "ConnectionError"
-            | "ConnectionRefusedError"
-            | "ConnectionResetError"
-            | "ConnectionAbortedError"
-            | "BrokenPipeError"
-            | "BlockingIOError"
-            | "TimeoutError"
-            | "FileNotFoundError"
-            | "IsADirectoryError"
-            | "NotADirectoryError"
-            | "PermissionError"
-            | "AssertionError"
-            | "MemoryError"
-            | "SystemExit"
-            | "StopIteration"
-            | "Warning"
-            | "RuntimeWarning"
+pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+    use crate::objects::exceptions::Kind;
+    macro_rules! kinds {
+        ($($kind:ident),* $(,)?) => {
+            match name { $(stringify!($kind) => Some(Kind::$kind),)* _ => None }
+        };
+    }
+    kinds!(
+        BaseException,
+        Exception,
+        RuntimeError,
+        RecursionError,
+        NotImplementedError,
+        TypeError,
+        ValueError,
+        EOFError,
+        UnicodeError,
+        UnicodeDecodeError,
+        UnicodeEncodeError,
+        ArithmeticError,
+        OverflowError,
+        ZeroDivisionError,
+        LookupError,
+        IndexError,
+        KeyError,
+        NameError,
+        AttributeError,
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        ConnectionError,
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        BlockingIOError,
+        TimeoutError,
+        FileNotFoundError,
+        IsADirectoryError,
+        NotADirectoryError,
+        PermissionError,
+        AssertionError,
+        MemoryError,
+        SystemExit,
+        StopIteration,
+        Warning,
+        RuntimeWarning,
     )
+}
+
+pub(super) fn is_exception(name: &str) -> bool {
+    exception_kind(name).is_some()
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
@@ -69,6 +78,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "next"
                 | "any"
                 | "isinstance"
+                | "issubclass"
                 | "getattr"
                 | "globals"
                 | "setattr"
@@ -92,6 +102,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "list"
             | "object"
             | "property"
+            | "staticmethod"
             | "range"
             | "set"
             | "str"
@@ -142,7 +153,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
-        Value::Bytes(_) if matches!(attr, "decode" | "rstrip") => "bytes",
+        Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
+        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
@@ -422,9 +434,17 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
-            "function" if method == "__get__" => {
+            "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
+                if owner == "staticmethod"
+                    && !matches!(ctx.heap.get(args[0]), Value::StaticMethod { .. })
+                {
+                    return Err(type_error(format!(
+                        "descriptor '__get__' requires a 'staticmethod' object but received a '{}'",
+                        ctx.type_name(args[0])
+                    )));
+                }
                 let owner = args.get(2).copied().unwrap_or(NONE);
                 if args[1] == NONE && owner == NONE {
                     return Err(type_error("__get__(None, None) is invalid"));
@@ -435,6 +455,13 @@ pub(super) fn call(
         };
     }
     match name {
+        "object" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(type_error("object() takes no arguments"));
+            }
+            let class = ctx.builtin("object");
+            Ok(ctx.instance(class, None))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -485,27 +512,10 @@ pub(super) fn call(
                 result => result,
             }
         }
-        "iter" | "any" => {
+        "issubclass" => {
             positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            if name == "iter" {
-                return ctx.python_iter(args[0]);
-            }
-            let iter = ctx.iterator(args[0])?;
-            while let Some(item) = ctx.next_item(iter)? {
-                if ctx.truth(item)? {
-                    return Ok(TRUE);
-                }
-            }
-            Ok(FALSE)
-        }
-        "next" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 2)?;
-            match ctx.iterator_next(args[0]) {
-                Err(e) if e.kind == "StopIteration" && args.len() == 2 => Ok(args[1]),
-                result => result,
-            }
+            arity(name, args, 2, 2)?;
+            Ok(boolean(ctx.python_subclass_check(args[0], args[1])?))
         }
         "isinstance" => {
             positional(name, kwargs)?;
@@ -594,6 +604,18 @@ pub(super) fn call(
             let value = format_value(ctx, args[0], &spec)?;
             Ok(ctx.text(value))
         }
+        "staticmethod" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("staticmethod() takes no keyword arguments"));
+            }
+            let [callable] = args else {
+                return Err(type_error(format!(
+                    "staticmethod expected 1 argument, got {}",
+                    args.len()
+                )));
+            };
+            super::static_method::construct(ctx, *callable)
+        }
         "property" => {
             let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
             super::property::construct(ctx, fields)
@@ -645,6 +667,28 @@ pub(super) fn call(
                 return Ok(result);
             }
             ctx.module(name.split('.').next().unwrap())
+        }
+        "iter" | "any" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            if name == "iter" {
+                return ctx.python_iter(args[0]);
+            }
+            let iter = ctx.iterator(args[0])?;
+            while let Some(item) = ctx.next_item(iter)? {
+                if ctx.truth(item)? {
+                    return Ok(TRUE);
+                }
+            }
+            Ok(FALSE)
+        }
+        "next" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 2)?;
+            match ctx.iterator_next(args[0]) {
+                Err(e) if e.kind == "StopIteration" && args.len() == 2 => Ok(args[1]),
+                result => result,
+            }
         }
         "print" => {
             let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;

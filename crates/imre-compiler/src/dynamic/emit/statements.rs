@@ -252,7 +252,7 @@ impl Function<'_, '_> {
                         .cause
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.raise(&exc, &cause);
+                    self.raise(&exc, &cause, v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
                     let test = self.expr(&v.test);
@@ -268,7 +268,7 @@ impl Function<'_, '_> {
                     } else {
                         self.invoke(&cls, &[])
                     };
-                    self.raise(&error, "0");
+                    self.raise(&error, "0", false);
                     self.label(&pass);
                 }
                 _ => {
@@ -374,7 +374,7 @@ impl Function<'_, '_> {
         self.branch(&condition, &bad, &good);
         self.label(&bad);
         let error = self.lookup("NotImplementedError");
-        self.raise(&error, "0");
+        self.raise(&error, "0", false);
         self.label(&good);
         let values = self.op("dict", &[]);
         for &(name, expression) in entries {
@@ -508,9 +508,11 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn raise(&mut self, exc: &str, cause: &str) {
+    fn raise(&mut self, exc: &str, cause: &str, reraise: bool) {
         // Raising always transfers control to the enclosing handler.
-        let op = self.output.data(b"raise");
+        let op = self
+            .output
+            .data(if reraise { b"reraise" } else { b"raise" });
         self.line(&format!(
             "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 0)"
         ));
@@ -554,7 +556,7 @@ impl Function<'_, '_> {
             self.jump(&done);
             self.label(&next);
         }
-        self.raise(&exc, "0");
+        self.raise(&exc, "0", true);
         self.live.pop();
         self.label(&done);
     }
@@ -588,7 +590,7 @@ impl Function<'_, '_> {
         self.caught.pop();
         self.live.pop();
         if !self.terminated {
-            self.raise(&exception, "0");
+            self.raise(&exception, "0", true);
         }
         self.label(&done);
     }
@@ -642,13 +644,12 @@ impl Function<'_, '_> {
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let ty = self.op("type", &[&exc]);
-        let result = self.invoke(&exit, &[&ty, &exc, "0"]);
+        let result = self.op("exit_exception", &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);
         self.label(&propagate);
-        self.raise(&exc, "0");
+        self.raise(&exc, "0", true);
         self.label(&done);
     }
 }

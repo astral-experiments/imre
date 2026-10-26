@@ -52,6 +52,28 @@ impl Calendar {
         Self(utc())
     }
 
+    /// Keep a parsed date's native timezone alive in the boxed datetime as well.
+    pub(crate) fn parse_mail_date(text: &str) -> Result<(Self, Option<Self>), Error> {
+        let day = maildates::parse(text)?;
+        let tz = with(&day, |value| match value {
+            Value::Date { zone, .. } => zone.clone().map(Self),
+            _ => unreachable!(),
+        });
+        Ok((Self(day), tz))
+    }
+
+    pub(crate) fn format_mail_date(&self, usegmt: bool) -> Result<Str, Error> {
+        maildates::format_datetime(&self.0, usegmt)
+    }
+
+    pub(crate) fn format_mail_timestamp(
+        number: Option<&CalendarNumber>,
+        local: bool,
+        usegmt: bool,
+    ) -> Result<Str, Error> {
+        maildates::formatdate(number, local, usegmt)
+    }
+
     pub(crate) fn duration(units: &[CalendarNumber; 7]) -> Result<Self, Error> {
         let mut mask = 0;
         let words = std::array::from_fn(|i| match &units[i] {

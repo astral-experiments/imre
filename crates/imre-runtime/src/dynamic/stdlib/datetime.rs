@@ -23,7 +23,7 @@ const UNITS: [&str; 7] = [
     "weeks",
 ];
 
-fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
+pub(super) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
     ctx.alloc(Value::Calendar { value, tzinfo })
 }
 
@@ -58,7 +58,7 @@ fn zone(ctx: &Context, id: Id) -> Result<Option<Calendar>> {
     })
 }
 
-fn number(ctx: &Context, id: Id) -> Option<CalendarNumber> {
+pub(super) fn number(ctx: &Context, id: Id) -> Option<CalendarNumber> {
     match ctx.heap.get(id) {
         Value::Float(n) => Some(CalendarNumber::Float(*n)),
         Value::Int(n) => Some(CalendarNumber::Int(n.clone())),
