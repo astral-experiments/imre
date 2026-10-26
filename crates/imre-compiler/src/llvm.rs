@@ -5045,7 +5045,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysStdlibModuleNames => {
-                self.call("imre_sys_stdlib_module_names", returns, &[])
+                let names = self.call("imre_sys_stdlib_module_names", returns, &[]);
+                self.check_error();
+                names
             }
             Builtin::SysImplementation => self.tuple(
                 returns,
