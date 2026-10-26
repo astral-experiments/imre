@@ -3,13 +3,14 @@
 import logging
 import os.path
 import sys
-from logging import Formatter, Logger, LogRecord, getLevelNamesMapping
+from logging import Formatter, Logger, LogRecord, getLevelNamesMapping, getLogger
 from imre._logging import _Level, _Lock, _TextOutput, _fallback, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
 from logging import Logger as _AdapterLogger
 
 _default_formatter = Formatter()
+_config_lock = _Lock()
 
 
 def _handle_error(record: LogRecord) -> None:
@@ -238,6 +239,49 @@ def _deliver(logger: Logger, level: int, message: str, path: str, lineno: int) -
             break
         current = current.parent
     _fallback(logger, level, message, found)
+
+
+def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force: bool,
+                  stream: _TextOutput | None, style: str, handlers: list[Handler] | None,
+                  level_name: str | None, default_format: bool, stream_supplied: bool) -> None:
+    with _config_lock:
+        root = getLogger("")
+        if force:
+            for old in root.handlers[:]:
+                root.removeHandler(old)
+                old.close()
+        if root.handlers:
+            return
+        chosen: list[Handler]
+        if handlers is None:
+            chosen = [StreamHandler(stream)]
+        else:
+            if stream_supplied:
+                raise ValueError("'stream' or 'filename' should not be specified together with 'handlers'")
+            chosen = handlers
+        if style != "%" and style != "{" and style != "$":
+            raise ValueError("Style must be one of: %,{,$")
+        if default_format:
+            if style == "%":
+                fmt = "%(levelname)s:%(name)s:%(message)s"
+            elif style == "{":
+                fmt = "{levelname}:{name}:{message}"
+            else:
+                fmt = "${levelname}:${name}:${message}"
+        formatter = Formatter(fmt, datefmt, style)
+        for handler in chosen:
+            if handler.formatter is None:
+                handler.setFormatter(formatter)
+            root.addHandler(handler)
+        if level_name is not None:
+            root.setLevel(level_name)
+        elif level is not None:
+            root.setLevel(level)
+
+
+def _auto_config() -> None:
+    if not getLogger("").handlers:
+        _basic_config(None, None, None, False, None, "%", None, None, True, False)
 
 
 def _logfile_name(filename: str | Path) -> str:

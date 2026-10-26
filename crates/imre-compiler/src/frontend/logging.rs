@@ -2,8 +2,6 @@
 use super::*;
 use ir::LogOperation as Log;
 
-const DEFAULT_FORMAT: &str = "%(levelname)s:%(name)s:%(message)s";
-
 fn operation(op: Log, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -341,46 +339,100 @@ impl Checker<'_> {
         Ok(scope.finish(operation(Log::New, Type::Logger, vec![name, level])))
     }
 
+    /// Invoke the bundled implementation after binding the caller's arguments in source order.
+    fn logging_source_call(
+        &mut self,
+        name: &str,
+        args: ir::CallArgs,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let sig = self
+            .logging_definition(name)
+            .and_then(|def| self.functions.get(&def))
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    &format!("missing native logging function {name}"),
+                )
+            })?;
+        self.calls.insert(sig.id);
+        Ok(self.call_value(sig, Type::None, args))
+    }
+
     pub(super) fn configure_logging(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let level = self.types.optional(Type::Int);
         let string = self.types.optional(Type::Str);
+        let output = self.types.optional(Type::TextOutput);
+        let handler = self
+            .handler_type()
+            .ok_or_else(|| error(self.source, call, "missing logging.Handler"))?;
+        let list = self.types.list(handler);
+        let handlers = self.types.optional(list);
+        let kw = ParameterKind::KeywordOnly;
+        let boolean = |n| Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(n),
+        };
         let params = [
-            parameter("level", level, ParameterKind::KeywordOnly, absent(level)),
-            parameter(
-                "format",
-                string,
-                ParameterKind::KeywordOnly,
-                self.coerce(text(DEFAULT_FORMAT), string, call)?,
-            ),
-            parameter(
-                "datefmt",
-                string,
-                ParameterKind::KeywordOnly,
-                absent(string),
-            ),
-            parameter(
-                "force",
-                Type::Bool,
-                ParameterKind::KeywordOnly,
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Bool(false),
-                },
-            ),
+            parameter("level", level, kw, absent(level)),
+            parameter("format", string, kw, absent(string)),
+            parameter("datefmt", string, kw, absent(string)),
+            parameter("force", Type::Bool, kw, boolean(false)),
+            parameter("stream", output, kw, absent(output)),
+            parameter("style", Type::Str, kw, text("%")),
+            parameter("handlers", handlers, kw, absent(handlers)),
         ];
-        let mut op = Log::Configure;
-        let args = self.arguments_with(call, &params, None, |checker, index, arg| {
+        let mut name = false;
+        let mut args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index == 0 {
                 let value = Self::string_value(checker.expr(arg)?);
                 if value.ty == Type::Str {
-                    op = Log::ConfigureName;
-                    return Ok(value);
+                    name = true;
+                    return checker.coerce(value, string, arg);
                 }
                 return checker.coerce(value, level, arg);
             }
+            if index == 6 && !matches!(arg, ast::Expr::List(_) | ast::Expr::ListComp(_)) {
+                let value = checker.expr(arg)?;
+                // The private helper only reads this list. Preserve the original list and
+                // its evaluation order without widening the caller's mutable list contract.
+                if let (Some(Type::Class(child)), Type::Class(base)) =
+                    (checker.types.element(value.ty), handler)
+                    && checker.classes.declarations.definitions[child]
+                        .bases
+                        .contains(&base)
+                {
+                    let view = Expr {
+                        ty: list,
+                        kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+                    };
+                    return checker.coerce(view, handlers, arg);
+                }
+                return checker.coerce(value, handlers, arg);
+            }
             checker.expr_expected(arg, params[index].ty)
         })?;
-        Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args))
+        let extra = args.values.len();
+        if name {
+            args.order.push(args.order[0]);
+            args.order[0] = extra;
+            args.values.push(absent(level));
+        } else {
+            args.order.push(extra);
+            args.values.push(absent(string));
+        }
+        let supplied = |s| {
+            call.arguments
+                .keywords
+                .iter()
+                .any(|k| k.arg.as_ref().is_some_and(|n| n.as_str() == s))
+        };
+        for flag in [!supplied("format"), supplied("stream")] {
+            args.order.push(args.values.len());
+            args.values.push(boolean(flag));
+        }
+        self.logging_source_call("_basic_config", args, call)
     }
 
     /// Share _checkLevel between global suppression and logger thresholds.
@@ -566,20 +618,11 @@ impl Checker<'_> {
         // Module-level convenience functions install the default handler after
         // evaluating the message arguments, even when the root filters the event.
         if root {
-            let string = self.types.optional(Type::Str);
-            body.push(Statement::Expr(operation(
-                Log::Configure,
-                Type::None,
-                vec![
-                    absent(self.types.optional(Type::Int)),
-                    self.coerce(text(DEFAULT_FORMAT), string, call)?,
-                    absent(string),
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Bool(false),
-                    },
-                ],
-            )));
+            body.push(Statement::Expr(self.logging_source_call(
+                "_auto_config",
+                ir::CallArgs::positional(Vec::new()),
+                call,
+            )?));
         }
         let logger = self.local(clear[0]);
         let level = self.local(clear[1]);

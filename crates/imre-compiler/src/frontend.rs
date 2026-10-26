@@ -2603,6 +2603,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
+        if self.types.payload(expected) == Some(Type::TextOutput)
+            && matches!(
+                self.types.payload(value.ty),
+                Some(Type::CodecWriter | Type::StringIO | Type::TextIO)
+            )
+        {
+            // Optional stream handles share a zero None word and the same rooted object payload.
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
         if matches!(value.ty, Type::CodecWriter | Type::StringIO | Type::TextIO)
             && self.types.payload(expected).unwrap_or(expected) == Type::TextOutput
         {
