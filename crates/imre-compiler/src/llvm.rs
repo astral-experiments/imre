@@ -5126,7 +5126,14 @@ impl Emitter<'_, '_> {
                 match op {
                     Float => self.call("imre_random_float", Type::Float, &[]),
                     Bits => self.call("imre_random_bits", Type::Int, &values),
-                    ChoiceIndex => self.call("imre_random_choice_index", Type::Int, &values),
+                    ChoiceIndex { secure } => {
+                        let symbol = if *secure {
+                            "imre_secrets_choice_index"
+                        } else {
+                            "imre_random_choice_index"
+                        };
+                        self.call(symbol, Type::Int, &values)
+                    }
                     Seed => {
                         let (symbol, params) = match values[0].ty {
                             Type::None => ("imre_random_seed_none", &[][..]),
@@ -5138,11 +5145,12 @@ impl Emitter<'_, '_> {
                         self.void_call(symbol, params);
                         none()
                     }
-                    Randrange | Randint | ChoiceRange | RandrangeOne => {
+                    Randrange | Randint | ChoiceRange { .. } | RandrangeOne => {
                         let mode = match op {
                             Randrange => 0,
                             Randint => 1,
-                            ChoiceRange => 2,
+                            ChoiceRange { secure: false } => 2,
+                            ChoiceRange { secure: true } => 4,
                             RandrangeOne => 3,
                             _ => unreachable!(),
                         };
@@ -9983,6 +9991,7 @@ declare void @imre_random_seed_bytes(ptr)
 declare double @imre_random_float()
 declare i64 @imre_random_bits(i64)
 declare i64 @imre_random_choice_index(i64)
+declare i64 @imre_secrets_choice_index(i64)
 declare i64 @imre_random_progression(i64, i64, i64, i32)
 declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)

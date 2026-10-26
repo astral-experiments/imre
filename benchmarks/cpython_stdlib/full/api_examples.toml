@@ -47,6 +47,7 @@ platform = ["Report the host operating system and machine with `system()` and `m
 posix = ["Read and set supported POSIX user and group IDs; the companion suite is counted under `os`.","benchmarks/cpython_stdlib/full/os/CREDENTIALS.md"]
 posixpath = ["POSIX `os.path` operations on strings and bytes; path tests are counted under `os`.","tests/fixtures/paths/os_path.py"]
 random = ["Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences.","benchmarks/cpython_stdlib/full/shutil/random.md"]
+secrets = ["Draw an unpredictable item from native strings, bytes, lists, homogeneous tuples, or integer ranges with OS randomness.", "tests/fixtures/iterables/secrets_choice.py"]
 re = ["Fixed regular expressions, captures and replacement escapes in `sub`.","benchmarks/cpython_stdlib/README.md"]
 select = ["Wait for readable or writable POSIX file descriptors with `poll` or `select`.","benchmarks/cpython_stdlib/full/select/operations.py"]
 selectors = ["Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes.","tests/fixtures/processes/select_backend.py"]

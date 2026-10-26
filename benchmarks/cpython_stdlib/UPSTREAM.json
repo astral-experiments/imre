@@ -46,6 +46,7 @@
     "Lib/test/test_pkgutil.py": "d4faaaeca0045726ce2c49e61497a6a7640a8115",
     "Lib/test/test_posixpath.py": "21f06712548d888ddf999ae127881420011d881e",
     "Lib/test/test_re.py": "f6e797b3785dbeb21c2e3bd94ebffed10f043b54",
+    "Lib/test/test_secrets.py": "d31d07e01f98ba3c1d9c9d0b948a57dfbc21f8ed",
     "Lib/test/test_shutil.py": "fb1a7d876a617e17bcecbb8d8b654a2a87dafe48",
     "Lib/test/test_subprocess.py": "7e04934c317a91d1f5f1a284929d5f35c9cf5a58",
     "Lib/test/test_sys.py": "0db0369500a7c7c965386bda5646046978fec3c7",

@@ -1017,6 +1017,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_typing_call_stub"
                 | "imre_random_bits"
                 | "imre_random_choice_index"
+                | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
                 | "imre_int_pow"

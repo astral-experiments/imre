@@ -99,6 +99,7 @@ pub(crate) enum IntrinsicModule {
     TomliW,
     Shutil,
     Random,
+    Secrets,
     Sysconfig,
     Signal,
     Opcode,
@@ -414,7 +415,7 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
-    RandomChoice,
+    RandomChoice { secure: bool },
     Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
@@ -505,6 +506,7 @@ impl IntrinsicModule {
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
             "random" => Some(Self::Random),
+            "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
             "_opcode" => Some(Self::Opcode),
@@ -987,7 +989,8 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
-            (Self::Random, "choice") => Intrinsic::RandomChoice,
+            (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
+            (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
             (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
             (Self::Random, "random") => Intrinsic::Random(crate::ir::RandomOperation::Float),
             (Self::Random, "getrandbits") => Intrinsic::Random(crate::ir::RandomOperation::Bits),
