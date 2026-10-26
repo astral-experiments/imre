@@ -52,16 +52,6 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
-                ast::Stmt::Delete(v) => {
-                    for target in &v.targets {
-                        if let ast::Expr::Name(name) = target {
-                            let name = self.text(name.id.as_str());
-                            self.op("delname", &[&self.scope.clone(), &name]);
-                        } else {
-                            self.unsupported("deleting an attribute or item");
-                        }
-                    }
-                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
