@@ -596,6 +596,9 @@ impl Context {
         match self.heap.get_mut(obj) {
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Module {
                 name: module,
                 scope,
@@ -927,6 +930,9 @@ impl Context {
         };
         body_scope.class_body = Some(Vec::new());
         body_scope.class_cell = Some(cell);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;

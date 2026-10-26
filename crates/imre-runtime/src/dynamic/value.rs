@@ -74,6 +74,8 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::Property(_) => "property",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {

@@ -52,6 +52,12 @@ def current():
         except TypeError as exc:
             print(exc.args)
 
+    for name in ("fget", "fset", "fdel"):
+        try:
+            setattr(copy, name, None)
+        except AttributeError as exc:
+            print(exc.args)
+
     class Wrong:
         field = copy.setter(5)
 
