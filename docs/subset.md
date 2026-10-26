@@ -360,7 +360,7 @@ A fixed-layout class can inherit from `collections.abc.Mapping[K, V]` or `typing
 
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
-`urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+`urllib.parse.quote`, `quote_plus`, and `unquote` accept strings or bytes and the native text codecs. `urlencode` accepts concrete dictionaries and sequences of key/value tuples in insertion order. It supports `doseq`, `safe`, `encoding`, `errors`, and the built-in `quote` or `quote_plus` callback. `urlunsplit` reconstructs a URL from a `SplitResult` or a fixed tuple of five strings or five byte strings.
 
 ## Datetime and fixed UTC offsets
 

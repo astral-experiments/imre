@@ -3,16 +3,23 @@ import argparse
 import hashlib
 import http.client
 import json
+import os
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import zipfile
+from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import native_identity
+
+HELLO_PATH = "/hello/" + quote("Málaga <&> 東京") + "?" + urlencode([("suffix", " 'x'\""), ("suffix", "unused")])
 CASES = (
     ("health", "GET", "/health", None),
     ("bigint", "POST", "/total", json.dumps({"values": [2**95, 3, -2]}).encode()),
@@ -43,13 +50,22 @@ def stage(wheelhouse, site):
     return hashes
 
 
-def request(port, method, route, body):
+def request(port, method, route, body, *, jar=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=8)
     try:
         headers = {"Content-Type": "application/json"} if body is not None else {}
+        if jar:
+            headers["Cookie"] = "session=" + jar["session"]
         conn.request(method, route, body, headers)
         response = conn.getresponse()
         data = response.read()
+        if jar is not None:
+            cookies = SimpleCookie(response.getheader("Set-Cookie", ""))
+            token = cookies["session"].value if "session" in cookies else ""
+            parts = token.rsplit(".", 2)
+            if len(parts) != 3 or not all(parts):
+                raise ValueError("expected a signed Flask session cookie")
+            jar["session"] = token
         allow = response.getheader("Allow", "")
         return {
             "status": response.status,
@@ -64,13 +80,17 @@ def request(port, method, route, body):
         conn.close()
 
 
-def exercise(command, work, expected):
+def exercise(command, work, expected, *, prove_binary=None):
     port_file = work / "port"
+    trace = work / "syscalls"
     row = {"outcome": "startup_error", "responses": {}}
     with (work / "stdout").open("wb") as stdout, (work / "stderr").open("wb") as stderr:
         try:
-            process = subprocess.Popen([*command, port_file], cwd=work, stdout=stdout, stderr=stderr)
-        except OSError as exc:
+            if prove_binary is not None:
+                command = native_identity.traced_command(prove_binary, trace)
+            process = subprocess.Popen([*command, port_file], cwd=work, stdout=stdout, stderr=stderr,
+                                       start_new_session=prove_binary is not None)
+        except (OSError, ValueError) as exc:
             return {**row, "error": str(exc)}
         try:
             deadline = time.monotonic() + 20
@@ -80,21 +100,53 @@ def exercise(command, work, expected):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("server did not publish its loopback port")
                 time.sleep(0.02)
+            port = int(port)
+            if prove_binary is not None:
+                row["outcome"] = "native_identity_error"
+                tracer_pid = native_identity.require_attached(process.pid, trace, command[0])
+                row["native_identity"] = native_identity.attest_socket(process.pid, prove_binary, port)
+                row["native_identity"]["tracer_pid"] = tracer_pid
             row["outcome"] = "request_error"
             for name, method, path, body in CASES:
-                row["responses"][name] = request(int(port), method, path, body)
+                row["responses"][name] = request(port, method, path, body)
+            row["responses"]["escaped_hello"] = request(port, "GET", HELLO_PATH, None)
+            jar = {}
+            for name in ("session_first", "session_replay"):
+                row["responses"][name] = request(port, "GET", "/visits", None, jar=jar)
+            prefix, signature = jar["session"].rsplit(".", 1)
+            tampered = {"session": prefix + "." + ("B" if signature.startswith("A") else "A") + signature[1:]}
+            row["responses"]["session_tampered"] = request(port, "GET", "/visits", None, jar=tampered)
+            row["responses"]["session_fresh"] = request(port, "GET", "/visits", None, jar={})
+            if prove_binary is not None:
+                row["outcome"] = "native_identity_error"
+                pids, _ = native_identity.inspect_processes(process.pid, prove_binary)
+                row["native_identity"]["final_pids"] = sorted(pids)
             row["outcome"] = "compare"
         except (OSError, ValueError, http.client.HTTPException, RuntimeError) as exc:
             row["error"] = str(exc)
         finally:
-            process.terminate()
+            if prove_binary is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
+                if prove_binary is not None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
                 process.wait()
     row["stdout"] = (work / "stdout").read_text(errors="replace")
     row["stderr"] = (work / "stderr").read_text(errors="replace")
+    if prove_binary is not None and row["outcome"] == "compare":
+        try:
+            row["native_identity"]["trace"] = native_identity.audit_trace(trace, prove_binary, process.pid)
+        except (OSError, ValueError) as exc:
+            row.update(outcome="native_identity_error", error=str(exc))
     if row["outcome"] == "compare":
         reference = expected["loopback_tcp"]
         mismatch = [k for k in sorted(reference.keys() | row["responses"].keys())
@@ -107,7 +159,7 @@ def exercise(command, work, expected):
     return row
 
 
-def native(compiler, runtime, site, work, expected, opt, reachable):
+def native(compiler, runtime, site, work, expected, opt, reachable, *, prove=False):
     binary = work / "server"
     command = [compiler, "build", site / "serve.py", "--module-root", site,
                "--runtime", runtime, "--opt-level", str(opt), "-o", binary]
@@ -120,7 +172,7 @@ def native(compiler, runtime, site, work, expected, opt, reachable):
     build = {"status": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
     if p.returncode:
         return {"outcome": "compile_error", "build": build}
-    return {"build": build, **exercise([binary], work, expected)}
+    return {"build": build, **exercise([binary], work, expected, prove_binary=binary if prove else None)}
 
 
 def main():
@@ -128,6 +180,7 @@ def main():
     parser.add_argument("--wheelhouse", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--reference-only", action="store_true")
+    parser.add_argument("--prove-native", action="store_true", help="attest the native executable, sockets and process tree on Linux")
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
     args = parser.parse_args()
@@ -136,6 +189,8 @@ def main():
         parser.error(f"run the gate with CPython {expected['python']}")
     if not args.reference_only and not (args.compiler and args.runtime):
         parser.error("supply --compiler and --runtime, or explicitly select --reference-only")
+    if args.prove_native and args.reference_only:
+        parser.error("--prove-native requires a native compiler and runtime")
     report = {"python": sys.version.split()[0], "app_sha256": digest(HERE / "tiny_flask_app.py"), "modes": {}}
     if report["app_sha256"] != expected["app_sha256"]:
         parser.error("the app differs from the recorded reference")
@@ -167,7 +222,16 @@ def main():
                     mode = f"{'reachable' if reachable else 'normal'}-O{opt}"
                     work = root / mode
                     work.mkdir()
-                    report["modes"][mode] = native(compiler, runtime, site, work, expected, opt, reachable)
+                    row = native(compiler, runtime, site, work, expected, opt, reachable, prove=args.prove_native)
+                    report["modes"][mode] = row
+                    if args.prove_native:
+                        row["verified_native_responses"] = len(row["responses"]) if row["outcome"] == "pass" else 0
+                    if args.prove_native and (trace := work / "syscalls").is_file():
+                        directory = args.output.parent / (args.output.stem + "-traces")
+                        directory.mkdir(parents=True, exist_ok=True)
+                        copy = directory / (mode + ".strace")
+                        shutil.copyfile(trace, copy)
+                        row["trace_file"] = str(copy.relative_to(args.output.parent))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     for name, row in report["modes"].items():
