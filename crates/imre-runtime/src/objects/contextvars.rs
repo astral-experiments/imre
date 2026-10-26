@@ -142,9 +142,16 @@ impl ReprView {
         }
     }
 
-    pub(super) fn write(self, out: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+    /// Expand a default or token key on the formatter's checked task stack.
+    ///
+    /// # Safety
+    /// This view's exact Context, ContextVar, or Token owner must still be rooted.
+    pub(super) unsafe fn begin(
+        self,
+        out: &mut values::ReprWriter<'_>,
+    ) -> Result<Option<(usize, WordKind, ReprEnd)>, std::fmt::Error> {
         match self {
-            Self::Context(owner) => write!(out, "<_contextvars.Context object at {owner:p}>"),
+            Self::Context(owner) => write!(out, "<_contextvars.Context object at {owner:p}>")?,
             Self::Var(owner, var) => {
                 let key = owner as usize;
                 let inserted = REPR.with_borrow_mut(|seen| {
@@ -155,38 +162,70 @@ impl ReprView {
                     Ok(seen.insert(key))
                 })?;
                 if !inserted {
-                    return out.write_str("...");
+                    out.write_str("...")?;
+                    return Ok(None);
                 }
-                let result = (|| {
-                    out.write_str("<ContextVar name=")?;
-                    super::exceptions::write_quoted_repr(&var.name, out)?;
-                    if let Some(value) = &var.default {
-                        out.write_str(" default=")?;
-                        // SAFETY: the variable roots its default throughout formatting.
-                        unsafe { values::try_write_unchecked_repr(out, value.word, value.kind) }?;
-                    }
-                    write!(out, " at {owner:p}>")
-                })();
-                REPR.with_borrow_mut(|seen| seen.remove(&key));
-                result
+                // SAFETY: this view was obtained from the rooted, exact ContextVar.
+                let tail = ReprEnd {
+                    owner: unsafe { crate::ObjectOwner::acquire_word(owner as usize) },
+                    key: Some(key),
+                };
+                out.write_str("<ContextVar name=")?;
+                super::exceptions::write_quoted_repr(&var.name, out)?;
+                if let Some(value) = &var.default {
+                    out.write_str(" default=")?;
+                    return Ok(Some((value.word, value.kind, tail)));
+                }
+                tail.write(out)?;
             }
-            Self::Tok(owner, t) => {
-                out.write_str(if t.used.get() {
+            Self::Tok(owner, token) => {
+                out.write_str(if token.used.get() {
                     "<Token used var="
                 } else {
                     "<Token var="
                 })?;
-                write_description(&t.key, out)?;
-                write!(out, " at {owner:p}>")
+                // SAFETY: this view was obtained from the rooted, exact Token.
+                let tail = ReprEnd {
+                    owner: unsafe { crate::ObjectOwner::acquire_word(owner as usize) },
+                    key: None,
+                };
+                return Ok(Some((
+                    crate::ObjectOwner::as_ptr(&token.key) as usize,
+                    WordKind::new(5),
+                    tail,
+                )));
             }
-            Self::Missing => out.write_str("<Token.MISSING>"),
+            Self::Missing => out.write_str("<Token.MISSING>")?,
+        }
+        Ok(None)
+    }
+}
+
+pub(super) struct ReprEnd {
+    // Keeps the default or token key alive until its representation is complete.
+    owner: crate::ObjectOwner,
+    key: Option<usize>,
+}
+
+impl ReprEnd {
+    pub(super) fn write(self, out: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+        write!(out, " at {:p}>", crate::ObjectOwner::as_ptr(&self.owner))
+    }
+}
+
+impl Drop for ReprEnd {
+    fn drop(&mut self) {
+        if let Some(key) = self.key {
+            REPR.with_borrow_mut(|seen| seen.remove(&key));
         }
     }
 }
+
 fn write_description(obj: &Object, out: &mut values::ReprWriter<'_>) -> std::fmt::Result {
-    // SAFETY: the caller roots obj. Leave its storage before nested repr can run.
-    let view = unsafe { obj.0.with(|s| repr_view(obj, s)) };
-    view.write(out)
+    // SAFETY: the caller roots the exact ContextVar or Token throughout formatting.
+    unsafe {
+        values::try_write_unchecked_repr(out, obj as *const Object as usize, WordKind::new(5))
+    }
 }
 fn description(obj: &Object) -> Result<String, Error> {
     let mut out = String::new();

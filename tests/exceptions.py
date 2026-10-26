@@ -24,6 +24,32 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "deep_context_default_repr": """
+from contextvars import Context, ContextVar
+n = 3000
+rows: list[list[object]] = []
+keys: list[object] = []
+ctx = Context()
+for _ in range(n):
+    items: list[object] = []
+    var = ContextVar("deep", default=items)
+    rows.append(items)
+    try:
+        ctx[var]
+    except KeyError as missing:
+        keys.append(missing.args[0])
+for i in range(n - 1):
+    rows[i].append(keys[i + 1])
+
+try:
+    text = repr(keys[0])
+except RecursionError:
+    print("recursion limit")
+else:
+    print(len(text) > 40 * n)
+for row in rows:
+    row.clear()
+""",
     "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
