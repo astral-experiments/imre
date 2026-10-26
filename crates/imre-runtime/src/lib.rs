@@ -94,11 +94,18 @@ impl Int {
         Self(Shared::into_raw(Shared::new(value)) as usize)
     }
 
+    fn try_new(value: BigInt) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
+        if let Some(small) = value.to_i64().and_then(Self::small) {
+            return Ok(small);
+        }
+        Shared::try_new(value).map(|owner| Self(Shared::into_raw(owner) as usize))
+    }
+
     fn try_from_i64(value: i64) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
         if let Some(small) = Self::small(value) {
             return Ok(small);
         }
-        Shared::try_new(BigInt::from(value)).map(|owner| Self(Shared::into_raw(owner) as usize))
+        Self::try_new(BigInt::from(value))
     }
 
     fn small(value: i64) -> Option<Self> {
@@ -1114,16 +1121,18 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
     finish(
-        parse_decimal_int(original)
-            .map(Int::into_raw)
-            .ok_or_else(|| integer_text::invalid_literal(original)),
+        parse_decimal_int(original).and_then(|value| {
+            value
+                .map(Int::into_raw)
+                .ok_or_else(|| integer_text::invalid_literal(original))
+        }),
         1,
     )
 }
 
 /// Parses a decimal integer without setting a pending Python exception. Callers
 /// such as argparse can report conversion failures in their own error context.
-fn parse_decimal_int(original: &str) -> Option<Int> {
+fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
     let source = original.trim();
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
@@ -1131,7 +1140,7 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
     if let Ok(value) = source.parse::<i64>()
         && let Some(value) = Int::small(value)
     {
-        return Some(value);
+        return Ok(Some(value));
     }
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -1141,13 +1150,16 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
             if character.is_ascii() {
                 normalized.push(character);
             } else {
-                normalized.push(char::from(b'0' + integer_text::decimal_digit(character)?));
+                let Some(digit) = integer_text::decimal_digit(character) else {
+                    return Ok(None);
+                };
+                normalized.push(char::from(b'0' + digit));
             }
         }
         if let Ok(value) = normalized.parse::<i64>()
             && let Some(value) = Int::small(value)
         {
-            return Some(value);
+            return Ok(Some(value));
         }
         Cow::Owned(normalized)
     };
@@ -1158,9 +1170,12 @@ fn parse_decimal_int(original: &str) -> Option<Int> {
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        return None;
+        return Ok(None);
     }
-    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10).map(Int::new)
+    BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
+        .map(Int::try_new)
+        .transpose()
+        .map_err(|_| Error::allocation())
 }
 
 #[unsafe(no_mangle)]

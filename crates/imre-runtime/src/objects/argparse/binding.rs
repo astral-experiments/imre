@@ -61,7 +61,7 @@ pub(super) enum Scalar<'a> {
 }
 
 impl<'a> Scalar<'a> {
-    fn convert(option: &OptionSpec, text: &'a str) -> Result<Self, String> {
+    fn convert(parser: &'a Parser, option: &OptionSpec, text: &'a str) -> Result<Self, Stop<'a>> {
         let value = match option.kind {
             Kind::Str | Kind::Path | Kind::Class => Some(Self::Text(text)),
             Kind::Int => {
@@ -74,18 +74,23 @@ impl<'a> Scalar<'a> {
                 {
                     None
                 } else {
-                    parse_decimal_int(text).map(Self::Int)
+                    parse_decimal_int(text)
+                        .map_err(Stop::Exception)?
+                        .map(Self::Int)
                 }
             }
             Kind::Float => floats::parse(text).map(Self::Float),
             Kind::Bool => unreachable!(),
         };
         value.ok_or_else(|| {
-            format!(
-                "argument {}: invalid {} value: {}",
-                option.error_name(),
-                option.converter.as_deref().unwrap(),
-                string_repr(text)
+            Stop::Error(
+                parser,
+                format!(
+                    "argument {}: invalid {} value: {}",
+                    option.error_name(),
+                    option.converter.as_deref().unwrap(),
+                    string_repr(text)
+                ),
             )
         })
     }
@@ -178,7 +183,10 @@ impl OptionSpec {
                 None => self
                     .default
                     .as_deref()
-                    .and_then(parse_decimal_int)
+                    .map(parse_decimal_int)
+                    .transpose()
+                    .map_err(Stop::Exception)?
+                    .flatten()
                     .unwrap_or_else(|| Int::from_usize(0)),
                 _ => unreachable!("count produces integers"),
             };
@@ -218,7 +226,7 @@ impl OptionSpec {
             let mut values = Vec::new();
             values.try_reserve_exact(args.len())?;
             for argument in args {
-                values.push(Scalar::convert(self, argument).map_err(invalid)?);
+                values.push(Scalar::convert(parser, self, argument)?);
             }
             for value in &values {
                 value.check(self).map_err(invalid)?;
@@ -236,9 +244,13 @@ impl OptionSpec {
             return Ok(Bound::Absent);
         };
         let value = if literal_integer {
-            Scalar::Int(parse_decimal_int(text).expect("canonical integer literal"))
+            Scalar::Int(
+                parse_decimal_int(text)
+                    .map_err(Stop::Exception)?
+                    .expect("canonical integer literal"),
+            )
         } else {
-            Scalar::convert(self, text).map_err(invalid)?
+            Scalar::convert(parser, self, text)?
         };
         if check {
             value.check(self).map_err(invalid)?;
