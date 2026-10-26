@@ -59,6 +59,33 @@ pub(super) fn decimal_digits_allowed(count: usize) -> bool {
     limit == 0 || count <= limit as usize
 }
 
+/// Enforces the limit on a validated, unsigned ASCII digit sequence with optional separators.
+pub(super) fn check_input_digits(digits: &str, limit: u32) -> crate::Result<()> {
+    if limit == 0 || digits.len() <= limit as usize {
+        return Ok(());
+    }
+    let count = digits.bytes().filter(u8::is_ascii_digit).count();
+    if count <= limit as usize {
+        return Ok(());
+    }
+    let (mut limit_buf, mut count_buf) = (itoa::Buffer::new(), itoa::Buffer::new());
+    let parts = [
+        "Exceeds the limit (",
+        limit_buf.format(limit),
+        " digits) for integer string conversion: value has ",
+        count_buf.format(count),
+        " digits; use sys.set_int_max_str_digits() to increase the limit",
+    ];
+    let mut detail = String::new();
+    detail
+        .try_reserve_exact(parts.iter().map(|part| part.len()).sum())
+        .map_err(|_| Error::allocation())?;
+    for part in parts {
+        detail.push_str(part);
+    }
+    Err(Error::new(Kind::ValueError, detail))
+}
+
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     let limit = decimal_limit();
