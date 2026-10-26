@@ -190,6 +190,7 @@ pub(super) enum Value {
         class: Option<&'static str>,
         names: Vec<String>,
         values: Vec<Id>,
+        extras: Vec<(&'static str, Id)>,
     },
     Set(Vec<Id>),
     Dict(Vec<(Id, Id)>),
@@ -292,11 +293,13 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v)
-            | Self::Tuple(v)
-            | Self::Set(v)
-            | Self::NamedTuple { values: v, .. }
-            | Self::Iterator { values: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) | Self::Iterator { values: v, .. } => {
+                visit.extend(v)
+            }
+            Self::NamedTuple { values, extras, .. } => {
+                visit.extend(values);
+                visit.extend(extras.iter().map(|&(_, id)| id));
+            }
             Self::Dict(entries) => {
                 for (key, value) in entries {
                     visit.extend([*key, *value]);

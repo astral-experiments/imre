@@ -22,9 +22,6 @@ const UNITS: [&str; 7] = [
     "hours",
     "weeks",
 ];
-const TM: [&str; 9] = [
-    "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
-];
 
 fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
     ctx.alloc(Value::Calendar { value, tzinfo })
@@ -282,12 +279,8 @@ pub(super) fn call(
                 "toordinal" => ctx.int(value.ordinal()),
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
-                    let values = value.timetuple().map(|n| ctx.int(n)).into();
-                    ctx.alloc(Value::NamedTuple {
-                        class: Some("time.struct_time"),
-                        names: TM.map(str::to_owned).into(),
-                        values,
-                    })
+                    let values = value.timetuple().map(|n| ctx.int(n));
+                    super::time::struct_time(ctx, values.into(), NONE, NONE)
                 }
                 _ => unreachable!(),
             })
