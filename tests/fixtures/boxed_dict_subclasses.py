@@ -117,6 +117,25 @@ def current():
     except KeyError as error:
         print(received, error.args)
 
+    class MutableKeys:
+        def __init__(self, as_view):
+            self.names = [("first", 1), ("before", 2)]
+            self.by_index = {0: self.names[0], 1: self.names[1]}
+            self.as_view = as_view
+
+        def keys(self):
+            return self.by_index.values() if self.as_view else self.names
+
+        def __getitem__(self, key):
+            if key[0] == "first":
+                self.names[1] = ("after", 3)
+                self.by_index[1] = self.names[1]
+                for _ in range(6000):
+                    []
+            return key[1]
+
+    print(dict(MutableKeys(False)), dict(MutableKeys(True)))
+
     def only_view():
         owner = Data(held=["live"])
         return owner.items()

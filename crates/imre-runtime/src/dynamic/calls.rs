@@ -61,7 +61,16 @@ impl Context {
             Err(error) => return Err(error),
         };
         let result = self.call(keys, Vec::new(), Vec::new())?;
-        for key in self.items(result)? {
+        // PyMapping_Keys keeps an exact list returned by keys() and materializes other results.
+        let keys = if matches!(self.heap.get(result), Value::List(_)) {
+            result
+        } else {
+            let items = self.items(result)?;
+            self.alloc(Value::List(items))
+        };
+        let iterator = self.iterator(keys)?;
+        while let Some(key) = self.next_item(iterator)? {
+            self.heap.keep(key);
             let value = self.get_item(input, key)?;
             visit(self, key, value)?;
         }
