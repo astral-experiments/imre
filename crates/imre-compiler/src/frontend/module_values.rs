@@ -193,7 +193,12 @@ impl Checker<'_> {
                 Some(ClassValue::Runtime { owner, ordinal: at })
                     if *owner == definition && *at == ordinal =>
                 {
-                    if class_scoped_child(&assign.value) {
+                    if class_scoped_child(&assign.value)
+                        && !(matches!(&*assign.value, ast::Expr::DictComp(_))
+                            && !ast::helpers::any_over_expr(&assign.value, |expr| {
+                                expr.as_name_expr().is_some_and(|n| self.class_lexical.contains(n.id.as_str()) || n.id == "__class__")
+                            }))
+                    {
                         return Err(error(
                             self.source,
                             assign.value.as_ref(),
@@ -317,11 +322,15 @@ fn class_data_type(ty: Type, types: &Types) -> bool {
         | Type::Float
         | Type::Str
         | Type::Bytes
+        | Type::IntEnum(_)
         | Type::ListInt => true,
         Type::List(_) => types.element(ty).is_some_and(|t| class_data_type(t, types)),
         Type::Set(_) => types
             .set_element(ty)
             .is_some_and(|t| class_data_type(t, types)),
+        Type::Tuple(_) if types.tuple_origin(ty).is_none() => types.fields(ty)
+            .is_some_and(|fields| fields.into_iter().all(|t| class_data_type(t, types))),
+        Type::Optional(_) => types.payload(ty).is_some_and(|t| class_data_type(t, types)),
         Type::Dict(_) => types
             .mapping(ty)
             .is_some_and(|(k, v)| class_data_type(k, types) && class_data_type(v, types)),

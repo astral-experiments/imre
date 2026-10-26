@@ -102,6 +102,7 @@ mod sequences;
 mod shutil;
 mod sign_parameters;
 mod single_dispatch;
+mod http_server;
 mod socket;
 mod stdlib;
 mod string_io;
@@ -1191,6 +1192,7 @@ fn lower_body(
     let module = &checker.graph.modules[checker.module];
     let classes = checker.classes;
     let types = checker.types;
+    checker.positional_pack = definition.parameters.vararg.as_deref().map(|p| p.name.to_string());
     checker.consuming_lists = consuming_lists::find(&definition.body);
     checker.joined_lines = joined_lines::find(&definition.body);
     checker.returns = signature.returns;
@@ -2282,6 +2284,7 @@ struct Checker<'a> {
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
     local_iter: bool,
+    positional_pack: Option<String>,
     context_method: bool,
     fixed_tuple: Option<fixed_tuples::Call>,
     generator_item: Option<Type>,
@@ -2354,6 +2357,7 @@ impl<'a> Checker<'a> {
         Self {
             interactive_names: false,
             local_iter: false,
+            positional_pack: None,
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
@@ -5531,6 +5535,12 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if binary.op == ast::Operator::Mod && left.ty == Type::Str
+            && self.types.element(right.ty) == Some(Type::ObjectValue)
+            && binary.right.as_name_expr().is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+        {
+            return Ok(Expr { ty: Type::Str, kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]) });
+        }
         if binary.op == ast::Operator::Add
             && (self.types.payload(left.ty) == Some(Type::Int)
                 || self.types.payload(right.ty) == Some(Type::Int))
@@ -5608,7 +5618,8 @@ impl<'a> Checker<'a> {
         }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty))
+            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty)
+                || (matches!(right.ty, Type::Dict(_)) && self.types.mapping(right.ty) == Some((Type::Str, Type::ObjectValue))))
         {
             return Ok(Expr {
                 ty: Type::Str,
@@ -6868,7 +6879,9 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
-                if self.mapping_class(list.ty).is_some() {
+                if self.mapping_class(list.ty).is_some()
+                    || matches!(list.ty, Type::Class(class) if self.classes.methods[class].contains_key("__getitem__"))
+                {
                     let key = self.expr(&subscript.slice)?;
                     return self.record_primitive(list, "__getitem__", &[key], expression);
                 }
@@ -7723,6 +7736,10 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(method) = self.request_method_lookup(call)? {
+            return Ok(method);
+        }
+
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
@@ -8342,6 +8359,17 @@ impl<'a> Checker<'a> {
                 return self.typed_expr(value);
             }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
+            Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
+                let params = [Parameter {
+                    name: "name".into(),
+                    ty: Type::Str,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: Some(Expr { ty: Type::Str, kind: ExprKind::Str(String::new()) }),
+                    sign_only: false,
+                }];
+                let args = self.arguments(call, &params, None)?;
+                return Ok(self.ordered_builtin(Builtin::Socket(ir::SocketOp::GetFqdn), Type::Str, args));
+            }
             Some(Binding::Intrinsic(Intrinsic::Socket)) => return self.socket_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
                 return self.codec_getwriter(call);

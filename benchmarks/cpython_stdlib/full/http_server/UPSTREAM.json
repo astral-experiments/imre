@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_httpservers",
+  "resources": [
+    "network"
+  ],
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/http/server.py": "ac1f57c29f06ff7de8219cf243a3a8f6d5dd9053",
+    "Lib/http/client.py": "6fb7d254ea9c27349123b2551602c91175687d54",
+    "Lib/test/test_httpservers.py": "7b58c5ef55b3379ea33a5e78428a88c98b5e67ec"
+  }
+}

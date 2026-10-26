@@ -244,7 +244,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::TimeSleep
+            Self::ClockParts(_) | Self::TimeSleep
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }

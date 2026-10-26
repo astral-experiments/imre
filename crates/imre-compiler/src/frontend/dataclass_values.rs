@@ -32,7 +32,8 @@ impl Checker<'_> {
             return true;
         }
         match ty {
-            Type::Float
+            Type::Exception
+            | Type::Float
             | Type::ListInt
             | Type::Path
             | Type::PurePath(_)

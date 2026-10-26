@@ -423,6 +423,13 @@ impl Reachable {
                                 || (source.is_bundled("selectors")
                                     && class.name.as_str() == "PollSelector"
                                     && name == "close")
+                                || ((name.starts_with("do_") || name == "__getattr__")
+                                    && has_base(graph, id, |module, base| {
+                                        let Some(Binding::Definition(def)) = graph.resolve(module, base) else { return false; };
+                                        let source = &graph.modules[def.module];
+                                        source.is_bundled("socketserver") && matches!(&source.parsed.syntax().body[def.statement],
+                                            ast::Stmt::ClassDef(c) if c.name.as_str() == "StreamRequestHandler")
+                                    }))
                                 || refs.found.attributes.contains(name)
                                 || matches!(
                                     name,
@@ -432,6 +439,7 @@ impl Reachable {
                                         | "__bool__"
                                         | "__fspath__"
                                         | "__iter__"
+                                        | "__getitem__"
                                         | "__str__"
                                 )
                                 || (matches!(name, "__getitem__" | "__len__" | "__contains__")

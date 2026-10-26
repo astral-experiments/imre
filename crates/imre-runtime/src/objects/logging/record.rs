@@ -421,13 +421,21 @@ impl Record {
 /// decide whether an empty argument tuple bypasses formatting (only LogRecord does that).
 fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
     let tuple = tuple_len(args);
-    let mut positional = (0..tuple.unwrap_or(1)).map(|i| {
+    let positional = (0..tuple.unwrap_or(1)).map(|i| {
         if tuple.is_some() {
             tuple_item(args, i)
         } else {
             args.clone()
         }
     });
+    format_operands(msg, positional, is_dict(args).then_some(args))
+}
+
+fn format_operands(
+    msg: &str,
+    mut positional: impl ExactSizeIterator<Item = OwnedWord>,
+    mapping: Option<&OwnedWord>,
+) -> Result<String> {
     let mut out = String::new();
     let mut input = msg;
     while let Some((literal, rest)) = input.split_once('%') {
@@ -438,14 +446,14 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
             continue;
         }
         let (piece, tail) = if let Some(rest) = rest.strip_prefix('(') {
-            if !is_dict(args) {
+            let Some(mapping) = mapping else {
                 return Err(Error::new(Kind::TypeError, "format requires a mapping"));
-            }
+            };
             let (key, rest) = mapping_key(rest)?;
             // A named conversion replaces the sole positional mapping with
             // the looked-up value. Later named conversions can still use args.
             let _ = positional.next();
-            percent_value_in(rest, &mut std::iter::once(dict_item(args, key)?), Some(msg))?
+            percent_value_in(rest, &mut std::iter::once(dict_item(mapping, key)?), Some(msg))?
         } else {
             percent_value_in(rest, &mut positional, Some(msg))?
         };
@@ -456,7 +464,7 @@ fn format_arguments(msg: &str, args: &OwnedWord) -> Result<String> {
         }
         input = tail;
     }
-    if !is_dict(args) && positional.len() != 0 {
+    if mapping.is_none() && positional.len() != 0 {
         return Err(Error::new(
             Kind::TypeError,
             "not all arguments converted during string formatting",
@@ -540,9 +548,20 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
 }
 
+fn unpack_object(value: OwnedWord) -> OwnedWord {
+    if value.kind.raw() == 5 && value.word != 0 {
+        // SAFETY: a kind-five owner roots this object; clone a boxed field inside the borrow.
+        if let Some(field) = unsafe { object(value.word as *const Object).0.with(|s| match s {
+            Storage::ObjectValue(field) => Some(field.clone()),
+            _ => None,
+        }) } { return field; }
+    }
+    value
+}
+
 /// Fetch a format operand at the point CPython consumes its width, precision or value.
 fn next_argument(args: &mut impl Iterator<Item = OwnedWord>) -> Result<OwnedWord> {
-    args.next()
+    args.next().map(unpack_object)
         .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))
 }
 
@@ -1089,6 +1108,30 @@ pub unsafe extern "C" fn imre_str_percent_int(fmt: *const Str, integer: usize) -
 pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str) -> *const Str {
     // SAFETY: the caller roots the format and the exact string allocation.
     unsafe { percent(&*fmt, WordKind::new(3).acquire(text as usize)) }
+}
+
+/// # Safety
+/// The second operand is the rooted sequence carrying the function's positional pack.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_pack(fmt: &Str, pack: &Object) -> *const Str {
+    // SAFETY: the formatter retains values without mutating the rooted pack.
+    let rendered = unsafe { pack.0.with(|storage| {
+        let sequence = storage.sequence();
+        let items = sequence.values.iter().map(|&word| {
+            // SAFETY: every value is rooted by the pack at its declared element kind.
+            sequence.kind.acquire(word)
+        });
+        format_operands(fmt.as_str(), items, None)
+    }) };
+    finish(rendered.and_then(|s| crate::checked_owned_str(Str::from(s))), std::ptr::null())
+}
+
+/// # Safety
+/// The caller roots the format and exact dictionary throughout the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_percent_dict(fmt: &Str, dict: *const Object) -> *const Str {
+    // SAFETY: kind five retains the rooted dictionary through named lookups.
+    unsafe { percent(fmt, WordKind::new(5).acquire(dict as usize)) }
 }
 
 /// Format the positional items of an exact tuple with the log-record formatter.

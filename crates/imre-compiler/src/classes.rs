@@ -355,16 +355,19 @@ fn collect_class(
                 .map(|n| n.id.as_str()),
             _ => None,
         };
-        if member.is_some_and(|name| {
-            base.and_then(|(_, b)| b.static_bindings.get(name))
-                .is_some_and(|binding| {
-                    !matches!(
-                        (binding, statement),
-                        (ClassValue::Runtime { .. }, ast::Stmt::Assign(_))
-                    )
-                })
-        }) {
-            return Err(module.error(statement, "overriding a fixed class binding is unsupported"));
+        if let Some(name) = member
+            && let Some(binding) = base.and_then(|(_, parent)| parent.static_bindings.get(name))
+        {
+            match (binding, statement) {
+                (ClassValue::Runtime { .. }, ast::Stmt::Assign(_)) => {}
+                (ClassValue::String(_), ast::Stmt::Assign(assign))
+                    if matches!(&*assign.value, ast::Expr::StringLiteral(_)) => {}
+                (ClassValue::String(_) | ClassValue::Runtime { .. }, ast::Stmt::FunctionDef(method))
+                    if method_kind(graph, definition.module, method, &class_bindings)? == MethodKind::Property => {
+                        static_bindings.remove(name);
+                    }
+                _ => return Err(module.error(statement, "overriding a fixed class binding is unsupported")),
+            }
         }
         match statement {
             ast::Stmt::Assign(member) if let Some(members) = &mut enum_members => {
@@ -497,10 +500,10 @@ fn collect_class(
                     && node.name.as_str() == "PollSelector"
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__fspath__" | "__setitem__")
+                    && !matches!(name, "__init__" | "__fspath__" | "__getitem__" | "__setitem__")
                     && !unary_protocol
                     && !selector_context
-                    && !(mapping && matches!(name, "__getitem__" | "__contains__"))
+                    && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
                     && !(module.is_bundled("socketserver")
                         && node.name.as_str() == "TCPServer"
@@ -965,6 +968,8 @@ fn class_static_binding(
                 None
             }
         }
+        (false, Binding::Definition(id))
+            if matches!(graph.modules[id.module].parsed.syntax().body[id.statement], ast::Stmt::ClassDef(_)) => Some(binding),
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(

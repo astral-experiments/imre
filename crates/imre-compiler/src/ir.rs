@@ -248,6 +248,7 @@ pub(crate) enum TypingOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
+    GetFqdn,
     New,
     Bind,
     Listen,
@@ -977,6 +978,7 @@ pub(crate) enum Builtin {
     /// Evaluates and roots all arguments, then raises the last (an exception).
     RaiseException,
     WallTime,
+    ClockParts(bool),
     TimeSleep,
     WarningFilter {
         category: u32,
