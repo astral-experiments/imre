@@ -615,8 +615,31 @@ impl Checker<'_> {
             ),
             _ => unreachable!("only supported text methods reach this binder"),
         };
-        let arguments = self.arguments(call, &parameters, Some(receiver))?;
+        let arguments =
+            self.arguments_with(call, &parameters, Some(receiver), |checker, i, arg| {
+                let parameter = &parameters[i];
+                if name == "find" && parameter.name == "start" {
+                    checker.find_start(arg, parameter.ty)
+                } else {
+                    checker.direct_argument(arg, parameter.ty, parameter.sign_only)
+                }
+            })?;
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
+    }
+
+    /// Check each search bound with the expected integer type, including conditional arms.
+    fn find_start(&mut self, node: &ast::Expr, optional: Type) -> Result<Expr, String> {
+        if let ast::Expr::If(branch) = node {
+            let value = self.conditional_with(branch, false, |checker, arm| {
+                checker.find_start(arm, optional)
+            })?;
+            return self.coerce(value, optional, node);
+        }
+        let value = self.expr_expected_if(node, optional, |checker, ty| {
+            matches!(checker.types.payload(ty).unwrap_or(ty), Type::IntEnum(_))
+        })?;
+        let value = self.optional_enum_integer(value, node)?;
+        self.coerce(value, optional, node)
     }
 
     /// CPython turns a missing or incompatible split('\n') into a catchable TypeError.
