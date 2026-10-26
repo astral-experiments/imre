@@ -2,6 +2,9 @@ use super::*;
 
 impl Context {
     fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if matches!(self.heap.get(class), Value::Native(kind) if kind == "dict") {
+            return self.builtins.get(&format!("dict.{name}")).copied();
+        }
         let Value::Class { scope, bases, .. } = self.heap.get(class) else {
             return None;
         };
@@ -18,6 +21,47 @@ impl Context {
             return None;
         };
         self.class_attr(*class, name)
+    }
+
+    /// Dict copying uses raw entries for a dict with its original iterator.
+    /// An overridden iterator opts into the mapping protocol, including key lookup.
+    pub(super) fn for_each_mapping_item(
+        &mut self,
+        input: Id,
+        mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
+    ) -> Result<bool> {
+        if self.slot(input, "__iter__").is_none_or(
+            |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
+        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
+        {
+            for (key, value) in entries {
+                visit(self, key, value)?;
+            }
+            return Ok(true);
+        }
+        if matches!(
+            self.heap.get(input),
+            Value::List(_)
+                | Value::Tuple(_)
+                | Value::Set(_)
+                | Value::Str(_)
+                | Value::Bytes(_)
+                | Value::Range { .. }
+                | Value::Iterator { .. }
+        ) {
+            return Ok(false);
+        }
+        let keys = match self.lookup_attr(input, "keys") {
+            Ok(keys) => keys,
+            Err(error) if error.kind == "AttributeError" => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let result = self.call(keys, Vec::new(), Vec::new())?;
+        for key in self.items(result)? {
+            let value = self.get_item(input, key)?;
+            visit(self, key, value)?;
+        }
+        Ok(true)
     }
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
@@ -60,7 +104,7 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
-                Value::Native(name) => name == "object.__setattr__",
+                Value::Native(name) => name == "object.__setattr__" || name.starts_with("dict."),
                 _ => false,
             };
             if method {
@@ -242,6 +286,7 @@ impl Context {
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
             | ("hmac.HMAC", Value::Hmac(_))
+            | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -277,10 +322,23 @@ impl Context {
                     || (name == "ValueError" && kind == "JSONDecodeError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
+                    || (matches!(name.as_str(), "OSError" | "ConnectionError")
+                        && matches!(
+                            kind,
+                            "BrokenPipeError"
+                                | "ConnectionRefusedError"
+                                | "ConnectionResetError"
+                                | "ConnectionAbortedError"
+                        ))
                     || (name == "OSError"
                         && matches!(
                             kind,
-                            "FileNotFoundError" | "PermissionError" | "IsADirectoryError"
+                            "FileNotFoundError"
+                                | "PermissionError"
+                                | "IsADirectoryError"
+                                | "BlockingIOError"
+                                | "TimeoutError"
+                                | "socket.gaierror"
                         ))
                     || self
                         .classes
@@ -311,6 +369,32 @@ impl Context {
                 "keywords" => return Ok(keywords),
                 _ => {}
             },
+            Value::File(handle) if name == "closed" => {
+                return Ok(if handle.borrow().is_none() {
+                    TRUE
+                } else {
+                    FALSE
+                });
+            }
+            Value::Native(class) if class == "socket.socket" && name == "__name__" => {
+                return Ok(self.text("socket"));
+            }
+            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::Raised(Error {
+                os_args: Some(args),
+                ..
+            }) if matches!(name, "errno" | "strerror" | "args") => {
+                let (code, description) = *args;
+                return Ok(match name {
+                    "errno" => self.int(code),
+                    "strerror" => self.text(description),
+                    _ => {
+                        let fields = vec![self.int(code), self.text(description)];
+                        self.alloc(Value::Tuple(fields))
+                    }
+                });
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -349,6 +433,11 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "dict" => {
+                if let Some(method) = self.class_attr(obj, name) {
+                    return Ok(method);
+                }
+            }
             Value::Native(class) if class == "object" && name == "__setattr__" => {
                 return Ok(self.builtin("object.__setattr__"));
             }
@@ -375,7 +464,7 @@ impl Context {
                     return self.bind_attribute(value, NONE, obj);
                 }
             }
-            Value::Instance { class, fields } => {
+            Value::Instance { class, fields, .. } => {
                 return self.instance_attribute(obj, class, fields.get(name).copied(), name);
             }
             Value::NamedTuple {
@@ -597,10 +686,15 @@ impl Context {
                     return Ok(self.alloc(Value::Instance {
                         class: callable,
                         fields,
+                        dictionary: None,
                     }));
                 }
+                let dictionary = self
+                    .has_base(callable, "dict")
+                    .then(|| self.dict(Vec::new()));
                 let instance = self.alloc(Value::Instance {
                     class: callable,
+                    dictionary,
                     fields: HashMap::new(),
                 });
                 if self.class_attr(callable, "__init__").is_some() {

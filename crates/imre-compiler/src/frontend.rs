@@ -6657,6 +6657,16 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values
+                    .iter()
+                    .any(|value| matches!(value.ty, Type::Class(id) if self.decimal_class(id)))
+                {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "native Decimal numeric comparisons are unsupported",
+                    ));
+                }
                 if let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
                     && values
                         .iter()

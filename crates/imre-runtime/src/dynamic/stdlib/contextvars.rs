@@ -16,12 +16,6 @@ impl Context {
         }
     }
 
-    pub(in super::super) fn context_lookup_error(&self, kind: &str, key: Id) -> Error {
-        let mut error = Error::new(kind, self.repr(key));
-        error.args = Some(vec![key]);
-        error
-    }
-
     fn bindings(&self, context: Id) -> &Rc<std::collections::HashMap<Id, Id>> {
         let Value::Context(bindings) = self.heap.get(context) else {
             unreachable!("contextvars receiver is an exact Context");
@@ -114,7 +108,7 @@ pub(super) fn call(
                 .copied()
                 .or_else(|| args.get(1).copied())
                 .or(*default)
-                .ok_or_else(|| ctx.context_lookup_error("LookupError", *variable))
+                .ok_or_else(|| ctx.lookup_error("LookupError", *variable))
         }
         ("ContextVar.set", [variable, value], []) => {
             let old = ctx.replace_binding(current, *variable, Some(*value));

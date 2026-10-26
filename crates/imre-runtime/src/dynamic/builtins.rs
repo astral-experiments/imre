@@ -37,6 +37,13 @@ pub(super) fn is_exception(name: &str) -> bool {
             | "ImportError"
             | "ModuleNotFoundError"
             | "OSError"
+            | "ConnectionError"
+            | "ConnectionRefusedError"
+            | "ConnectionResetError"
+            | "ConnectionAbortedError"
+            | "BrokenPipeError"
+            | "BlockingIOError"
+            | "TimeoutError"
             | "FileNotFoundError"
             | "PermissionError"
             | "AssertionError"
@@ -85,6 +92,21 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
     ) || is_exception(name)
 }
 
+pub(super) const DICT_METHODS: &[&str] = &[
+    "__init__",
+    "__len__",
+    "__iter__",
+    "__contains__",
+    "__getitem__",
+    "__setitem__",
+    "get",
+    "items",
+    "keys",
+    "setdefault",
+    "update",
+    "values",
+];
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Str(_)
@@ -114,16 +136,34 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
-        Value::Set(_) if matches!(attr, "add" | "update") => "set",
-        Value::Dict(_) | Value::DefaultDict { .. }
+        Value::Socket(_)
             if matches!(
                 attr,
-                "items" | "values" | "keys" | "get" | "setdefault" | "update"
+                "bind"
+                    | "listen"
+                    | "accept"
+                    | "connect"
+                    | "getsockname"
+                    | "fileno"
+                    | "close"
+                    | "recv"
+                    | "recv_into"
+                    | "makefile"
+                    | "send"
+                    | "sendall"
+                    | "shutdown"
+                    | "setsockopt"
+                    | "setblocking"
+                    | "getblocking"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
-            "dict"
+            "socket.socket"
         }
+        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
+        Value::Set(_) if matches!(attr, "add" | "update") => "set",
+        Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
                 attr,
@@ -143,6 +183,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "read"
+                    | "fileno"
                     | "readline"
                     | "readinto"
                     | "seek"
@@ -462,7 +503,7 @@ pub(super) fn call(
                 Error::new(kind, format!("{path}: {e}"))
             })?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
-                io::BufReader::new(file),
+                io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))
         }
         "__import__" => {

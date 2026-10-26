@@ -1,7 +1,41 @@
 use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
 use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+
+/// One buffered cursor serves filesystem input and a socket retained by makefile.
+pub(in crate::dynamic) enum ReadSource {
+    File(std::fs::File),
+    Socket(crate::objects::socket::SocketInput),
+}
+
+impl Read for ReadSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::File(file) => file.read(buf),
+            Self::Socket(sock) => sock.read(buf),
+        }
+    }
+}
+
+impl Seek for ReadSource {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match self {
+            Self::File(file) => file.seek(pos),
+            Self::Socket(_) => Err(std::io::Error::from_raw_os_error(libc::ESPIPE)),
+        }
+    }
+}
+
+impl AsRawFd for ReadSource {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            Self::File(file) => file.as_raw_fd(),
+            Self::Socket(sock) => sock.as_raw_fd(),
+        }
+    }
+}
 
 fn join(left: &str, right: &str) -> String {
     if right.starts_with('/') || left.is_empty() {
@@ -159,7 +193,11 @@ pub(super) fn call(
     let handle = handle.clone();
     let mut slot = handle.borrow_mut();
     if matches!(name, "file.__exit__" | "file.close") {
-        slot.take();
+        if let Some(reader) = slot.take()
+            && let ReadSource::Socket(mut raw) = reader.into_inner()
+        {
+            raw.close().map_err(os_error)?;
+        }
         return Ok(NONE);
     }
     let f = slot
@@ -167,6 +205,7 @@ pub(super) fn call(
         .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
     match name {
         "file.__enter__" => Ok(first),
+        "file.fileno" => Ok(ctx.int(i64::from(f.get_ref().as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.seek" => {
             let offset = ctx.as_integer(argument(args, 1)?)?;
