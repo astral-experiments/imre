@@ -308,6 +308,7 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
+            "boxed_codecs.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
             "boxed_urlsplit.py",

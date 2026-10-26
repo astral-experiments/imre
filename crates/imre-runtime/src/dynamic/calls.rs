@@ -86,6 +86,7 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::Method { .. }
         ) || self.slot(value, "__call__").is_some()
@@ -454,6 +455,11 @@ impl Context {
                 "block_size" => return Ok(self.int(64)),
                 _ => {}
             },
+            Value::CodecInfo { entry, decode } => match name {
+                "name" => return Ok(self.text(entry.codec().name())),
+                "decode" => return Ok(decode),
+                _ => {}
+            },
             Value::Hmac(mac) => match name {
                 "digest_size" => return Ok(mac.digest_size),
                 "block_size" => return Ok(mac.block_size),
@@ -634,6 +640,7 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
