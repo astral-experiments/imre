@@ -4446,8 +4446,6 @@ impl Emitter<'_, '_> {
                     Names => "imre_log_names",
                     Numbers => "imre_log_numbers",
                     NamesCopy => "imre_log_names_copy",
-                    Configure => "imre_log_config",
-                    ConfigureName => "imre_log_config_named",
                     DictConfig => "imre_log_dict_config",
                     DictConfigTyped => "imre_log_typed_dict_config",
                     FileConfig => "imre_log_file_config",
@@ -9625,10 +9623,8 @@ declare ptr @imre_log_enabled_cache(ptr)
 declare ptr @imre_log_names()
 declare ptr @imre_log_numbers()
 declare ptr @imre_log_names_copy()
-declare void @imre_log_config_named(ptr, i64, i64, i1)
 declare i64 @imre_union_from_int(i64)
 declare i64 @imre_union_into_int(i64)
-declare void @imre_log_config(i64, i64, i64, i1)
 declare void @imre_log_dict_config(ptr)
 declare void @imre_log_typed_dict_config(ptr, i64)
 declare void @imre_log_file_config(ptr, i8, i1, i64)

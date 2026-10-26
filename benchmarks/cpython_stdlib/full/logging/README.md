@@ -32,11 +32,11 @@ The [standalone logger comparison](standalone.md) measures the original handler-
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 20 |
+| Imre | Imre | Imre | CPython hooks and native child | 22 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
 | CPython | CPython | Imre | CPython hooks and native child | 1 |
-| Blocked before execution | | | | 205 |
+| Blocked before execution | | | | 203 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -47,6 +47,7 @@ delayed creation and emission after closing a file opened in write mode.
 Four additional unchanged rotation bodies check actual files and rollover decisions.
 The [CP1251 StreamHandler method](stream-delivery.md) checks the encoded bytes and newline.
 The stream replacement method checks sys.stderr, the old stream, and the unchanged-stream return.
+Two original root configuration methods check the formatter, handler replacement and exact output before and after force.
 Four bodies verify native stderr with the original
 CPython output helper. The 40 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

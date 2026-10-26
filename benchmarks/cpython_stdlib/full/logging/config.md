@@ -30,3 +30,30 @@ After #588 merged, the same four checks on configuration integration `9135966`
 (main `1ee7c84`) reached the same `import codecs`. The native codec registry
 work in [#691](https://github.com/astral-sh/imre/pull/691) tracks the shared
 prerequisite; this test also needs a CP1251 stream writer for the real byte stream.
+
+## Root stream configuration
+
+Public `logging.basicConfig` and the module logging functions install a
+real StreamHandler in the root logger’s live list. A second call leaves an
+attached handler alone. With `force=True`, configuration snapshots the old
+list, removes and closes those handlers, then installs the replacements.
+It preserves any caller-supplied formatter. All three styles use the native
+Formatter. Filename and filemode configuration remain outside this change.
+
+The [focused Linux report](basic-config-streams-linux.json) covers two complete
+CPython 3.14.5 methods at O0 and O3. `BasicConfigTest.test_force` runs all
+four original assertions with stock native unittest, including the exact
+WARNING and INFO output. `test_datefmt` reads the assigned formatter and
+compares its optional string in Imre; the adapter records stock unittest’s
+integer contract diagnostic. The original setup, teardown and cleanup run in
+CPython. Each native child starts with the observed empty root and saved level.
+
+The [control](../../../../tests/fixtures/files/logging_root_stream_config.py)
+also checks handler aliases, caller-owned streams, conflicts, and explicit
+None arguments. Run the [adapter](native_basic_config.py) with pinned Python:
+
+```sh
+python -I -B benchmarks/cpython_stdlib/full/logging/native_basic_config.py \
+  --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang \
+  --cpython-source /path/to/cpython --result /tmp/basic-config-streams.json
+```

@@ -522,16 +522,19 @@ impl Checker<'_> {
         receiver: Expr,
         attr: &ast::ExprAttribute,
     ) -> Expr {
-        let Some(payload @ Type::Class(_)) = self.types.payload(receiver.ty) else {
+        let Some(payload) = self.types.payload(receiver.ty) else {
             return receiver;
         };
-        if !matches!(&*attr.value, ast::Expr::Attribute(_))
-            || !self
-                .graph
-                .session
-                .narrowed_instance(self.module, &attr.value)
-        {
-            return receiver;
+        match payload {
+            // Handler.formatter is optional until explicit or basic configuration assigns it.
+            Type::LogFormatter => {}
+            Type::Class(_)
+                if matches!(&*attr.value, ast::Expr::Attribute(_))
+                    && self
+                        .graph
+                        .session
+                        .narrowed_instance(self.module, &attr.value) => {}
+            _ => return receiver,
         }
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
