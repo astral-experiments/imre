@@ -12,6 +12,7 @@ mod contextvars;
 mod files;
 mod hashlib;
 mod json;
+mod operator;
 mod regex;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -21,6 +22,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "os"
             | "os.path"
+            | "operator"
             | "platform"
             | "site"
             | "struct"
@@ -265,6 +267,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "fsdecode" | "uname")
         | ("os.path", "join" | "abspath" | "dirname")
+        | ("operator", "attrgetter")
         | (
             "platform",
             "system"
@@ -305,6 +308,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "operator.attrgetter" {
+        return operator::attrgetter(ctx, args, kwargs);
+    }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);

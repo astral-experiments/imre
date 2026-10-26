@@ -92,6 +92,9 @@ def main():
                 expected.stderr,
             )
 
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
+
         args_code = (
             "import sys\nfor arg in sys.argv:\n    print(arg)\nprint(__name__)\n"
         )
