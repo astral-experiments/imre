@@ -4,6 +4,7 @@
 mod builtins;
 mod calls;
 mod ffi;
+mod function_fields;
 mod iterators;
 mod operators;
 mod property;

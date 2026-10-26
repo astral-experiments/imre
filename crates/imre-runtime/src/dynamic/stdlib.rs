@@ -11,8 +11,10 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
+mod functools;
 mod hashlib;
 mod hmac;
+mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
 mod json;
@@ -37,6 +39,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "json"
             | "datetime"
+            | "time"
             | "hashlib"
             | "hmac"
             | "re"
@@ -84,6 +87,7 @@ fn option(args: &[Id], index: usize, kwargs: &[(String, Id)], name: &str) -> Res
 fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::NamedTuple {
         class: None,
+        extras: Vec::new(),
         names: fields.iter().map(|(name, _)| (*name).to_owned()).collect(),
         values: fields.iter().map(|&(_, value)| value).collect(),
     })
@@ -177,6 +181,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     }
     let id = match (module, name) {
         ("datetime", "UTC") => datetime::utc(ctx),
+        ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
+            ctx.builtin(&format!("time.{name}"))
+        }
         ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
@@ -264,6 +271,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 ],
             )
         }
+        ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
+        ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("os", "name") => ctx.text("posix"),
         ("os" | "os.path", "sep") => ctx.text("/"),
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
@@ -319,7 +328,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
-        | ("functools", "lru_cache" | "partial")
+        | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -358,6 +367,9 @@ pub(super) fn call(
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("datetime.") {
         return datetime::call(ctx, method, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("time.") {
+        return time::call(ctx, method, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
@@ -408,6 +420,7 @@ pub(super) fn call(
         }));
     }
     let (max_args, keywords): (usize, &[&str]) = match name {
+        "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.loads" => (1, &["s"]),
@@ -631,6 +644,7 @@ pub(super) fn call(
             let text = json::dumps(ctx, input, kwargs)?;
             ctx.text(text)
         }
+        "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools.lru_cache" => {
             if args.is_empty() && kwargs.is_empty() {
                 ctx.alloc(Value::Native("functools._cached".into()))

@@ -10,6 +10,50 @@ use super::{
 };
 use std::ffi::CStr;
 
+pub(crate) use super::stdlib::imre_wall_time as wall_time;
+
+/// The nine sequence fields and two named timezone attributes of a civil time.
+pub(crate) struct ClockParts {
+    pub fields: [i64; 9],
+    pub zone: Option<crate::StrOwner>,
+    pub offset: i64,
+}
+
+impl ClockParts {
+    pub(crate) fn from_float(stamp: f64, utc: bool) -> Result<Self, Error> {
+        Self::civil(timed::float_seconds(stamp)?, utc)
+    }
+
+    pub(crate) fn from_int(stamp: &Int, utc: bool) -> Result<Self, Error> {
+        Self::civil(stamp.to_i64().ok_or_else(timed::overflow)?, utc)
+    }
+
+    fn civil(seconds: i64, utc: bool) -> Result<Self, Error> {
+        let tm = timed::civil(seconds, utc)?;
+        let fields = [
+            i64::from(tm.tm_year) + 1900,
+            i64::from(tm.tm_mon + 1),
+            i64::from(tm.tm_mday),
+            i64::from(tm.tm_hour),
+            i64::from(tm.tm_min),
+            i64::from(tm.tm_sec),
+            i64::from((tm.tm_wday + 6) % 7),
+            i64::from(tm.tm_yday + 1),
+            i64::from(tm.tm_isdst),
+        ];
+        let zone = (!tm.tm_zone.is_null()).then(|| {
+            // SAFETY: libc returns a NUL-terminated zone name. Copy it before the next conversion.
+            let name = unsafe { CStr::from_ptr(tm.tm_zone) }.to_string_lossy();
+            crate::StrOwner::new(crate::Str::from(name.as_ref()))
+        });
+        Ok(Self {
+            fields,
+            zone,
+            offset: tm.tm_gmtoff,
+        })
+    }
+}
+
 /// # Safety
 /// The descriptor has the nine integer slots yielded by a Python struct_time.
 #[unsafe(no_mangle)]
@@ -19,7 +63,7 @@ pub unsafe extern "C" fn imre_clock_parts(
     layout: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: the caller supplies the struct_time descriptor.
-    unsafe { clock_parts(timed::float_seconds(stamp), utc, layout) }
+    unsafe { clock_parts(ClockParts::from_float(stamp, utc), layout) }
 }
 
 /// Convert an integer timestamp without rounding it to a floating-point second.
@@ -33,54 +77,33 @@ pub unsafe extern "C" fn imre_clock_int_parts(
     layout: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: the caller keeps the Python integer and tuple layout live.
-    unsafe {
-        clock_parts(
-            Int::borrow(stamp).to_i64().ok_or_else(timed::overflow),
-            utc,
-            layout,
-        )
-    }
+    unsafe { clock_parts(ClockParts::from_int(&Int::borrow(stamp), utc), layout) }
 }
 
 /// Build a struct_time from checked seconds and the caller's nine-field descriptor.
 unsafe fn clock_parts(
-    seconds: Result<i64, Error>,
-    utc: bool,
+    parts: Result<ClockParts, Error>,
     layout: *const RecordDescriptor,
 ) -> *mut usize {
-    let parts = seconds.and_then(|value| timed::civil(value, utc));
     finish(
-        parts.map(|tm| {
-            let fields = [
-                i64::from(tm.tm_year) + 1900,
-                i64::from(tm.tm_mon + 1),
-                i64::from(tm.tm_mday),
-                i64::from(tm.tm_hour),
-                i64::from(tm.tm_min),
-                i64::from(tm.tm_sec),
-                i64::from((tm.tm_wday + 6) % 7),
-                i64::from(tm.tm_yday + 1),
-                i64::from(tm.tm_isdst),
-            ];
+        parts.map(|parts| {
             // SAFETY: the caller supplied the time tuple layout, with two zero-initialized hidden words.
             unsafe {
                 let record = imre_record_try_new(layout);
                 if record.is_null() {
                     return record;
                 }
-                for (index, value) in fields.into_iter().enumerate() {
+                for (index, value) in parts.fields.into_iter().enumerate() {
                     record
                         .add(index)
                         .write(Int::small(value).unwrap().into_raw());
                 }
-                if !tm.tm_zone.is_null() {
-                    let zone = CStr::from_ptr(tm.tm_zone).to_string_lossy();
-                    let owner = crate::StrOwner::new(crate::Str::from(zone.as_ref()));
+                if let Some(zone) = parts.zone {
                     record
                         .add(9)
-                        .write(crate::StrOwner::into_raw(owner) as usize);
+                        .write(crate::StrOwner::into_raw(zone) as usize);
                 }
-                record.add(10).write(Int::from(tm.tm_gmtoff).into_raw());
+                record.add(10).write(Int::from(parts.offset).into_raw());
                 record
             }
         }),

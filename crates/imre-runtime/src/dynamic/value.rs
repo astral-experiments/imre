@@ -194,6 +194,7 @@ pub(super) enum Value {
         class: Option<&'static str>,
         names: Vec<String>,
         values: Vec<Id>,
+        extras: Vec<(&'static str, Id)>,
     },
     Set(Vec<Id>),
     Dict(Vec<(Id, Id)>),
@@ -217,7 +218,7 @@ pub(super) enum Value {
         scope: Id,
     },
     Function {
-        name: String,
+        fields: super::function_fields::FunctionFields,
         code: Code,
         scope: Id,
         class_cell: Option<Id>,
@@ -317,11 +318,13 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v)
-            | Self::Tuple(v)
-            | Self::Set(v)
-            | Self::NamedTuple { values: v, .. }
-            | Self::Iterator { values: v, .. } => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) | Self::Iterator { values: v, .. } => {
+                visit.extend(v)
+            }
+            Self::NamedTuple { values, extras, .. } => {
+                visit.extend(values);
+                visit.extend(extras.iter().map(|&(_, id)| id));
+            }
             Self::Dict(entries) => {
                 for (key, value) in entries {
                     visit.extend([*key, *value]);
@@ -387,10 +390,12 @@ impl Value {
                 class_cell,
                 parameters,
                 defaults,
+                fields,
                 ..
             } => {
                 visit.extend([*scope, *parameters, *defaults]);
                 visit.extend(class_cell);
+                fields.children(visit);
             }
             Self::Class {
                 scope, ancestors, ..

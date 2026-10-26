@@ -283,6 +283,7 @@ impl Context {
                 class: Some(class),
                 names,
                 values,
+                ..
             } => {
                 let fields = names
                     .iter()
@@ -348,7 +349,9 @@ impl Context {
             Value::Raised(Error { message, .. }) => message.clone(),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
-            Value::Function { name, .. } => format!("<function {name}>"),
+            Value::Function { fields, .. } => {
+                format!("<function {}>", self.display(fields.qualname))
+            }
             Value::AttrGetter(paths) => {
                 let arguments = paths
                     .iter()
