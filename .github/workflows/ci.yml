@@ -220,7 +220,7 @@ jobs:
           CLANG: clang-18
         run: |
           cargo build -p imre-runtime --locked
-          cargo test -p imre-compiler --lib --locked slice_sum_validation::bounded_slice_sums -- --exact --ignored --nocapture
+          cargo test --workspace --lib --locked slice_sum_validation::bounded_slice_sums -- --exact --ignored --nocapture
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
