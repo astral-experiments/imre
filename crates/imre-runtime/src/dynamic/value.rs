@@ -215,6 +215,7 @@ impl Context {
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
             Value::None => "NoneType",
+            Value::Weak(wr) => wr.kind.class(),
             Value::Ellipsis => "ellipsis",
             Value::NotImplemented => "NotImplementedType",
             Value::Bool(_) => "bool",
@@ -390,6 +391,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) enum Value {
     None,
+    Weak(super::weakref::Reference),
     Ellipsis,
     NotImplemented,
     Bool(bool),
@@ -791,6 +793,7 @@ impl Value {
                 dictionary,
             } => visit.extend([*callable, *dictionary]),
             Self::Property(property) => property.children(visit),
+            Self::Weak(wr) => visit.push(wr.callback),
             Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
                 function,
@@ -926,6 +929,10 @@ pub(super) struct Heap {
     pub(super) immutable_hashes: HashMap<Id, i64>,
     frames: Vec<Frame>,
     next_collection: usize,
+    weak: HashMap<Id, Vec<Id>>,
+    // A dead proxy is still observable after its registry entry disappears.
+    pub(super) has_weak_values: bool,
+    weak_edge_removed: bool,
 }
 
 struct Frame {
@@ -966,6 +973,78 @@ impl Heap {
             immutable_hashes: HashMap::new(),
             frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
+            weak: HashMap::new(),
+            has_weak_values: false,
+            weak_edge_removed: false,
+        }
+    }
+
+    pub fn weak_references(&self, target: Id) -> &[Id] {
+        self.weak.get(&target).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn new_weak_reference(
+        &mut self,
+        target: Id,
+        callback: Id,
+        kind: super::weakref::Kind,
+    ) -> Id {
+        let references = self.weak_references(target);
+        if callback == NONE
+            && let Some(&id) = references.iter().find(|&&id|
+                matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
+        {
+            return id;
+        }
+        // Callback-free canonical references precede proxies, then callbacks in newest-first order.
+        let index = references
+            .iter()
+            .position(|&id| {
+                let Value::Weak(wr) = self.get(id) else {
+                    unreachable!()
+                };
+                wr.callback != NONE || (callback == NONE && kind == super::weakref::Kind::Reference)
+            })
+            .unwrap_or(references.len());
+        let id = self.alloc(Value::Weak(super::weakref::Reference {
+            target: Some(target),
+            callback,
+            kind,
+            hash: None,
+        }));
+        self.weak.entry(target).or_default().insert(index, id);
+        self.has_weak_values = true;
+        // The caller may hold either the target or the new wrapper only as a temporary.
+        self.weak_edge_removed = true;
+        id
+    }
+
+    fn weak_edge(&self, value: Id) -> bool {
+        self.weak.contains_key(&value)
+            || matches!(self.get(value), Value::Weak(wr) if wr.target.is_some())
+    }
+
+    /// A name in a surviving frame keeps this object alive until that binding changes.
+    fn bound_in_active_frame(&self, value: Id) -> bool {
+        self.frames.iter().rev().any(|frame| {
+            let Value::Scope(scope) = self.get(frame.scope) else {
+                return false;
+            };
+            if let Some(namespace) = scope.namespace {
+                return matches!(self.get(namespace), Value::Dict(entries)
+                    if entries.iter().any(|&(_, bound)| bound == value));
+            }
+            scope.names.values().any(|&bound| bound == value)
+        })
+    }
+
+    pub fn weak_edge_removed(&mut self, value: Id) {
+        if self.has_weak_values
+            && (self.weak_edge(value) || matches!(self.get(value), Value::Function { .. }))
+            && !self.bound_in_active_frame(value)
+        {
+            // A dropped function may have held the last strong path through its captured scope.
+            self.weak_edge_removed = true;
         }
     }
 
@@ -997,7 +1076,26 @@ impl Heap {
             .push(Frame::new(scope, code, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
-        self.frames.pop();
+        let frame = self.frames.pop().expect("returning native activation");
+        if self.has_weak_values
+            && let Value::Scope(scope) = self.get(frame.scope)
+        {
+            let released =
+                frame.live.iter().chain(scope.names.values()).any(|&id| {
+                    id != value && self.weak_edge(id) && !self.bound_in_active_frame(id)
+                });
+            if released {
+                // A normal function allocates its scope in the caller before entering.
+                // Once it returns, only an escaped closure or frame can keep that scope alive.
+                if scope.parent.is_some() && scope.class_body.is_none() {
+                    let caller = &mut self.frames.last_mut().unwrap().live;
+                    if let Some(index) = caller.iter().position(|&id| id == frame.scope) {
+                        caller.swap_remove(index);
+                    }
+                }
+                self.weak_edge_removed = true;
+            }
+        }
         self.keep(value);
     }
     pub fn keep(&mut self, value: Id) {
@@ -1042,7 +1140,7 @@ impl Heap {
         live: &[Id],
         location: Location,
         caught: Id,
-    ) {
+    ) -> Option<Vec<(Id, Id)>> {
         let frame = self.frames.last_mut().unwrap();
         frame.active = if caught == NONE {
             frame.inherited
@@ -1057,8 +1155,10 @@ impl Heap {
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
-        if self.slots.len() < self.next_collection || !self.free.is_empty() {
-            return;
+        if (!self.has_weak_values || !std::mem::take(&mut self.weak_edge_removed))
+            && (self.slots.len() < self.next_collection || !self.free.is_empty())
+        {
+            return None;
         }
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
@@ -1073,6 +1173,26 @@ impl Heap {
                 self.get(id).children(&mut pending);
             }
         }
+        // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
+        // never receive callbacks, and every live wrapper is cleared before any callback runs.
+        let mut callbacks = Vec::new();
+        self.weak.retain(|&target, refs| {
+            refs.retain(|&id| marked[id as usize]);
+            if marked[target as usize] {
+                return !refs.is_empty();
+            }
+            for &id in refs.iter() {
+                let Some(Value::Weak(wr)) = &mut self.slots[id as usize] else {
+                    unreachable!()
+                };
+                wr.target = None;
+                let callback = std::mem::replace(&mut wr.callback, NONE);
+                if callback != NONE {
+                    callbacks.push((callback, id));
+                }
+            }
+            false
+        });
         for (id, alive) in marked.into_iter().enumerate() {
             if !alive && self.slots[id].take().is_some() {
                 self.immutable_hashes.remove(&(id as Id));
@@ -1082,6 +1202,11 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
+        for &(callback, wr) in &callbacks {
+            self.keep(callback);
+            self.keep(wr);
+        }
+        (!callbacks.is_empty()).then_some(callbacks)
     }
 }
 

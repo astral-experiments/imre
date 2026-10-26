@@ -908,7 +908,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 
 impl Context {
     pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
-        self.heap.statement(
+        let Some(callbacks) = self.heap.statement(
             self.modules
                 .values()
                 .chain(self.classes.values())
@@ -926,6 +926,13 @@ impl Context {
             live,
             location,
             caught,
-        );
+        ) else {
+            return;
+        };
+        for (callback, reference) in callbacks {
+            if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
+                eprintln!("Exception ignored while calling weakref callback: {error}");
+            }
+        }
     }
 }

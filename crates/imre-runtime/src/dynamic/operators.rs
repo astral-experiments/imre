@@ -96,6 +96,7 @@ impl Context {
     }
 
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
+        let id = self.weak_proxy_target(id)?;
         Ok(match self.heap.get(id) {
             Value::None => false,
             Value::NotImplemented => {
@@ -317,6 +318,15 @@ impl Context {
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
         match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Weak(left), Value::Weak(right))
+                if left.kind == weakref::Kind::Reference
+                    && right.kind == weakref::Kind::Reference =>
+            {
+                match (left.target, right.target) {
+                    (Some(left), Some(right)) => equal(left, right),
+                    _ => false,
+                }
+            }
             (Value::None, Value::None) => true,
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => self
                 .as_int(a)
@@ -903,6 +913,7 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        let obj = self.weak_proxy_target(obj)?;
         if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
@@ -963,6 +974,7 @@ impl Context {
             .ok_or_else(|| Error::new("IndexError", "index out of range"))
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if matches!(
             self.heap.get(obj),
             Value::Dict(_) | Value::DefaultDict { .. }
@@ -988,10 +1000,13 @@ impl Context {
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            *items
+            let entry = items
                 .get_mut(i as usize)
-                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))? =
-                val;
+                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))?;
+            let previous = std::mem::replace(entry, val);
+            if previous != val {
+                self.heap.weak_edge_removed(previous);
+            }
         } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
             self.call(setter, vec![key, val], Vec::new())?;
         } else {
@@ -1230,6 +1245,11 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        let (a, b) = if !self.heap.has_weak_values || matches!(op, "is" | "is not") {
+            (a, b)
+        } else {
+            (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
+        };
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }
@@ -1577,6 +1597,24 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if self.heap.has_weak_values
+            && matches!(op, "==" | "!=")
+            && let (Value::Weak(left), Value::Weak(right)) = (self.heap.get(a), self.heap.get(b))
+            && left.kind == weakref::Kind::Reference
+            && right.kind == weakref::Kind::Reference
+            && let (Some(left), Some(right)) = (left.target, right.target)
+        {
+            self.heap.keep(left);
+            self.heap.keep(right);
+            if op == "!="
+                && self.slot(left, "__ne__").is_none()
+                && self.slot(right, "__ne__").is_none()
+            {
+                let equal = self.binary("==", left, right)?;
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
+            return self.binary(op, left, right).map(Some);
+        }
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
@@ -1608,6 +1646,10 @@ impl Context {
     }
 
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        let target = self.weak_proxy_target(a)?;
+        if target != a {
+            return self.inplace(op, target, self.weak_proxy_target(b)?);
+        }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?
         {
@@ -1655,6 +1697,7 @@ impl Context {
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if let Some(method) = self.bound_slot(obj, "__delitem__")? {
             self.call(method, vec![key], vec![])?;
             return Ok(());
@@ -1710,7 +1753,8 @@ impl Context {
                 let Value::List(entries) = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                entries.remove(i as usize);
+                let value = entries.remove(i as usize);
+                self.heap.weak_edge_removed(value);
             }
             _ => {
                 return Err(Error::new(
