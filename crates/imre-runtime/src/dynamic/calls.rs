@@ -290,6 +290,7 @@ impl Context {
             | Value::Dict(_)
             | Value::Set { .. }
             | Value::Range { .. }
+            | Value::Slice(_)
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
@@ -434,6 +435,7 @@ impl Context {
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
+            | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -641,6 +643,13 @@ impl Context {
             }
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
+            }
+            Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
+                return Ok(parts[match name {
+                    "start" => 0,
+                    "stop" => 1,
+                    _ => 2,
+                }]);
             }
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
@@ -850,6 +859,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
+            Value::Native(class)
+                if class == "slice" && matches!(name, "indices" | "__reduce__") =>
+            {
+                return Ok(self.builtin(&format!("slice.{name}")));
+            }
             Value::Native(class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
             }
@@ -928,6 +942,11 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
             let name = self.text(name);
             self.call(hook, vec![name], Vec::new())?;
@@ -1082,6 +1101,11 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
             let name = self.text(name);
             self.call(hook, vec![name, value], Vec::new())?;
@@ -1284,6 +1308,7 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "slice"
                                 | "function"
                                 | "method"
                                 | "object"

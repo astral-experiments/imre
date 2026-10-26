@@ -147,11 +147,7 @@ impl Context {
                     Ok(self.alloc(Value::List(out)))
                 }
             }
-            "slice" => self.slice(a, b),
-            "setslice" => {
-                self.set_slice(a, b, c)?;
-                Ok(c)
-            }
+            "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;

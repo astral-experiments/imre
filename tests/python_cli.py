@@ -410,6 +410,7 @@ def report(text):
             "boxed_zip.py",
             "boxed_python_iterators.py",
             "boxed_generator_delegation.py",
+            "boxed_slice.py",
             "boxed_bytes_separators.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",

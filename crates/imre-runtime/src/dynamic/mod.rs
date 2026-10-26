@@ -11,6 +11,7 @@ mod function_fields;
 mod iterators;
 mod operators;
 mod property;
+mod slice;
 mod source_code;
 mod static_method;
 mod stdlib;

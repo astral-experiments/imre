@@ -105,6 +105,7 @@ const TYPES: &[&str] = &[
     "staticmethod",
     "range",
     "set",
+    "slice",
     "str",
     "tuple",
     "type",
@@ -180,6 +181,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
@@ -560,6 +562,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
+            "slice" => super::slice::method(ctx, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -798,6 +801,7 @@ pub(super) fn call(
                 pending: None,
             }))
         }
+        "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 3)?;

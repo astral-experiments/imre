@@ -183,6 +183,7 @@ impl Context {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
             Value::Set { frozen: true, .. } => "frozenset",
@@ -309,6 +310,7 @@ pub(super) enum Value {
         tzinfo: Id,
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
+    Slice([Id; 3]),
     Range {
         start: i64,
         stop: i64,
@@ -551,6 +553,7 @@ impl Value {
                 visit.extend(old);
             }
             Self::Yielded(item) => visit.push(*item),
+            Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
