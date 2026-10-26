@@ -1,6 +1,6 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use super::Context;
@@ -155,19 +155,23 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
-            Value::Iterator { reverse: true, .. } => "list_reverseiterator",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
+            Value::Iterator { kind, .. } => kind,
+            Value::Generator { .. } => "generator",
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::TypeVar(_) => "TypeVar",
+            Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
@@ -250,9 +254,11 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub class_cell: Option<Id>,
+    pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
     pub namespace: Option<Id>,
+    pub globals: HashSet<String>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -303,6 +309,7 @@ pub(super) enum Value {
         frozen: bool,
     },
     Dict(Vec<(Id, Id)>),
+    MappingProxy(Id),
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -335,11 +342,13 @@ pub(super) enum Value {
         scope: Id,
         ancestors: Vec<Id>,
     },
+    TypeVar(super::typing::TypeVariable),
+    GenericAlias(super::typing::Alias),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
-        text: Option<Id>,
+        scalar: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -381,6 +390,13 @@ pub(super) enum Value {
         function: Id,
         entries: Vec<CachedCall>,
     },
+    Generator {
+        code: Id,
+        scope: Id,
+        running: bool,
+        exhausted: bool,
+    },
+    Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
@@ -394,6 +410,7 @@ pub(super) enum Value {
         peeked: Option<Id>,
     },
     Iterator {
+        kind: &'static str,
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
@@ -469,7 +486,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
-            Self::DictView { dict, .. } => visit.push(*dict),
+            Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
@@ -491,8 +508,10 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
+            Self::Yielded(item) => visit.push(*item),
             Self::Range { .. } => {}
+            Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
@@ -503,6 +522,9 @@ impl Value {
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
+                if let Some((bases, mro)) = scope.class_lineage {
+                    visit.extend([bases, mro]);
+                }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
@@ -533,17 +555,19 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
+            Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
+            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
             Self::Instance {
                 class,
                 fields,
                 dictionary,
-                text,
+                scalar,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
-                visit.extend(text);
+                visit.extend(scalar);
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {

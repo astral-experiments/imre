@@ -3,13 +3,16 @@
 
 mod builtins;
 mod calls;
+mod enums;
 mod ffi;
 mod function_fields;
+mod iterators;
 mod operators;
 mod property;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod typing;
 mod value;
 mod zip;
 
@@ -54,6 +57,7 @@ pub(crate) struct Context {
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
+    typing: typing::Registry,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     pending: Option<Error>,
@@ -115,7 +119,10 @@ impl Context {
     fn string_storage(&self, id: Id) -> Option<Id> {
         match self.heap.get(id) {
             Value::Str(_) => Some(id),
-            Value::Instance { text, .. } => *text,
+            Value::Instance {
+                scalar: Some(value),
+                ..
+            } if matches!(self.heap.get(*value), Value::Str(_)) => Some(*value),
             _ => None,
         }
     }
@@ -143,7 +150,7 @@ impl Context {
         Ok(value)
     }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
-        match self.heap.get(id) {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Int(n) => Ok(n.clone()),
             Value::Bool(b) => Ok(crate::Int::from(i64::from(*b))),
             _ => Err(Error::new("TypeError", "expected an integer")),
@@ -167,6 +174,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
+                | Value::Generator { .. }
         )
     }
 
@@ -175,12 +183,12 @@ impl Context {
         if self.is_native_iterator(id) {
             return Ok(id);
         }
-        let sequence = match *self.heap.get(id) {
-            Value::List(_)
-            | Value::Tuple(_)
-            | Value::Bytes(_)
-            | Value::ByteArray(_)
-            | Value::Range { .. } => id,
+        let (sequence, kind) = match *self.heap.get(id) {
+            Value::List(_) => (id, "list_iterator"),
+            Value::Tuple(_) => (id, "tuple_iterator"),
+            Value::Bytes(_) => (id, "bytes_iterator"),
+            Value::ByteArray(_) => (id, "bytearray_iterator"),
+            Value::Range { .. } => (id, "range_iterator"),
             Value::Instance { class, .. }
                 if let Some(slot) = self.class_attr(class, "__iter__") =>
             {
@@ -205,13 +213,14 @@ impl Context {
             }
             _ => {
                 let values = self.items(id)?;
-                self.alloc(Value::Tuple(values))
+                (self.alloc(Value::Tuple(values)), "iterator")
             }
         };
         Ok(self.alloc(Value::Iterator {
             sequence: Some(sequence),
             offset: 0,
             reverse: false,
+            kind,
         }))
     }
 
@@ -220,7 +229,7 @@ impl Context {
         let source = self.iterator(iterable)?;
         if matches!(
             self.heap.get(source),
-            Value::Instance { .. } | Value::CallableIterator(_)
+            Value::Instance { .. } | Value::CallableIterator(_) | Value::Generator { .. }
         ) {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -236,6 +245,7 @@ impl Context {
             sequence,
             offset,
             reverse,
+            ..
         } = self.heap.get(id)
         else {
             return Err(Error::new("TypeError", "expected iterator"));
@@ -330,6 +340,7 @@ impl Context {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
+            Value::Generator { .. } => return self.next_generator_item(id),
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::CallableIterator(None) => return Ok(None),
             Value::CallableIterator(Some(state)) => {
@@ -378,6 +389,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
+                | Value::Generator { .. }
         ) || self.slot(id, "__iter__").is_some()
         {
             let iter = self.iterator(id)?;
@@ -386,6 +398,15 @@ impl Context {
                 items.push(item);
             }
             return Ok(items);
+        }
+        if let Some(values) = self.enum_values(id) {
+            let Value::Dict(entries) = self.heap.get(values) else {
+                unreachable!()
+            };
+            return Ok(entries.iter().map(|&(_, member)| member).collect());
+        }
+        if let Value::MappingProxy(dict) = *self.heap.get(id) {
+            return self.items(dict);
         }
         match self.heap.get(id).clone() {
             Value::List(items)
@@ -430,6 +451,10 @@ impl Context {
                     .map(|k| fields[&k])
                     .collect())
             }
+            Value::Instance { .. } if self.slot(id, "__iter__").is_some() => {
+                let iter = self.iterator(id)?;
+                self.items(iter)
+            }
             _ => Err(Error::new(
                 "TypeError",
                 format!("'{}' object is not iterable", self.type_name(id)),
@@ -440,9 +465,11 @@ impl Context {
         self.alloc(Value::Scope(Scope {
             class_body: None,
             class_cell: None,
+            class_lineage: None,
             first_argument: None,
             names: Default::default(),
             namespace: None,
+            globals: Default::default(),
             parent,
             module: module.to_owned(),
         }))
@@ -453,6 +480,15 @@ impl Context {
         };
         s
     }
+    fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).globals.contains(name) {
+            while let Some(parent) = self.scope_data(scope).parent {
+                scope = parent;
+            }
+        }
+        scope
+    }
+
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(namespace) = scope.namespace {
@@ -508,6 +544,7 @@ impl Context {
     }
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        let scope = self.binding_scope(scope, name);
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
             self.put_item(namespace, key, value)
@@ -526,6 +563,7 @@ impl Context {
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
+            scope = self.binding_scope(scope, name);
             let s = self.scope_data(scope);
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
