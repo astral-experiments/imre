@@ -158,6 +158,20 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
+        if value.ty == Type::Calendar(ir::CalendarType::Date) {
+            if classes.iter().any(|class| class.accepts(value.ty)) {
+                return "true".to_owned();
+            }
+            if classes
+                .iter()
+                .any(|class| class.accepts(Type::Calendar(ir::CalendarType::DateTime)))
+            {
+                return self.instruction(format!(
+                    "call i1 @imre_calendar_is_datetime(ptr {})",
+                    value.operand
+                ));
+            }
+        }
         // Frontend class tests include every descendant. If they include the
         // declared base, all layouts which can reach this view already match.
         if matches!(value.ty, Type::Class(_)) && classes.iter().any(|class| class.accepts(value.ty))

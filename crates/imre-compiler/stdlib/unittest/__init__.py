@@ -3,6 +3,7 @@
 
 import difflib
 import re
+from datetime import date, timedelta
 from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import ClassVar
@@ -219,8 +220,19 @@ class TestCase:
 
     def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
         if first != second:
-            left, right = _short_reprs(repr(first), repr(second))
-            raise self.failureException(self._formatMessage(msg, left + " != " + right))
+            self._failBaseEquality(repr(first), repr(second), msg)
+
+    def _assertDateEqual(self, first: date, second: date, msg: str | None = None) -> None:
+        if first != second:
+            self._failBaseEquality(repr(first), repr(second), msg)
+
+    def _assertDeltaEqual(self, first: timedelta, second: timedelta, msg: str | None = None) -> None:
+        if first != second:
+            self._failBaseEquality(repr(first), repr(second), msg)
+
+    def _failBaseEquality(self, first: str, second: str, msg: str | None) -> None:
+        left, right = _short_reprs(first, second)
+        raise self.failureException(self._formatMessage(msg, left + " != " + right))
 
     def _truncateMessage(self, message: str, diff: str) -> str:
         limit = self.maxDiff

@@ -59,12 +59,48 @@ pub unsafe extern "C" fn imre_calendar_compare(
     b: *const Object,
     equality: bool,
 ) -> i32 {
+    // SAFETY: the typed comparison roots both calendar operands.
+    unsafe { compare(a, b, equality, "") }
+}
+
+/// # Safety
+/// Both operands must be rooted date or datetime instances. The operator indexes
+/// the four ordering comparisons in the compiler.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_date_order(
+    a: *const Object,
+    b: *const Object,
+    op: u8,
+) -> i32 {
+    // SAFETY: the compiler passes two rooted calendar objects and the matching operator.
+    unsafe { compare(a, b, false, ["<", "<=", ">", ">="][usize::from(op)]) }
+}
+
+unsafe fn compare(a: *const Object, b: *const Object, equality: bool, operator: &str) -> i32 {
     // SAFETY: both calendar operands remain rooted throughout the comparison.
     let (a, b) = unsafe { (object(a), object(b)) };
     let res = with(a, |a| {
         with(b, |b| {
             let ord = match (a, b) {
                 (Value::Delta(a), Value::Delta(b)) => a.cmp(b),
+                (Value::DateOnly(a), Value::DateOnly(b)) => a.cmp(b),
+                (Value::DateOnly(_), Value::Date { .. })
+                | (Value::Date { .. }, Value::DateOnly(_)) => {
+                    if equality {
+                        return Ok(1);
+                    }
+                    let (left, right) = if matches!(a, Value::DateOnly(_)) {
+                        ("datetime.date", "datetime.datetime")
+                    } else {
+                        ("datetime.datetime", "datetime.date")
+                    };
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!(
+                            "'{operator}' not supported between instances of '{left}' and '{right}'"
+                        ),
+                    ));
+                }
                 (Value::Zone { offset: a, .. }, Value::Zone { offset: b, .. }) => {
                     delta(a).cmp(&delta(b))
                 }
@@ -113,6 +149,7 @@ const FACTORS: [i64; 7] = [
 
 pub(super) enum Value {
     Delta(i128),
+    DateOnly(i128),
     // The value is local civil microseconds since ordinal 1. Both naive and aware datetimes
     // use the same calendar; the fixed offset matters for instant comparison, not day addition.
     Date {
@@ -127,9 +164,16 @@ pub(super) enum Value {
 }
 
 fn owner(value: Value) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Calendar(Box::new(value)))))
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::Calendar(
+        allocator_api2::boxed::Box::new(value),
+    ))))
 }
 
+fn try_owner(value: Value) -> Result<crate::ObjectOwner, Error> {
+    let value = allocator_api2::boxed::Box::try_new(value).map_err(|_| Error::allocation())?;
+    crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Calendar(value))))
+        .map_err(|_| Error::allocation())
+}
 fn with<T>(obj: &Object, f: impl FnOnce(&Value) -> T) -> T {
     // SAFETY: calendar storage is immutable after creation, including during nested reads.
     unsafe {
@@ -240,6 +284,10 @@ pub(super) fn write_repr(v: &Value, out: &mut super::values::ReprWriter<'_>) -> 
     use std::fmt::Write as _;
     match v {
         Value::Delta(n) => write_delta_repr(*n, out)?,
+        Value::DateOnly(ord) => {
+            let (y, m, d) = ymd(*ord);
+            write!(out, "datetime.date({y}, {m}, {d})")?;
+        }
         Value::Zone { offset, name } => {
             if delta(offset) == 0 && name.is_none() {
                 out.write_str("datetime.timezone.utc")?;
@@ -291,6 +339,7 @@ pub unsafe extern "C" fn imre_calendar_equal_optional(a: usize, b: usize) -> boo
 pub(super) fn equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Delta(a), Value::Delta(b)) => a == b,
+        (Value::DateOnly(a), Value::DateOnly(b)) => a == b,
         (Value::Zone { offset: a, .. }, Value::Zone { offset: b, .. }) => delta(a) == delta(b),
         (
             Value::Date {
@@ -446,12 +495,7 @@ fn check(value: i32, name: &str, low: i32, high: i32) -> Result<(), Error> {
         ))
     }
 }
-fn new_date(
-    words: [usize; 8],
-    zone: Option<crate::ObjectOwner>,
-) -> Result<crate::ObjectOwner, Error> {
-    let [y, m, d, h, mn, s, u, fold] = words.map(c_component);
-    let (y, m, d, h, mn, s, u, fold) = (y?, m?, d?, h?, mn?, s?, u?, fold?);
+fn checked_ordinal(y: i32, m: i32, d: i32) -> Result<i128, Error> {
     check(y, "year", 1, 9999)?;
     check(m, "month", 1, 12)?;
     let max = month_days(y, m);
@@ -461,6 +505,16 @@ fn new_date(
             format!("day {d} must be in range 1..{max} for month {m} in year {y}"),
         ));
     }
+    Ok(ordinal(y, m, d))
+}
+
+fn new_date(
+    words: [usize; 8],
+    zone: Option<crate::ObjectOwner>,
+) -> Result<crate::ObjectOwner, Error> {
+    let [y, m, d, h, mn, s, u, fold] = words.map(c_component);
+    let (y, m, d, h, mn, s, u, fold) = (y?, m?, d?, h?, mn?, s?, u?, fold?);
+    let ord = checked_ordinal(y, m, d)?;
     check(h, "hour", 0, 23)?;
     check(mn, "minute", 0, 59)?;
     check(s, "second", 0, 59)?;
@@ -471,10 +525,65 @@ fn new_date(
             format!("fold must be either 0 or 1, not {fold}"),
         ));
     }
-    let local = (ordinal(y, m, d) - 1) * DAY
-        + i128::from(h * 3600 + mn * 60 + s) * 1_000_000
-        + i128::from(u);
+    let local = (ord - 1) * DAY + i128::from(h * 3600 + mn * 60 + s) * 1_000_000 + i128::from(u);
     Ok(owner(Value::Date { local, zone, fold }))
+}
+
+/// # Safety
+/// All three date components are rooted Python integers in their tagged ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_date(
+    year: usize,
+    month: usize,
+    day: usize,
+) -> *const Object {
+    rc_result((|| {
+        let ord = checked_ordinal(c_component(year)?, c_component(month)?, c_component(day)?)?;
+        try_owner(Value::DateOnly(ord))
+    })())
+}
+
+/// # Safety
+/// The argument is a rooted date view, which may retain a datetime subclass value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_is_datetime(value: *const Object) -> bool {
+    // SAFETY: the generated view retains its original immutable calendar object.
+    with(unsafe { object(value) }, |v| {
+        matches!(v, Value::Date { .. })
+    })
+}
+
+/// # Safety
+/// Date and time have their statically checked calendar layouts. A nonzero zone
+/// word holds a live fixed-offset timezone for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_combine(
+    value: *const Object,
+    time: *const Object,
+    zone: usize,
+) -> *const Object {
+    // SAFETY: the compiler roots each argument and only admits a naive clock time.
+    let (value, [hour, minute, second, micros, fold], zone) = unsafe {
+        (
+            object(value),
+            object(time).0.with(|s| match s {
+                Storage::ClockTime(c) => c.0,
+                _ => unreachable!(),
+            }),
+            (zone != 0).then(|| retain(zone as *const Object)),
+        )
+    };
+    let start = with(value, |v| match v {
+        Value::DateOnly(ord) => (ord - 1) * DAY,
+        Value::Date { local, .. } => local.div_euclid(DAY) * DAY,
+        _ => unreachable!(),
+    });
+    let local = start + i128::from(((hour * 60 + minute) * 60 + second) * 1_000_000 + micros);
+    rc_result(try_owner(Value::Date {
+        local,
+        zone,
+        fold: fold as i32,
+    }))
 }
 fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOwner, Error> {
     if !(0..MAX_ORD * DAY).contains(&local) {
@@ -599,12 +708,22 @@ pub unsafe extern "C" fn imre_calendar_shift(
     d: *const Object,
     sub: bool,
 ) -> *const Object {
-    // SAFETY: both typed operands remain rooted until the new datetime is built.
+    // SAFETY: both typed operands remain rooted until the new date or datetime is built.
     let (dt, d) = unsafe { (object(dt), object(d)) };
     let n = delta(d);
-    let n = if sub { -n } else { n };
     rc_result(with(dt, |dt| match dt {
-        Value::Date { local, zone, .. } => date(*local + n, zone.clone()),
+        Value::DateOnly(ord) => {
+            // date arithmetic uses timedelta.days, even when the fractional day is negative.
+            let days = n.div_euclid(DAY);
+            let ord = if sub { ord - days } else { ord + days };
+            if !(1..=MAX_ORD).contains(&ord) {
+                return Err(Error::new(Kind::OverflowError, "date value out of range"));
+            }
+            try_owner(Value::DateOnly(ord))
+        }
+        Value::Date { local, zone, .. } => {
+            date(if sub { local - n } else { local + n }, zone.clone())
+        }
         _ => unreachable!(),
     }))
 }
@@ -624,6 +743,10 @@ pub unsafe extern "C" fn imre_calendar_field(o: *const Object, index: usize) -> 
     let (o, index) = unsafe { (object(o), Int::borrow(index)) };
     let i = index.as_small().unwrap() as usize;
     let n = with(o, |v| match v {
+        Value::DateOnly(ord) => {
+            let (y, m, d) = ymd(*ord);
+            i128::from([y, m, d][i])
+        }
         Value::Date { local, fold, .. } => date_fields(*local, *fold)[i],
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);
@@ -681,6 +804,10 @@ pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str 
 pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *const Str {
     // SAFETY: the compiler roots this exact calendar value while its fields are formatted.
     let s = with(unsafe { object(o) }, |v| match v {
+        Value::DateOnly(ord) => {
+            let (y, m, d) = ymd(*ord);
+            format!("{y:04}-{m:02}-{d:02}")
+        }
         Value::Date { local, zone, .. } => date_text(*local, zone, if iso { 'T' } else { ' ' }),
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);

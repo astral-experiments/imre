@@ -3651,8 +3651,22 @@ impl Emitter<'_, '_> {
                 }
                 Type::Calendar(_) => {
                     let equality = matches!(predicate, "eq" | "ne");
+                    let (function, argument) = if !equality
+                        && [left.ty, right.ty].contains(&Type::Calendar(ir::CalendarType::Date))
+                    {
+                        let code = match op {
+                            Compare::Less => 0,
+                            Compare::LessEqual => 1,
+                            Compare::Greater => 2,
+                            Compare::GreaterEqual => 3,
+                            _ => unreachable!(),
+                        };
+                        ("imre_calendar_date_order", format!("i8 {code}"))
+                    } else {
+                        ("imre_calendar_compare", format!("i1 {equality}"))
+                    };
                     let order = self.checked_instruction(format!(
-                        "call i32 @imre_calendar_compare(ptr {}, ptr {}, i1 {equality})",
+                        "call i32 @{function}(ptr {}, ptr {}, {argument})",
                         left.operand, right.operand
                     ));
                     self.instruction(format!("icmp {predicate} i32 {order}, 0"))
@@ -9592,6 +9606,9 @@ declare ptr @imre_regex_match(ptr, ptr)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare ptr @imre_calendar_date(i64, i64, i64)
+declare ptr @imre_calendar_combine(ptr, ptr, i64)
+declare i1 @imre_calendar_is_datetime(ptr)
 declare ptr @imre_calendar_zone(ptr, i64)
 declare ptr @imre_calendar_utc()
 declare ptr @imre_calendar_zone_limit(i1)
@@ -9611,6 +9628,7 @@ declare double @imre_calendar_seconds(ptr)
 declare i1 @imre_calendar_truth(ptr)
 declare i1 @imre_calendar_equal_optional(i64,i64)
 declare i32 @imre_calendar_compare(ptr,ptr,i1)
+declare i32 @imre_calendar_date_order(ptr,ptr,i8)
 declare ptr @imre_log_clock_new(i64, i64, i64, i64, i8, i64)
 declare i32 @imre_log_clock_compare(ptr, ptr)
 declare i64 @imre_log_clock_part(ptr, i64)

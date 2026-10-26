@@ -20,6 +20,7 @@ from suite_inventory import (
 from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
 
 CANDIDATES = {
+    "TestDateOnly": ["test_delta_non_days_ignored"],
     "TestModule": ["test_utc_alias"],
     "TestTimeDelta": [
         "test_basic_attributes",
@@ -46,7 +47,7 @@ def prepare(tools, directory, owner, name):
     zone = owner == "TestTimeZone"
     fixture = ZONE_LAYOUT + method_bytes(SOURCE, owner, "setUp") if zone else b""
     source = (
-        b"from datetime import datetime, timedelta, timezone, UTC\nimport unittest\n"
+        b"from datetime import date, datetime, timedelta, timezone, UTC\nimport unittest\n"
         b"ZERO = timedelta(0)\nclass Case(unittest.TestCase):\n"
         + fixture
         + original

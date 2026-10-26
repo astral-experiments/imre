@@ -4,7 +4,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write};
 
-use crate::ir::Type;
+use crate::ir::{CalendarType, Type};
 use crate::modules::DefinitionId;
 use std::rc::Rc;
 
@@ -668,6 +668,14 @@ impl Types {
         let ty = match members.as_slice() {
             [] if nullable => Type::None,
             [member] => *member,
+            [
+                Type::Calendar(CalendarType::Date),
+                Type::Calendar(CalendarType::DateTime),
+            ]
+            | [
+                Type::Calendar(CalendarType::DateTime),
+                Type::Calendar(CalendarType::Date),
+            ] => Type::Calendar(CalendarType::Date),
             [Type::Bool, Type::Int] | [Type::Int, Type::Bool] => {
                 Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::Int])))
             }

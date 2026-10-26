@@ -2634,6 +2634,24 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]),
             });
         }
+        if self.types.payload(value.ty) == Some(Type::Calendar(ir::CalendarType::DateTime))
+            && self.types.payload(expected) == Some(Type::Calendar(ir::CalendarType::Date))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
+        if value.ty == Type::Calendar(ir::CalendarType::DateTime)
+            && self.types.payload(expected).unwrap_or(expected)
+                == Type::Calendar(ir::CalendarType::Date)
+        {
+            let date = Expr {
+                ty: Type::Calendar(ir::CalendarType::Date),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+            return self.coerce(date, expected, node);
+        }
         if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
@@ -6736,7 +6754,13 @@ impl<'a> Checker<'a> {
                                                 .is_some_and(|fs| fs.iter().all(|&f| f == elem))
                                     })
                             });
-                    if !numeric && !records && !paths && !tuples && !variable_tuple {
+                    let dates = [ty, right].iter().all(|t| {
+                        matches!(
+                            t,
+                            Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
+                        )
+                    });
+                    if !numeric && !records && !paths && !tuples && !variable_tuple && !dates {
                         self.expect(ty, right, expression)?;
                     }
                     let ordered = numeric
@@ -6745,7 +6769,9 @@ impl<'a> Checker<'a> {
                             Type::Bytes
                                 | Type::ClockTime
                                 | Type::Calendar(
-                                    ir::CalendarType::Delta | ir::CalendarType::DateTime
+                                    ir::CalendarType::Delta
+                                        | ir::CalendarType::Date
+                                        | ir::CalendarType::DateTime
                                 )
                         )
                         || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
@@ -8738,9 +8764,12 @@ impl<'a> Checker<'a> {
                 == Some(Binding::Intrinsic(Intrinsic::Calendar(
                     ir::CalendarType::DateTime,
                 )))
-            && attr.attr.as_str() == "now"
         {
-            return self.calendar_now(call);
+            match attr.attr.as_str() {
+                "now" => return self.calendar_now(call),
+                "combine" => return self.calendar_combine(call),
+                _ => {}
+            }
         }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
