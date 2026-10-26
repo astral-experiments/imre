@@ -1057,7 +1057,7 @@ pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> 
                 group.keep_commas = true;
                 group.operators += 1;
             }
-            Name | Int | Float | Complex | String | True | False | None | Ellipsis
+            Identifier | Int | Float | Complex | String | True | False | None | Ellipsis
             | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
             _ => group.operators += 1,
         }

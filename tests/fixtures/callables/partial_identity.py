@@ -66,6 +66,10 @@ def exercise() -> None:
     copied = wrap(original)
     print(copied is original)
     print(copied(7))
+    repeated = partial(doubled)
+    for _ in range(3):
+        repeated = partial(repeated)
+    print(repeated(7))
     try:
         copied(-1)
     except ValueError as exc:
