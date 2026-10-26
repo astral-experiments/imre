@@ -357,6 +357,13 @@ impl Context {
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
+            Value::Repeat(repeat) => {
+                let value = self.repr(repeat.value);
+                match repeat.remaining {
+                    Some(n) => format!("repeat({value}, {n})"),
+                    None => format!("repeat({value})"),
+                }
+            }
             Value::Count { current, step } => {
                 let current = self.repr(*current);
                 if matches!(self.heap.get(*step), Value::Bool(true))

@@ -405,6 +405,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_itertools_count.py",
+            "boxed_itertools_repeat.py",
             "boxed_dict_subclasses.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
