@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from _imre_socketserver_reader import _SocketReader
-import selectors
+from _imre_socketserver_poll import _open_poll, _poll_ready, _close_poll
 import socket
 import sys
 
@@ -197,15 +197,17 @@ class TCPServer:
     def serve_forever(self, poll_interval: float | None = 0.5) -> None:
         self._server_stopped = False
         try:
-            with selectors.PollSelector() as selector:
-                selector.register(self.fileno(), selectors.EVENT_READ)
+            selector = _open_poll(self.fileno())
+            try:
                 while not self._shutdown_requested:
-                    ready = selector.select(poll_interval)
+                    ready = _poll_ready(selector, poll_interval)
                     if self._shutdown_requested:
                         break
                     if ready:
                         self._handle_request_noblock()
                     self.service_actions()
+            finally:
+                _close_poll(selector)
         finally:
             self._shutdown_requested = False
             self._server_stopped = True
@@ -213,9 +215,12 @@ class TCPServer:
     def shutdown(self) -> None:
         self._shutdown_requested = True
         # Wait for the loop's finally block, including a request already being handled.
-        with selectors.PollSelector() as waiter:
+        waiter = _open_poll(None)
+        try:
             while not self._server_stopped:
-                waiter.select(0.01)
+                _poll_ready(waiter, 0.01)
+        finally:
+            _close_poll(waiter)
 
     def service_actions(self) -> None:
         """Hook for work between requests and on idle polls."""

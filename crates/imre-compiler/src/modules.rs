@@ -31,6 +31,14 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "_imre_socketserver_poll" => Some((
+            "_imre_socketserver_poll.py",
+            if cfg!(any(target_os = "linux", target_os = "macos")) {
+                include_str!("../stdlib/_socketserver_poll.py")
+            } else {
+                include_str!("../stdlib/_socketserver_no_poll.py")
+            },
+        )),
         "_imre_socketserver_reader" => Some((
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
