@@ -34,7 +34,17 @@ python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels \
 python3 "$bench/summary.py" /tmp/flask-comparison.json
 ```
 
-The optional Imre row builds the unchanged `serve.py` at O3 against the same wheel tree and must pass the TCP controls to be timed. The JSON records the compiler diagnostic if the app cannot start. Use the parent compatibility gate to run all four build modes and check the Flask traceback.
+The optional Imre row builds the unchanged `serve.py` at O3 against the staged wheels. Add `--runtime-imports` to use the compiler's native runtime-import mode. To repeat a run with an existing executable, supply `--imre-binary PATH` in place of the compiler and runtime. The receipt records its source path and SHA-256. Supplied binaries must come from the unchanged application and pinned wheels. The receipt distinguishes supplied artifacts from those built by the harness.
+
+Before timing, the harness runs the ten-request Flask gate on the exact ELF. The gate checks the application traceback, escaped Unicode, signed cookie replay, a tampered cookie, and recovery. On Linux, `strace` and procfs verify the executable and socket owners and catch a mapped `libpython` or foreign executable. The JSON records the result under `imre_native_preflight` and keeps the raw trace alongside the receipt. A failed proof leaves Imre out of `trials`. Each timed Imre process runs without the tracer and must have the proven SHA-256 before warmup. The external controls use their existing HTTP preflight and workload.
+
+The negative control supplies the existing Rust HTTP server as the candidate Imre binary. It returns the expected health and big-integer JSON responses, but cannot serve a signed Flask session. This command runs one nine-request smoke round on each eligible control and checks that Imre receives no timing row.
+
+```sh
+python3.14 "$bench/check_native_negative.py" --wheelhouse /tmp/flask-wheels \
+  --client /tmp/flask-client --rust "$bench/rust/target/release/imre-flask-hyper-control" \
+  --node "$(command -v node)" --bun "$(command -v bun)" --server-cpu 28 --client-cpus 29,30,31
+```
 
 For a paired WSGI comparison, provide the unmodified Waitress 3.0.2 wheel in the same wheelhouse. The runner checks its SHA-256, extracts it alongside the existing releases and runs the original Flask app with one Waitress application worker. The CPython-hosted LLVM mode accepts a Python launcher whose arguments are the staged wheel directory and the ready file. The launcher imports the compiled views and uses CPython to run the framework and HTTP transport. Include one `--hosted-artifact` per binary or source that the launcher consumes. The WSGI and hosted options can run together and share one contemporaneous CPython/Werkzeug control.
 

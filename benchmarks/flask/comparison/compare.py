@@ -133,14 +133,33 @@ def executable(path):
     return {"path": str(path), "sha256": gate.digest(path)}
 
 
+def native_preflight(binary, fingerprint, expected, directory, output):
+    directory.mkdir()
+    proof = gate.exercise([binary], directory, expected, prove_binary=binary)
+    if proof["outcome"] == "pass" and proof["native_identity"]["binary_sha256"] != fingerprint:
+        proof.update(outcome="native_identity_error", error="verified executable differs from the candidate")
+    proof["verified_native_responses"] = len(proof["responses"]) if proof["outcome"] == "pass" else 0
+    trace = directory / "syscalls"
+    if trace.is_file():
+        dest = output.with_suffix(".imre.strace")
+        with trace.open("rb") as src, dest.open("xb") as dst:
+            shutil.copyfileobj(src, dst)
+        proof["trace_file"] = dest.name
+        proof["trace_sha256"] = gate.digest(dest)
+    return proof
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("wheelhouse", "client", "output"):
         parser.add_argument(f"--{name}", required=True, type=Path)
     for name in ("node", "bun", "rust"):
         parser.add_argument(f"--{name}", type=Path)
-    parser.add_argument("--compiler", type=Path)
+    candidate = parser.add_mutually_exclusive_group()
+    candidate.add_argument("--compiler", type=Path)
+    candidate.add_argument("--imre-binary", type=Path, help="verify and time a supplied standalone ELF")
     parser.add_argument("--runtime", type=Path)
+    parser.add_argument("--runtime-imports", action="store_true", help="build the unchanged entry with native runtime imports")
     parser.add_argument("--wsgi-pair", action="store_true",
                         help="compare CPython/Werkzeug with CPython/Waitress using the extra pinned wheel")
     parser.add_argument("--hosted-launcher", type=Path,
@@ -162,6 +181,8 @@ def main():
         parser.error(f"run with CPython {expected['python']}")
     if bool(args.compiler) != bool(args.runtime):
         parser.error("supply both --compiler and --runtime")
+    if args.runtime_imports and not args.compiler:
+        parser.error("--runtime-imports requires --compiler and --runtime")
     paired = args.wsgi_pair or args.hosted_launcher
     if not paired and not all((args.node, args.bun, args.rust)):
         parser.error("the cross-language comparison requires --node, --bun and --rust")
@@ -173,7 +194,7 @@ def main():
         parser.error(f"output already exists: {args.output}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     items = cases()
-    sources = [HERE.parent / f for f in ("tiny_flask_app.py", "serve.py", "gate.py", "requirements.txt", "expected.json")]
+    sources = [HERE.parent / f for f in ("tiny_flask_app.py", "serve.py", "gate.py", "native_identity.py", "requirements.txt", "expected.json")]
     sources.extend(HERE / f for f in ("compare.py", "control.mjs", "client.go", "rust/Cargo.toml", "rust/Cargo.lock", "rust/src/main.rs"))
     if args.wsgi_pair:
         sources.append(HERE / "serve_waitress.py")
@@ -225,18 +246,32 @@ def main():
             commands["hosted_llvm"] = [sys.executable, "-ISB", args.hosted_launcher.resolve(), site]
         fixtures = work / "fixtures.json"
         fixtures.write_text(json.dumps(items))
+        binary = work / "imre-server"
         if args.compiler:
             inventory.update(compiler=executable(args.compiler), runtime=executable(args.runtime))
-            binary = work / "imre-server"
-            result = subprocess.run([args.compiler.resolve(), "build", site / "serve.py",
-                "--module-root", site, "--runtime", args.runtime.resolve(), "--opt-level", "3",
-                "-o", binary], text=True, capture_output=True, timeout=120)
-            report["imre_build"] = {"status": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
-            if result.returncode == 0:
-                commands["imre"] = [binary]
-                report["imre_build"]["binary_sha256"] = gate.digest(binary)
+            command = [args.compiler.resolve(), "build", site / "serve.py", "--module-root", site,
+                       "--runtime", args.runtime.resolve(), "--opt-level", "3", "-o", binary]
+            if args.runtime_imports:
+                command.append("--runtime-imports")
+            result = subprocess.run(command, text=True, capture_output=True, timeout=120)
+            report["imre_build"] = {"status": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
+                                    "runtime_imports": args.runtime_imports}
+        elif args.imre_binary:
+            inventory["imre_input"] = executable(args.imre_binary)
+            shutil.copy2(args.imre_binary, binary)
+            report["imre_build"] = {"status": None, "reason": "prebuilt executable supplied"}
         else:
-            report["imre_build"] = {"status": None, "reason": "compiler and runtime not supplied"}
+            report["imre_build"] = {"status": None, "reason": "no compiler or executable supplied"}
+        if args.imre_binary or report["imre_build"]["status"] == 0:
+            fingerprint = gate.digest(binary)
+            if args.imre_binary and fingerprint != inventory["imre_input"]["sha256"]:
+                raise ValueError("the supplied executable changed while copying")
+            report["imre_build"]["binary_sha256"] = fingerprint
+            proof = native_preflight(binary, fingerprint, expected, work / "native-proof", args.output)
+            report["imre_native_preflight"] = proof
+            if proof["outcome"] == "pass":
+                commands["imre"] = [binary]
+            save()
         for name, command in list(commands.items()):
             try:
                 with serve(command, args.server_cpu) as (port, _, log):
@@ -273,6 +308,8 @@ def main():
                 if r < args.first_round - 1:
                     continue
                 with serve(commands[name], args.server_cpu, capture_errors=False) as (port, process, _):
+                    if name == "imre" and gate.digest(Path(f"/proc/{process.pid}/exe")) != fingerprint:
+                        raise RuntimeError("timed Imre executable differs from the verified ELF")
                     for profile, c in experiments:
                         call = ["taskset", "-c", args.client_cpus, args.client.resolve(),
                                 "-addr", f"127.0.0.1:{port}", "-cases", fixtures,
@@ -292,6 +329,8 @@ def main():
                                       other_client_core_seconds=max(0, sum(core_cpu(cpu) for cpu in client_cores)
                                           - client_busy0 - sample["ClientCPUSeconds"]),
                                       other_server_core_seconds=max(0, core_cpu(args.server_cpu) - busy0 - server))
+                        if name == "imre":
+                            sample["binary_sha256"] = fingerprint
                         report["trials"].append(sample)
                 print(f"Round {r + 1}: {name}", flush=True)
                 save()
