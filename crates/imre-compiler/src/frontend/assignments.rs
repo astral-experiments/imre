@@ -550,7 +550,7 @@ impl Checker<'_> {
                 {
                     return Some(ty);
                 }
-                let receiver = probe.expr(&attribute.value).ok()?;
+                let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
                 if let Type::Class(class) = receiver.ty
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {

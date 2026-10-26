@@ -25,7 +25,7 @@ pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
-pub(crate) use codecs::Codec;
+pub(crate) use codecs::{Codec, CodecInfo};
 mod contexts;
 mod contextvars;
 mod copying;
@@ -124,6 +124,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    WeakProxy(records::weak::WeakRecord, bool),
     FunctoolsPlaceholder {
         class: bool,
     },

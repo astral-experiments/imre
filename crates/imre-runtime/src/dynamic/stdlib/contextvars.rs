@@ -150,7 +150,8 @@ pub(super) fn call(
                     _ => ctx.alloc(Value::Tuple(vec![key, value])),
                 })
                 .collect();
-            Ok(ctx.alloc(Value::Iterator { values, offset: 0 }))
+            let sequence = ctx.alloc(Value::Tuple(values));
+            ctx.iterator(sequence)
         }
         ("Context.run", [context, callable, rest @ ..], kwargs) => {
             if ctx.contexts.contains(context) {

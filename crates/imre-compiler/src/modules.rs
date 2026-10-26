@@ -28,6 +28,32 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+/// Python source modules bundled for runtime imports.
+pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "_imre_socketserver_poll" => Some((
+            "_imre_socketserver_poll.py",
+            if cfg!(any(target_os = "linux", target_os = "macos")) {
+                include_str!("../stdlib/_socketserver_poll.py")
+            } else {
+                include_str!("../stdlib/_socketserver_no_poll.py")
+            },
+        )),
+        "_imre_socketserver_reader" => Some((
+            "_imre_socketserver_reader.py",
+            include_str!("../stdlib/_socketserver_reader.py"),
+        )),
+        "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        "http" => Some((
+            "http/__init__.py",
+            include_str!("../stdlib/http/__init__.py"),
+        )),
+        "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+        "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+        _ => None,
+    }
+}
+
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
 // frozen test modules have no corresponding stubs in the pinned typeshed inventory.
 const INTRINSIC_MODULES: &[&str] = &[
@@ -128,6 +154,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Gzip,
     UnicodeData,
+    WeakRef,
     Codecs,
     Socket,
     Hashlib,
@@ -336,6 +363,8 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     UnicodeNormalize { check: bool },
+    WeakProxy,
+    WeakProxyClass { callable: bool },
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
@@ -373,6 +402,7 @@ pub(crate) enum Intrinsic {
     CountElements,
     Deque,
     Repeat,
+    AttrGetter,
     LengthHint,
     MathProd,
     Count,
@@ -548,6 +578,7 @@ impl IntrinsicModule {
             "gzip" => Some(Self::Gzip),
             "types" => Some(Self::Types),
             "unicodedata" => Some(Self::UnicodeData),
+            "weakref" => Some(Self::WeakRef),
             "codecs" => Some(Self::Codecs),
             "socket" => Some(Self::Socket),
             "hashlib" => Some(Self::Hashlib),
@@ -874,6 +905,9 @@ impl IntrinsicModule {
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
+            (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
+            (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
             (Self::UnicodeData, "normalize") => Intrinsic::UnicodeNormalize { check: false },
             (Self::UnicodeData, "is_normalized") => Intrinsic::UnicodeNormalize { check: true },
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
@@ -952,6 +986,7 @@ impl IntrinsicModule {
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
+            (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
@@ -1129,6 +1164,7 @@ pub(crate) struct SourceGraph {
     pub(crate) virtual_command: bool,
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
+    pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -2101,6 +2137,7 @@ impl<'a> Loader<'a> {
             virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
+            needs_object_runtime: std::cell::Cell::new(false),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -2752,22 +2789,19 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "_imre_socketserver_reader" => Some((
+                "_imre_socketserver_reader.py",
+                include_str!("../stdlib/_socketserver_reader_typed.py"),
+            )),
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
-            "http" => Some((
-                "http/__init__.py",
-                include_str!("../stdlib/http/__init__.py"),
-            )),
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "mimetypes" if cfg!(unix) => {
                 Some(("mimetypes.py", include_str!("../stdlib/mimetypes.py")))
             }
-            "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
-            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
-            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
@@ -2780,7 +2814,7 @@ impl<'a> Loader<'a> {
                 "unittest/mock.py",
                 include_str!("../stdlib/unittest/mock.py"),
             )),
-            _ => None,
+            _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;

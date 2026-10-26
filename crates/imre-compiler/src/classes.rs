@@ -98,6 +98,7 @@ pub(crate) struct Field {
     pub(crate) module: usize,
     pub(crate) name: String,
     pub(crate) annotation: ast::Expr,
+    pub(crate) weak_proxy: bool,
     pub(crate) default: Option<FieldDefault>,
     pub(crate) kw_only: bool,
     pub(crate) repr: bool,
@@ -498,7 +499,7 @@ fn collect_class(
                 if name.starts_with("__")
                     && !matches!(
                         name,
-                        "__init__" | "__fspath__" | "__getitem__" | "__setitem__"
+                        "__init__" | "__call__" | "__fspath__" | "__getitem__" | "__setitem__"
                     )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
@@ -514,6 +515,12 @@ fn collect_class(
                     );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                if name == "__call__" && kind != MethodKind::Instance {
+                    return Err(module.error(
+                        method,
+                        "a fixed callable record requires an instance __call__ method",
+                    ));
+                }
                 if name == "__setitem__"
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 3
@@ -737,6 +744,7 @@ fn collect_class(
                     module: definition.module,
                     name: name.clone(),
                     annotation: annotation.clone(),
+                    weak_proxy: false,
                     default: None,
                     kw_only: false,
                     repr: true,
@@ -747,17 +755,20 @@ fn collect_class(
     }
     if !is_enum
         && dataclass.is_none()
-        && fields.len() == inherited_fields.len()
         && let Some(init) = initializer
     {
-        inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
-        // A write to inherited or local class data creates an instance shadow.
-        fields.retain(|f| {
-            !matches!(
-                static_bindings.get(&f.name),
-                Some(ClassValue::Runtime { .. })
-            )
-        });
+        let infer = fields.len() == inherited_fields.len();
+        inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
+        if infer {
+            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields)?;
+            // A write to inherited or local class data creates an instance shadow.
+            fields.retain(|f| {
+                !matches!(
+                    static_bindings.get(&f.name),
+                    Some(ClassValue::Runtime { .. })
+                )
+            });
+        }
     }
     if fields
         .iter()

@@ -65,6 +65,7 @@ impl Context {
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::CodecInfo { .. } => "CodecInfo",
             Value::List(_) => "list",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -181,6 +182,11 @@ pub(super) enum Value {
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
+    CodecInfo {
+        entry: crate::objects::CodecInfo,
+        decode: Id,
+    },
+    CodecDecoder(crate::objects::Codec),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     Hmac(Hmac),
     Socket(crate::ObjectOwner),
@@ -254,7 +260,7 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     Iterator {
-        values: Vec<Id>,
+        sequence: Option<Id>,
         offset: usize,
     },
     IoMethod {
@@ -293,9 +299,8 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set(v) | Self::Iterator { values: v, .. } => {
-                visit.extend(v)
-            }
+            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -393,6 +398,7 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.args.iter().flatten()),
             Self::IoMethod { owner, .. } => visit.push(*owner),
+            Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -402,6 +408,7 @@ impl Value {
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
+            | Self::CodecDecoder(_)
             | Self::Hash(_)
             | Self::Socket(_)
             | Self::Native(_)
