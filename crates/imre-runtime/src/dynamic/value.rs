@@ -278,7 +278,6 @@ pub(super) enum Value {
     ContextVar {
         name: Id,
         default: Option<Id>,
-        repr_active: std::cell::Cell<bool>,
     },
     ContextToken {
         context: Id,

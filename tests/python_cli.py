@@ -315,6 +315,7 @@ def report(text):
         for fixture in (
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
+            "boxed_recursive_repr.py",
             "boxed_datetime.py",
             "boxed_time.py",
             "boxed_codecs.py",
