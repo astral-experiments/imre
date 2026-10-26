@@ -8,6 +8,14 @@ use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
+
+#[derive(Clone, Copy)]
+pub(super) struct Hmac {
+    pub inner: Id,
+    pub outer: Id,
+    pub digest_size: Id,
+    pub block_size: Id,
+}
 pub(super) const NONE: Id = 0;
 pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
@@ -144,6 +152,7 @@ pub(super) enum Value {
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
     Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
+    Hmac(Hmac),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -248,6 +257,9 @@ impl Value {
                 }
             }
             Self::DictView { dict, .. } => visit.push(*dict),
+            Self::Hmac(mac) => {
+                visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
+            }
             Self::Context(bindings) => {
                 for (key, value) in bindings.iter() {
                     visit.extend([*key, *value]);

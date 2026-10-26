@@ -14,11 +14,8 @@ impl Checker<'_> {
         module: usize,
         definition: &ast::StmtFunctionDef,
     ) -> FunctionText {
-        let doc = if self.graph.python_optimization() < 2
-            && let Some(ast::Stmt::Expr(stmt)) = definition.body.first()
-            && let ast::Expr::StringLiteral(text) = &*stmt.value
-        {
-            Some(clean_doc(text.value.to_str()))
+        let doc = if self.graph.python_optimization() < 2 {
+            docstring(&definition.body)
         } else {
             None
         };
@@ -58,6 +55,17 @@ impl Checker<'_> {
             doc: None,
         })
     }
+}
+
+/// Return the normalized value of a namespace's leading string literal.
+pub(crate) fn docstring(body: &[ast::Stmt]) -> Option<String> {
+    let ast::Stmt::Expr(stmt) = body.first()? else {
+        return None;
+    };
+    let ast::Expr::StringLiteral(text) = &*stmt.value else {
+        return None;
+    };
+    Some(clean_doc(text.value.to_str()))
 }
 
 /// CPython expands tabs at eight-character stops, then removes the common

@@ -157,12 +157,13 @@ impl Context {
             _ => return false,
         };
         match (name, self.heap.get(value)) {
-            ("object", _)
+            ("bytearray", Value::ByteArray(_))
+            | ("object", _)
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
-            | ("bytearray", Value::ByteArray(_))
+            | ("hmac.HMAC", Value::Hmac(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -228,6 +229,15 @@ impl Context {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
                 "block_size" => return Ok(self.int(64)),
+                _ => {}
+            },
+            Value::Hmac(mac) => match name {
+                "digest_size" => return Ok(mac.digest_size),
+                "block_size" => return Ok(mac.block_size),
+                "name" => {
+                    let name = self.lookup_attr(mac.inner, "name")?;
+                    return Ok(self.text(format!("hmac-{}", self.str_value(name)?)));
+                }
                 _ => {}
             },
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
@@ -635,6 +645,12 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // The class body can read the enclosing module's docstring before the
+        // type supplies a default for an undocumented class.
+        class_scope
+            .names
+            .entry("__doc__".to_owned())
+            .or_insert(NONE);
         let members = class_scope
             .class_body
             .take()

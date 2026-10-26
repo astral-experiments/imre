@@ -106,6 +106,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bytes(_) if attr == "decode" => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
+        Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
         Value::Dict(_) | Value::DefaultDict { .. }

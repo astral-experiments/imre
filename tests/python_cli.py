@@ -306,6 +306,7 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_contextvars.py",
             "boxed_descriptors.py",
@@ -313,8 +314,11 @@ def report(text):
             "boxed_setattr.py",
             "boxed_item_assignment.py",
         ):
-            plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
+            plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
+        for flags in ("-IB", "-IBOO"):
+            compare(flags, "-c", imports + "arithmetic.current()")
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",
@@ -338,6 +342,8 @@ def report(text):
             "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
             "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
         )
+        plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_hmac.py").read_bytes())
+        compare("-IB", "-c", imports + "arithmetic.check()")
         checked = run(
             imre,
             "-IB",

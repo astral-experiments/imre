@@ -13,6 +13,7 @@ crate-type = ["rlib", "staticlib"]
 allocator-api2 = "=0.2.21"
 imre-regex = { path = "../imre-regex" }
 base64 = "=0.22.1"
+constant_time_eq = "=0.4.2"
 num-bigint.workspace = true
 num-traits.workspace = true
 compact_str.workspace = true
