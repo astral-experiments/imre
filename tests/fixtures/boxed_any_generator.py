@@ -9,7 +9,7 @@ def current():
     value = "outer"
     gen = (observe(value) for value in items if value != 1)
     assert not seen and iter(gen) is gen
-    for it in [gen, iter(items), iter((0, 1)), iter(range(3))]:
+    for it in [gen, iter(items), iter((0, 1)), iter(b"a"), iter(bytearray(b"a")), iter(range(3))]:
         print(type(it).__name__, isinstance(it, type(it)), type(type(it)) is type)
     items.append(3)
     assert any(gen)
@@ -19,6 +19,11 @@ def current():
     assert list(cursor) == items
     items.append(4)
     assert next(cursor, "closed") == "closed"
+    buffer = bytearray(b"\x00\x00\xff")
+    cursor = iter(buffer)
+    assert next(cursor) == 0
+    buffer[1] = 3
+    assert any(byte for byte in cursor) and next(cursor) == 255
     assert not any(()) and any([False, True])
     assert any(range(10**12)) and not any(range(0))
     assert list(iter(range(5, -1, -2))) == [5, 3, 1]

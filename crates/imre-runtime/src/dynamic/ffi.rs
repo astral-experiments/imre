@@ -184,8 +184,10 @@ impl Context {
             "generator" => self.generator(a, b),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.iterator(a),
-            "more" => Ok(flag(self.iterator_more(a)?)),
-            "next" => self.iterator_next(a),
+            "more" => Ok(flag(self.iterator_has_item(a)?)),
+            "next" => self
+                .next_item(a)?
+                .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))

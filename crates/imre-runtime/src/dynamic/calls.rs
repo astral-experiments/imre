@@ -257,6 +257,8 @@ impl Context {
                             | "generator"
                             | "list_iterator"
                             | "tuple_iterator"
+                            | "bytes_iterator"
+                            | "bytearray_iterator"
                             | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"

@@ -32,6 +32,8 @@ impl Context {
         let (sequence, kind) = match self.heap.get(value) {
             Value::List(_) => (value, "list_iterator"),
             Value::Tuple(_) => (value, "tuple_iterator"),
+            Value::Bytes(_) => (value, "bytes_iterator"),
+            Value::ByteArray(_) => (value, "bytearray_iterator"),
             _ => {
                 let values = self.items(value)?;
                 (self.alloc(Value::Tuple(values)), "iterator")
@@ -104,7 +106,7 @@ impl Context {
 
     pub(super) fn iterator_more(&mut self, iter: Id) -> Result<bool> {
         let (code, scope) = match *self.heap.get(iter) {
-            Value::AstWalk(ref queue) => return Ok(!queue.is_empty()),
+            Value::Iterator { .. } | Value::AstWalk(_) => return self.iterator_has_item(iter),
             Value::RangeIterator { remaining, .. } => return Ok(remaining != 0),
             Value::PythonIterator {
                 buffered: Some(_), ..
@@ -130,7 +132,6 @@ impl Context {
                 buffered: Some(_), ..
             } => return Ok(true),
             Value::Generator { code, scope, .. } => (code, scope),
-            Value::Iterator { .. } => return Ok(self.peek_sequence_item(iter)?.is_some()),
             _ => return Err(Error::new("TypeError", "expected iterator")),
         };
         let Value::Generator { running, .. } = self.heap.get_mut(iter) else {
@@ -169,19 +170,13 @@ impl Context {
         if let Some(method) = self.bound_slot(iter, "__next__")? {
             return self.call(method, Vec::new(), Vec::new());
         }
-        if matches!(self.heap.get(iter), Value::AstWalk(_)) {
-            return super::stdlib::ast::advance(self, iter)?
+        if matches!(
+            self.heap.get(iter),
+            Value::Iterator { .. } | Value::AstWalk(_)
+        ) {
+            return self
+                .next_item(iter)?
                 .ok_or_else(|| Error::new("StopIteration", ""));
-        }
-        if matches!(self.heap.get(iter), Value::Iterator { .. }) {
-            let item = self
-                .peek_sequence_item(iter)?
-                .ok_or_else(|| Error::new("StopIteration", ""))?;
-            let Value::Iterator { offset, .. } = self.heap.get_mut(iter) else {
-                unreachable!()
-            };
-            *offset += 1;
-            return Ok(item);
         }
         if !self.iterator_more(iter)? {
             return Err(Error::new("StopIteration", ""));
