@@ -1,4 +1,6 @@
 //! Preserve OS error fields as values; a rendered error is not a source of errno.
+use allocator_api2::boxed::Box;
+
 use super::{
     Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, write_quoted_repr,
 };
