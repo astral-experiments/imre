@@ -153,6 +153,7 @@ impl Builtin {
                     | TextOperation::Partition
                     | TextOperation::Translate
                     | TextOperation::UrlQuote
+                    | TextOperation::UrlQuotePlus
                     | TextOperation::UrlUnquote
                     | TextOperation::UrlSplit
                     | TextOperation::UrlProperty(_)
@@ -1094,6 +1095,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_enum_lookup_int"
                 | "imre_str_unquote"
                 | "imre_url_quote"
+                | "imre_url_quote_plus"
                 | "imre_url_unquote"
                 | "imre_string_iterable_list"
                 | "imre_str_join"
