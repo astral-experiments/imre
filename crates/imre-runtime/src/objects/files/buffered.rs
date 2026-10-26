@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 use super::super::codecs::Codec;
 use super::gzip::{GzipError, GzipReader};
-use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
+use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error, os_error};
 use crate::{BinaryOutput, StrOwner};
 
 struct TextEncoder {
@@ -81,7 +81,7 @@ impl Output {
     /// Encode the entire input before changing the file or its text buffer.
     pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
         let Some(encoder) = self.encoder.as_mut() else {
-            return self.write(text.as_bytes()).map_err(os_error);
+            return self.write(text.as_bytes()).map_err(errno_error);
         };
         let translated;
         let text = if let Some(newline) = encoder.newline {
@@ -99,7 +99,7 @@ impl Output {
         if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
             encoder.codec = Codec::Utf8 { signature: false };
         }
-        self.write(&encoded).map_err(os_error)
+        self.write(&encoded).map_err(errno_error)
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {

@@ -318,7 +318,7 @@ impl FileState {
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
-        writer.write(bytes).map_err(os_error)
+        writer.write(bytes).map_err(errno_error)
     }
 
     pub(super) fn write(&mut self, text: &str) -> Result<()> {
@@ -385,7 +385,7 @@ impl FileState {
             | Stream::Member(_)
             | Stream::Memory(_)
             | Stream::TextMemory(_) => Ok(()),
-            Stream::Write(writer) => writer.flush().map_err(os_error),
+            Stream::Write(writer) => writer.flush().map_err(errno_error),
         }
     }
 }
@@ -741,7 +741,7 @@ fn with_path_file<T>(
     let path = StrOwner::new(Str::from(path));
     let mut state = open_state(&path, mode, binary, false)?;
     let result = operation(&mut state);
-    let closed = state.stream.take().unwrap().close().map_err(os_error);
+    let closed = state.stream.take().unwrap().close().map_err(errno_error);
     closed.and(result)
 }
 
@@ -1027,7 +1027,7 @@ pub unsafe extern "C" fn imre_text_close(value: *const Object) -> u32 {
 pub(super) fn close_stream(file: &Object) -> Result<()> {
     // SAFETY: only an independent stream owner escapes the nonreentrant access.
     let stream = unsafe { file.0.with_mut(|storage| storage.file_mut().stream.take()) };
-    stream.map_or(Ok(()), Stream::close).map_err(os_error)
+    stream.map_or(Ok(()), Stream::close).map_err(errno_error)
 }
 
 /// # Safety
