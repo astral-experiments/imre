@@ -722,6 +722,26 @@ mod tests {
     }
 
     #[test]
+    fn key_sort_checks_the_detached_list_before_using_it() {
+        let source = concat!(
+            "def key(word: str) -> int:\n",
+            "    print(word)\n",
+            "    return len(word)\n",
+            "values = ['bb', 'a']\n",
+            "values.sort(key=key)\n",
+        );
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        let (_, after_call) = llvm.split_once("call ptr @imre_sort_detach(").unwrap();
+        assert!(
+            after_call
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains("call i32 @imre_error_pending()")
+        );
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
