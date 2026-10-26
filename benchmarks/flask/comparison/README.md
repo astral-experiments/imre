@@ -45,4 +45,4 @@ python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels --client /tmp/flas
   --rounds 9 --server-cpu 28 --client-cpus 29,30,31 --output /tmp/flask-paired.json
 ```
 
-Use `--rounds 0` for a correctness run. A paired run only needs its own launcher and server dependencies.
+Use `--rounds 0` for a correctness run. Use `--mixed-only --concurrency 8` to repeat the equal-weight mix alone. A paired run only needs its own launcher and server dependencies.
