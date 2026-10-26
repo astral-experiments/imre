@@ -31,6 +31,8 @@ def current():
     print(get_json(ctx)(), attrgetter("request.value", "request.value")(ctx))
     saved, replaced = attrgetter("request", "replace")(ctx)
     print(saved.get_json(), replaced)
+    print(repr(attrgetter("request.value")))
+    print(repr(attrgetter("request", "replace")))
 
     for call in (
         lambda: attrgetter(),
