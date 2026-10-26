@@ -315,6 +315,7 @@ def report(text):
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_item_assignment.py",
+            "boxed_dict_subclasses.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

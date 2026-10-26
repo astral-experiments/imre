@@ -16,7 +16,7 @@ impl Context {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
             }
-            Value::Instance { class, fields } => Some(
+            Value::Instance { class, fields, .. } => Some(
                 self.namedtuple_fields(*class)?
                     .iter()
                     .map(|k| fields[k])
@@ -87,7 +87,10 @@ impl Context {
             | Value::Set(v)
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
-            Value::DictView { dict, .. } => return self.truth(*dict),
+            Value::DictView { dict, .. } => !self
+                .dict_entries(*dict)
+                .expect("dict view backing")
+                .is_empty(),
             Value::Context(bindings) => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
@@ -144,7 +147,9 @@ impl Context {
             return false;
         }
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
-        match (self.heap.get(a), self.heap.get(b)) {
+        let left = self.dict_storage(a).unwrap_or(a);
+        let right = self.dict_storage(b).unwrap_or(b);
+        match (self.heap.get(left), self.heap.get(right)) {
             (Value::None, Value::None) => true,
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => self
                 .as_int(a)
@@ -168,7 +173,10 @@ impl Context {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
             (Value::List(_), _) | (_, Value::List(_)) => false,
-            (Value::Dict(x), Value::Dict(y)) => {
+            (
+                Value::Dict(x) | Value::DefaultDict { entries: x, .. },
+                Value::Dict(y) | Value::DefaultDict { entries: y, .. },
+            ) => {
                 x.len() == y.len()
                     && x.iter()
                         .all(|&(k, v)| y.iter().any(|&(j, w)| equal(k, j) && equal(v, w)))
@@ -299,6 +307,10 @@ impl Context {
                 output.push(')');
                 output
             }
+            Value::Instance {
+                dictionary: Some(backing),
+                ..
+            } => self.display(*backing),
             Value::Dict(entries) => format!(
                 "{{{}}}",
                 entries
@@ -360,7 +372,7 @@ impl Context {
             return bindings
                 .get(&key)
                 .copied()
-                .ok_or_else(|| self.context_lookup_error("KeyError", key));
+                .ok_or_else(|| self.lookup_error("KeyError", key));
         }
         if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
             if !builtins::hashable(self, key) {
@@ -376,7 +388,10 @@ impl Context {
                 self.put_item(obj, key, v)?;
                 return Ok(v);
             }
-            return Err(Error::new("KeyError", self.repr(key)));
+            return Err(self.lookup_error("KeyError", key));
+        }
+        if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
+            return self.call(getter, vec![key], Vec::new());
         }
         if matches!(self.heap.get(obj), Value::DictView { .. } | Value::Set(_)) {
             return Err(Error::new("TypeError", "object is not subscriptable"));
@@ -439,6 +454,10 @@ impl Context {
         Ok(())
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
+        if let Some(hook) = self.bound_slot(container, "__contains__")? {
+            let result = self.call(hook, vec![item], Vec::new())?;
+            return self.truth(result);
+        }
         if let Value::Context(bindings) = self.heap.get(container) {
             self.context_key(item)?;
             return Ok(bindings.contains_key(&item));

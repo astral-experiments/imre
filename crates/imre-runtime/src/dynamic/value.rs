@@ -82,6 +82,12 @@ impl Context {
         }
     }
 
+    pub(super) fn lookup_error(&self, kind: &str, key: Id) -> Error {
+        let mut error = Error::new(kind, self.repr(key));
+        error.args = Some(vec![key]);
+        error
+    }
+
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let message = match args {
             [] => String::new(),
@@ -199,6 +205,7 @@ pub(super) enum Value {
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
+        dictionary: Option<Id>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
@@ -312,8 +319,13 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(bases);
             }
-            Self::Instance { class, fields } => {
+            Self::Instance {
+                class,
+                fields,
+                dictionary,
+            } => {
                 visit.push(*class);
+                visit.extend(dictionary);
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
