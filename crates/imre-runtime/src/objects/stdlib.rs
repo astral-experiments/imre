@@ -97,6 +97,19 @@ pub(super) enum StringSort {
     Distinct,
 }
 
+pub(super) fn stable_sort<T: Copy>(values: &mut [T], compare: impl FnMut(&T, &T) -> Ordering) {
+    // Glidesort needs at least 48 scratch elements to avoid internal allocation.
+    // A stack buffer also lets a large sort finish when the heap is full.
+    let mut local = [std::mem::MaybeUninit::uninit(); 64];
+    let mut heap = Vec::<T>::new();
+    let scratch = if values.len() <= 128 || heap.try_reserve_exact(values.len()).is_err() {
+        local.as_mut_slice()
+    } else {
+        heap.spare_capacity_mut()
+    };
+    glidesort::sort_with_buffer_by(values, scratch, compare);
+}
+
 /// # Safety
 /// Each word is an immutable string rooted for the entire sort.
 pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
@@ -106,16 +119,7 @@ pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
     match mode {
         StringSort::Stable { reverse } => {
-            // Glidesort needs at least 48 scratch words to avoid internal allocation.
-            // A stack buffer also lets a large sort finish when the heap is full.
-            let mut local = [std::mem::MaybeUninit::uninit(); 64];
-            let mut heap = Vec::<usize>::new();
-            let scratch = if values.len() <= 128 || heap.try_reserve_exact(values.len()).is_err() {
-                local.as_mut_slice()
-            } else {
-                heap.spare_capacity_mut()
-            };
-            glidesort::sort_with_buffer_by(values, scratch, |left, right| {
+            stable_sort(values, |left, right| {
                 if reverse {
                     compare(right, left)
                 } else {
@@ -206,11 +210,11 @@ pub(super) fn shared_prefix<'a>(mut keys: impl ExactSizeIterator<Item = &'a [u8]
 
 /// # Safety
 /// Both words are rooted canonical integers for this comparison.
-unsafe fn compare_int(left: usize, right: usize) -> Ordering {
+pub(super) unsafe fn compare_int(left: usize, right: usize) -> Ordering {
     if left & right & 1 != 0 {
         (left as isize).cmp(&(right as isize))
     } else {
-        // SAFETY: the key list roots both arbitrary-precision integers.
+        // SAFETY: the caller keeps both arbitrary-precision integers alive.
         unsafe { crate::imre_int_compare(left, right) }.cmp(&0)
     }
 }

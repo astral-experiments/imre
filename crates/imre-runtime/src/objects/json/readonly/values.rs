@@ -5,7 +5,6 @@ use std::fmt::Write as _;
 use toml_datetime::{Datetime, Offset};
 
 use super::{Error, Node, View, deep_values};
-use crate::objects::exceptions::push_string_repr;
 
 impl View {
     /// Containers use identity before comparing their elements. Direct equality
@@ -104,20 +103,20 @@ impl View {
         })
     }
 
-    pub(in crate::objects) fn write_repr(&self, output: &mut String) {
-        self.try_write_repr(output).unwrap_or_else(Error::raise)
-    }
-
-    pub(in crate::objects) fn try_write_repr(&self, output: &mut String) -> Result<(), Error> {
+    pub(in crate::objects) fn try_write_repr(
+        &self,
+        output: &mut crate::objects::values::ReprWriter<'_>,
+    ) -> Result<(), Error> {
         if let Some(items) = self.nodes.root_items() {
             // SAFETY: the root owns this ordinary list through the entire repr traversal.
             unsafe {
-                crate::objects::values::write_repr(
+                crate::objects::values::try_write_repr(
                     output,
                     crate::ObjectOwner::as_ptr(items) as usize,
                     crate::objects::words::WordKind::new(5),
                 )
-            };
+            }
+            .map_err(|_| Error::allocation())?;
         } else if self.nodes.deep() {
             deep_values::write_repr(self, output)?;
         } else {
@@ -126,54 +125,66 @@ impl View {
         Ok(())
     }
 
-    pub(super) fn write_at(&self, i: usize, output: &mut String) -> Result<(), Error> {
+    pub(super) fn write_at(
+        &self,
+        i: usize,
+        output: &mut crate::objects::values::ReprWriter<'_>,
+    ) -> Result<(), Error> {
         let node = &self.nodes[i];
         match node {
-            Node::Null => output.push_str("None"),
-            Node::Datetime(value) => write_datetime_repr(value, output),
-            Node::Bool(b) => output.push_str(if *b { "True" } else { "False" }),
+            Node::Null => output.write_str("None").map_err(|_| Error::allocation())?,
+            Node::Datetime(value) => {
+                write_datetime_repr(value, output).map_err(|_| Error::allocation())?
+            }
+            Node::Bool(b) => output
+                .write_str(if *b { "True" } else { "False" })
+                .map_err(|_| Error::allocation())?,
             Node::Integer(i) => {
                 if let Some(i) = i.as_small() {
-                    write!(output, "{i}").unwrap();
+                    write!(output, "{i}").map_err(|_| Error::allocation())?;
                 } else {
-                    write!(output, "{}", i.big()).unwrap();
+                    write!(output, "{}", i.big()).map_err(|_| Error::allocation())?;
                 }
             }
-            Node::Float(f) => output.push_str(&crate::floats::render(*f)),
-            Node::ConstantNan => output.push_str("nan"),
-            Node::String(s) => push_string_repr(s, output),
+            Node::Float(f) => output
+                .write_str(&crate::floats::render(*f))
+                .map_err(|_| Error::allocation())?,
+            Node::ConstantNan => output.write_str("nan").map_err(|_| Error::allocation())?,
+            Node::String(s) => crate::objects::exceptions::write_quoted_repr(s, output)
+                .map_err(|_| Error::allocation())?,
             Node::Deferred(array) => array.try_view()?.try_write_repr(output)?,
             Node::Array(items) => {
-                output.push('[');
+                output.write_char('[').map_err(|_| Error::allocation())?;
                 for (offset, &item) in items.iter().enumerate() {
                     if offset != 0 {
-                        output.push_str(", ");
+                        output.write_str(", ").map_err(|_| Error::allocation())?;
                     }
                     self.write_at(item, output)?;
                 }
-                output.push(']');
+                output.write_char(']').map_err(|_| Error::allocation())?;
             }
             Node::Object(fields) => {
-                output.push('{');
+                output.write_char('{').map_err(|_| Error::allocation())?;
                 for (offset, (name, _)) in fields.iter().enumerate() {
                     if fields[..offset].iter().any(|(old, _)| old == name) {
                         continue;
                     }
                     if offset != 0 {
-                        output.push_str(", ");
+                        output.write_str(", ").map_err(|_| Error::allocation())?;
                     }
-                    push_string_repr(name, output);
-                    output.push_str(": ");
+                    crate::objects::exceptions::write_quoted_repr(name, output)
+                        .map_err(|_| Error::allocation())?;
+                    output.write_str(": ").map_err(|_| Error::allocation())?;
                     self.write_at(node.lookup(name).unwrap(), output)?;
                 }
-                output.push('}');
+                output.write_char('}').map_err(|_| Error::allocation())?;
             }
         }
         Ok(())
     }
 }
 
-fn write_datetime_repr(text: &str, output: &mut String) {
+fn write_datetime_repr(text: &str, output: &mut impl std::fmt::Write) -> std::fmt::Result {
     let value: Datetime = text.parse().expect("validated TOML datetime");
     match (value.date, value.time) {
         (Some(date), time) => {
@@ -182,44 +193,44 @@ fn write_datetime_repr(text: &str, output: &mut String) {
                 output,
                 "datetime.{kind}({}, {}, {}",
                 date.year, date.month, date.day
-            )
-            .unwrap();
+            )?;
             if time.is_some() {
-                output.push_str(", ");
+                output.write_str(", ")?;
             }
         }
-        (None, Some(_)) => output.push_str("datetime.time("),
+        (None, Some(_)) => output.write_str("datetime.time(")?,
         (None, None) => unreachable!("TOML datetimes contain a date or time"),
     }
     if let Some(time) = value.time {
-        write!(output, "{}, {}", time.hour, time.minute).unwrap();
+        write!(output, "{}, {}", time.hour, time.minute)?;
         let seconds = time.second.unwrap_or(0);
         let micros = time.nanosecond.unwrap_or(0) / 1000;
         if seconds != 0 || micros != 0 {
-            write!(output, ", {seconds}").unwrap();
+            write!(output, ", {seconds}")?;
         }
         if micros != 0 {
-            write!(output, ", {micros}").unwrap();
+            write!(output, ", {micros}")?;
         }
     }
     if let Some(offset) = value.offset {
-        output.push_str(", tzinfo=datetime.timezone");
+        output.write_str(", tzinfo=datetime.timezone")?;
         let minutes = match offset {
             Offset::Z => 0,
             Offset::Custom { minutes } => i32::from(minutes),
         };
         if minutes == 0 {
-            output.push_str(".utc");
+            output.write_str(".utc")?;
         } else {
-            output.push_str("(datetime.timedelta(");
+            output.write_str("(datetime.timedelta(")?;
             let seconds = minutes * 60;
             if seconds < 0 {
-                output.push_str("days=-1, ");
+                output.write_str("days=-1, ")?;
             }
-            write!(output, "seconds={}))", seconds.rem_euclid(86_400)).unwrap();
+            write!(output, "seconds={}))", seconds.rem_euclid(86_400))?;
         }
     }
-    output.push(')');
+    output.write_char(')')?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -242,7 +253,7 @@ mod tests {
             ),
         ] {
             let mut output = String::new();
-            write_datetime_repr(text, &mut output);
+            write_datetime_repr(text, &mut output).unwrap();
             assert_eq!(output, expected);
         }
     }

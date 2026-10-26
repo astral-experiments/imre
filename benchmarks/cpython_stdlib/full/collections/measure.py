@@ -47,7 +47,7 @@ def main():
             raise subprocess.CalledProcessError(result.returncode, result.args)
 
     def level(n):
-        for name in ("routines", "doctests", "counter_host", "defaultdict_factory_host", "deque_index_host"):
+        for name in ("routines", "doctests", "counter_host", "defaultdict_factory_host", "deque_index_host", "sequence_predicates_host"):
             result = out / f"{name}-O{n}.json"
             run(HERE / (name + ".py"), *common, "--opt-level", str(n), "--result", result,
                 expected=(0, 1) if name == "doctests" else (0,))
@@ -67,7 +67,7 @@ def main():
 
     run(HERE / "native_report.py", "--routines", *levels("routines"), "--doctests", *levels("doctests"),
         "--host", *levels("counter_host"), "--host", *levels("defaultdict_factory_host"),
-        "--host", *levels("deque_index_host"),
+        "--host", *levels("deque_index_host"), "--host", *levels("sequence_predicates_host"),
         "--result", out / "fixture-roles.json")
     run(HERE / "combine_defaults.py", out, "--result", out / "evidence-linux.json")
     compare = ["--compare", args.compare.resolve()] if args.compare else []

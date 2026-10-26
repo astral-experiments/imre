@@ -142,64 +142,64 @@ impl ReprView {
         }
     }
 
-    pub(super) fn write(self, out: &mut String) {
+    pub(super) fn write(self, out: &mut values::ReprWriter<'_>) -> std::fmt::Result {
         match self {
-            Self::Context(owner) => {
-                write!(out, "<_contextvars.Context object at {owner:p}>").unwrap()
-            }
+            Self::Context(owner) => write!(out, "<_contextvars.Context object at {owner:p}>"),
             Self::Var(owner, var) => {
                 let key = owner as usize;
                 let inserted = REPR.with_borrow_mut(|seen| {
                     if seen.contains(&key) {
                         return Ok(false);
                     }
-                    seen.try_reserve(1).map(|()| seen.insert(key))
-                });
-                let Ok(inserted) = inserted else {
-                    Error::allocation().raise();
-                    return;
-                };
+                    seen.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                    Ok(seen.insert(key))
+                })?;
                 if !inserted {
-                    out.push_str("...");
-                    return;
+                    return out.write_str("...");
                 }
-                out.push_str("<ContextVar name=");
-                // SAFETY: both the name and default are rooted by this variable.
-                unsafe {
-                    values::write_repr(out, StrOwner::as_ptr(&var.name) as usize, WordKind::new(3))
-                };
-                if let Some(value) = &var.default {
-                    out.push_str(" default=");
-                    // SAFETY: the stored word carries its exact live ownership kind.
-                    unsafe { values::write_repr(out, value.word, value.kind) };
-                }
-                write!(out, " at {owner:p}>").unwrap();
-                REPR.with_borrow_mut(|seen| seen.remove(&(owner as usize)));
+                let result = (|| {
+                    out.write_str("<ContextVar name=")?;
+                    super::exceptions::write_quoted_repr(&var.name, out)?;
+                    if let Some(value) = &var.default {
+                        out.write_str(" default=")?;
+                        // SAFETY: the variable roots its default throughout formatting.
+                        unsafe { values::try_write_unchecked_repr(out, value.word, value.kind) }?;
+                    }
+                    write!(out, " at {owner:p}>")
+                })();
+                REPR.with_borrow_mut(|seen| seen.remove(&key));
+                result
             }
             Self::Tok(owner, t) => {
-                out.push_str(if t.used.get() {
+                out.write_str(if t.used.get() {
                     "<Token used var="
                 } else {
                     "<Token var="
-                });
-                out.push_str(&description(&t.key));
-                write!(out, " at {owner:p}>").unwrap();
+                })?;
+                write_description(&t.key, out)?;
+                write!(out, " at {owner:p}>")
             }
-            Self::Missing => out.push_str("<Token.MISSING>"),
+            Self::Missing => out.write_str("<Token.MISSING>"),
         }
     }
 }
-fn description(obj: &Object) -> String {
-    // SAFETY: clone a read-only formatting snapshot and leave storage before nested repr.
+fn write_description(obj: &Object, out: &mut values::ReprWriter<'_>) -> std::fmt::Result {
+    // SAFETY: the caller roots obj. Leave its storage before nested repr can run.
     let view = unsafe { obj.0.with(|s| repr_view(obj, s)) };
+    view.write(out)
+}
+fn description(obj: &Object) -> Result<String, Error> {
     let mut out = String::new();
-    view.write(&mut out);
-    out
+    write_description(obj, &mut values::ReprWriter(&mut out)).map_err(|_| Error::allocation())?;
+    Ok(out)
 }
 fn missing(key: &Object, kind: Kind) -> Error {
     // SAFETY: the exception independently owns the variable passed as its only argument.
     let word = unsafe { WordKind::new(5).acquire(key as *const Object as usize) };
-    Error::object_argument(kind, description(key), word)
+    match description(key) {
+        Ok(text) => Error::object_argument(kind, text, word),
+        Err(error) => error,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -315,7 +315,10 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
             None
         };
         if let Some((kind, reason)) = error {
-            return Err(Error::new(kind, format!("{} {reason}", description(owner))));
+            return Err(Error::new(
+                kind,
+                format!("{} {reason}", description(owner)?),
+            ));
         }
         t.used.set(true);
         context.replace(t.key.clone(), t.old.clone());

@@ -235,41 +235,43 @@ fn parts(value: i128) -> (i128, i128, i128) {
     )
 }
 
-pub(super) fn write_repr(v: &Value, out: &mut String) {
+pub(super) fn write_repr(v: &Value, out: &mut super::values::ReprWriter<'_>) -> std::fmt::Result {
+    use std::fmt::Write as _;
     match v {
-        Value::Delta(n) => out.push_str(&delta_repr(*n)),
+        Value::Delta(n) => write_delta_repr(*n, out)?,
         Value::Zone { offset, name } => {
             if delta(offset) == 0 && name.is_none() {
-                out.push_str("datetime.timezone.utc");
-                return;
+                out.write_str("datetime.timezone.utc")?;
+                return Ok(());
             }
-            out.push_str("datetime.timezone(");
-            out.push_str(&delta_repr(delta(offset)));
+            out.write_str("datetime.timezone(")?;
+            write_delta_repr(delta(offset), out)?;
             if let Some(s) = name {
-                out.push_str(", ");
-                exceptions::push_string_repr(s.as_str(), out);
+                out.write_str(", ")?;
+                exceptions::write_quoted_repr(s.as_str(), out)?;
             }
-            out.push(')');
+            out.write_char(')')?;
         }
         Value::Date { local, zone, fold } => {
             let [y, m, d, h, mi, s, u, _] = date_fields(*local, *fold);
-            out.push_str(&format!("datetime.datetime({y}, {m}, {d}, {h}, {mi}"));
+            write!(out, "datetime.datetime({y}, {m}, {d}, {h}, {mi}")?;
             if s != 0 || u != 0 {
-                out.push_str(&format!(", {s}"));
+                write!(out, ", {s}")?;
             }
             if u != 0 {
-                out.push_str(&format!(", {u}"));
+                write!(out, ", {u}")?;
             }
             if *fold != 0 {
-                out.push_str(", fold=1");
+                out.write_str(", fold=1")?;
             }
             if let Some(z) = zone {
-                out.push_str(", tzinfo=");
-                with(z, |v| write_repr(v, out));
+                out.write_str(", tzinfo=")?;
+                with(z, |v| write_repr(v, out))?;
             }
-            out.push(')');
+            out.write_char(')')?;
         }
     }
+    Ok(())
 }
 /// # Safety
 /// Each nonzero word denotes a rooted calendar object; zero denotes Python None.
@@ -305,21 +307,23 @@ pub(super) fn equal(a: &Value, b: &Value) -> bool {
     }
 }
 
-fn delta_repr(value: i128) -> String {
+fn write_delta_repr(value: i128, out: &mut impl std::fmt::Write) -> std::fmt::Result {
     let (d, s, u) = parts(value);
-    let args = [("days", d), ("seconds", s), ("microseconds", u)]
-        .into_iter()
-        .filter(|(_, n)| *n != 0)
-        .map(|(s, n)| format!("{s}={n}"))
-        .collect::<Vec<_>>();
-    format!(
-        "datetime.timedelta({})",
-        if args.is_empty() {
-            "0".to_owned()
-        } else {
-            args.join(", ")
+    out.write_str("datetime.timedelta(")?;
+    let mut first = true;
+    for (name, value) in [("days", d), ("seconds", s), ("microseconds", u)] {
+        if value != 0 {
+            if !first {
+                out.write_str(", ")?;
+            }
+            write!(out, "{name}={value}")?;
+            first = false;
         }
-    )
+    }
+    if first {
+        out.write_char('0')?;
+    }
+    out.write_char(')')
 }
 
 fn zone_name(offset: i128) -> String {
@@ -350,13 +354,12 @@ fn make_zone(
 ) -> Result<crate::ObjectOwner, Error> {
     let us = delta(&delta_obj);
     if us.abs() >= DAY {
-        return Err(Error::new(
-            Kind::ValueError,
-            format!(
-                "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not {}",
-                delta_repr(us)
-            ),
-        ));
+        let mut message = String::new();
+        let mut output = super::values::ReprWriter(&mut message);
+        use std::fmt::Write as _;
+        output.write_str("offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not ").map_err(|_| Error::allocation())?;
+        write_delta_repr(us, &mut output).map_err(|_| Error::allocation())?;
+        return Err(Error::new(Kind::ValueError, message));
     }
     if us == 0 && name.is_none() {
         return Ok(utc());
