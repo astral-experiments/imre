@@ -31,20 +31,26 @@ impl Context {
 
     /// Resolve Python's integer-index protocol without rounding or truncating a numeric value.
     pub(super) fn index_integer(&mut self, value: Id) -> Result<crate::Int> {
-        if let Ok(integer) = self.as_int(value) {
-            return Ok(integer);
-        }
-        let Some(index) = self.bound_slot(value, "__index__")? else {
-            return Err(Error::new(
+        self.try_index_integer(value)?.ok_or_else(|| {
+            Error::new(
                 "TypeError",
                 format!(
                     "'{}' object cannot be interpreted as an integer",
                     self.type_name(value)
                 ),
-            ));
+            )
+        })
+    }
+
+    pub(super) fn try_index_integer(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        if let Ok(integer) = self.as_int(value) {
+            return Ok(Some(integer));
+        }
+        let Some(index) = self.bound_slot(value, "__index__")? else {
+            return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        self.as_int(result).map_err(|_| {
+        self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
