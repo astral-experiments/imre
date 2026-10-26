@@ -156,6 +156,7 @@ impl Context {
             Value::Struct { .. } => "Struct",
             Value::List(_) => "list",
             Value::Iterator { reverse: true, .. } => "list_reverseiterator",
+            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -380,6 +381,12 @@ pub(super) enum Value {
         strict: bool,
         pending: Option<Id>,
     },
+    CallableIterator(Option<[Id; 2]>),
+    // Private to a compiled loop. Python-visible iterators keep their original identity.
+    LoopIterator {
+        source: Id,
+        peeked: Option<Id>,
+    },
     Iterator {
         sequence: Option<Id>,
         offset: usize,
@@ -428,6 +435,11 @@ impl Value {
             } => {
                 visit.extend(inputs.iter());
                 visit.extend(pending);
+            }
+            Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
+            Self::LoopIterator { source, peeked } => {
+                visit.push(*source);
+                visit.extend(peeked);
             }
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
