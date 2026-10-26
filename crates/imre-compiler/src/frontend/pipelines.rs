@@ -1264,8 +1264,16 @@ impl Checker<'_> {
             });
         }
         let tuple_element = fields.as_ref().and_then(|fields| {
-            let first = fields.first().copied().unwrap_or(Type::None);
-            fields.iter().all(|ty| *ty == first).then_some(first)
+            let first = *fields.first()?;
+            if fields.iter().all(|ty| *ty == first) {
+                return Some(first);
+            }
+            let non_none = *fields.iter().find(|&&ty| ty != Type::None)?;
+            let payload = self.types.payload(non_none).unwrap_or(non_none);
+            fields
+                .iter()
+                .all(|&ty| ty == Type::None || self.types.payload(ty).unwrap_or(ty) == payload)
+                .then(|| self.types.optional(payload))
         });
         let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
             .or(set_element)
@@ -1341,13 +1349,17 @@ impl Checker<'_> {
                     ty: element,
                     kind: ExprKind::None,
                 };
-                // An empty tuple never reaches this expression. For a nonempty
-                // homogeneous tuple every dynamic arm has one concrete layout.
-                for index in (0..fields.len()).rev() {
-                    let field = Expr {
-                        ty: element,
-                        kind: ExprKind::Field(Box::new(self.local(source)), index),
-                    };
+                // Read each field with its stored type before converting it to the
+                // cursor's common layout, including the tag for a nullable element.
+                for (index, &ty) in fields.iter().enumerate().rev() {
+                    let field = self.coerce(
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(self.local(source)), index),
+                        },
+                        element,
+                        node,
+                    )?;
                     item = if index + 1 == fields.len() {
                         field
                     } else {
