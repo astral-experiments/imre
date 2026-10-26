@@ -1048,25 +1048,12 @@ impl Context {
             self.call(method, vec![key], vec![])?;
             return Ok(());
         }
+        if let Some(dict) = self.dict_storage(obj) {
+            builtins::remove_dict_item(self, dict, key)?
+                .ok_or_else(|| self.lookup_error("KeyError", key))?;
+            return Ok(());
+        }
         match self.heap.get(obj) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                if !builtins::hashable(self, key) {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("unhashable type: '{}'", self.type_name(key)),
-                    ));
-                }
-                let i = entries
-                    .iter()
-                    .position(|(k, _)| self.equal(*k, key))
-                    .ok_or_else(|| Error::new("KeyError", self.repr(key)))?;
-                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                    self.heap.get_mut(obj)
-                else {
-                    unreachable!()
-                };
-                entries.remove(i);
-            }
             Value::List(entries) => {
                 let i = self.as_integer(key)?;
                 let i = if i < 0 { entries.len() as i64 + i } else { i };

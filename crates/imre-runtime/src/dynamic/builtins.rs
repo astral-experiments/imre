@@ -9,7 +9,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod integer;
 mod text;
-pub(super) use collections::{hashable, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -162,6 +162,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "get",
     "items",
     "keys",
+    "pop",
     "setdefault",
     "update",
     "values",
