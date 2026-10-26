@@ -3,14 +3,55 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from discover_staged import early_skips, suite_names
 from run_staged_reference import compare_group
 from stage_tests import stage, verify_prefix
+from suite_inventory import passing_subtest_skips
 
 
 class FixtureChecks(unittest.TestCase):
+    def test_skipped_subtest_needs_a_passing_sibling_and_matching_junit_reason(self):
+        class Parameters(unittest.TestCase):
+            def test_parameters(self):
+                for value in (0, 1, 2):
+                    with self.subTest(value=value):
+                        if value:
+                            self.skipTest("this parameter")
+
+            @unittest.skip("whole method")
+            def test_whole(self):
+                self.fail()
+
+        count, skips, aliases = passing_subtest_skips(unittest.defaultTestLoader.loadTestsFromTestCase(Parameters))
+        parent, whole = Parameters("test_parameters").id(), Parameters("test_whole").id()
+        self.assertEqual(count, 2)
+        self.assertEqual(skips, [[parent, {"value": 1}, "this parameter"], [parent, {"value": 2}, "this parameter"]])
+        expected = {parent: ["pass"], whole: [{"skipped": "whole method"}]}
+        root = ET.Element("testsuite")
+        for name, reason in ((parent + " (value=1)", "this parameter"), (whole, "whole method")):
+            case = ET.SubElement(root, "testcase", name=name, status="run", result="completed")
+            ET.SubElement(case, "skipped").text = reason
+        with tempfile.TemporaryDirectory() as temporary:
+            xml = Path(temporary) / "suite.xml"
+            ET.ElementTree(root).write(xml)
+            result = compare_group(xml, expected, {}, 0, aliases)
+            self.assertEqual(result["outcomes"], {"pass": 1, "skipped": 1})
+            self.assertEqual(result["differences"], {})
+            root[0][0].text = "a different reason"
+            ET.ElementTree(root).write(xml)
+            self.assertIn("incomplete", compare_group(xml, expected, {}, 0, aliases))
+
+        class AllSkipped(unittest.TestCase):
+            def test_parameters(self):
+                with self.subTest(value=1):
+                    self.skipTest("only parameter")
+
+        with self.assertRaisesRegex(ValueError, "no successful sibling"):
+            passing_subtest_skips(unittest.defaultTestLoader.loadTestsFromTestCase(AllSkipped))
+
     def test_incomplete_junit_cannot_supply_reference_counts(self):
         expected = {"test.suite.C.test_a": ["pass"], "test.suite.C.test_b": ["pass"]}
         with tempfile.TemporaryDirectory() as temporary:
