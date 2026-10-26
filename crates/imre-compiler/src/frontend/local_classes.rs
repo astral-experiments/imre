@@ -137,6 +137,16 @@ impl Checker<'_> {
                 }
                 ast::Stmt::Assign(a)
                     if let [ast::Expr::Name(n)] = a.targets.as_slice()
+                        && ((matches!(n.id.as_str(), "__enter__" | "__exit__")
+                            && matches!(&*a.value, ast::Expr::NoneLiteral(_)))
+                            || (n.id == "__slots__"
+                                && matches!(&*a.value, ast::Expr::Tuple(t) if t.elts.is_empty()))) =>
+                {
+                    abstract_methods.remove(n.id.as_str());
+                    attributes.insert(n.id.to_string(), Some(false));
+                }
+                ast::Stmt::Assign(a)
+                    if let [ast::Expr::Name(n)] = a.targets.as_slice()
                         && !n.id.starts_with("__")
                         && matches!(
                             &*a.value,

@@ -9143,6 +9143,24 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Bool(result),
                 });
             }
+            if let [child, parent] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+                && let Some(Binding::Definition(parent)) = self.resolve(parent)
+                && self.graph.is_abstract_context_manager(parent)
+                && let Some(local) = self.local_class(child)?
+            {
+                let nominal = local.abstract_base.is_some_and(|base| {
+                    let classes = &self.classes.declarations;
+                    classes.subclass(self.graph, base, classes.ids[&parent])
+                });
+                let protocol = ["__enter__", "__exit__"]
+                    .iter()
+                    .all(|name| local.attributes.get(*name) == Some(&Some(true)));
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(nominal || protocol),
+                });
+            }
             if let Some(answer) = self.mapping_issubclass(call)? {
                 return Ok(answer);
             }

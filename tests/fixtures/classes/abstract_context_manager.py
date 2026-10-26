@@ -29,8 +29,22 @@ class Missing(Duck):
     __enter__ = None
 
 
-def use(resource: AbstractContextManager[int]) -> int:
-    return resource.__enter__()
+def is_manager(resource: AbstractContextManager[int]) -> bool:
+    return isinstance(resource, AbstractContextManager)
+
+
+def local_protocol() -> bool:
+    class Both:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, typ, value, tb):
+            return None
+
+    class NoExit(Both):
+        __exit__ = None
+
+    return issubclass(Both, AbstractContextManager) and not issubclass(NoExit, AbstractContextManager)
 
 
 def incomplete() -> None:
@@ -40,7 +54,9 @@ def incomplete() -> None:
     MissingExit()
 
 
-assert use(Resource()) == 42
+assert local_protocol()
+assert is_manager(Resource())
+assert Resource().__enter__() == 42
 assert Resource().__exit__(None, None, None) is None
 manager = DefaultEnter()
 assert manager.__enter__() is manager
