@@ -170,6 +170,21 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        use InstanceType::{Deque, Exact, List, Tuple};
+        match self.collection_class_name(expression) {
+            Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
+            Some("collections.abc.Sequence") => {
+                return Ok(vec![
+                    List,
+                    Deque,
+                    Tuple,
+                    Exact(Type::Str),
+                    Exact(Type::Bytes),
+                ]);
+            }
+            _ => {}
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }

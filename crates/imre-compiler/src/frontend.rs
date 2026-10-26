@@ -5585,7 +5585,7 @@ impl<'a> Checker<'a> {
             return Ok(typing::dummy());
         }
 
-        if let Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) = self.resolve(expression) {
+        if let Some(name) = self.collection_class_name(expression) {
             return Ok(annotations::class_value(name));
         }
         if let ast::Expr::Attribute(attr) = expression

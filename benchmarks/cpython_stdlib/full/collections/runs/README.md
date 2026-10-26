@@ -81,3 +81,5 @@ verifier branch named in the hosted run, download its `collections-<sha>`
 artifact, then run `python -B archive_run.py <download-dir>` from this
 module's directory. The script checks Git provenance and validates both full
 reports against the pinned reference before copying them.
+
+The refreshed [Sequence ABC run](4435f75200d3/README.md) records both denominators and original assertions at each optimization level.
