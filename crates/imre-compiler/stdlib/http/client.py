@@ -41,7 +41,7 @@ class HTTPMessage:
                     value += line
                 continue
             if name:
-                self._headers.append((name, value.rstrip("\r\n")))
+                self._headers.append((name, value.lstrip(" \t\r\n").rstrip("\r\n")))
                 name = ""
             colon = line.find(":")
             if colon < 0:
@@ -55,6 +55,6 @@ class HTTPMessage:
                     break
             if not name:
                 break
-            value = line[colon + 1:].lstrip(" \t")
+            value = line[colon + 1:]
         if name:
-            self._headers.append((name, value.rstrip("\r\n")))
+            self._headers.append((name, value.lstrip(" \t\r\n").rstrip("\r\n")))

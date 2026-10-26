@@ -215,8 +215,8 @@ def public_contracts(command):
             first_socket = conn.sock
             for connection in ("keep-alive", "close"):
                 conn.putrequest("CHECK", "/new")
-                conn.putheader("Connection", connection)
-                conn.putheader("X-Value", "one")
+                conn.putheader("Connection", "\r\n\tclose" if connection == "close" else connection)
+                conn.putheader("X-Value", "\r\n one")
                 conn.putheader("x-value", "two")
                 conn.endheaders()
                 assert conn.sock is first_socket
