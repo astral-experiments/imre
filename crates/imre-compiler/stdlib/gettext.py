@@ -1,5 +1,6 @@
 """Translate messages with GNU MO catalogs selected by domain and language."""
 
+from _imre_gettext_locale import normalize as _normalize_locale
 import codecs
 import os
 import sys
@@ -14,7 +15,7 @@ def _default_directory() -> str:
 
 def _expand_lang(language: str) -> list[str]:
     # GNU gettext tries the most specific combination first, then each subset.
-    base, at, modifier = language.partition("@")
+    base, at, modifier = _normalize_locale(language).partition("@")
     base, dot, encoding = base.partition(".")
     base, underscore, territory = base.partition("_")
     components = [dot + encoding, underscore + territory, at + modifier]
@@ -44,7 +45,7 @@ def _paths(domain: str, directory: str, languages: list[str]) -> list[str]:
     paths: list[str] = []
     for language in languages:
         for name in _expand_lang(language):
-            if name == "C" or name == "POSIX":
+            if name == "C":
                 return paths
             filename = os.path.join(directory, name, "LC_MESSAGES", domain + ".mo")
             if filename not in paths and os.path.exists(filename):
@@ -126,16 +127,26 @@ def _plural_program(expression: str) -> list[str]:
 
 
 def _binary(op: str, left: int, right: int) -> int:
-    if op == "+": return left + right
-    if op == "-": return left - right
-    if op == "*": return left * right
-    if op == "/": return left // right
-    if op == "%": return left % right
-    if op == "==": return int(left == right)
-    if op == "!=": return int(left != right)
-    if op == "<": return int(left < right)
-    if op == "<=": return int(left <= right)
-    if op == ">": return int(left > right)
+    if op == "+":
+        return left + right
+    if op == "-":
+        return left - right
+    if op == "*":
+        return left * right
+    if op == "/":
+        return left // right
+    if op == "%":
+        return left % right
+    if op == "==":
+        return int(left == right)
+    if op == "!=":
+        return int(left != right)
+    if op == "<":
+        return int(left < right)
+    if op == "<=":
+        return int(left <= right)
+    if op == ">":
+        return int(left > right)
     return int(left >= right)
 
 
@@ -156,9 +167,12 @@ def _plural_index(program: list[str], number: int) -> int:
             left = values.pop()
             if token == ":":
                 condition = values.pop()
-                if condition[1]: values.append(condition)
-                elif condition[0]: values.append(left)
-                else: values.append(right)
+                if condition[1]:
+                    values.append(condition)
+                elif condition[0]:
+                    values.append(left)
+                else:
+                    values.append(right)
             elif left[1] or (token == "&&" and not left[0]) or (token == "||" and left[0]):
                 values.append(left)
             elif right[1] or token == "&&" or token == "||":
@@ -171,6 +185,20 @@ def _plural_index(program: list[str], number: int) -> int:
     if error:
         raise ZeroDivisionError(error)
     return value
+
+
+class _PluralRule:
+    program: list[str]
+
+    def __init__(self, expression: str) -> None:
+        self.program = _plural_program(expression)
+
+    def select(self, n: int) -> int:
+        return _plural_index(self.program, n)
+
+
+def c2py(plural: str):
+    return _PluralRule(plural).select
 
 
 def _word(data: bytes, offset: int, big: bool) -> int:
