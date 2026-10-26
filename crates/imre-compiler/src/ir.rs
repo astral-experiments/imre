@@ -1200,6 +1200,8 @@ pub(crate) enum Builtin {
     /// Read the public maxsize (false) or typed (true) of a constructed cache.
     CacheParameter(bool),
     CallableContext,
+    /// A fresh partial with the same call interface, owning its original target.
+    EmptyPartial,
     HashStr,
     HashRecord,
     /// A dictionary with a read-only JSON receiver and a literal string key.

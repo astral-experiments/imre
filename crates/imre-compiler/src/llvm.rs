@@ -4638,6 +4638,7 @@ impl Emitter<'_, '_> {
                     }
                 }
             }
+            Builtin::EmptyPartial => self.empty_partial(&args[0].value),
             Builtin::CallableContext => {
                 let address = self.instruction(format!(
                     "getelementptr %callable, ptr {}, i32 0, i32 1",
