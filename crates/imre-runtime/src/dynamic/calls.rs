@@ -509,6 +509,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "datetime.time" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("time")),
+                "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }

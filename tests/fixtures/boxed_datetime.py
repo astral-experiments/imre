@@ -42,6 +42,7 @@ def test_cookie_timestamp():
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
+    assert (time.__module__, time.__name__, time.__qualname__) == ("datetime", "time", "time")
     assert not isinstance(midnight, date)
     assert midnight.tzinfo is None and midnight.fold == 0
     day = date(2000, 2, 29)
