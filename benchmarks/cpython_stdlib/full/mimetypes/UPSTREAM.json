@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_mimetypes",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/mimetypes.py": "7d0f4c1fd400d538a6a80b0af4cdf2da0f6910a9",
+    "Lib/test/test_mimetypes.py": "c1806b1c1337786fdbbbefada073033c57d45caa",
+    "Lib/test/mime.types": "eb39a17b6bf4b2c5a5711dfaf3e2ec18836023f3"
+  }
+}

@@ -2682,6 +2682,9 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/http/__init__.py"),
             )),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "mimetypes" if cfg!(unix) => {
+                Some(("mimetypes.py", include_str!("../stdlib/mimetypes.py")))
+            }
             "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
