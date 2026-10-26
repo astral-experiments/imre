@@ -193,7 +193,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "socket.socket"
         }
         Value::TextFile(_)
-            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+            if matches!(
+                attr,
+                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+            ) =>
         {
             "TextIOWrapper"
         }
@@ -781,11 +784,35 @@ pub(super) fn call(
             super::property::construct(ctx, fields)
         }
         "open" => {
-            let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
+            arity(name, args, 0, 2)?;
+            let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if matches!(mode, "w" | "wt" | "tw") {
-                let file = crate::objects::TextFile::create(path)?;
+            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
+                if mode.contains('b') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "binary mode doesn't take an encoding argument",
+                    ));
+                }
+                let encoding = ctx.str_value(encoding)?;
+                if !matches!(
+                    crate::objects::Codec::lookup(encoding)?,
+                    crate::objects::Codec::Utf8 { signature: false }
+                ) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "text files require UTF-8 encoding",
+                    ));
+                }
+            }
+            let text_mode = match mode {
+                "r" | "rt" | "tr" => Some(0),
+                "w" | "wt" | "tw" => Some(1),
+                _ => None,
+            };
+            if let Some(text_mode) = text_mode {
+                let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             if mode != "rb" {
