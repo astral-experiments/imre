@@ -59,6 +59,12 @@ def exercise(path):
         alias.read()
     except UnsupportedOperation as error:
         print(alias.closed, isinstance(error, OSError), isinstance(error, ValueError))
+    for operation, argument in ((alias.read, 1 << 40), (alias.readline, 1 << 100),
+                                (alias.readinto, b""), (alias.read, -2)):
+        try:
+            operation(argument)
+        except (OverflowError, TypeError, OSError) as error:
+            print(type(error).__name__)
     try:
         alias.write(b"x")
     except ValueError:

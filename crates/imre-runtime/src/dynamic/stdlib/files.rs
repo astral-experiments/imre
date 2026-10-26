@@ -259,6 +259,23 @@ pub(super) fn call(
                 ("file.__enter__", []) => Ok(first),
                 ("file.fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
+                    match (name, &args[1..]) {
+                        ("file.read", [size]) => {
+                            crate::objects::FileState::check_writer_read_size(&ctx.as_int(*size)?)?;
+                        }
+                        ("file.readline", [size]) if *size != NONE => {
+                            ctx.as_integer(*size)?;
+                        }
+                        ("file.readinto", [buffer])
+                            if !matches!(ctx.heap.get(*buffer), Value::ByteArray(_)) =>
+                        {
+                            return Err(Error::new(
+                                "TypeError",
+                                "readinto() requires a writable bytes-like object",
+                            ));
+                        }
+                        _ => {}
+                    }
                     Err(Error::new("UnsupportedOperation", "read"))
                 }
                 _ => Err(Error::new(

@@ -270,16 +270,11 @@ impl FileState {
         if self.kind == FileKind::GzipBinaryRead {
             self.stream()?;
         }
-        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::BinaryWrite {
-            i32::try_from(size).map_err(|_| {
-                Error::new(
-                    Kind::OverflowError,
-                    "Python int too large to convert to C int",
-                )
-            })?;
+            Self::check_writer_read_size(value)?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::Memory {
             return self.read_bytes(usize::try_from(size).ok());
         }
@@ -296,6 +291,18 @@ impl FileState {
             return Ok(Bytes::new());
         }
         self.input()?.read_bytes(usize::try_from(size).ok())
+    }
+
+    /// BufferedWriter.read converts its count to a C int before rejecting the access mode.
+    pub(crate) fn check_writer_read_size(value: &Int) -> Result<()> {
+        i32::try_from(super::bytes::native_size(value)?)
+            .map(|_| ())
+            .map_err(|_| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })
     }
 
     pub(crate) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {

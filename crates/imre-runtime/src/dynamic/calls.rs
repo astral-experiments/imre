@@ -466,6 +466,8 @@ impl Context {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
+                    || (kind == "UnsupportedOperation"
+                        && matches!(name.as_str(), "OSError" | "ValueError"))
                     || (name == "RuntimeError" && kind == "RecursionError")
                     || (name == "ValueError"
                         && matches!(kind, "JSONDecodeError" | "binascii.Error"))
