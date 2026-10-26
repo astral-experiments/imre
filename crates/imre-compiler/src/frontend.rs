@@ -12,6 +12,7 @@ use crate::narrowing;
 use crate::types::Types;
 
 mod annotations;
+pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
 mod argparse;
 mod ascii;
 mod assertion_syntax;

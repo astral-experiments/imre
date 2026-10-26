@@ -144,6 +144,7 @@ fn result(ctx: &mut Context, class: &'static str, fields: [Id; 5]) -> Id {
         class: Some(class),
         names: FIELDS.map(str::to_owned).into(),
         values: fields.into(),
+        extras: Vec::new(),
     })
 }
 

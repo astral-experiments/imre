@@ -94,6 +94,7 @@ def main():
 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -312,6 +313,7 @@ def report(text):
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_datetime.py",
+            "boxed_time.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_type_identity.py",
