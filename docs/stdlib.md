@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 68 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 32 modules with recorded suites, 92 complete test executions pass natively at both optimization levels; 12,443 of 12,590 upstream executions have a classification.
+**At a glance:** 69 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 33 modules with recorded suites, 92 complete test executions pass natively at both optimization levels; 12,789 of 12,936 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 391 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,508 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 392 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,510 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -40,6 +40,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `genericpath` | Rejected | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHA-256 construction, incremental updates, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/native_hashlib.py) | — | — | — |
+| `http` | Yes | Look up `HTTPStatus(404).phrase`, inspect status categories and iterate canonical status and method members. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 0 | 2 |
 | `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`; with a configured cache tag, convert paths using `util.cache_from_source` and `util.source_from_cache`. [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
 | `inspect` | Yes | `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 0 |
 | `io` | Yes | In-memory `StringIO` and `BytesIO` streams. [Evidence](../benchmarks/cpython_stdlib/full/doctest/stringio/README.md) | — | — | — |
@@ -128,7 +129,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `heapq` |
 | `hmac` |
 | `html` |
-| `http` |
 | `imaplib` |
 | `ipaddress` |
 | `keyword` |

@@ -12,7 +12,7 @@ fn tag(ty: Type) -> u8 {
         // contains both an exception and a LogRecord.
         Type::Exception | Type::LogRecord => 3,
         Type::Class(_) | Type::Tuple(_) => 4,
-        Type::Enum(_) => 5,
+        Type::Enum(_) | Type::IntEnum(_) => 5,
         Type::Path => 6,
         Type::Int => 7,
         _ => unreachable!("closed native union member"),
@@ -45,7 +45,7 @@ impl Emitter<'_, '_> {
         let operand = if source == Type::Int {
             self.instruction(format!("call i64 @imre_union_from_int(i64 {word})"))
         } else if tag != 0 {
-            let bits = if matches!(source, Type::Enum(_)) {
+            let bits = if matches!(source, Type::Enum(_) | Type::IntEnum(_)) {
                 self.instruction(format!("shl i64 {word}, 3"))
             } else {
                 word.clone()
@@ -97,7 +97,7 @@ impl Emitter<'_, '_> {
                 "call i64 @imre_union_into_int(i64 {})",
                 value.operand
             ))
-        } else if matches!(returns, Type::Enum(_)) {
+        } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
             self.instruction(format!("lshr i64 {}, 3", value.operand))
         } else {
             self.instruction(format!("and i64 {}, -8", value.operand))

@@ -1,0 +1,33 @@
+{
+  "wheel": "werkzeug-3.1.8-py3-none-any.whl",
+  "sha256": "63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50",
+  "sources": {
+    "HTTP_STATUS_CODES.inc": {
+      "path": "werkzeug/http.py",
+      "source_sha256": "e0720a5fef9f54b4d478f76f1f88ec0e6ba2519737f17ce20cf0608542456f4a",
+      "lines": [
+        55,
+        120
+      ],
+      "excerpt_sha256": "6151f5024217da71eb19d1dc5f53f3050f666db7ee0535c10d1db81fbf9ddbb9"
+    },
+    "_clean_status.inc": {
+      "path": "werkzeug/sansio/response.py",
+      "source_sha256": "d79f63dd30b601b0efaa9a5c7a0566a4b7eda2def4516b66e6a64ed24a90a459",
+      "lines": [
+        160,
+        187
+      ],
+      "excerpt_sha256": "a9b7ffbdceeee8cd44127a7d7589ab1b3b45d26823d0142302f20540da5b2673"
+    },
+    "LICENSE.txt": {
+      "path": "werkzeug-3.1.8.dist-info/licenses/LICENSE.txt",
+      "source_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+      "lines": [
+        1,
+        28
+      ],
+      "excerpt_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"
+    }
+  }
+}

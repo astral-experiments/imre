@@ -32,8 +32,22 @@ pub(super) fn inline_dispatch(module: &Module, effects: &effects::ExceptionEffec
 impl Emitter<'_, '_> {
     pub(super) fn prepare_enum_members(&mut self) {
         let module = self.module;
+        let has_http = module
+            .class_metadata
+            .iter()
+            .any(|class| !class.http_members.is_empty());
         for class in &module.class_metadata {
-            for (name, value) in &class.enum_members {
+            for (index, (name, value)) in class.enum_members.iter().enumerate() {
+                if has_http {
+                    let row = class.http_members.get(index).map(|http| {
+                        (
+                            http.code.map_or(0, |n| (u64::from(n) << 1) | 1),
+                            self.intern_literal(http.phrase.as_bytes(), Type::Str),
+                            self.intern_literal(http.description.as_bytes(), Type::Str),
+                        )
+                    });
+                    self.http_members.push(row);
+                }
                 let fields = [&class.name, name, value]
                     .map(|text| self.intern_literal(text.as_bytes(), Type::Str));
                 self.enum_members.push(fields);
@@ -75,6 +89,27 @@ impl Emitter<'_, '_> {
             styles.join(", ")
         )
         .unwrap();
+        if !self.http_members.is_empty() {
+            let rows = self.http_members.iter().map(|row| match row {
+                Some((code, phrase, description)) => {
+                    let phrase = self.output.string_name(*phrase, "literal");
+                    let description = self.output.string_name(*description, "literal");
+                    format!("{{ i64, ptr, ptr }} {{ i64 {code}, ptr @{phrase}, ptr @{description} }}")
+                }
+                None => "{ i64, ptr, ptr } zeroinitializer".to_owned(),
+            }).collect::<Vec<_>>();
+            writeln!(
+                self.output.global(
+                    self.output.entry,
+                    "http_enum_members",
+                    "constant",
+                    format_args!("[{} x {{ i64, ptr, ptr }}]", rows.len())
+                ),
+                "[{}]",
+                rows.join(", ")
+            )
+            .unwrap();
+        }
         let rows = self
             .enum_members
             .iter()
@@ -96,11 +131,30 @@ impl Emitter<'_, '_> {
         .unwrap();
     }
 
+    pub(super) fn http_member_field(&mut self, tag: &Value, field: u8) -> Value {
+        let index = self.instruction(format!("sub nuw i64 {}, 1", tag.operand));
+        let table = self.output.global_ref("http_enum_members".to_owned());
+        let ptr = self.instruction(format!("getelementptr inbounds [{} x {{ i64, ptr, ptr }}], ptr @{table}, i64 0, i64 {index}, i32 {field}", self.http_members.len()));
+        if field == 0 {
+            Value {
+                ty: Type::Int,
+                operand: self.instruction(format!("load i64, ptr {ptr}")),
+                small_integer: true,
+            }
+        } else {
+            self.enum_string_root(&ptr)
+        }
+    }
+
     pub(super) fn enum_text(&mut self, tag: &Value, name: bool) -> Value {
         let index = self.instruction(format!("sub nuw i64 {}, 1", tag.operand));
         let field = if name { 1 } else { 2 };
         let table = self.output.global_ref("str_enum_members".to_owned());
         let ptr = self.instruction(format!("getelementptr inbounds [{} x [3 x ptr]], ptr @{table}, i64 0, i64 {index}, i64 {field}", self.enum_members.len()));
+        self.enum_string_root(&ptr)
+    }
+
+    fn enum_string_root(&mut self, ptr: &str) -> Value {
         let root = self.instruction(format!("load ptr, ptr {ptr}"));
         let result = Value {
             ty: Type::Str,

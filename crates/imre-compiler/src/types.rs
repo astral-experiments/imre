@@ -243,9 +243,11 @@ impl Types {
             ),
             Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
             Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
-            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
-                id < classes
-            }
+            Type::Class(id)
+            | Type::NamedException(id)
+            | Type::IntEnum(id)
+            | Type::StrEnum(id)
+            | Type::Enum(id) => id < classes,
             Type::Coroutine(id) | Type::Task(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
             }
@@ -544,6 +546,7 @@ impl Types {
             Type::Int
                 | Type::Str
                 | Type::StrLiteral(_)
+                | Type::IntEnum(_)
                 | Type::StrEnum(_)
                 | Type::Enum(_)
                 | Type::Bytes
@@ -676,6 +679,26 @@ impl Types {
                     }
                     self.string_literal(strings)
                 }
+            }
+            [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.string_or_int(),
+            choices @ [_, _, ..]
+                if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
+                    && choices
+                        .iter()
+                        .all(|ty| matches!(ty, Type::Str | Type::Int | Type::IntEnum(_)))
+                    && choices
+                        .iter()
+                        .filter(|ty| matches!(ty, Type::IntEnum(_)))
+                        .count()
+                        == 1 =>
+            {
+                let mut ordered = choices.to_vec();
+                ordered.sort_by_key(|ty| match ty {
+                    Type::Str => 0,
+                    Type::Int => 1,
+                    _ => 2,
+                });
+                Type::Union(self.intern(Shape::Union(ordered)))
             }
             [Type::Str, other] | [other, Type::Str]
                 if matches!(
@@ -1751,7 +1774,11 @@ impl TypeDescription<'_> {
             | Type::Set(id)
             | Type::Optional(id)
             | Type::Union(id) => id,
-            Type::Class(id) | Type::NamedException(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id)
+            | Type::NamedException(id)
+            | Type::IntEnum(id)
+            | Type::StrEnum(id)
+            | Type::Enum(id) => {
                 return self.write_str(&(self.class_name)(id));
             }
             _ => return write!(self, "{ty}"),

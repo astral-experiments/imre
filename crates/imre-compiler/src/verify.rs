@@ -588,7 +588,7 @@ impl Verifier<'_> {
                             .ok_or("invalid enum class")?;
                         require(*member < metadata.enum_members.len(), "invalid enum member")?;
                         require(
-                            matches!(value.ty, Type::StrEnum(id) | Type::Enum(id) if id == *class),
+                            matches!(value.ty, Type::IntEnum(id) | Type::StrEnum(id) | Type::Enum(id) if id == *class),
                             "enum member result has the wrong class",
                         )?;
                     }

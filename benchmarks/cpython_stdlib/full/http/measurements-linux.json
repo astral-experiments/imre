@@ -1,0 +1,411 @@
+{
+  "compiler_sha256": "28db98c00ff30944b72e787ed34c7b4d1861f7cf693f672db910dcc92a0f337d",
+  "runtime_sha256": "6269abc02e7ef7fb6bfcb43b8d50b9b9deb525c13d3cee0e614216d6e29d473d",
+  "worker_sha256": "58da4fcc2de3741d05b5e2da832fd94054ecd8efc57d6fa08365336ec181b0af",
+  "suites": {
+    "httplib": [
+      {
+        "opt_level": 0,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {
+          "test_dir_with_added_behavior_on_status": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_category": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_range": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_simple_httpstatus": {
+            "outcome": "blocked",
+            "reason": "test.test_httplib.BasicTest.test_simple_httpstatus: depends on instance/class state outside the staged method",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          }
+        },
+        "hosted": {
+          "test_httpstatus_category": {
+            "ge": 330,
+            "is_client_error": 66,
+            "is_informational": 66,
+            "is_redirection": 66,
+            "is_server_error": 66,
+            "is_success": 66,
+            "le": 235
+          },
+          "test_httpstatus_range": {
+            "ge": 66,
+            "le": 66
+          }
+        }
+      },
+      {
+        "opt_level": 0,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {
+          "test_dir_with_added_behavior_on_status": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_category": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_range": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_simple_httpstatus": {
+            "outcome": "blocked",
+            "reason": "test.test_httplib.BasicTest.test_simple_httpstatus: depends on instance/class state outside the staged method",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          }
+        },
+        "hosted": {
+          "test_httpstatus_category": {
+            "ge": 330,
+            "is_client_error": 66,
+            "is_informational": 66,
+            "is_redirection": 66,
+            "is_server_error": 66,
+            "is_success": 66,
+            "le": 235
+          },
+          "test_httpstatus_range": {
+            "ge": 66,
+            "le": 66
+          }
+        }
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {
+          "test_dir_with_added_behavior_on_status": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_category": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_range": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_simple_httpstatus": {
+            "outcome": "blocked",
+            "reason": "test.test_httplib.BasicTest.test_simple_httpstatus: depends on instance/class state outside the staged method",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          }
+        },
+        "hosted": {
+          "test_httpstatus_category": {
+            "ge": 330,
+            "is_client_error": 66,
+            "is_informational": 66,
+            "is_redirection": 66,
+            "is_server_error": 66,
+            "is_success": 66,
+            "le": 235
+          },
+          "test_httpstatus_range": {
+            "ge": 66,
+            "le": 66
+          }
+        }
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httplib.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {
+          "test_dir_with_added_behavior_on_status": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_category": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_httpstatus_range": {
+            "outcome": "blocked",
+            "reason": "upstream module global needs its original definition: TestCase",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          },
+          "test_simple_httpstatus": {
+            "outcome": "blocked",
+            "reason": "test.test_httplib.BasicTest.test_simple_httpstatus: depends on instance/class state outside the staged method",
+            "roles": {
+              "body": "unobserved",
+              "assertions": "unobserved",
+              "operation": "unobserved",
+              "fixture": "unobserved"
+            },
+            "evidence": {
+              "stage": "original fixture",
+              "source_blob": "6f3eac6b98a4de9af2ed9bb8652139e9a2f87298"
+            }
+          }
+        },
+        "hosted": {
+          "test_httpstatus_category": {
+            "ge": 330,
+            "is_client_error": 66,
+            "is_informational": 66,
+            "is_redirection": 66,
+            "is_server_error": 66,
+            "is_success": 66,
+            "le": 235
+          },
+          "test_httpstatus_range": {
+            "ge": 66,
+            "le": 66
+          }
+        }
+      }
+    ],
+    "httpservers": [
+      {
+        "opt_level": 0,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 0,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_httpservers.py:7:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      }
+    ],
+    "http_cookies": [
+      {
+        "opt_level": 0,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookies.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 0,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookies.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookies.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookies.py:6:1: Imre: standard-library imports and shadowing are unsupported: \"http\"",
+        "methods": {},
+        "hosted": {}
+      }
+    ],
+    "http_cookiejar": [
+      {
+        "opt_level": 0,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookiejar.py:8:1: Imre: Lib/test/support/os_helper.py:22:1: Imre: static binding \"TESTFN_ASCII\" cannot be rebound",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 0,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O0)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookiejar.py:8:1: Imre: Lib/test/support/os_helper.py:22:1: Imre: static binding \"TESTFN_ASCII\" cannot be rebound",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": false,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookiejar.py:8:1: Imre: Lib/test/support/os_helper.py:22:1: Imre: static binding \"TESTFN_ASCII\" cannot be rebound",
+        "methods": {},
+        "hosted": {}
+      },
+      {
+        "opt_level": 3,
+        "reachable_only": true,
+        "suite_startup": "Compiling Lib/case.py (-O3)\nLib/case.py:1:1: Imre: Lib/test/test_http_cookiejar.py:8:1: Imre: Lib/test/support/os_helper.py:22:1: Imre: static binding \"TESTFN_ASCII\" cannot be rebound",
+        "methods": {},
+        "hosted": {}
+      }
+    ]
+  }
+}

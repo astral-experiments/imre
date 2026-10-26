@@ -316,6 +316,11 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 .as_ref()
                 .map(|members| members.values.clone())
                 .unwrap_or_default(),
+            http_members: class
+                .enum_members
+                .as_ref()
+                .map(|m| m.http_members.clone())
+                .unwrap_or_default(),
             qualified_name: format!(
                 "{}.{}",
                 if class.definition.module == graph.entry {

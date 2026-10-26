@@ -2247,6 +2247,27 @@ pub unsafe extern "C" fn imre_dict_get(value: *const Object, key: usize) -> usiz
     }
 }
 
+/// Subscribe to an enum-keyed dictionary with an equal Python integer. KeyError
+/// retains the original integer even when its enum member exists outside this map.
+///
+/// # Safety
+/// The caller roots the ordinary dictionary and the supplied integer. The tag is
+/// either the corresponding canonical scalar key or zero when no such member exists.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_get_enum_int(
+    value: *const Object,
+    tag: usize,
+    key: usize,
+) -> usize {
+    // SAFETY: the enum-keyed table compares scalar tags without dereferencing them.
+    match unsafe { try_lookup(value, tag) } {
+        Ok(Some(value)) => value.into_word(),
+        Err(error) => error.returning(0),
+        // SAFETY: the original integer remains rooted until the exception acquires it.
+        Ok(None) => Error::key(unsafe { WordKind::new(2).acquire(key) }).returning(0),
+    }
+}
+
 /// Follow the dictionary's missing-key policy. Only a plain missing entry
 /// returns None, allowing ChainMap to continue without constructing a KeyError.
 pub(super) unsafe fn subscript(

@@ -47,6 +47,7 @@ impl Type {
     fn llvm(self) -> &'static str {
         match self {
             Self::Int
+            | Self::IntEnum(_)
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Optional(_)
@@ -240,6 +241,7 @@ impl Type {
             | Self::Tuple(_) => "null",
             Self::Bool
             | Self::None
+            | Self::IntEnum(_)
             | Self::StrEnum(_)
             | Self::Enum(_)
             | Self::Optional(_)
@@ -408,6 +410,7 @@ fn emit_program(
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
+        http_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
@@ -615,6 +618,7 @@ struct Emitter<'a, 'module> {
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
     enum_members: Vec<[usize; 3]>,
+    http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
@@ -929,7 +933,12 @@ impl Emitter<'_, '_> {
             | Type::RegexMatch
             | Type::SourceModule
             | Type::BinaryIO => "object",
-            Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
+            Type::Float
+            | Type::Bool
+            | Type::IntEnum(_)
+            | Type::StrEnum(_)
+            | Type::Enum(_)
+            | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
@@ -957,7 +966,7 @@ impl Emitter<'_, '_> {
         if value.ty != Type::Float
             && !matches!(
                 self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None | Type::StrEnum(_) | Type::Enum(_)
+                Type::Bool | Type::None | Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
             )
             && !value.small_integer
             && !self
@@ -3561,7 +3570,7 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Type::StrEnum(_) | Type::Enum(_) => self.instruction(format!(
+                Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => self.instruction(format!(
                     "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
                 )),
@@ -4098,14 +4107,23 @@ impl Emitter<'_, '_> {
                 operand: self.enum_tag(*class, *member).to_string(),
                 small_integer: false,
             },
+            Builtin::IntEnumValue => self.http_member_field(&args[0].value, 0),
+            Builtin::HttpEnumPhrase => self.http_member_field(&args[0].value, 1),
+            Builtin::HttpEnumDescription => self.http_member_field(&args[0].value, 2),
             Builtin::EnumString => self.call("imre_enum_string", returns, &[&args[0].value]),
             Builtin::EnumLookup(class) => {
                 let first = self.enum_tag(*class, 0);
                 let count = self.module.class_metadata[*class].enum_members.len();
+                let lookup = if args[0].value.ty == Type::Int {
+                    "imre_enum_lookup_int"
+                } else {
+                    "imre_enum_lookup"
+                };
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call i64 @imre_enum_lookup(ptr {}, i64 {first}, i64 {count})",
+                        "call i64 @{lookup}({} {}, i64 {first}, i64 {count})",
+                        args[0].value.ty.llvm(),
                         args[0].value.operand
                     )),
                     small_integer: false,
@@ -6194,7 +6212,7 @@ impl Emitter<'_, '_> {
                         ..self.own_operand(args.into_iter().next().unwrap())
                     };
                 }
-                Type::StrEnum(_) => self.enum_text(&args[0].value, false),
+                Type::IntEnum(_) | Type::StrEnum(_) => self.enum_text(&args[0].value, false),
                 Type::Int => self.call("imre_int_str", Type::Str, &[&args[0].value]),
                 Type::Float => self.call("imre_float_str", Type::Str, &[&args[0].value]),
                 Type::Bytes => self.call("imre_bytes_str", Type::Str, &[&args[0].value]),
@@ -7032,7 +7050,7 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::DictGetDefault | Builtin::DictSetDefault | Builtin::DictPop => {
-                let key = self.key_word(&args[1].value);
+                let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
                 let default = args.get(2).map(|arg| self.word(&arg.value));
                 let receiver = &args[0].value.operand;
                 let word = if matches!(builtin, Builtin::DictPop) {
@@ -7153,7 +7171,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::DictContains | Builtin::SetContains | Builtin::ChainMapContains => {
-                let key = self.key_word(&args[0].value);
+                let key = self.mapping_read_key(args[1].value.ty, &args[0].value);
                 let family = match builtin {
                     Builtin::SetContains => "set",
                     Builtin::ChainMapContains => "chainmap",
@@ -7355,7 +7373,7 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("imre_print_str", &[&args[0].value])
                     }
-                    Type::StrEnum(_) | Type::Enum(_) => {
+                    Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => {
                         let text = if matches!(args[0].value.ty, Type::Enum(_)) {
                             self.call("imre_enum_string", Type::Str, &[&args[0].value])
                         } else {
@@ -7536,7 +7554,7 @@ impl Emitter<'_, '_> {
         args: &[Operand],
         returns: Type,
     ) -> Value {
-        let key = self.key_word(&args[1].value);
+        let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
         let call = format!(
             "call i32 @{function}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
@@ -7642,6 +7660,27 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Map an equal integer to the stored enum tag. Zero cannot be an inserted member.
+    fn enum_key_for_int(&mut self, mapping: Type, key: &Value) -> Option<String> {
+        let (Type::IntEnum(class), _) = self.module.types.mapping(mapping)? else {
+            return None;
+        };
+        if key.ty != Type::Int {
+            return None;
+        }
+        let first = self.enum_tag(class, 0);
+        let count = self.module.class_metadata[class].enum_members.len();
+        Some(self.instruction(format!(
+            "call i64 @imre_enum_find_int(i64 {}, i64 {first}, i64 {count})",
+            key.operand
+        )))
+    }
+
+    fn mapping_read_key(&mut self, mapping: Type, key: &Value) -> String {
+        self.enum_key_for_int(mapping, key)
+            .unwrap_or_else(|| self.key_word(key))
+    }
+
     fn key_word(&mut self, value: &Value) -> String {
         if self.module.types.fallible_key(value.ty) {
             self.checked_line(format!(
@@ -7655,6 +7694,7 @@ impl Emitter<'_, '_> {
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
             Type::Int
+            | Type::IntEnum(_)
             | Type::StrEnum(_)
             | Type::Enum(_)
             | Type::Optional(_)
@@ -7765,6 +7805,7 @@ impl Emitter<'_, '_> {
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
             Type::Int
+            | Type::IntEnum(_)
             | Type::StrEnum(_)
             | Type::Enum(_)
             | Type::Optional(_)
@@ -8137,6 +8178,13 @@ impl Emitter<'_, '_> {
             return self.unpack_word(word, returns);
         }
         if matches!(list.ty, Type::Dict(_)) {
+            if let Some(tag) = self.enum_key_for_int(list.ty, index) {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_dict_get_enum_int(ptr {}, i64 {tag}, i64 {})",
+                    list.operand, index.operand
+                ));
+                return self.unpack_word(word, returns);
+            }
             let key = self.key_word(index);
             let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
             // A missing Counter key returns immediate zero. Default-list
@@ -8428,7 +8476,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::ForwardRef(_) => 12,
         Type::FunctionRef => 14,
         Type::AnnotationValue(_) => 13,
-        Type::StrEnum(_) | Type::Enum(_) => 10,
+        Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) | Type::StringIterable => 9,
         Type::ListInt => 4,
@@ -9310,6 +9358,7 @@ declare ptr @imre_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @imre_dict_len(ptr)
 declare i32 @imre_dict_contains(ptr, i64)
 declare i64 @imre_dict_get(ptr, i64)
+declare i64 @imre_dict_get_enum_int(ptr, i64, i64)
 declare ptr @imre_dict_gather_str_int(ptr, ptr)
 declare ptr @imre_dict_gather_bytes_int(ptr, ptr)
 declare i32 @imre_dict_try_get(ptr, i64, ptr)
@@ -9648,6 +9697,9 @@ declare i32 @imre_int_list_contains(i64, ptr)
 declare void @imre_str_enum_table(ptr, i64)
 declare void @imre_enum_display_table(ptr, i64, ptr)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
+declare i64 @imre_enum_lookup_int(i64, i64, i64)
+declare i64 @imre_enum_find_int(i64, i64, i64)
+declare void @imre_http_enum_table(ptr)
 declare ptr @imre_enum_string(i64)
 declare i32 @imre_str_equal(ptr, ptr)
 declare ptr @imre_class_name_part(ptr, i32)
