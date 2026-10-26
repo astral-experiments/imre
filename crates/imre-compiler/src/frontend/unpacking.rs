@@ -356,7 +356,7 @@ impl Checker<'_> {
                 {
                     return self.store_class_data(class, attribute, value);
                 }
-                let receiver = self.expr(&attribute.value)?;
+                let receiver = Self::weak_target(self.expr(&attribute.value)?);
                 if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
