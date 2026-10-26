@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::exceptions::{Error, Kind, Result, finish};
+use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::{Bytes, Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 mod components;
@@ -957,7 +957,7 @@ pub unsafe extern "C" fn imre_path_link(path: *const Object, word: usize, tag: u
 
 /// Match pathlib's retry order: create the leaf first, make missing parents with
 /// their default mode, then retry each child without creating its parents again.
-fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()> {
+fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> Result<()> {
     let mut pending = Vec::new();
     let (mut current, mut current_mode, mut current_exists) = (path, mode, exist_ok);
     loop {
@@ -966,7 +966,7 @@ fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()>
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let next = parent(current);
                 if !parents || next == current {
-                    return Err(error);
+                    return Err(files::errno_with_filename(error, Some(current)));
                 }
                 pending.push((current, current_mode, current_exists));
                 (current, current_mode, current_exists) = (next, 0o777, true);
@@ -977,7 +977,7 @@ fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()>
             {
                 break;
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(files::errno_with_filename(error, Some(current))),
         }
     }
     for (path, mode, exist_ok) in pending.into_iter().rev() {
@@ -1007,7 +1007,7 @@ pub unsafe extern "C" fn imre_path_mkdir(
                     "Python int too large to convert to C int",
                 )
             })?;
-            mkdir(path, mode as u32, parents != 0, exist_ok != 0).map_err(files::os_error)
+            mkdir(path, mode as u32, parents != 0, exist_ok != 0)
         })
     };
     finish(result, ());
@@ -1021,10 +1021,11 @@ pub unsafe extern "C" fn imre_path_unlink(path: *const Object, missing_ok: u32) 
     // SAFETY: unlink has no language callbacks and the immutable path stays live.
     let result = unsafe {
         object(path).0.with(|storage| {
-            check_nul(storage.path(), "unlink: embedded null character in path")?;
-            match fs::remove_file(storage.path()) {
+            let path = storage.path();
+            check_nul(path, "unlink: embedded null character in path")?;
+            match fs::remove_file(path) {
                 Err(error) if missing_ok != 0 && error.kind() == io::ErrorKind::NotFound => Ok(()),
-                result => result.map_err(files::os_error),
+                result => result.map_err(|error| files::errno_with_filename(error, Some(path))),
             }
         })
     };
@@ -1039,8 +1040,9 @@ pub unsafe extern "C" fn imre_path_rmdir(path: *const Object) {
     // SAFETY: the rooted spelling is borrowed only for synchronous I/O.
     let result = unsafe {
         object(path).0.with(|storage| {
-            check_nul(storage.path(), "rmdir: embedded null character in path")?;
-            fs::remove_dir(storage.path()).map_err(files::os_error)
+            let path = storage.path();
+            check_nul(path, "rmdir: embedded null character in path")?;
+            fs::remove_dir(path).map_err(|error| files::errno_with_filename(error, Some(path)))
         })
     };
     finish(result, ());
@@ -1060,7 +1062,13 @@ pub unsafe extern "C" fn imre_path_replace(
         object(path).0.with(|storage| {
             check_nul(storage.path(), "replace: embedded null character in src")?;
             check_nul(&*target, "replace: embedded null character in dst")?;
-            fs::rename(storage.path(), (&*target).as_str()).map_err(files::os_error)?;
+            fs::rename(storage.path(), (&*target).as_str()).map_err(|error| {
+                files::errno_with_filenames(
+                    error,
+                    Some(Filename::Str(StrOwner::clone(storage.path_text()))),
+                    Some(Filename::Str(StrOwner::new((*target).clone()))),
+                )
+            })?;
             Ok(new_path(normalize(&*target)))
         })
     };
@@ -1120,7 +1128,8 @@ impl PathIterator {
             )?)
         } else {
             check_directory_path(&root)?;
-            let entries = super::os::directory_entry_types(&root).map_err(files::os_error)?;
+            let entries = super::os::directory_entry_types(&root)
+                .map_err(|error| files::errno_with_filename(error, Some(&root)))?;
             IterationState::Snapshot(entries.into_iter())
         };
         Ok(Self { root, state })
