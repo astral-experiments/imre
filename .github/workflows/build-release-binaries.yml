@@ -16,9 +16,11 @@ jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: >-
-      ${{ matrix.target == 'aarch64-apple-darwin' && 'macos-15' ||
+      ${{ matrix.target == 'aarch64-apple-darwin' &&
+          (github.repository == 'viarius-experiments/imre' && 'nscloud-macos-tahoe-arm64-6x14' || 'macos-15') ||
           matrix.target == 'aarch64-unknown-linux-gnu' &&
-          (github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm') ||
+          (github.repository == 'viarius-experiments/imre' && 'nscloud-ubuntu-24.04-arm64-4x8' ||
+           github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm') ||
           (github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' ||
            github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04') }}
     strategy:

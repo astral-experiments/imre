@@ -176,14 +176,18 @@ jobs:
     needs: scope
     # The archive job already builds and tests the runtime on ARM64.
     if: needs.scope.outputs.release_artifacts == 'false'
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
+    runs-on: >-
+      ${{ github.repository == 'viarius-experiments/imre' && 'nscloud-ubuntu-24.04-arm64-4x8' ||
+          github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: cargo test -p imre-runtime --lib --locked
 
   windows-compiler:
     needs: scope
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
+    runs-on: >-
+      ${{ (github.repository == 'viarius-experiments/imre' || github.repository == 'astral-sh/imre') &&
+          'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
