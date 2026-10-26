@@ -431,15 +431,18 @@ impl Checker<'_> {
                         vec![value, receiver],
                     )));
                 }
-                if receiver.ty == Type::Logger && attribute.attr.as_str() == "propagate" {
+                if receiver.ty == Type::Logger
+                    && let Some(op) = match attribute.attr.as_str() {
+                        "disabled" => Some(ir::LogOperation::SetDisabled),
+                        "propagate" => Some(ir::LogOperation::SetPropagate),
+                        _ => None,
+                    }
+                {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
                     return Ok(Statement::Expr(Expr {
                         ty: Type::None,
-                        kind: ExprKind::Builtin(
-                            Builtin::Logging(ir::LogOperation::SetPropagate),
-                            vec![value, receiver],
-                        ),
+                        kind: ExprKind::Builtin(Builtin::Logging(op), vec![value, receiver]),
                     }));
                 }
                 if receiver.ty == Type::LogFormatter {

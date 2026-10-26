@@ -4452,6 +4452,7 @@ impl Emitter<'_, '_> {
                     DictConfigTyped => "imre_log_typed_dict_config",
                     FileConfig => "imre_log_file_config",
                     Disabled => "imre_log_disabled",
+                    SetDisabled => "imre_log_set_disabled",
                     Propagate => "imre_log_propagate",
                     SetPropagate => "imre_log_set_propagate",
                     HasHandlers => "imre_log_has_handlers",
@@ -9632,6 +9633,7 @@ declare void @imre_log_dict_config(ptr)
 declare void @imre_log_typed_dict_config(ptr, i64)
 declare void @imre_log_file_config(ptr, i8, i1, i64)
 declare i1 @imre_log_disabled(ptr)
+declare void @imre_log_set_disabled(i1, ptr)
 declare i1 @imre_log_propagate(ptr)
 declare void @imre_log_set_propagate(i1, ptr)
 declare i1 @imre_log_has_handlers(ptr)
