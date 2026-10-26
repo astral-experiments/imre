@@ -304,6 +304,16 @@ def report(text):
         (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
+        compare(
+            "-IB", "-c",
+            "import sys, hashlib\nsys.path\n"
+            "def factory(data=b''):\n    return hashlib.sha1(data)\n"
+            "h = factory(b'\\x00a')\nalias = h\nalias.update(b'\\xff')\n"
+            "copy = h.copy()\ncopy.update(b'next')\n"
+            "print(h.name, h.block_size, h.digest_size, list(h.digest()), h.hexdigest())\n"
+            "print(list(h.digest()), list(copy.digest()), factory().hexdigest())\n"
+            "try:\n    h.update('text')\nexcept TypeError as exc:\n    print(str(exc))\n",
+        )
         checked = run(
             imre,
             "-IB",

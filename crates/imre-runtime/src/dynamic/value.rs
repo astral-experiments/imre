@@ -111,6 +111,7 @@ pub(super) enum Value {
     Str(String),
     Bytes(Vec<u8>),
     ByteArray(Vec<u8>),
+    Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
     List(Vec<Id>),
     Tuple(Vec<Id>),
     NamedTuple {
@@ -271,6 +272,7 @@ impl Value {
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
+            | Self::Hash(_)
             | Self::Native(_)
             | Self::TokenMissing
             | Self::File(_)

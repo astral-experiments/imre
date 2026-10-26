@@ -167,6 +167,7 @@ impl Context {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
+                    || (name == "RuntimeError" && kind == "RecursionError")
                     || (name == "ImportError" && kind == "ModuleNotFoundError")
                     || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
                     || (name == "OSError"
@@ -194,6 +195,12 @@ impl Context {
                 });
                 return Ok(self.alloc(Value::Tuple(args)));
             }
+            Value::Hash(hash) => match name {
+                "name" => return Ok(self.text(hash.borrow().name())),
+                "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
+                "block_size" => return Ok(self.int(64)),
+                _ => {}
+            },
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
