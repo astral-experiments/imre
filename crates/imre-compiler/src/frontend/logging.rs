@@ -54,21 +54,8 @@ fn required(name: &str, ty: Type) -> Parameter {
 }
 
 impl Checker<'_> {
-    /// Resolve a bundled definition even when a caller only imported getLogger.
-    fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
-        let module = self
-            .graph
-            .modules
-            .iter()
-            .find(|module| module.is_bundled("__imre_logging_classes__"))?;
-        match module.bindings.get(name)? {
-            Binding::Definition(def) => Some(*def),
-            _ => None,
-        }
-    }
-
     fn handler_type(&self) -> Option<Type> {
-        let id = self.logging_definition("Handler")?;
+        let id = self.graph.logging_definition("Handler")?;
         Some(Type::Class(*self.classes.declarations.ids.get(&id)?))
     }
 
@@ -79,7 +66,7 @@ impl Checker<'_> {
                 || self.classes.declarations.definitions[class]
                     .bases
                     .contains(&base))
-            && let Some(shutdown) = self.logging_definition("_shutdown_handler")
+            && let Some(shutdown) = self.graph.logging_definition("_shutdown_handler")
         {
             return operation(
                 Log::HandlerRegister(self.functions[&shutdown].id),
@@ -376,6 +363,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let sig = self
+            .graph
             .logging_definition(name)
             .and_then(|def| self.functions.get(&def))
             .ok_or_else(|| {
@@ -784,6 +772,7 @@ impl Checker<'_> {
             vec![logger.clone(), level.clone()],
         );
         let def = self
+            .graph
             .logging_definition("_deliver")
             .ok_or_else(|| error(self.source, call, "missing native logging delivery"))?;
         let sig = self.functions.get(&def).ok_or_else(|| {

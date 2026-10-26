@@ -134,6 +134,7 @@ def main():
     parser.add_argument('--body-report', type=Path,
                         help='use the complete O0/O3 whole-method probe from the same compiler for remaining IDs')
     parser.add_argument('--cohort', choices=cohorts, action='append')
+    parser.add_argument('--fixture-dir', type=Path, help='parent for the original filesystem fixtures; binaries use the normal temporary directory')
     args = parser.parse_args()
     if sys.version_info[:3] != (3, 14, 5) or sys.platform != 'linux':
         parser.error('use the test-enabled CPython 3.14.5 on Linux')
@@ -152,7 +153,9 @@ def main():
     if body_report and body_report['imre_commit'] != args.imre_commit:
         parser.error('--body-report requires a matching --imre-commit for the supplied compiler and runtime')
     reports = []
-    with tempfile.TemporaryDirectory(prefix='pl-') as tmp, chdir(tmp):
+    # CPython resolves PathTest.base against cwd when the original module is imported.
+    with (tempfile.TemporaryDirectory(prefix='pl-build-') as tmp,
+          tempfile.TemporaryDirectory(prefix='pl-fixture-', dir=args.fixture_dir) as fixture, chdir(fixture)):
         for level in (0, 3):
             tools = Toolchain(imre, runtime, clang, level)
             adapters = {}

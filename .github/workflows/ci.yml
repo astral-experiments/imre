@@ -176,14 +176,18 @@ jobs:
     needs: scope
     # The archive job already builds and tests the runtime on ARM64.
     if: needs.scope.outputs.release_artifacts == 'false'
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
+    runs-on: >-
+      ${{ github.repository == 'viarius-experiments/imre' && 'nscloud-ubuntu-24.04-arm64-4x8' ||
+          github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: cargo test -p imre-runtime --lib --locked
 
   windows-compiler:
     needs: scope
-    runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
+    runs-on: >-
+      ${{ (github.repository == 'viarius-experiments/imre' || github.repository == 'astral-sh/imre') &&
+          'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -338,7 +342,8 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/pathlib/native_files.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$level" --result "$RUNNER_TEMP/cpython-path-files-O$level.json"
             python3 benchmarks/cpython_stdlib/full/pathlib/walk_matrix.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$level"
           done
-          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/cpython-path-cohorts.json"
+          # Upstream test_stat expects files and directories on the same device.
+          python3 -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py --fixture-dir /dev/shm --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --links "$RUNNER_TEMP/cpython-path-cohorts.json"
           python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat "$RUNNER_TEMP/cpython-path-cohorts.json"
@@ -700,5 +705,6 @@ jobs:
               paths processes argparse_cli
             )
           fi
-          python3 tests/run_suites.py --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
+          python3 tests/run_suites_children.py
+          python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
             -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
