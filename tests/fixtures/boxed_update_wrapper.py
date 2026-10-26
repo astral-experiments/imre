@@ -48,3 +48,21 @@ wrapper.__annotate__ = alternate
 print(wrapper.__annotations__, wrapper.__annotations__ is wrapper.__annotations__)
 wrapper.__annotations__ = {"cached": True}
 print(wrapper.__annotate__, wrapper.__annotations__)
+
+
+class Annotations(dict):
+    pass
+
+
+annotations = Annotations({"value": int})
+wrapper.__annotations__ = annotations
+print(wrapper.__annotations__ is annotations, isinstance(wrapper.__annotations__, Annotations))
+
+
+def subclass_annotations(fmt):
+    return Annotations({"format": fmt})
+
+
+wrapper.__annotate__ = subclass_annotations
+lazy_annotations = wrapper.__annotations__
+print(isinstance(lazy_annotations, Annotations), lazy_annotations["format"])
