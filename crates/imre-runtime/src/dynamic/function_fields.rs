@@ -5,7 +5,6 @@ use super::value::{Error, Id, NONE, Result, Value};
 
 #[derive(Clone, Copy)]
 pub(super) struct FunctionFields {
-    pub first_line: u32,
     pub name: Id,
     pub qualname: Id,
     pub module: Id,
@@ -26,7 +25,6 @@ impl FunctionFields {
         annotate: Id,
     ) -> Self {
         Self {
-            first_line: ctx.heap.current_line().unwrap_or(0),
             name,
             qualname,
             doc,
@@ -108,6 +106,29 @@ impl Context {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         let object = self.heap.get(value);
+        if name == "__code__" {
+            let Value::Code(new) = object else {
+                return Err(Error::new(
+                    "TypeError",
+                    "__code__ must be set to a code object",
+                ));
+            };
+            let Value::Function { code, .. } = *self.heap.get(fun) else {
+                unreachable!()
+            };
+            if value != code && !(new.module_definition && self.code_object(code).module_definition)
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "replacing nested function code requires closure layout",
+                ));
+            }
+            let Value::Function { code, .. } = self.heap.get_mut(fun) else {
+                unreachable!()
+            };
+            *code = value;
+            return Ok(());
+        }
         let invalid = match name {
             "__name__" | "__qualname__" if !matches!(object, Value::Str(_)) => {
                 Some(format!("{name} must be set to a string object"))

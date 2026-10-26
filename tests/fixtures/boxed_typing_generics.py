@@ -62,6 +62,23 @@ print(len(t.get_overloads(Right.select)), t.get_overloads(Right.select)[0](None,
 t.clear_overloads()
 print(t.get_overloads(Left.select), Left().select(None))
 
+def first():
+    pass
+
+
+def second():
+    pass
+
+
+second.__qualname__ = first.__qualname__
+t.overload(first)
+t.overload(second)
+second.__code__ = first.__code__
+wrapped = staticmethod(second)
+t.overload(wrapped)
+print(t.get_overloads(first)[0] is wrapped, t.get_overloads(wrapped)[1] is second)
+t.clear_overloads()
+
 marker = []
 print(t.cast(T, marker) is marker, t.get_origin(t.Generic) is t.Generic)
 

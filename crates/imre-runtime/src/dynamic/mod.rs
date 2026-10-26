@@ -47,6 +47,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     token_missing: Id,
+    native_code_objects: HashMap<usize, Id>,
     codec_entries: stdlib::codecs::Registry,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
@@ -57,6 +58,13 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    fn code_object(&self, id: Id) -> value::CodeObject {
+        let Value::Code(code) = self.heap.get(id) else {
+            unreachable!("function must retain its code object")
+        };
+        *code
+    }
+
     fn alloc(&mut self, value: Value) -> Id {
         self.heap.alloc(value)
     }
@@ -236,7 +244,7 @@ impl Context {
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
-            | Value::Set(items)
+            | Value::Set { items, .. }
             | Value::NamedTuple { values: items, .. } => Ok(items),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())

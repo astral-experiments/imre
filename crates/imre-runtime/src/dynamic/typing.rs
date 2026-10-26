@@ -736,10 +736,12 @@ impl Context {
 
     fn overload_key(&self, function: Id) -> Option<((String, String), u32)> {
         let value = match self.heap.get(function) {
-            Value::Method { callable, .. } => self.heap.get(*callable),
+            Value::Method { callable, .. } | Value::StaticMethod { callable, .. } => {
+                self.heap.get(*callable)
+            }
             value => value,
         };
-        let Value::Function { fields, .. } = value else {
+        let Value::Function { fields, code, .. } = value else {
             return None;
         };
         Some((
@@ -747,7 +749,7 @@ impl Context {
                 self.str_value(fields.module).ok()?.to_owned(),
                 self.str_value(fields.qualname).ok()?.to_owned(),
             ),
-            fields.first_line,
+            self.code_object(*code).first_line,
         ))
     }
 }

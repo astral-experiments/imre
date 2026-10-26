@@ -47,7 +47,7 @@ impl Context {
             self.heap.get(input),
             Value::List(_)
                 | Value::Tuple(_)
-                | Value::Set(_)
+                | Value::Set { .. }
                 | Value::Str(_)
                 | Value::Bytes(_)
                 | Value::Range { .. }
@@ -270,13 +270,14 @@ impl Context {
             | Value::Bytes(_)
             | Value::List(_)
             | Value::Dict(_)
-            | Value::Set(_)
+            | Value::Set { .. }
             | Value::Range { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
+            | Value::Code(_)
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::StaticMethod { .. } => "staticmethod",
@@ -303,6 +304,7 @@ impl Context {
                         "NoneType"
                             | "ellipsis"
                             | "float"
+                            | "code"
                             | "function"
                             | "module"
                             | "method"
@@ -395,7 +397,8 @@ impl Context {
             | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
-            | ("set", Value::Set(_))
+            | ("set", Value::Set { frozen: false, .. })
+            | ("frozenset", Value::Set { frozen: true, .. })
             | ("range", Value::Range { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -574,6 +577,13 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
+            Value::Code(code) => match name {
+                "co_name" => return Ok(code.name),
+                "co_filename" => return Ok(code.filename),
+                "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                _ => {}
+            },
+            Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function { scope, fields, .. } => {
                 if name == "__globals__" {
                     return Ok(self.module_globals(scope));
@@ -811,6 +821,9 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
+            Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
@@ -887,6 +900,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "set"
+                                | "frozenset"
                                 | "tuple"
                                 | "bytes"
                                 | "bytearray"
@@ -1042,14 +1056,14 @@ impl Context {
                 scope,
                 class_cell,
                 code,
-                parameters,
                 defaults,
                 ..
             } => {
+                let code = self.code_object(code);
                 let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
-                let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
+                let sig: serde_json::Value = serde_json::from_str(self.str_value(code.parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {
                     sig[key]
@@ -1127,7 +1141,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                let value = self.execute(code, local)?;
+                let value = self.execute(code.entry, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
@@ -1188,7 +1202,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(code, scope)?;
+        self.execute(self.code_object(code).entry, scope)?;
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));

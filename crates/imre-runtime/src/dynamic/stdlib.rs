@@ -212,6 +212,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "CodeType") => ctx.builtin("code"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
