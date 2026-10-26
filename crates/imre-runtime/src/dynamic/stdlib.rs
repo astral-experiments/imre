@@ -197,6 +197,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "CodeType") => ctx.builtin("code"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))

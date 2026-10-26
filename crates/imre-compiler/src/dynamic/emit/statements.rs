@@ -1,5 +1,6 @@
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
+use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, Function, LoopTarget};
@@ -78,6 +79,7 @@ impl Function<'_, '_> {
                         Body::Statements(&v.body)
                     };
                     let function = self.define(
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         v.name.as_str(),
                         Some(&v.parameters),
                         v.returns.as_deref(),
@@ -99,7 +101,13 @@ impl Function<'_, '_> {
                     } else {
                         self.op("list", &[])
                     };
-                    let init = self.define(v.name.as_str(), None, None, Body::Namespace(&v.body));
+                    let init = self.define(
+                        v.start(),
+                        v.name.as_str(),
+                        None,
+                        None,
+                        Body::Namespace(&v.body),
+                    );
                     let name = self.text(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
@@ -258,6 +266,7 @@ impl Function<'_, '_> {
 
     pub(super) fn define(
         &mut self,
+        start: TextSize,
         name: &str,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
@@ -285,14 +294,17 @@ impl Function<'_, '_> {
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
-            let code = self
-                .output
-                .code(self.source, String::new(), Body::Annotations(entries));
+            let code = self.output.definition(
+                self.source,
+                String::new(),
+                Body::Annotations(entries),
+                params.map_or(start, Ranged::start),
+            );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let sig = self.text(r#"{"posonly":["format"]}"#);
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -300,7 +312,7 @@ impl Function<'_, '_> {
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let code = self.output.code(self.source, prefix, body);
+        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
@@ -333,7 +345,7 @@ impl Function<'_, '_> {
         }
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
-        self.checked(&format!("call i64 @imre_dyn_def_with_metadata(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope))
+        self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope))
     }
 
     pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {

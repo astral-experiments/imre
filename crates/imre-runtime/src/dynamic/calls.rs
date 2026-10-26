@@ -232,6 +232,7 @@ impl Context {
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
+            | Value::Code(_)
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Property(_) => "property",
@@ -249,6 +250,7 @@ impl Context {
                         "NoneType"
                             | "ellipsis"
                             | "float"
+                            | "code"
                             | "function"
                             | "module"
                             | "method"
@@ -478,6 +480,13 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
+            Value::Code(code) => match name {
+                "co_name" => return Ok(code.name),
+                "co_filename" => return Ok(code.filename),
+                "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                _ => {}
+            },
+            Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function { scope, fields, .. } => {
                 if name == "__globals__" {
                     return Ok(self.module_globals(scope));
@@ -707,6 +716,9 @@ impl Context {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
         match self.heap.get_mut(obj) {
+            Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
@@ -909,13 +921,13 @@ impl Context {
                 scope,
                 class_cell,
                 code,
-                parameters,
                 defaults,
             } => {
+                let code = self.code_object(code);
                 let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
-                let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
+                let sig: serde_json::Value = serde_json::from_str(self.str_value(code.parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {
                     sig[key]
@@ -993,7 +1005,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                let value = self.execute(code, local)?;
+                let value = self.execute(code.entry, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
@@ -1054,7 +1066,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(code, scope)?;
+        self.execute(self.code_object(code).entry, scope)?;
         let ancestors = self.linearized_bases(&bases)?;
         let class = self.alloc(Value::Class {
             name: name.clone(),
