@@ -120,29 +120,31 @@ pub unsafe extern "C" fn imre_object_record_payload(
     }
 }
 
-pub(super) fn length(kind: WordKind, word: usize) -> Option<usize> {
+pub(super) fn length(kind: WordKind, word: usize) -> Result<Option<usize>, Error> {
     // SAFETY: each admitted exact type is read through its own representation.
     unsafe {
-        match kind.raw() {
+        Ok(match kind.raw() {
             3 => Some((&*(word as *const Str)).chars().count()),
             4 => Some((&*(word as *const crate::List)).0.with(Vec::len)),
-            5 => object(word as *const Object).0.with(|s| match s {
-                Storage::Sequence(v) => Some(v.resolved().values.len()),
-                _ => None,
-            }),
+            5 => {
+                return object(word as *const Object).0.with(|s| match s {
+                    Storage::Sequence(v) => v.resolved().map(|v| Some(v.values.len())),
+                    _ => Ok(None),
+                });
+            }
             6 => {
                 let layout = records::descriptor(word as *const usize);
                 layout.class_semantics().is_none().then_some(layout.length)
             }
             8 => Some((&*(word as *const Bytes)).len()),
             _ => None,
-        }
+        })
     }
 }
 
 /// Observable Python length, including containers whose members are not sequence indices.
-pub(super) fn python_length(kind: WordKind, word: usize) -> Option<usize> {
-    length(kind, word).or_else(|| {
+pub(super) fn python_length(kind: WordKind, word: usize) -> Result<Option<usize>, Error> {
+    Ok(length(kind, word)?.or_else(|| {
         if kind.raw() != 5 {
             return None;
         }
@@ -152,33 +154,47 @@ pub(super) fn python_length(kind: WordKind, word: usize) -> Option<usize> {
                 .0
                 .with(Storage::mapping_or_set_len)
         }
-    })
+    }))
 }
 
 /// # Safety
 /// The caller roots a sequence and has checked the element index against its length.
-pub(super) unsafe fn sequence_item(kind: WordKind, word: usize, i: usize) -> (WordKind, usize) {
+pub(super) unsafe fn sequence_item(
+    kind: WordKind,
+    word: usize,
+    i: usize,
+) -> Result<(WordKind, usize), Error> {
     // SAFETY: each concrete representation retains its element during the read.
     unsafe {
-        match kind.raw() {
+        Ok(match kind.raw() {
             4 => (&*(word as *const crate::List))
                 .0
                 .with(|v| (WordKind::new(2), v[i].0)),
-            5 => object(word as *const Object).0.with(|s| {
-                let Storage::Sequence(v) = s else {
-                    unreachable!("admitted typed list")
-                };
-                let v = v.resolved();
-                concrete(v.kind, v.values[i])
-            }),
+            5 => {
+                return object(word as *const Object).0.with(|s| {
+                    let Storage::Sequence(v) = s else {
+                        unreachable!("admitted typed list")
+                    };
+                    let v = v.resolved()?;
+                    Ok(concrete(v.kind, v.values[i]))
+                });
+            }
             6 => tuple_item(word, i),
             _ => unreachable!("list or tuple"),
-        }
+        })
     }
 }
 
 /// Compare nested native sequences independent of their storage specialization.
 pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) -> bool {
+    // SAFETY: the arguments stay rooted for the comparison.
+    crate::finish(unsafe { try_equal(left, right) }, false)
+}
+
+pub(super) unsafe fn try_equal(
+    left: (WordKind, usize),
+    right: (WordKind, usize),
+) -> Result<bool, Error> {
     let numeric = |(k, w): (WordKind, usize)| {
         if k.raw() == 1 {
             (WordKind::new(2), (w << 1) | 1)
@@ -199,28 +215,31 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
                 numeric(concrete(next.1.0, next.1.1)),
             )
         };
-        let sequence = |kind: WordKind, word| match kind.raw() {
-            4 => 1,
-            5 if length(kind, word).is_some() => 1,
-            6 if length(kind, word).is_some() => 2,
-            _ => 0,
+        let sequence = |kind: WordKind, word| -> Result<_, Error> {
+            Ok(match kind.raw() {
+                4 => 1,
+                5 if length(kind, word)?.is_some() => 1,
+                6 if length(kind, word)?.is_some() => 2,
+                _ => 0,
+            })
         };
         let (a, b) = ((ka, wa), (kb, wb));
-        if sequence(ka, wa) != 0 && sequence(ka, wa) == sequence(kb, wb) {
+        let left_sequence = sequence(ka, wa)?;
+        if left_sequence != 0 && left_sequence == sequence(kb, wb)? {
             // SAFETY: both words are rooted exact sequences, read within checked bounds.
             unsafe {
-                let n = length(ka, wa).unwrap();
-                if Some(n) != length(kb, wb) {
-                    return false;
+                let n = length(ka, wa)?.unwrap();
+                if Some(n) != length(kb, wb)? {
+                    return Ok(false);
                 }
                 if !(ka == kb && wa == wb) && n != 0 {
                     if n > 1 {
                         if pending.try_reserve(1).is_err() {
-                            return Error::memory_error().returning(false);
+                            return Err(Error::memory_error());
                         }
                         pending.push((a, b, 1, n));
                     }
-                    next = (sequence_item(ka, wa, 0), sequence_item(kb, wb, 0));
+                    next = (sequence_item(ka, wa, 0)?, sequence_item(kb, wb, 0)?);
                     continue;
                 }
             }
@@ -228,26 +247,26 @@ pub(super) unsafe fn equal(left: (WordKind, usize), right: (WordKind, usize)) ->
             let (integer, float) = match (ka.raw(), kb.raw()) {
                 (2, 7) => (wa, wb),
                 (7, 2) => (wb, wa),
-                _ => return false,
+                _ => return Ok(false),
             };
             // SAFETY: the exact int stays rooted throughout the lossless comparison.
             let integer = unsafe { Int::borrow(integer) };
             if crate::floats::compare(&integer, f64::from_bits(float as u64)) != 0 {
-                return false;
+                return Ok(false);
             }
         } else {
             // SAFETY: a matching concrete scalar or identical rooted tuple.
-            if !unsafe { values::equal(wa, wb, ka) } {
-                return false;
+            if !unsafe { values::try_equal(wa, wb, ka) }? {
+                return Ok(false);
             }
         }
         let Some((a, b, i, n)) = pending.pop() else {
-            return true;
+            return Ok(true);
         };
         if i + 1 < n {
             pending.push((a, b, i + 1, n));
         }
         // SAFETY: the outer exception or comparison operand roots every tuple.
-        next = unsafe { (sequence_item(a.0, a.1, i), sequence_item(b.0, b.1, i)) };
+        next = unsafe { (sequence_item(a.0, a.1, i)?, sequence_item(b.0, b.1, i)?) };
     }
 }

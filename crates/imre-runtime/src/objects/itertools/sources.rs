@@ -38,7 +38,7 @@ impl Sequence {
                                 .then(|| rows.owned_row(index))
                                 .transpose();
                         }
-                        let values = values.resolved();
+                        let values = values.resolved()?;
                         Ok(values.values.get(index).map(|&v| values.kind.acquire(v)))
                     })?,
                     6 => {

@@ -55,6 +55,16 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            Self::Bool => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_))), PreservesLists),
+            Self::Len => Contract::new(
+                args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
+                PreservesLists,
+            ),
+            Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
+                Contract::new(true, PreservesLists)
+            }
+            Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
+            Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, Unknown),
@@ -444,7 +454,6 @@ impl Builtin {
             | Self::StringIntList
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
             Self::Abs
-            | Self::Bool
             | Self::DefaultFactoryEnabled
             | Self::EnumLookup(_)
             | Self::DictSumValues
@@ -482,7 +491,6 @@ impl Builtin {
             | Self::IsNone
             | Self::MockCallList { .. }
             | Self::JsonIsInt
-            | Self::Len
             | Self::JsonEmptyObject
             | Self::WallTime
             | Self::CacheNew
@@ -493,6 +501,7 @@ impl Builtin {
             | Self::CallableContext
             | Self::ModuleCache(_)
             | Self::HashStr
+            | Self::SequenceGetInBounds
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
             | Self::DirectoryContextView
@@ -503,9 +512,7 @@ impl Builtin {
             | Self::RegexSpelling
             | Self::RegexSearch
             | Self::RegexMatchStart
-            | Self::SequenceGetInBounds
             | Self::Split
-            | Self::StringListNonempty
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
             | Self::NominalIdentity
@@ -523,7 +530,6 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::IntListContains
-            | Self::StringListContains
             | Self::StructListContains
             | Self::DequeContains
             | Self::StringContains
@@ -541,7 +547,6 @@ impl Builtin {
             | Self::BinaryReadSize
             | Self::Ndiff
             | Self::StringListCopy
-            | Self::StringListFilter(_)
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
@@ -657,18 +662,15 @@ impl Builtin {
             | Self::DictAsBase
             | Self::DictClear
             | Self::ListClear
-            | Self::ListReverse
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
-            | Self::ListExtendUnhinted
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
-            | Self::SortDetach
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
@@ -944,6 +946,13 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_seq_len_fast"
+                | "imre_seq_len"
+                | "imre_str_list_nonempty"
+                | "imre_union_truthy"
+                | "imre_seq_reverse"
+                | "imre_sort_detach"
+                | "imre_list_extend_unhinted"
                 | "imre_chr"
                 | "imre_annotation_ref"
                 | "imre_typing_call_stub"

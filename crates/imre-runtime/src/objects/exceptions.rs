@@ -1709,7 +1709,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        4 | 5 => super::boxed_values::python_length(kind, word) != Some(0),
+        4 | 5 => super::boxed_values::python_length(kind, word)
+            .map_or_else(|error| error.returning(false), |length| length != Some(0)),
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),

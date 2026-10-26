@@ -215,7 +215,7 @@ impl TextLines {
             continuous_lf: false,
             materialized,
         };
-        Ok(Words::deferred(Deferred(View::Lines(Rc::new(selection)))))
+        Words::deferred(Deferred(View::Lines(Rc::new(selection))))
     }
 
     /// Returns the source bytes that a join would reproduce without change.
@@ -299,7 +299,7 @@ impl Deferred {
             let words = if lines.len() <= 3 {
                 lines.materialized
             } else {
-                Words::deferred(Self(View::Lines(Rc::new(lines))))
+                Words::deferred(Self(View::Lines(Rc::new(lines))))?
             };
             Ok(Some(crate::ObjectOwner::into_raw(words.into_object())))
         }

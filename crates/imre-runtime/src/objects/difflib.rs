@@ -1,6 +1,7 @@
 //! Python 3.12's default line differ. Both the line alignment and the optional
 //! intraline guides use the same longest-contiguous-match rule.
 
+use super::exceptions::Error;
 use super::{Str, Words, python_whitespace};
 use crate::StrOwner;
 use smallvec::SmallVec;
@@ -35,6 +36,34 @@ struct Block {
     len: usize,
 }
 
+fn allocation<T, E>(result: Result<T, E>) -> Result<T, Error> {
+    result.map_err(|_| Error::memory_error())
+}
+
+fn buffer<T>(capacity: usize) -> Result<Vec<T>, Error> {
+    let mut values = Vec::new();
+    allocation(values.try_reserve_exact(capacity))?;
+    Ok(values)
+}
+
+fn collect_exact<T>(iter: impl ExactSizeIterator<Item = T>) -> Result<Vec<T>, Error> {
+    let mut values = buffer(iter.len())?;
+    values.extend(iter);
+    Ok(values)
+}
+
+fn characters(text: &str) -> Result<Vec<char>, Error> {
+    let mut values = buffer(text.chars().count())?;
+    values.extend(text.chars());
+    Ok(values)
+}
+
+fn push<T>(values: &mut Vec<T>, value: T) -> Result<(), Error> {
+    allocation(values.try_reserve(1))?;
+    values.push(value);
+    Ok(())
+}
+
 struct Matcher<'a, T> {
     right: &'a [T],
     positions: HashMap<T, SmallVec<[usize; 1]>>,
@@ -42,38 +71,40 @@ struct Matcher<'a, T> {
 }
 
 impl<'a, T: Copy + Eq + Hash> Matcher<'a, T> {
-    fn new(right: &'a [T], junk: fn(T) -> bool) -> Self {
-        let mut positions = HashMap::<T, SmallVec<[usize; 1]>>::with_capacity(right.len());
+    fn new(right: &'a [T], junk: fn(T) -> bool) -> Result<Self, Error> {
+        let mut positions = HashMap::<T, SmallVec<[usize; 1]>>::new();
+        allocation(positions.try_reserve(right.len()))?;
         for (index, &item) in right.iter().enumerate() {
-            positions.entry(item).or_default().push(index);
+            let hits = positions.entry(item).or_default();
+            allocation(hits.try_reserve(1))?;
+            hits.push(index);
         }
-        Self {
+        Ok(Self {
             right,
             positions,
             junk,
-        }
+        })
     }
 
     /// Splits around each longest match, then coalesces adjacent blocks. Junk
     /// and popular elements can extend a match even when they cannot start one.
-    fn blocks(&self, left: &[T]) -> Vec<Block> {
+    fn blocks(&self, left: &[T]) -> Result<Vec<Block>, Error> {
         let right = self.right;
         let limit = if right.len() < 200 {
             usize::MAX
         } else {
             right.len() / 100 + 1
         };
-        let positions: Vec<&[usize]> = left
-            .iter()
-            .map(|item| {
-                self.positions
-                    .get(item)
-                    .filter(|hits| hits.len() <= limit && !(self.junk)(*item))
-                    .map_or(&[][..], |hits| hits.as_slice())
-            })
-            .collect();
-        let mut previous = vec![(0, 0); right.len()];
-        let mut regions = vec![(0..left.len(), 0..right.len())];
+        let positions = collect_exact(left.iter().map(|item| {
+            self.positions
+                .get(item)
+                .filter(|hits| hits.len() <= limit && !(self.junk)(*item))
+                .map_or(&[][..], |hits| hits.as_slice())
+        }))?;
+        let mut previous = buffer(right.len())?;
+        previous.resize(right.len(), (0, 0));
+        let mut regions = Vec::new();
+        push(&mut regions, (0..left.len(), 0..right.len()))?;
         let mut blocks = Vec::new();
         while let Some((a, b)) = regions.pop() {
             previous[b.clone()].fill((0, 0));
@@ -127,16 +158,19 @@ impl<'a, T: Copy + Eq + Hash> Matcher<'a, T> {
             if best.len == 0 {
                 continue;
             }
-            blocks.push(best);
+            push(&mut blocks, best)?;
             if a.start < best.left && b.start < best.right {
-                regions.push((a.start..best.left, b.start..best.right));
+                push(&mut regions, (a.start..best.left, b.start..best.right))?;
             }
             if best.left + best.len < a.end && best.right + best.len < b.end {
-                regions.push((best.left + best.len..a.end, best.right + best.len..b.end));
+                push(
+                    &mut regions,
+                    (best.left + best.len..a.end, best.right + best.len..b.end),
+                )?;
             }
         }
         blocks.sort_unstable_by_key(|block| block.left);
-        let mut merged: Vec<Block> = Vec::with_capacity(blocks.len() + 1);
+        let mut merged: Vec<Block> = buffer(blocks.len() + 1)?;
         for block in blocks {
             if let Some(last) = merged.last_mut()
                 && last.left + last.len == block.left
@@ -152,7 +186,7 @@ impl<'a, T: Copy + Eq + Hash> Matcher<'a, T> {
             right: right.len(),
             len: 0,
         });
-        merged
+        Ok(merged)
     }
 }
 
@@ -166,26 +200,35 @@ struct CharLine {
 }
 
 impl CharLine {
-    fn new(line: &str) -> Self {
-        let chars: Vec<_> = line.chars().collect();
+    fn new(line: &str) -> Result<Self, Error> {
+        let chars = characters(line)?;
         let mut counts = HashMap::new();
         for &ch in &chars {
+            if counts.len() == counts.capacity() && !counts.contains_key(&ch) {
+                allocation(counts.try_reserve(1))?;
+            }
             *counts.entry(ch).or_insert(0) += 1;
         }
-        Self { chars, counts }
+        Ok(Self { chars, counts })
     }
 }
 
 /// Finds the highest-scoring nonidentical pair, visiting the right sequence
 /// first for Python's tie order. An identical junk/popular line is the fallback.
-fn synchronization(left: &[Line], right: &[Line]) -> Option<(usize, usize, Vec<Block>)> {
-    let left_chars: Vec<_> = left.iter().map(|line| CharLine::new(line.text())).collect();
+fn synchronization(
+    left: &[Line],
+    right: &[Line],
+) -> Result<Option<(usize, usize, Vec<Block>)>, Error> {
+    let mut left_chars = buffer(left.len())?;
+    for line in left {
+        left_chars.push(CharLine::new(line.text())?);
+    }
     let mut identical = None;
     let mut best = None;
     let mut best_ratio = 0.74;
     for (j, line) in right.iter().map(|line| line.text()).enumerate() {
-        let chars: Vec<char> = line.chars().collect();
-        let matcher = Matcher::new(&chars, char_junk);
+        let chars = characters(line)?;
+        let matcher = Matcher::new(&chars, char_junk)?;
         for (i, other) in left_chars.iter().enumerate() {
             if left[i].text() == line {
                 identical.get_or_insert((i, j, Vec::new()));
@@ -208,7 +251,7 @@ fn synchronization(left: &[Line], right: &[Line]) -> Option<(usize, usize, Vec<B
             if ratio(common) <= best_ratio {
                 continue;
             }
-            let blocks = matcher.blocks(&other.chars);
+            let blocks = matcher.blocks(&other.chars)?;
             let matches = blocks.iter().map(|b| b.len).sum();
             let score = ratio(matches);
             if score > best_ratio {
@@ -217,19 +260,25 @@ fn synchronization(left: &[Line], right: &[Line]) -> Option<(usize, usize, Vec<B
             }
         }
     }
-    if best_ratio >= 0.75 { best } else { identical }
+    Ok(if best_ratio >= 0.75 { best } else { identical })
 }
 
-fn marked_pair(left: &str, right: &str, blocks: Vec<Block>, emit: &mut impl FnMut(&str, &str)) {
+fn marked_pair(
+    left: &str,
+    right: &str,
+    blocks: Vec<Block>,
+    emit: &mut impl FnMut(&str, &str) -> Result<(), Error>,
+) -> Result<(), Error> {
     if left == right {
-        emit("  ", left);
-        return;
+        return emit("  ", left);
     }
-    let l: Vec<_> = left.chars().collect();
+    let l = characters(left)?;
     let mut ltags = String::new();
     let mut rtags = String::new();
     let mut li = 0;
     let mut ri = 0;
+    allocation(ltags.try_reserve_exact(left.len()))?;
+    allocation(rtags.try_reserve_exact(right.len()))?;
     for block in blocks {
         let replaced = li < block.left && ri < block.right;
         ltags.extend(std::iter::repeat_n(
@@ -248,72 +297,83 @@ fn marked_pair(left: &str, right: &str, blocks: Vec<Block>, emit: &mut impl FnMu
         li = block.left + block.len;
         ri = block.right + block.len;
     }
-    for (tag, source, guide) in [("- ", left, ltags), ("+ ", right, rtags)] {
-        emit(tag, source);
+    for (tag, source, mut guide) in [("- ", left, ltags), ("+ ", right, rtags)] {
+        emit(tag, source)?;
         let trimmed = guide.trim_end_matches(python_whitespace);
         if !trimmed.is_empty() {
-            let mut hint = String::with_capacity(trimmed.len() + 1);
-            hint.push_str(trimmed);
-            hint.push('\n');
-            emit("? ", &hint);
+            guide.truncate(trimmed.len());
+            allocation(guide.try_reserve(1))?;
+            guide.push('\n');
+            emit("? ", &guide)?;
         }
     }
+    Ok(())
 }
 
-fn dump(lines: &[Line], tag: &str, emit: &mut impl FnMut(&str, &str)) {
+fn dump(
+    lines: &[Line],
+    tag: &str,
+    emit: &mut impl FnMut(&str, &str) -> Result<(), Error>,
+) -> Result<(), Error> {
     for line in lines {
-        emit(tag, line.text());
+        emit(tag, line.text())?;
     }
+    Ok(())
 }
 
 /// Expands replacement regions on an explicit stack. Emitting the shorter
 /// unmatched side first is observable when that side is the insertion.
-fn changed(left: &[Line], right: &[Line], emit: &mut impl FnMut(&str, &str)) {
+fn changed(
+    left: &[Line],
+    right: &[Line],
+    emit: &mut impl FnMut(&str, &str) -> Result<(), Error>,
+) -> Result<(), Error> {
     if left.is_empty() {
-        dump(right, "+ ", emit);
-        return;
+        return dump(right, "+ ", emit);
     }
     if right.is_empty() {
-        dump(left, "- ", emit);
-        return;
+        return dump(left, "- ", emit);
     }
     enum Work {
         Region(Range<usize>, Range<usize>),
         Pair(usize, usize, Vec<Block>),
     }
-    let mut pending = vec![Work::Region(0..left.len(), 0..right.len())];
+    let mut pending = Vec::new();
+    push(&mut pending, Work::Region(0..left.len(), 0..right.len()))?;
     while let Some(work) = pending.pop() {
         let (a, b) = match work {
             Work::Region(a, b) => (a, b),
             Work::Pair(i, j, blocks) => {
-                marked_pair(left[i].text(), right[j].text(), blocks, emit);
+                marked_pair(left[i].text(), right[j].text(), blocks, emit)?;
                 continue;
             }
         };
         if !a.is_empty()
             && !b.is_empty()
-            && let Some((i, j, blocks)) = synchronization(&left[a.clone()], &right[b.clone()])
+            && let Some((i, j, blocks)) = synchronization(&left[a.clone()], &right[b.clone()])?
         {
             let i = i + a.start;
             let j = j + b.start;
+            allocation(pending.try_reserve(3))?;
             pending.push(Work::Region(i + 1..a.end, j + 1..b.end));
             pending.push(Work::Pair(i, j, blocks));
             pending.push(Work::Region(a.start..i, b.start..j));
         } else if b.len() < a.len() {
-            dump(&right[b], "+ ", emit);
-            dump(&left[a], "- ", emit);
+            dump(&right[b], "+ ", emit)?;
+            dump(&left[a], "- ", emit)?;
         } else {
-            dump(&left[a], "- ", emit);
-            dump(&right[b], "+ ", emit);
+            dump(&left[a], "- ", emit)?;
+            dump(&right[b], "+ ", emit)?;
         }
     }
+    Ok(())
 }
 
 /// In sorted sequences, common runs with equal multiplicity have a single
 /// alignment that matches the whole run. Every longest block must use it:
 /// an offset inside such a run can only shorten the block. Unequal counts
 /// or autojunk can change Python's choice, so those inputs use the matcher.
-fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
+fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Result<Option<Vec<Block>>, Error> {
     let mut blocks: Vec<Block> = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < left.len() && j < right.len() {
@@ -331,7 +391,7 @@ fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
                     .take_while(|item| item.text() == line)
                     .count();
                 if n != m || (right.len() >= 200 && m > right.len() / 100 + 1) {
-                    return None;
+                    return Ok(None);
                 }
                 if let Some(last) = blocks.last_mut()
                     && last.left + last.len == i
@@ -339,36 +399,44 @@ fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
                 {
                     last.len += n;
                 } else {
-                    blocks.push(Block {
-                        left: i,
-                        right: j,
-                        len: n,
-                    });
+                    push(
+                        &mut blocks,
+                        Block {
+                            left: i,
+                            right: j,
+                            len: n,
+                        },
+                    )?;
                 }
                 i += n;
                 j += n;
             }
         }
     }
-    blocks.push(Block {
-        left: left.len(),
-        right: right.len(),
-        len: 0,
-    });
-    Some(blocks)
+    push(
+        &mut blocks,
+        Block {
+            left: left.len(),
+            right: right.len(),
+            len: 0,
+        },
+    )?;
+    Ok(Some(blocks))
 }
 
 /// With no identical line in a replacement, every input survives with its own
 /// sign and in its original side's order. Interleaving the two sides cannot
 /// affect a stable sort by the entire untagged line: ties have the same sign.
-fn disjoint(left: &[Line], right: &[Line]) -> bool {
+fn disjoint(left: &[Line], right: &[Line]) -> Result<bool, Error> {
     let (small, large) = if left.len() < right.len() {
         (left, right)
     } else {
         (right, left)
     };
-    let keys: HashSet<&str> = small.iter().map(|line| line.text()).collect();
-    large.iter().all(|line| !keys.contains(line.text()))
+    let mut keys = HashSet::new();
+    allocation(keys.try_reserve(small.len()))?;
+    keys.extend(small.iter().map(|line| line.text()));
+    Ok(large.iter().all(|line| !keys.contains(line.text())))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -382,15 +450,17 @@ fn ndiff(
     right: &[Line],
     sorted: Option<Vec<Block>>,
     output: Output,
-    mut emit: impl FnMut(&str, &str),
-) {
+    mut emit: impl FnMut(&str, &str) -> Result<(), Error>,
+) -> Result<(), Error> {
     let (mut i, mut j) = (0, 0);
     let exact_common_runs = sorted.is_some();
-    let blocks = sorted.unwrap_or_else(|| {
-        let a: Vec<_> = left.iter().map(|line| line.text()).collect();
-        let b: Vec<_> = right.iter().map(|line| line.text()).collect();
-        Matcher::new(&b, |_| false).blocks(&a)
-    });
+    let blocks = if let Some(blocks) = sorted {
+        blocks
+    } else {
+        let a = collect_exact(left.iter().map(|line| line.text()))?;
+        let b = collect_exact(right.iter().map(|line| line.text()))?;
+        Matcher::new(&b, |_| false)?.blocks(&a)?
+    };
     for block in blocks {
         let removed = &left[i..block.left];
         let added = &right[j..block.right];
@@ -398,51 +468,59 @@ fn ndiff(
             && (exact_common_runs
                 || removed.is_empty()
                 || added.is_empty()
-                || disjoint(removed, added))
+                || disjoint(removed, added)?)
         {
-            dump(removed, "- ", &mut emit);
-            dump(added, "+ ", &mut emit);
+            dump(removed, "- ", &mut emit)?;
+            dump(added, "+ ", &mut emit)?;
         } else {
-            changed(removed, added, &mut emit);
+            changed(removed, added, &mut emit)?;
         }
         i = block.left + block.len;
         j = block.right + block.len;
         if output == Output::Full {
-            dump(&left[block.left..i], "  ", &mut emit);
+            dump(&left[block.left..i], "  ", &mut emit)?;
         }
     }
+    Ok(())
 }
 
 /// Builds a full diff or the signed projection from two immutable snapshots.
 ///
 /// # Safety
 /// Each buffer owns nonnullable strings for the duration of the call.
-pub(super) unsafe fn materialize_words(left: &Words, right: &Words, output: Output) -> Words {
+pub(super) unsafe fn materialize_words(
+    left: &Words,
+    right: &Words,
+    output: Output,
+) -> Result<Words, Error> {
     let ordered = left.strings_ascending() && right.strings_ascending();
     // SAFETY: both input buffers remain rooted and immutable while their views are live.
     let (left, right) = unsafe { (Line::from_words(left), Line::from_words(right)) };
     let sorted = if ordered {
-        sorted_line_blocks(left, right)
+        sorted_line_blocks(left, right)?
     } else {
         None
     };
     let mut words = Words::new(3);
     if output == Output::Full {
-        words.values.reserve(left.len().max(right.len()));
+        allocation(words.values.try_reserve(left.len().max(right.len())))?;
     }
     ndiff(left, right, sorted, output, |prefix, line| {
         if output == Output::ProjectedChanges && !matches!(prefix, "- " | "+ ") {
-            return;
+            return Ok(());
         }
-        let mut tagged = Str::with_capacity(prefix.len() + line.len());
+        allocation(words.values.try_reserve(1))?;
+        let mut tagged = Str::new("");
+        allocation(tagged.try_reserve(prefix.len() + line.len()))?;
         tagged.push_str(prefix);
         tagged.push_str(line);
         words
             .values
-            .push(StrOwner::into_raw(StrOwner::new(tagged)) as usize);
-    });
+            .push(StrOwner::into_raw(allocation(StrOwner::try_new(tagged))?) as usize);
+        Ok(())
+    })?;
     words.update_header();
-    words
+    Ok(words)
 }
 
 #[cfg(test)]
@@ -464,7 +542,9 @@ mod tests {
         let right = strings(right);
         // SAFETY: the input and output buffers independently root all their strings.
         unsafe {
-            let rows = materialize_words(&left, &right, output);
+            let rows = materialize_words(&left, &right, output)
+                .ok()
+                .expect("fixture diff");
             Line::from_words(&rows)
                 .iter()
                 .map(|line| line.text().to_owned())

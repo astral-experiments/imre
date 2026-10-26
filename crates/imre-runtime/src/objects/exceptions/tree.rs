@@ -78,7 +78,7 @@ pub(in crate::objects) fn append_tree_entries(
                 return Ok(false);
             };
             errors.entries.0.with(|storage| {
-                let entries = storage.sequence();
+                let entries = storage.sequence()?;
                 output
                     .values
                     .try_reserve(entries.values.len())

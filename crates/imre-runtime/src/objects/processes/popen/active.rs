@@ -24,7 +24,7 @@ pub(in crate::objects) fn retain_live_owner(owner: &crate::ObjectOwner) {
             // SAFETY: no other sequence access or language callback spans this mutation.
             unsafe {
                 active.0.with_mut(|storage| {
-                    let entries = storage.sequence_mut();
+                    let entries = storage.concrete_sequence_mut();
                     entries
                         .values
                         .push(crate::ObjectOwner::into_raw(owner.clone()) as usize);
@@ -49,7 +49,7 @@ pub(in crate::objects::processes) fn cleanup() {
         // cannot run user code or mutate the active list.
         unsafe {
             active.0.with_mut(|storage| {
-                let entries = storage.sequence_mut();
+                let entries = storage.concrete_sequence_mut();
                 entries.values.retain(|word| {
                     let done = object(*word as *const Object)
                         .0
