@@ -1149,6 +1149,17 @@ impl Checker<'_> {
         {
             return Ok(checked);
         }
+        if matches!(attribute.attr.as_str(), "assertIs" | "assertIsNot")
+            && self.unittest_case(class)
+            && !self.classes.methods[class].contains_key(attribute.attr.as_str())
+            && let Some(receiver) = &receiver
+        {
+            return self.unittest_identity(
+                call,
+                receiver,
+                attribute.attr.as_str() == "assertIsNot",
+            );
+        }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver
             && let Some(checked) =

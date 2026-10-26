@@ -26,6 +26,8 @@ CPython reference executions; they confer no Imre coverage.
 
 ## Native execution
 
+[Identity assertions across upstream suites](identity-assertions.md) lists the exact before/after IDs, execution roles and the command that regenerates their full inventories.
+
 ```sh
 /path/to/python -B benchmarks/cpython_stdlib/full/unittest/run.py \
     --imre /path/to/imre --runtime /path/to/libimre_runtime.a \
