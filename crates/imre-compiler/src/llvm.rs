@@ -9759,6 +9759,63 @@ mod tests {
     }
 
     #[test]
+    fn bytes_text_allocation_errors_escape_nested_calls() {
+        let llvm = compile(
+            "def text(data: bytes) -> str:\n    return str(data)\ndef outer(data: bytes) -> str:\n    return text(data)\ntry:\n    print(outer(b'abc'))\nexcept MemoryError:\n    print('memory')\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        for call in ["call ptr @imre_bytes_str(", "call ptr @fn_0("] {
+            let (_, after) = llvm.split_once(call).unwrap();
+            let (body, _) = after.split_once("\n}").unwrap();
+            assert!(body.contains("call i32 @imre_error_pending()"));
+        }
+    }
+
+    #[test]
+    fn log_record_repr_checks_for_field_allocation_failure() {
+        let llvm = compile(
+            r#"import logging
+def show(text: str) -> str:
+    record = logging.LogRecord("app", 20, "mod.py", 1, (text, text), (), None)
+    try:
+        return repr(record)
+    except MemoryError:
+        return "memory"
+print(show("x"))
+"#,
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let (_, after) = llvm.split_once("call ptr @imre_logrecord_repr(").unwrap();
+        assert!(
+            after
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains("call i32 @imre_error_pending()")
+        );
+    }
+
+    #[test]
+    fn exception_field_display_checks_for_allocation_failure() {
+        let llvm = compile("def show(label: str, quoted: bool) -> str:\n    try:\n        raise SystemExit((label, label))\n    except SystemExit as error:\n        if quoted:\n            return repr(error.code)\n        return str(error.code)\nprint(show(\"text\", True))\n", &CompileOptions::default()).unwrap();
+        for call in [
+            "call ptr @imre_system_exit_code_text(",
+            "call ptr @imre_exception_field_repr(",
+        ] {
+            let (_, after) = llvm.split_once(call).unwrap();
+            assert!(
+                after
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .contains("call i32 @imre_error_pending()")
+            );
+        }
+    }
+
+    #[test]
     fn boxed_equality_checks_errors_before_using_the_result() {
         let body = function_body(
             "from collections.abc import Mapping\n\ndef check(left: Mapping[str, object], right: Mapping[str, object]) -> None:\n    print(left['x'] == right['x'])\ncheck({'x': (1, 2)}, {'x': (3, 4)})\n",

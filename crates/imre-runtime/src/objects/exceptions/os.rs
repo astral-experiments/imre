@@ -1,10 +1,11 @@
 //! Preserve OS error fields as values; a rendered error is not a source of errno.
 use super::{
-    Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, push_string_repr,
+    Error, Kind, Object, Payload, Result, Str, Unicode16Repr, finish, object, write_quoted_repr,
 };
 #[cfg(test)]
 use crate::Bytes;
 use crate::StrOwner;
+use crate::objects::values::ReprWriter;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -27,19 +28,19 @@ impl Filename {
         }
     }
 
-    fn append_repr(&self, output: &mut String) {
+    fn write_repr(&self, output: &mut ReprWriter<'_>) -> std::fmt::Result {
         match self {
-            Self::Str(s) => push_string_repr(s, output),
-            Self::Bytes(b) => crate::objects::bytes::write_repr(output, b),
+            Self::Str(s) => write_quoted_repr(s, output),
+            Self::Bytes(b) => crate::objects::bytes::write_quoted_repr(output, b),
             Self::SurrogateEscaped(raw) => push_fs_repr(raw, output),
             Self::Path(p) => {
                 // SAFETY: the exception roots this immutable path while rendering it.
                 unsafe {
-                    crate::objects::values::write_repr(
+                    crate::objects::values::try_write_unchecked_repr(
                         output,
                         crate::ObjectOwner::as_ptr(p) as usize,
                         crate::objects::words::WordKind::new(5),
-                    );
+                    )
                 }
             }
         }
@@ -63,36 +64,32 @@ impl Filename {
 }
 
 /// Render POSIX surrogateescape without replacing a failed syscall with a decoding error.
-fn push_fs_repr(raw: &[u8], out: &mut String) {
+fn push_fs_repr(raw: &[u8], out: &mut impl Write) -> std::fmt::Result {
     let quote = if raw.contains(&b'\'') && !raw.contains(&b'"') {
         '"'
     } else {
         '\''
     };
-    out.push(quote);
+    out.write_char(quote)?;
     for chunk in raw.utf8_chunks() {
         let mut text = chunk.valid();
         // Escape both delimiters according to the choice for the complete filename.
         // Quote-free spans use the same Unicode printability table as ordinary str repr.
         while let Some(index) = text.find(['\'', '"']) {
-            UnicodeEscape::new_repr(&text[..index])
-                .write_body(&mut Unicode16Repr(out))
-                .unwrap();
+            UnicodeEscape::new_repr(&text[..index]).write_body(&mut Unicode16Repr(out))?;
             let ch = char::from(text.as_bytes()[index]);
             if ch == quote {
-                out.push('\\');
+                out.write_char('\\')?;
             }
-            out.push(ch);
+            out.write_char(ch)?;
             text = &text[index + 1..];
         }
-        UnicodeEscape::new_repr(text)
-            .write_body(&mut Unicode16Repr(out))
-            .unwrap();
+        UnicodeEscape::new_repr(text).write_body(&mut Unicode16Repr(out))?;
         for byte in chunk.invalid() {
-            write!(out, "\\udc{byte:02x}").unwrap();
+            write!(out, "\\udc{byte:02x}")?;
         }
     }
-    out.push(quote);
+    out.write_char(quote)
 }
 
 #[derive(Clone)]
@@ -102,13 +99,16 @@ pub(super) struct Filenames {
 }
 
 impl Filenames {
-    pub(super) fn append_message(&self, output: &mut String) {
-        output.push_str(": ");
-        self.first.append_repr(output);
+    pub(super) fn message(&self, prefix: &str) -> super::Rendered {
+        let mut text = String::new();
+        let mut output = ReprWriter(&mut text);
+        write!(output, "{prefix}: ")?;
+        self.first.write_repr(&mut output)?;
         if let Some(path) = &self.second {
-            output.push_str(" -> ");
-            path.append_repr(output);
+            output.write_str(" -> ")?;
+            path.write_repr(&mut output)?;
         }
+        super::rendered(text.into())
     }
 }
 
@@ -120,12 +120,10 @@ impl Error {
             first: filename,
             second: None,
         });
-        let mut message = String::from("[Errno None] None");
-        paths.append_message(&mut message);
         Self {
             kind: Kind::OSError,
             payload: Some(Payload::Arguments(Box::new(super::BuiltinArguments {
-                message: StrOwner::new(message.into()),
+                message: StrOwner::new(Str::new("[Errno None] None")),
                 args: std::iter::once(Self::string_arg(arg)).collect(),
                 os_paths: Some(paths),
             }))),
@@ -216,6 +214,28 @@ mod tests {
                 crate::Int::small(17).unwrap().into_raw()
             );
         }
+    }
+
+    #[test]
+    fn os_errors_quote_filenames_only_when_displayed() {
+        let error = Error::from_errno(
+            Kind::FileNotFoundError,
+            libc::ENOENT,
+            "missing",
+            Some(Filename::SurrogateEscaped(crate::BytesOwner::new(
+                b"bad\xff\x01".to_vec(),
+            ))),
+            Some(Filename::Bytes(crate::BytesOwner::new(vec![0, 255]))),
+        );
+        let Some(Payload::Arguments(args)) = &error.payload else {
+            panic!("expected errno arguments");
+        };
+        assert_eq!(args.message.as_str(), "[Errno 2] missing");
+        let paths = args.os_paths.as_ref().unwrap();
+        assert_eq!(
+            paths.message(&args.message).unwrap().as_str(),
+            r"[Errno 2] missing: 'bad\udcff\x01' -> b'\x00\xff'"
+        );
     }
 
     #[test]

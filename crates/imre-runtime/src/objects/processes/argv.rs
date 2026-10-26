@@ -146,22 +146,25 @@ pub(super) unsafe fn with_bytes<T>(word: usize, kind: WordKind, f: impl FnOnce(&
 
 /// Subprocess exception messages interpolate str(cmd), which differs from repr
 /// for a standalone string or Path. Lists and tuples keep their normal repr.
-pub(super) fn display(cmd: &OwnedWord) -> String {
+pub(super) fn message_prefix(cmd: &OwnedWord) -> std::result::Result<String, fmt::Error> {
+    let mut text = String::new();
+    let mut output = ReprWriter(&mut text);
+    output.write_str("Command '")?;
     // SAFETY: formatting cannot mutate the closed, acyclic command object.
     unsafe {
         if cmd.kind.raw() == 3 {
-            return (&*(cmd.word as *const Str)).as_str().to_owned();
-        }
-        if cmd.kind.raw() == 5
-            && let Some(path) = object(cmd.word as *const Object).0.with(|s| {
+            output.write_str((&*(cmd.word as *const Str)).as_str())?;
+        } else if cmd.kind.raw() == 5
+            && let Some(result) = object(cmd.word as *const Object).0.with(|s| {
                 matches!(s, Storage::Path { .. } | Storage::PurePath(_))
-                    .then(|| s.path().to_owned())
+                    .then(|| output.write_str(s.path()))
             })
         {
-            return path;
+            result?;
+        } else {
+            crate::objects::values::try_write_repr(&mut output, cmd.word, cmd.kind)?;
         }
-        let mut text = String::new();
-        crate::objects::values::write_repr(&mut text, cmd.word, cmd.kind);
-        text
     }
+    output.write_char('\'')?;
+    Ok(text)
 }

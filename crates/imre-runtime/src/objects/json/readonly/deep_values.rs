@@ -84,7 +84,11 @@ pub(super) fn equal(left: &View, right: &View) -> Result<bool, Error> {
     Ok(true)
 }
 
-pub(super) fn write_repr(view: &View, out: &mut String) -> Result<(), Error> {
+pub(super) fn write_repr(
+    view: &View,
+    out: &mut crate::objects::values::ReprWriter<'_>,
+) -> Result<(), Error> {
+    use std::fmt::Write as _;
     let mut stack = vec![(view, view.index, 0)];
     while let Some((view, index, next)) = stack.pop() {
         let (view, index) = view.try_resolved(index)?;
@@ -92,20 +96,20 @@ pub(super) fn write_repr(view: &View, out: &mut String) -> Result<(), Error> {
         let (offset, child) = match node {
             Node::Array(items) => {
                 if next == 0 {
-                    out.push('[');
+                    out.write_char('[').map_err(|_| Error::allocation())?;
                 }
                 let Some(&child) = items.get(next) else {
-                    out.push(']');
+                    out.write_char(']').map_err(|_| Error::allocation())?;
                     continue;
                 };
                 if next != 0 {
-                    out.push_str(", ");
+                    out.write_str(", ").map_err(|_| Error::allocation())?;
                 }
                 (next, child)
             }
             Node::Object(fields) => {
                 if next == 0 {
-                    out.push('{');
+                    out.write_char('{').map_err(|_| Error::allocation())?;
                 }
                 let mut offset = next;
                 while offset < fields.len()
@@ -116,14 +120,15 @@ pub(super) fn write_repr(view: &View, out: &mut String) -> Result<(), Error> {
                     offset += 1;
                 }
                 let Some((key, _)) = fields.get(offset) else {
-                    out.push('}');
+                    out.write_char('}').map_err(|_| Error::allocation())?;
                     continue;
                 };
                 if offset != 0 {
-                    out.push_str(", ");
+                    out.write_str(", ").map_err(|_| Error::allocation())?;
                 }
-                crate::objects::exceptions::push_string_repr(key, out);
-                out.push_str(": ");
+                crate::objects::exceptions::write_quoted_repr(key, out)
+                    .map_err(|_| Error::allocation())?;
+                out.write_str(": ").map_err(|_| Error::allocation())?;
                 (offset, node.lookup(key).unwrap())
             }
             _ => {
