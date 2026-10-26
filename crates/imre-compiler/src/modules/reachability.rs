@@ -374,6 +374,13 @@ impl Reachable {
                 };
                 if let ast::Stmt::ClassDef(class) = node {
                     if expanded.insert(id) {
+                        if source.is_bundled(super::LOGGING_CLASSES)
+                            && class.name.as_str() == "Handler"
+                            && let Some(Binding::Definition(shutdown)) =
+                                source.bindings.get("_shutdown_handler")
+                        {
+                            refs.found.definitions.insert(*shutdown);
+                        }
                         if let Some(args) = &class.arguments {
                             refs.visit_arguments(args);
                         }

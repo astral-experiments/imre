@@ -125,7 +125,12 @@ impl Builtin {
             Self::ExceptionFieldRepr
             | Self::ExceptionRepr
             | Self::ExceptionMessage
-            | Self::Logging(crate::ir::LogOperation::PrintActiveException) => {
+            | Self::Logging(
+                crate::ir::LogOperation::PrintActiveException
+                | crate::ir::LogOperation::DictConfig
+                | crate::ir::LogOperation::DictConfigTyped
+                | crate::ir::LogOperation::FileConfig,
+            ) => {
                 Contract::new(true, Unknown)
             }
             Self::SystemExitFromTuple
@@ -265,10 +270,7 @@ impl Builtin {
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
-                    crate::ir::LogOperation::DictConfig
-                        | crate::ir::LogOperation::DictConfigTyped
-                        | crate::ir::LogOperation::FileConfig
-                        | crate::ir::LogOperation::CheckLevel
+                    crate::ir::LogOperation::CheckLevel
                         | crate::ir::LogOperation::WriteStream
                         | crate::ir::LogOperation::FlushStream
                         | crate::ir::LogOperation::LockAcquire
