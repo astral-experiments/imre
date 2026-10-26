@@ -675,14 +675,15 @@ impl Checker<'_> {
             )?;
             return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
         }
-        self.reject_builtin_keywords(call)?;
         let args = call.arguments.args.as_ref();
         let name = attribute.attr.as_str();
         let (level, args) = match (name, args) {
             ("getEffectiveLevel", []) => {
+                self.reject_builtin_keywords(call)?;
                 return Ok(operation(Log::EffectiveLevel, Type::Int, vec![logger]));
             }
             ("isEnabledFor", [level]) => {
+                self.reject_builtin_keywords(call)?;
                 let level = self.expr_expected(level, Type::Int)?;
                 return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
             }
@@ -708,7 +709,6 @@ impl Checker<'_> {
         level: Option<u8>,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
         let args = call.arguments.args.as_ref();
         let (level, args) = if let Some(level) = level {
             (number(level), args)
@@ -735,6 +735,24 @@ impl Checker<'_> {
         for operand in operands {
             values.push(self.expr(operand)?);
         }
+        let extra = match call.arguments.keywords.as_ref() {
+            [] => None,
+            [kw] if kw.arg.as_ref().is_some_and(|name| name.as_str() == "extra") => {
+                Some(self.logging_extra(&kw.value)?)
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "keyword arguments are unsupported for this builtin",
+                ));
+            }
+        };
+        let extra_index = extra.map(|field| {
+            let i = values.len();
+            values.push(field);
+            i
+        });
         // Python evaluates all arguments, even when a logger discards an event.
         let mut body = Vec::new();
         let mut clear = Vec::new();
@@ -755,7 +773,7 @@ impl Checker<'_> {
         let logger = self.local(clear[0]);
         let level = self.local(clear[1]);
         let original = self.check_record_value(self.local(clear[2]), message)?;
-        let arguments = clear[3..]
+        let arguments = clear[3..3 + operands.len()]
             .iter()
             .zip(operands)
             .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
@@ -771,18 +789,6 @@ impl Checker<'_> {
             Type::Bool,
             vec![logger.clone(), level.clone()],
         );
-        let def = self
-            .graph
-            .logging_definition("_deliver")
-            .ok_or_else(|| error(self.source, call, "missing native logging delivery"))?;
-        let sig = self.functions.get(&def).ok_or_else(|| {
-            error(
-                self.source,
-                call,
-                "missing native logging delivery signature",
-            )
-        })?;
-        self.calls.insert(sig.id);
         let path = text(
             self.graph.modules[self.module]
                 .path
@@ -821,6 +827,23 @@ impl Checker<'_> {
                 none(),
             ],
         );
+        let record = if let Some(i) = extra_index {
+            self.record_with_extra(record, self.local(clear[i]))
+        } else {
+            record
+        };
+        let def = self
+            .graph
+            .logging_definition("_deliver")
+            .ok_or_else(|| error(self.source, call, "missing native logging delivery"))?;
+        let sig = self.functions.get(&def).ok_or_else(|| {
+            error(
+                self.source,
+                call,
+                "missing native logging delivery signature",
+            )
+        })?;
+        self.calls.insert(sig.id);
         let emit = self.call_value(
             sig,
             Type::None,
