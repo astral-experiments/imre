@@ -183,6 +183,14 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
+            let closed = match self.heap.get(id) {
+                Value::File(file) => file.borrow().is_none(),
+                Value::TextFile(file) => file.closed(),
+                _ => false,
+            };
+            if closed {
+                return Err(Error::new("ValueError", "I/O operation on closed file."));
+            }
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
