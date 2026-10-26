@@ -247,21 +247,18 @@ class StreamHandler(Handler):
         return old
 
 
-def _deliver(logger: Logger, level: int, message: str, path: str, lineno: int) -> None:
+def _deliver(logger: Logger, level: int, record: LogRecord) -> None:
     current: Logger | None = logger
-    record: LogRecord | None = None
     found = False
     while current is not None:
         for handler in current.handlers:
             found = True
             if level >= handler.level:
-                if record is None:
-                    record = LogRecord(logger.name, level, path, lineno, message, (), None)
                 handler.handle(record)
         if not current.propagate:
             break
         current = current.parent
-    _fallback(logger, level, message, found)
+    _fallback(logger, level, record, found)
 
 
 def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force: bool,

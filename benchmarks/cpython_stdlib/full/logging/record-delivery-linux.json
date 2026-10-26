@@ -1,0 +1,404 @@
+{
+  "schema": "logging-record-delivery-comparison-v1",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source": "b63a8f1bb8b8d46b443347e260176f352a893786",
+  "tree": "8a50e3fb7e728d7e6af0a80f7bd818bf13ea9623",
+  "canonical_stream": "2b5d7086da9c4f831c7fc5cda4e9ac0256c6e7ab",
+  "fixture": "benchmarks/cpython_stdlib/full/logging/record_delivery.py",
+  "fixture_blob": "14c19b48f6092c39e921999dd35d5cdbb6732546",
+  "observations": [
+    "True",
+    "hello %(who)s",
+    "hello first",
+    "hello second",
+    "send",
+    "True",
+    "28",
+    "%04d %r %%",
+    "0007 'a\\nb' %",
+    "(7, 'a\\nb')",
+    "incomplete %",
+    "incomplete format",
+    "not enough arguments for format string",
+    "dir/file",
+    "path: dir/file (PosixPath('dir/file'))",
+    "ok <Status.OK: 'ok'> / Choice.OK <Choice.OK: 'ok'>",
+    "disabled",
+    "7",
+    "7",
+    "below last resort"
+  ],
+  "oracle": {
+    "status": 0,
+    "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+    "output_lines": 20,
+    "stderr": "last resort: 0009\n"
+  },
+  "levels": {
+    "0": {
+      "status": 0,
+      "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+      "output_lines": 20,
+      "stderr": "last resort: 0009\n"
+    },
+    "3": {
+      "status": 0,
+      "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+      "output_lines": 20,
+      "stderr": "last resort: 0009\n"
+    }
+  },
+  "compiler_modes": {
+    "production": {
+      "tools": {
+        "imre": "f448dd7ab458c957552abf83b2af178de6a69554dbe35febdda463f9319fa713",
+        "libimre_runtime.a": "a1d3391539681594933734e3b4fdea4bcea141b5b6fd7e4636d0a3b4f0dd946f"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+          "output_lines": 20,
+          "stderr": "last resort: 0009\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+          "output_lines": 20,
+          "stderr": "last resort: 0009\n"
+        }
+      }
+    },
+    "verify-ir": {
+      "tools": {
+        "imre": "880016eee811dc208bf5c2f857161900cad8dbd289fb09b12a0d340a1afd948c",
+        "libimre_runtime.a": "a1d3391539681594933734e3b4fdea4bcea141b5b6fd7e4636d0a3b4f0dd946f"
+      },
+      "levels": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+          "output_lines": 20,
+          "stderr": "last resort: 0009\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "52c9ccfb67ed96fde6800d3da118436fb34819abaa7397c709364ade89d1d63b",
+          "output_lines": 20,
+          "stderr": "last resort: 0009\n"
+        }
+      }
+    }
+  },
+  "suite_parent": "38dc24aaba9c97180780e1f31c11d917dca23f3f",
+  "suite_denominator": 272,
+  "suite_sha256": "8ed707d3e5c8c90ff45c4e8dc33262348bdeba31cf04e32a9d399efafe372fd4",
+  "upstream_test_blob": "c1dc06e02d965781df0498a444aa0a333bd28a85",
+  "changed_suite_occurrences": 2,
+  "changed_suite_classifications": 2,
+  "reference_replay": {
+    "platform": "linux",
+    "resources": "all",
+    "denominator": 272,
+    "counts": {
+      "pass": 269,
+      "skip": 3
+    },
+    "sha256": "5dc88b27ac1d3b3ead98cba41b8839197b9fa6e24f2ce8d33db95c157e18ead2"
+  },
+  "basic_handlers_blocker": {
+    "test_id": "test.test_logging.BasicConfigTest.test_handlers",
+    "method_sha256": "9ef59195b1a80a638fb1413c081a74552f7db1b9c0ff1675950570d8f4033c1c",
+    "source": "Lib/test/test_logging.py:5599:30",
+    "original_statement": "self.assertIsNotNone(handlers[0].formatter)",
+    "fixture": "CPython BasicConfigTest setup and cleanup; native child recreates its empty root and saved level.",
+    "levels": {
+      "0": {
+        "stock": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O0)\n<native-case>/case.py:34:30: Imre: expected object value, got logging.Formatter | None; annotations are enforced contracts\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.original_logging_level = prepare(30)\n"
+        },
+        "typed-non-None": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O0)\n<native-case>/case.py:40:9: Imre: identity comparisons require supported stable object identities\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n\n    def assertIsNotNone(self, item: logging.Formatter | None) -> None:\n        if item is None:\n            raise AssertionError(\"unexpectedly None\")\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.original_logging_level = prepare(30)\n"
+        },
+        "typed-identity": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O0)\n<native-case>/case.py:18:30: Imre: finite unions support str | bytes and nullable exact types\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nclass NativeCase:\n\n    def assertIsNotNone(self, item: logging.Formatter | None) -> None:\n        if item is None:\n            raise AssertionError(\"unexpectedly None\")\n\n    def assertIs(self, left: logging.Handler | logging.Formatter | None,\n                 right: logging.Handler | logging.Formatter | None) -> None:\n        if left is not right:\n            raise AssertionError(\"different objects\")\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        self.original_logging_level = prepare(30)\n"
+        }
+      },
+      "3": {
+        "stock": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O3)\n<native-case>/case.py:34:30: Imre: expected object value, got logging.Formatter | None; annotations are enforced contracts\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.original_logging_level = prepare(30)\n"
+        },
+        "typed-non-None": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O3)\n<native-case>/case.py:40:9: Imre: identity comparisons require supported stable object identities\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nimport unittest\n\nclass NativeCase(unittest.TestCase):\n\n    def assertIsNotNone(self, item: logging.Formatter | None) -> None:\n        if item is None:\n            raise AssertionError(\"unexpectedly None\")\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        super().__init__()\n        self.original_logging_level = prepare(30)\n"
+        },
+        "typed-identity": {
+          "stage": "compile",
+          "diagnostic": " Compiling <native-case>/case.py (-O3)\n<native-case>/case.py:18:30: Imre: finite unions support str | bytes and nullable exact types\n",
+          "adapter": "import io\nimport logging\nimport sys\nimport unittest\n\ndef prepare(level: int) -> int:\n    root = logging.getLogger(\"\")\n    assert not root.handlers\n    root.setLevel(level)\n    return root.level\n\nclass NativeCase:\n\n    def assertIsNotNone(self, item: logging.Formatter | None) -> None:\n        if item is None:\n            raise AssertionError(\"unexpectedly None\")\n\n    def assertIs(self, left: logging.Handler | logging.Formatter | None,\n                 right: logging.Handler | logging.Formatter | None) -> None:\n        if left is not right:\n            raise AssertionError(\"different objects\")\n\n    original_logging_level: int\n\n    def __init__(self) -> None:\n        self.original_logging_level = prepare(30)\n"
+        }
+      }
+    },
+    "suite_classification": "blocked",
+    "additional_upstream_ids": 0
+  },
+  "stream_assertion_controls": {
+    "source": "import io\nimport logging\nimport typing\n\nclass Assertions:\n\n    def assertIs(self, first, second: typing.TextIO) -> None:\n        if first is not second:\n            raise AssertionError(\"different stream objects\")\n\n    def assertIsNone(self, value) -> None:\n        if value is not None:\n            raise AssertionError(\"expected unchanged stream\")\n\ndef exercise() -> None:\n    checks = Assertions()\n    first = io.StringIO()\n    second = io.StringIO()\n    handler = logging.StreamHandler(first)\n    old = handler.setStream(second)\n    checks.assertIs(old, first)\n    checks.assertIsNone(handler.setStream(second))\n    print(\"original stream and unchanged result accepted\")\n    try:\n        checks.assertIs(old, second)\n    except AssertionError as error:\n        print(str(error))\n    try:\n        checks.assertIsNone(old)\n    except AssertionError as error:\n        print(str(error))\n\nexercise()\n",
+    "fixture_blob": "81c6e3096908881fbb25d817a285e166be4db158",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "68df7a8ce5b028787610bc90c247dbe52859f0e0b35a03fc33802010c45e4c9d",
+      "output_lines": 3,
+      "stderr": ""
+    },
+    "observations": [
+      "original stream and unchanged result accepted",
+      "different stream objects",
+      "expected unchanged stream"
+    ],
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "68df7a8ce5b028787610bc90c247dbe52859f0e0b35a03fc33802010c45e4c9d",
+        "output_lines": 3,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "68df7a8ce5b028787610bc90c247dbe52859f0e0b35a03fc33802010c45e4c9d",
+        "output_lines": 3,
+        "stderr": ""
+      }
+    },
+    "additional_upstream_ids": 0
+  },
+  "stream_suite_sha256": "a82cc5368b71777aab028e44daf876f675b918cd6d4999ab7b4bc3b4434d0885",
+  "instance_qualname": {
+    "control": "\"\"\"Distinguish an instance field from the class's qualified name.\"\"\"\nimport logging\n\n\ndef present(record: logging.LogRecord, name: str) -> bool:\n    return hasattr(record, name)\n\n\nrecord = logging.makeLogRecord({})\nprint(present(record, '__qualname__'))\nfields = vars(record)\nfields['__qualname__'] = None\nprint(present(record, '__qualname__'))\nprint(str(fields['__qualname__']))\ndel fields['__qualname__']\nprint(present(record, '__qualname__'))\nprint(present(record, '__firstlineno__'))\nprint(present(record, 'getMessage'))\n",
+    "observations": [
+      "False",
+      "True",
+      "None",
+      "False",
+      "True",
+      "True"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+      "output_lines": 6,
+      "stderr": ""
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "224711e21411c5bf25b45c24b5261b2a975f943d53f0c66bcfd3812d27bd2d99",
+          "output_lines": 6,
+          "stderr": ""
+        }
+      }
+    },
+    "additional_upstream_ids": 0,
+    "canonical_before": {
+      "source": "38dc24aaba9c97180780e1f31c11d917dca23f3f",
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "cpython_logging_blob": "9005f1ef865c9096e6035feb7a53a98f8dade705",
+      "control": "\"\"\"Distinguish an instance field from the class's qualified name.\"\"\"\nimport logging\n\n\ndef present(record: logging.LogRecord, name: str) -> bool:\n    return hasattr(record, name)\n\n\nrecord = logging.makeLogRecord({})\nprint(present(record, '__qualname__'))\nfields = vars(record)\nfields['__qualname__'] = None\nprint(present(record, '__qualname__'))\nprint(str(fields['__qualname__']))\ndel fields['__qualname__']\nprint(present(record, '__qualname__'))\nprint(present(record, '__firstlineno__'))\nprint(present(record, 'getMessage'))\n",
+      "oracle": "False\nTrue\nNone\nFalse\nTrue\nTrue\n",
+      "class_qualname": "LogRecord",
+      "class_namespace_contains_qualname": false,
+      "unchanged_test_sha256": "829efb248ac9b45c5c66cb4da1a5847fc755127c43a6b49dc1ec280b2b80e0d7",
+      "levels": {
+        "0": {
+          "qualname_stdout": "True\nTrue\nNone\nTrue\nTrue\nTrue\n",
+          "qualname_status": 0,
+          "qualname_stderr": "",
+          "stock_assertion": {
+            "statement": "self.assertIs(old, sys.stderr)",
+            "source": "Lib/test/test_logging.py:845",
+            "diagnostic": "generated repr cannot format resource, callable, or custom-repr fields"
+          }
+        },
+        "3": {
+          "qualname_stdout": "True\nTrue\nNone\nTrue\nTrue\nTrue\n",
+          "qualname_status": 0,
+          "qualname_stderr": "",
+          "stock_assertion": {
+            "statement": "self.assertIs(old, sys.stderr)",
+            "source": "Lib/test/test_logging.py:845",
+            "diagnostic": "generated repr cannot format resource, callable, or custom-repr fields"
+          }
+        }
+      }
+    },
+    "canonical_correction": "7bb5f8906511662039eab7de39251eb923fc197b"
+  },
+  "manager_cleanup_suite_sha256": "1b7e4344055c8095119f352ed1293846691cdc748dbef2da8bd26a578dd486a5",
+  "file_handler": {
+    "fixture": "tests/fixtures/files/logging_file_delivery.py",
+    "fixture_blob": "42417ef9ce3f6012d5217b501ebc38db1bd03a54",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+      "output_lines": 25,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+        "output_lines": 25,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "bda444938b9a6967cc455c8664130a6af0a5af488eb15a6f5f386115ca67c041",
+        "output_lines": 25,
+        "stderr": ""
+      }
+    }
+  },
+  "root_config_suite_sha256": "f03e37684fc30f7b2da356a36a056d7a09ebdd265623bee56d723bca192b8043",
+  "logging_config_cleanup": {
+    "fixture": "tests/fixtures/files/logging_config_cleanup.py",
+    "fixture_blob": "0f1cf0e8d062c66ca8b01c3dd899689492fa71b9",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+      "output_lines": 13,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+        "output_lines": 13,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "9903deb0b2d22ad1a32f7b186315ae4fe436349b7734985392c42ba50f6f2b10",
+        "output_lines": 13,
+        "stderr": ""
+      }
+    }
+  },
+  "logging_file_codecs": {
+    "fixture": "tests/fixtures/files/logging_file_codecs.py",
+    "fixture_blob": "07f1d9c88cbf8084862dd6213696c8c7013ce38b",
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+      "output_lines": 51,
+      "stderr": ""
+    },
+    "levels": {
+      "0": {
+        "status": 0,
+        "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+        "output_lines": 51,
+        "stderr": ""
+      },
+      "3": {
+        "status": 0,
+        "stdout_sha256": "37c4e680722aa2cdb3f748e84ba1145df81bfcb1cee3ee11b2b3a394bbffe71e",
+        "output_lines": 51,
+        "stderr": ""
+      }
+    }
+  },
+  "standalone_suite_sha256": "1012a444ad446c068cdd43481a3a2bf454d4391abffbb6469a19577dc2a52848",
+  "detached_fallback": {
+    "source": "import logging\n\nclass Capture(logging.Handler):\n    records: list[logging.LogRecord]\n    def __init__(self) -> None:\n        super().__init__()\n        self.records = []\n    def emit(self, record: logging.LogRecord | None) -> None:\n        if record is not None:\n            self.records.append(record)\n\ndef main() -> None:\n    logging.basicConfig(level=logging.DEBUG, format=\"ROOT %(name)s:%(message)s\")\n    managed = logging.getLogger(\"twins\")\n    detached = logging.Logger(\"twins\")\n    capture = Capture()\n    detached.addHandler(capture)\n    values = {\"word\": \"before\"}\n    detached.warning(\"retained %(word)s\", values)\n    values[\"word\"] = \"after\"\n    print(capture.records[0].getMessage())\n    detached.warning(\"bad %\", 9)\n    print(capture.records[1].msg)\n    detached.removeHandler(capture)\n    detached.info(\"ignored %\", 2)\n    detached.warning(\"last resort %04d\", 7)\n    managed.warning(\"managed %04d\", 11)\n\nmain()\n",
+    "observations": [
+      "retained after",
+      "bad %"
+    ],
+    "oracle": {
+      "status": 0,
+      "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+      "output_lines": 2,
+      "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+    },
+    "levels_by_compiler": {
+      "default": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        }
+      },
+      "verify": {
+        "0": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        },
+        "3": {
+          "status": 0,
+          "stdout_sha256": "7cfd619e0de988fb4a8118df3c9d9fa6fe1faa059ff2341ee3a46c883e47ee6a",
+          "output_lines": 2,
+          "stderr": "last resort 0007\nROOT twins:managed 0011\n"
+        }
+      }
+    }
+  },
+  "full_replay_with_utf8_file": {
+    "source": "430485790b962a9a06fdeaf1e8f644a330fd9de1",
+    "canonical_utf8_file": "f14ae90d2c51f233f7c650be275e8d5e906f0beb",
+    "levels": {
+      "0": {
+        "blocked": 196,
+        "host-driven-native-operation": 50,
+        "native-body-host-fixture": 23,
+        "reference-skip": 3
+      },
+      "3": {
+        "blocked": 196,
+        "host-driven-native-operation": 50,
+        "native-body-host-fixture": 23,
+        "reference-skip": 3
+      }
+    },
+    "denominator": 272,
+    "sha256": "a4628cb524c07a5d4f0dc43ccc2dcb1060f4e09abeaf5502219e85db27c2073b"
+  }
+}

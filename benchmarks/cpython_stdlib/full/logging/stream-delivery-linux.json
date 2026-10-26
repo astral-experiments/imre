@@ -35,11 +35,11 @@
           "opt_level": 0,
           "method_sha256": "829efb248ac9b45c5c66cb4da1a5847fc755127c43a6b49dc1ec280b2b80e0d7",
           "assertion": "Native object identity and None checks on the original operands",
-          "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"
+          "shared_assertion_blocker": "unittest.TestCase.assertIs: generated repr cannot format resource, callable, or custom-repr fields"
         }
       },
-      "control_stdout_sha256": "3093feeaf4793d86c6eaa8ed38c55c9806f29d0216a3e61537ad3b0555453307",
-      "control_observations": 21
+      "control_stdout_sha256": "9d6caae13d902d2a384c7012ee76a7a25bf348c24dceca33fe4601a33557826d",
+      "control_observations": 26
     },
     "3": {
       "test_id": "test.test_logging.EncodingTest.test_encoding_cyrillic_unicode",
@@ -74,11 +74,11 @@
           "opt_level": 3,
           "method_sha256": "829efb248ac9b45c5c66cb4da1a5847fc755127c43a6b49dc1ec280b2b80e0d7",
           "assertion": "Native object identity and None checks on the original operands",
-          "shared_assertion_blocker": "unittest.TestCase.assertIs: unknown class method"
+          "shared_assertion_blocker": "unittest.TestCase.assertIs: generated repr cannot format resource, callable, or custom-repr fields"
         }
       },
-      "control_stdout_sha256": "3093feeaf4793d86c6eaa8ed38c55c9806f29d0216a3e61537ad3b0555453307",
-      "control_observations": 21
+      "control_stdout_sha256": "9d6caae13d902d2a384c7012ee76a7a25bf348c24dceca33fe4601a33557826d",
+      "control_observations": 26
     }
   }
 }
