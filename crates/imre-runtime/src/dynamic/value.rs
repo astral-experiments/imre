@@ -167,6 +167,7 @@ impl Context {
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
+            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
@@ -302,6 +303,7 @@ pub(super) enum Value {
     Bool(bool),
     Int(crate::Int),
     Float(f64),
+    Complex(super::complex::Complex),
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
@@ -663,6 +665,7 @@ impl Value {
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
+            | Self::Complex(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)

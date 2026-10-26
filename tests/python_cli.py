@@ -374,6 +374,7 @@ def report(text):
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_int_to_bytes.py",
+            "boxed_complex.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_formatter.py",

@@ -94,6 +94,7 @@ const TYPES: &[&str] = &[
     "bool",
     "bytearray",
     "bytes",
+    "complex",
     "dict",
     "frozenset",
     "int",
@@ -918,6 +919,7 @@ pub(super) fn call(
             }
             ctx.module(name.split('.').next().unwrap())
         }
+        "complex" => ctx.new_complex(args, kwargs),
         "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;

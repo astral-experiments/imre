@@ -28,7 +28,9 @@ impl Function<'_, '_> {
             ast::Expr::NumberLiteral(v) => match &v.value {
                 ast::Number::Int(n) => self.integer(n),
                 ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
-                _ => self.unsupported("complex numeric literal"),
+                ast::Number::Complex { real, imag } => {
+                    self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
+                }
             },
             ast::Expr::StringLiteral(v) => self.text(&v.value.to_string()),
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
