@@ -17,6 +17,12 @@ def current():
             assign.value = ast.Name("new", ast.Load())
         if isinstance(node, ast.Name):
             print(node.id)
+    # Postfix operators do not need nesting delimiters.
+    parts = ["x"]
+    for _ in range(6000):
+        parts.append(".field()[0]")
+    deep = ast.parse("".join(parts), mode="eval").body
+    print(type(deep).__name__, type(deep.value.func).__name__, deep.end_col_offset)
     expression = ast.parse("é", mode="eval").body
     print(isinstance(expression, ast.expr), expression.end_col_offset)
     print(expression.ctx is ast.parse("x", mode="eval").body.ctx)
