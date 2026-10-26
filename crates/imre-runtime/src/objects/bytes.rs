@@ -368,11 +368,8 @@ pub unsafe extern "C" fn imre_bytes_contains(needle: *const Bytes, haystack: *co
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_contains_int(needle: usize, haystack: *const Bytes) -> u32 {
     // SAFETY: the caller keeps both the canonical integer and immutable bytes rooted.
-    let number = unsafe { Int::borrow(needle) };
-    finish(
-        unsafe { bytes_contains_int(&*haystack, &number) }.map(u32::from),
-        0,
-    )
+    let (number, haystack) = unsafe { (Int::borrow(needle), &*haystack) };
+    finish(bytes_contains_int(haystack, &number).map(u32::from), 0)
 }
 
 /// # Safety
