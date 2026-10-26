@@ -158,7 +158,7 @@ impl Context {
             }
             if matches!(
                 self.heap.get(raw),
-                Value::Property(_) | Value::Function { .. }
+                Value::Property(_) | Value::Function { .. } | Value::StaticMethod { .. }
             ) {
                 continue;
             }
