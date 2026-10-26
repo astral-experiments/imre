@@ -424,15 +424,26 @@ impl Parser {
         let Some(commands) = &mut self.subcommands else {
             return Ok(());
         };
-        let mut parts = vec![(len(&self.prog), Cow::Borrowed(self.prog.as_str()))];
+        let count = self
+            .options
+            .iter()
+            .filter(|option| option.positional())
+            .count();
+        let mut parts = Vec::new();
+        if count != 0 {
+            parts
+                .try_reserve_exact(count + 1)
+                .map_err(|_| Error::allocation())?;
+            parts.push((len(&self.prog), Cow::Borrowed(self.prog.as_str())));
+        }
         parts.extend(self.options.iter().filter(|o| o.positional()).map(|o| {
             let label = o.label(true, false);
             (len(&label), Cow::Owned(label))
         }));
-        let width = width();
-        let prog = if parts.len() == 1 {
+        let prog = if parts.is_empty() {
             Cow::Borrowed(self.prog.as_str())
         } else {
+            let width = width();
             let mut prefix = ProgramPrefix::default();
             let (parts, indent) = if parts.iter().map(|(length, _)| length + 1).sum::<usize>() - 1
                 > width
