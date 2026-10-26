@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_time",
+  "regrtest_discovery": true,
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Modules/timemodule.c": "1bfbf3f6a0b991ef7d46ce1b268cd2c576183df1",
+    "Objects/structseq.c": "2dc59b0ff64a382c7deec97ec8c2f6b63ebfa0ae",
+    "Lib/test/test_time.py": "f66a37edb4cadfccd20a4dc244a7a3a1e0fa4142"
+  }
+}

@@ -285,6 +285,9 @@ impl Checker<'_> {
         {
             return Ok(vec![Exact(self.types.url_split_result(bytes))]);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StructTime)) {
+            return Ok(vec![Exact(self.types.struct_time())]);
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
@@ -643,7 +646,7 @@ impl Checker<'_> {
                 && kind != 0
             {
                 unknown = true;
-            } else if class.accepts(ty) {
+            } else if class.accepts(ty, &self.types) {
                 return Some(true);
             }
         }

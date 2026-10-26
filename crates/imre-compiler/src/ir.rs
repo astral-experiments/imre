@@ -990,6 +990,11 @@ pub(crate) enum Builtin {
     RaiseException,
     WallTime,
     ClockParts(bool),
+    Mktime,
+    TimeComponent,
+    TimeSequenceLength,
+    TimeExtras,
+    TimeExtra(bool),
     TimeSleep,
     WarningFilter {
         category: u32,
@@ -2158,7 +2163,7 @@ pub(crate) enum InstanceType {
 }
 
 impl InstanceType {
-    pub(crate) fn accepts(self, ty: Type) -> bool {
+    pub(crate) fn accepts(self, ty: Type, types: &crate::types::Types) -> bool {
         match self {
             Self::IoBase(base) => base.matches(ty) != Some(false),
             Self::Exact(Type::CompletedProcess(..)) => matches!(ty, Type::CompletedProcess(..)),
@@ -2172,7 +2177,11 @@ impl InstanceType {
                 ty,
                 Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
             ),
-            Self::Exact(expected) => expected == ty,
+            Self::Exact(expected) => {
+                expected == ty
+                    || (types.time_attributes(expected).is_some()
+                        && types.time_attributes(ty).is_some())
+            }
             Self::ForwardRef => matches!(ty, Type::ForwardRef(_)),
             Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::IntEnum => matches!(ty, Type::IntEnum(_)),

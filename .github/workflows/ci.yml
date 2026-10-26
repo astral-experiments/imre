@@ -526,6 +526,12 @@ jobs:
           python3 "$suite/focused.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
           python3 "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/test-datetime.json"
           cmp "$suite/native-linux.json" "$RUNNER_TEMP/test-datetime.json"
+      - name: Compare original time methods and local civil time with CPython
+        run: |
+          suite=benchmarks/cpython_stdlib/full/time
+          python3 tests/time_local.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+          python3 "$suite/run.py" --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/test-time.json"
+          cmp "$suite/evidence-linux.json" "$RUNNER_TEMP/test-time.json"
       - name: Check CSV reader behavior with vendored CPython methods
         run: |
           python3 benchmarks/cpython_stdlib/native_csv.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18

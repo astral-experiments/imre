@@ -65,6 +65,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+mod time;
 pub(crate) use text::split_parts;
 mod typing;
 pub(crate) use text::short_string;

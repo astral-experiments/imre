@@ -10,6 +10,10 @@ use std::rc::Rc;
 
 const MAX_DESCRIPTION_BYTES: usize = 1024;
 
+pub(crate) const TIME_FIELDS: &[&str] = &[
+    "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
+];
+
 const STAT_RESULT_NAME: &str = "os.stat_result";
 pub(crate) const STAT_SEQUENCE_FIELDS: [&str; 10] = [
     "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
@@ -101,6 +105,7 @@ pub(crate) enum AnnotationOrigin {
 pub(crate) enum TupleOrigin {
     Declaration(DefinitionId),
     StructSequence(&'static str, &'static [&'static str]),
+    StructTime(Type, Type),
     LibraryNamedTuple(&'static str, &'static [&'static str]),
 }
 
@@ -676,6 +681,11 @@ impl Types {
                 Type::Calendar(CalendarType::DateTime),
                 Type::Calendar(CalendarType::Date),
             ] => Type::Calendar(CalendarType::Date),
+            [Type::Float, clock] | [clock, Type::Float]
+                if self.time_attributes(*clock).is_some() =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![Type::Float, *clock])))
+            }
             [Type::Bool, Type::Int] | [Type::Int, Type::Bool] => {
                 Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::Int])))
             }
@@ -1005,7 +1015,9 @@ impl Types {
         match &self.0.borrow().shapes[id] {
             Shape::Tuple(fields)
             | Shape::NamedTuple(
-                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                TupleOrigin::StructSequence(..)
+                | TupleOrigin::StructTime(..)
+                | TupleOrigin::LibraryNamedTuple(..),
                 fields,
             ) => Some(fields.clone()),
             _ => None,
@@ -1116,6 +1128,20 @@ impl Types {
             })
     }
 
+    pub(crate) fn struct_time(&self) -> Type {
+        self.namedtuple_layout(
+            TupleOrigin::StructTime(self.optional(Type::Str), self.optional(Type::Int)),
+            vec![Type::Int; 9],
+        )
+    }
+
+    pub(crate) fn time_attributes(&self, ty: Type) -> Option<[Type; 2]> {
+        match self.tuple_origin(ty)? {
+            TupleOrigin::StructTime(zone, offset) => Some([zone, offset]),
+            _ => None,
+        }
+    }
+
     /// Stat results use ten visible integer slots and a separate tail for named attributes.
     pub(crate) fn stat_result(&self) -> Type {
         self.struct_sequence(
@@ -1176,6 +1202,10 @@ impl Types {
     pub(crate) fn namedtuple_metadata(&self, origin: TupleOrigin) -> Option<Rc<NamedTuple>> {
         match origin {
             TupleOrigin::Declaration(id) => self.namedtuple(id),
+            TupleOrigin::StructTime(..) => Some(Rc::new(NamedTuple {
+                name: "time.struct_time".into(),
+                fields: TIME_FIELDS.iter().map(|v| (*v).to_owned()).collect(),
+            })),
             TupleOrigin::StructSequence(name, fields)
             | TupleOrigin::LibraryNamedTuple(name, fields) => Some(Rc::new(NamedTuple {
                 name: name.to_string(),
@@ -1193,7 +1223,9 @@ impl Types {
         let Type::Tuple(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::NamedTuple(
-                TupleOrigin::StructSequence(..) | TupleOrigin::LibraryNamedTuple(..),
+                TupleOrigin::StructSequence(..)
+                | TupleOrigin::StructTime(..)
+                | TupleOrigin::LibraryNamedTuple(..),
                 fields,
             ) => Some(fields.clone()),
             _ => None,

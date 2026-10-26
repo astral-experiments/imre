@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn type_error_after(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
+pub(super) fn type_error_after(ty: Type, mut values: Vec<Expr>, message: String) -> Expr {
     values.push(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {

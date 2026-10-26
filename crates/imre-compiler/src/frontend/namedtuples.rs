@@ -135,7 +135,7 @@ impl Checker<'_> {
             || (attribute.attr.as_str() == "_fields"
                 && !matches!(
                     self.types.tuple_origin(receiver.ty),
-                    Some(TupleOrigin::StructSequence(..))
+                    Some(TupleOrigin::StructSequence(..) | TupleOrigin::StructTime(..))
                 ))
         {
             let fields = self.namedtuple_fields(declaration);
