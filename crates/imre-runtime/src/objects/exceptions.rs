@@ -1431,8 +1431,8 @@ fn group_owns_exception(group: &crate::ObjectOwner, target: &crate::ObjectOwner)
 }
 
 fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner) -> Result<()> {
-    // SAFETY: the caller roots the escaping exception.
     if crate::ObjectOwner::ptr_eq(value, &active)
+        // SAFETY: the caller roots the escaping exception.
         || unsafe { value.0.with(|s| s.exception().suppress_context) }
     {
         return Ok(());
