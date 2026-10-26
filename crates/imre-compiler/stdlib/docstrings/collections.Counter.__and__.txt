@@ -1,0 +1,5 @@
+Intersection is the minimum of corresponding counts.
+
+>>> Counter('abbb') & Counter('bcc')
+Counter({'b': 1})
+

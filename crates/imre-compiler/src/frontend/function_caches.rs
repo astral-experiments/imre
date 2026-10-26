@@ -8,11 +8,20 @@ pub(super) fn policy(
     module: ModuleId,
     def: &ast::StmtFunctionDef,
 ) -> Result<Option<Policy>, String> {
+    decorator_policy(graph, module, def, |expr| graph.resolve(module, expr))
+}
+
+fn decorator_policy(
+    graph: &SourceGraph,
+    module: ModuleId,
+    def: &ast::StmtFunctionDef,
+    resolve: impl Fn(&ast::Expr) -> Option<Binding>,
+) -> Result<Option<Policy>, String> {
     let [decorator] = def.decorator_list.as_slice() else {
         return Ok(None);
     };
     let expression = &decorator.expression;
-    match graph.resolve(module, expression) {
+    match resolve(expression) {
         Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => {
             return Ok(Some(Policy {
                 capacity: -1,
@@ -30,7 +39,7 @@ pub(super) fn policy(
     let ast::Expr::Call(call) = expression else {
         return Ok(None);
     };
-    if graph.resolve(module, &call.func) != Some(Binding::Intrinsic(Intrinsic::LruCache)) {
+    if resolve(&call.func) != Some(Binding::Intrinsic(Intrinsic::LruCache)) {
         return Ok(None);
     }
     configuration(graph, module, call).map(Some)
@@ -255,6 +264,25 @@ fn context_field(
 }
 
 impl Checker<'_> {
+    pub(super) fn local_cache_policy(
+        &self,
+        def: &ast::StmtFunctionDef,
+    ) -> Result<Option<Policy>, String> {
+        decorator_policy(self.graph, self.module, def, |expr| self.resolve(expr))
+    }
+
+    pub(super) fn local_annotation_origin(
+        &self,
+        function: &local_functions::Function,
+    ) -> crate::types::AnnotationOrigin {
+        self.helpers
+            .local_annotations
+            .borrow_mut()
+            .entry(function.signature.id)
+            .or_insert_with(|| (self.module, function.definition.clone()));
+        crate::types::AnnotationOrigin::Local(function.signature.id)
+    }
+
     /// A direct decorator or an applied constant configuration captures its actual target once.
     pub(super) fn cache_constructor(
         &mut self,
@@ -287,17 +315,34 @@ impl Checker<'_> {
             ));
         };
         self.reject_builtin_keywords(call)?;
-        let callable = if let Some(binding) = self.local_function_binding(source) {
-            binding
-                .target(self.source, source)?
-                .callback(self.types, self.source, source)?
+        let callable = self.expr(source)?;
+        let annotations = if let Some(binding) = self.local_function_binding(source) {
+            Some(self.local_annotation_origin(binding.target(self.source, source)?))
+        } else if let Some(Binding::Definition(d)) = self.resolve(source) {
+            self.functions
+                .contains_key(&d)
+                .then_some(crate::types::AnnotationOrigin::Module(d))
         } else {
-            self.expr(source)?
+            self.types
+                .cached_function(callable.ty)
+                .and_then(|layout| layout.annotations)
         };
+        self.owned_cache(callable, policy, annotations, call)
+            .map(Some)
+    }
+
+    /// Each execution of a decorator owns its captured callable and fresh table.
+    pub(super) fn owned_cache(
+        &mut self,
+        callable: Expr,
+        policy: Policy,
+        annotations: Option<crate::types::AnnotationOrigin>,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,
-                source,
+                site,
                 "a cache decorator requires a callable with a known signature",
             )
         })?;
@@ -306,7 +351,7 @@ impl Checker<'_> {
         {
             return Err(error(
                 self.source,
-                call,
+                site,
                 "cached functions require exact immutable positional keys and a synchronous result",
             ));
         }
@@ -319,6 +364,7 @@ impl Checker<'_> {
             frame,
             table,
             capacity: policy.capacity,
+            annotations,
         };
         let id = self.helpers.reserve();
         self.helpers.finish(
@@ -328,7 +374,7 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 recursion_error: self.graph.modules[self.module].error(
-                    call,
+                    site,
                     "recursive indirect cache applications are unsupported",
                 ),
                 function: build_wrapper(
@@ -345,18 +391,30 @@ impl Checker<'_> {
             ty: frame,
             kind: ExprKind::Tuple(vec![callable, state]),
         };
-        Ok(Some(Expr {
+        Ok(Expr {
             ty: self.types.cached_callable(layout, id, policy),
             kind: ExprKind::Callable {
                 function: id,
                 receiver: Some(Box::new(frame)),
             },
-        }))
+        })
     }
 
     pub(super) fn wrapped_function(&self, receiver: &Expr, name: &str) -> Option<Expr> {
-        let layout = self.types.cached_function(receiver.ty)?;
-        (name == "__wrapped__").then(|| context_field(receiver.clone(), layout, 0, layout.callable))
+        if name != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
+            return None;
+        }
+        Some(
+            if let Some(layout) = self.types.cached_function(receiver.ty) {
+                context_field(receiver.clone(), layout, 0, layout.callable)
+            } else {
+                builtin(
+                    Builtin::FunctionWrappedGet,
+                    receiver.ty,
+                    vec![receiver.clone()],
+                )
+            },
+        )
     }
 
     pub(super) fn cache_control(
@@ -521,7 +579,10 @@ impl Checker<'_> {
     fn cache_snapshot(&self, capacity: i64, stat: impl Fn(u32) -> Expr) -> Expr {
         let fields = vec![stat(0), stat(1), cache_size(capacity), stat(3)];
         Expr {
-            ty: self.types.tuple(fields.iter().map(|v| v.ty).collect()),
+            ty: self.types.namedtuple_layout(
+                crate::types::CACHE_INFO,
+                fields.iter().map(|v| v.ty).collect(),
+            ),
             kind: ExprKind::Tuple(fields),
         }
     }

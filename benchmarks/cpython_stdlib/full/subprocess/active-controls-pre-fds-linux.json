@@ -1,0 +1,368 @@
+{
+  "schema": "imre.subprocess.active-controls/v1",
+  "imre_revision": "0551437d17e5c89b603f14d9e25853b0ab04f969",
+  "tested_tree": "f04223515ebf1c7c1ab464d28427fcb620ffd097",
+  "toolchain": {
+    "imre": "717e5b05c8b28a4e0cb9558873ee4578a218fcb0456f95d843878a487f893c5c",
+    "runtime": "7c64d8e29e8d588e0649d295eec831a0e3f80d66522d185452306e36ceac8979",
+    "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "retained_objects": [
+    {
+      "commit": "0551437d17e5c89b603f14d9e25853b0ab04f969",
+      "tree": "f04223515ebf1c7c1ab464d28427fcb620ffd097",
+      "level": "0",
+      "native_control_sha256": "f758c9c9fd4ea7834870005a22bbcbb6c822989d13364afac4f1be5f9e8d0c9a",
+      "native_control_stdout": "retained original Popen objects, reaped on failed and successful launches",
+      "original_receipt_sha256": "b1552b7d8e40993f67c8dcf27b8525da4349bd9ac0a8887ee51fb5e4249caba8",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import time;time.sleep(3)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": -9,
+          "fixture_waitpid_errno": 10,
+          "failed_launch_errno": 2,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        },
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import sys, time;time.sleep(0.2)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            1,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": 0,
+          "fixture_waitpid_errno": null,
+          "failed_launch_errno": null,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        }
+      }
+    },
+    {
+      "commit": "0551437d17e5c89b603f14d9e25853b0ab04f969",
+      "tree": "f04223515ebf1c7c1ab464d28427fcb620ffd097",
+      "level": "3",
+      "native_control_sha256": "ad64acd56f4addb85f0ef391d3fa0cc0c2e380eabf46fcba806f1567703041de",
+      "native_control_stdout": "retained original Popen objects, reaped on failed and successful launches",
+      "original_receipt_sha256": "26121d2ec30151b5539f1d55921515f2b5c71517562a8834f6337419e1c14b40",
+      "rows": {
+        "test.test_subprocess.POSIXProcessTestCase.test_leak_fast_process_del_killed": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import time;time.sleep(3)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": -9,
+          "fixture_waitpid_errno": 10,
+          "failed_launch_errno": 2,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        },
+        "test.test_subprocess.POSIXProcessTestCase.test_zombie_fast_process_del": {
+          "parent_executable_verified": true,
+          "data_child_argv": [
+            "<pinned-cpython>",
+            "-c",
+            "import sys, time;time.sleep(0.2)"
+          ],
+          "parent_warning_pid_matched": true,
+          "applied_host_filter": "always",
+          "original_object_identity_retained": true,
+          "membership_lengths": [
+            1,
+            1,
+            0
+          ],
+          "successful_kernel_reaps": 1,
+          "kernel_status": 0,
+          "fixture_waitpid_errno": null,
+          "failed_launch_errno": null,
+          "fixture_closed_parent_pipe_ends": 2,
+          "fixture_cleanup_calls": 1
+        }
+      }
+    }
+  ],
+  "waits": [
+    {
+      "opt_level": 0,
+      "parent_sha256": "cfdd3af519702630174f94991a333930fa26f688aec5cc504d6a8fccfd7801af",
+      "modes": {
+        "wait": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        },
+        "poll": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        }
+      }
+    },
+    {
+      "opt_level": 3,
+      "parent_sha256": "afd4feaaaf0b61f4d49d00284e85ec8e652b02c92cafbdffa2fa9e71680f6336",
+      "modes": {
+        "wait": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        },
+        "poll": {
+          "parent": "imre",
+          "child": "fixture C program: PTRACE_TRACEME and raise(SIGQUIT)",
+          "expected": [
+            -3,
+            -3,
+            7
+          ],
+          "observed": [
+            -3,
+            -3,
+            7
+          ],
+          "native_stop_signal": 3,
+          "post_resume_reap": 7
+        }
+      }
+    }
+  ],
+  "adjacent_streams": [
+    {
+      "level": 0,
+      "rows": {
+        "string-io-identity": {
+          "native_sha256": "4f384de2aa97bb7fe46519329b8933d2045e21264007d23615516e3a69c6719e",
+          "stdout": [
+            "True",
+            "True"
+          ],
+          "files": {}
+        },
+        "popen-buffer-size": {
+          "native_sha256": "ccb1629ef67af9fcaf730024152669bb8e41c47d12ff012599232e7e74ad35f6",
+          "stdout": [
+            "0",
+            "True",
+            "True",
+            "True",
+            "6",
+            "b'before:2345:error:after'",
+            "True",
+            "True",
+            "b'ABC'",
+            "0",
+            "text",
+            "b'ok'",
+            "b'bytes'",
+            "0",
+            "evaluated stdout",
+            "stdout and stderr arguments may not be used with capture_output.",
+            "I/O operation on closed file",
+            "closed descriptor",
+            "invalid stdin merge",
+            "True",
+            "True",
+            "True",
+            "False",
+            "0",
+            "0",
+            "Python int too large to convert to C int",
+            "I/O operation on closed file",
+            "embedded NUL in the command"
+          ],
+          "files": {
+            "redirect-output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "redirect-input": "2224512ef44a62e580bb1c0dcb33aff688f4e7da8a488aeb4e7ca402c5cacf45"
+          }
+        }
+      }
+    },
+    {
+      "level": 3,
+      "rows": {
+        "string-io-identity": {
+          "native_sha256": "91136f4df68229a214f9a959637028d99e73fac06b94a5fc8e484572bd12a707",
+          "stdout": [
+            "True",
+            "True"
+          ],
+          "files": {}
+        },
+        "popen-buffer-size": {
+          "native_sha256": "e956b3d2ebfa0ee5c33d18546a0349a986bc538f7f3c9efd536fcb9d03915ffb",
+          "stdout": [
+            "0",
+            "True",
+            "True",
+            "True",
+            "6",
+            "b'before:2345:error:after'",
+            "True",
+            "True",
+            "b'ABC'",
+            "0",
+            "text",
+            "b'ok'",
+            "b'bytes'",
+            "0",
+            "evaluated stdout",
+            "stdout and stderr arguments may not be used with capture_output.",
+            "I/O operation on closed file",
+            "closed descriptor",
+            "invalid stdin merge",
+            "True",
+            "True",
+            "True",
+            "False",
+            "0",
+            "0",
+            "Python int too large to convert to C int",
+            "I/O operation on closed file",
+            "embedded NUL in the command"
+          ],
+          "files": {
+            "redirect-output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "redirect-input": "2224512ef44a62e580bb1c0dcb33aff688f4e7da8a488aeb4e7ca402c5cacf45"
+          }
+        }
+      }
+    }
+  ],
+  "exception_abi": {
+    "0": [
+      "0 tests/fixtures/processes/exception_handlers.py 9163ea6575bf14a885c69864e19a586d16d85c686c19bf3d96b70e6b2c010948 CPython and linked Imre: 7",
+      "0 benchmarks/cpython_stdlib/full/subprocess/exception_abi_integration.py 2c8d58d4f26d74368029425050853e581897c5783a338ad1ee2d006c8822bc20 CPython and linked Imre: 5",
+      "0 benchmarks/cpython_stdlib/full/shutil/csv_exception_handlers.py 07b20460ff72f2038d052f57835eaea6c4f509b1fc49b71859055984ef946307 CPython and linked Imre: 7"
+    ],
+    "3": [
+      "3 tests/fixtures/processes/exception_handlers.py 9163ea6575bf14a885c69864e19a586d16d85c686c19bf3d96b70e6b2c010948 CPython and linked Imre: 7",
+      "3 benchmarks/cpython_stdlib/full/subprocess/exception_abi_integration.py 2c8d58d4f26d74368029425050853e581897c5783a338ad1ee2d006c8822bc20 CPython and linked Imre: 5",
+      "3 benchmarks/cpython_stdlib/full/shutil/csv_exception_handlers.py 07b20460ff72f2038d052f57835eaea6c4f509b1fc49b71859055984ef946307 CPython and linked Imre: 7"
+    ]
+  },
+  "warnings": {
+    "oracle": {
+      "pids": {
+        "default": 1553301,
+        "live": 1553302,
+        "exited": 1553304,
+        "waited": 1553305,
+        "polled": 1553306,
+        "other-category": 1553307,
+        "ignored": 1553308
+      },
+      "emitted": [
+        1553302,
+        1553304,
+        1553307
+      ]
+    },
+    "0": {
+      "pids": {
+        "default": 1553507,
+        "live": 1553509,
+        "exited": 1553511,
+        "waited": 1553512,
+        "polled": 1553515,
+        "other-category": 1553516,
+        "ignored": 1553517
+      },
+      "emitted": [
+        1553509,
+        1553511,
+        1553516
+      ],
+      "native_parent": 1553506,
+      "actor_sha256": "0d6c18e9790badd71beab17021667be6fc096b0f25743ed8ec34b59e777b81ea"
+    },
+    "3": {
+      "pids": {
+        "default": 1554172,
+        "live": 1554179,
+        "exited": 1554181,
+        "waited": 1554186,
+        "polled": 1554193,
+        "other-category": 1554201,
+        "ignored": 1554204
+      },
+      "emitted": [
+        1554179,
+        1554181,
+        1554201
+      ],
+      "native_parent": 1554170,
+      "actor_sha256": "5cc6a7f63312262d2ee455d6b61ab12f40dcc8825673b3815b89b9ff2d67f4ac"
+    }
+  }
+}

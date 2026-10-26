@@ -83,6 +83,13 @@ teardown, skips and subtest failures. It refuses successful callbacks that
 only supply a legacy summary label. Custom suite execution needs a dedicated
 fixture adapter.
 
+For a direct TestCase with default fixtures, supply a verified
+[`NativeDefaultMethod`](SUITE_RUNNER.md#running-a-method-with-native-default-fixtures)
+under `native_defaults={(id, occurrence): entry}`. Its lifecycle runs inside
+the native `unittest.main()` process. A host that discovers the case does not
+run the fixture; a host that executes the operation still gets the
+`host-operation` classification.
+
 For a compiler rejection, pass `preflight={(id, occurrence): compile_blocker(exc)}`.
 For an independently executed suite, use `build_report(reference, level,
 discovered, observations, exceptions=...)` directly. Supply the full

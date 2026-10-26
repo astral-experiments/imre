@@ -1,23 +1,23 @@
 //! Per-reader logical positions for one archive. Path inputs transfer the file
 //! descriptor; caller-supplied streams are retained without taking close ownership.
 
+use crate::ObjectOwner;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
-use std::rc::Rc;
 
 use super::{Error, Info, Object, Result, directory, files};
 use crate::objects::exceptions::Kind;
 
 #[derive(Clone)]
 pub(super) enum Source {
-    Owned(Rc<File>),
-    Borrowed(Rc<Object>),
+    Owned(crate::Shared<File>),
+    Borrowed(ObjectOwner),
 }
 
 impl Source {
-    /// A member offset is relative to the adjusted archive origin and may be negative.
-    pub(super) fn header_offset(&self, offset: i128) -> Result<u64> {
+    /// Resolve an absolute archive position using the backing stream's seek rules.
+    pub(super) fn absolute_offset(&self, offset: i128) -> Result<u64> {
         match self {
             Self::Owned(file) => (&**file)
                 .seek(SeekFrom::Start(files::disk_offset(offset)?))

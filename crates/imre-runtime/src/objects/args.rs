@@ -1,8 +1,8 @@
 //! C-main argument capture and independent Python-visible argument lists.
 
+use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char};
-use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Object, Str, Words, fail};
@@ -15,9 +15,9 @@ struct Arguments {
 
 thread_local! {
     static ARGUMENTS: Cell<Option<Arguments>> = const { Cell::new(None) };
-    static ORIGINAL: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static ORIGINAL: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
     static LAUNCHER: RefCell<std::io::Result<Option<Vec<u8>>>> = const { RefCell::new(Ok(None)) };
-    static ARGV: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    static ARGV: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
 }
 
 /// Captures argv without decoding or allocating. Generated main calls this only
@@ -39,7 +39,7 @@ pub unsafe extern "C" fn imre_args_init(argc: i32, argv: *const *const c_char) {
 }
 
 /// Decodes all inputs before publishing a list, so a failed access can be retried.
-fn decode(arguments: Arguments) -> Result<Rc<Object>> {
+fn decode(arguments: Arguments) -> Result<crate::ObjectOwner> {
     decode_bytes(
         arguments.count,
         (0..arguments.count).map(|index| {
@@ -49,7 +49,10 @@ fn decode(arguments: Arguments) -> Result<Rc<Object>> {
     )
 }
 
-fn decode_bytes<'a>(count: usize, arguments: impl Iterator<Item = &'a [u8]>) -> Result<Rc<Object>> {
+fn decode_bytes<'a>(
+    count: usize,
+    arguments: impl Iterator<Item = &'a [u8]>,
+) -> Result<crate::ObjectOwner> {
     let mut values = Words::new(3);
     values
         .values
@@ -67,7 +70,7 @@ fn decode_bytes<'a>(count: usize, arguments: impl Iterator<Item = &'a [u8]>) -> 
         })?;
         values
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(text))) as usize);
+            .push(StrOwner::into_raw(StrOwner::new(Str::new(text))) as usize);
     }
     Ok(values.into_object())
 }
@@ -120,7 +123,7 @@ pub extern "C" fn imre_sysconfig_scripts() -> *const Str {
     let text = directory
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// The Python interpreter for explicitly launched Python helpers. Preserve
@@ -130,7 +133,7 @@ pub extern "C" fn imre_sys_executable() -> *const Str {
     let text = python_executable()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
-    Rc::into_raw(Rc::new(Str::from(text)))
+    StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.
@@ -173,16 +176,16 @@ pub extern "C" fn imre_sys_orig_argv() -> *const Object {
 }
 
 fn argument_list(
-    root: &'static std::thread::LocalKey<RefCell<Option<Rc<Object>>>>,
-    build: impl FnOnce() -> Result<Rc<Object>>,
+    root: &'static std::thread::LocalKey<RefCell<Option<crate::ObjectOwner>>>,
+    build: impl FnOnce() -> Result<crate::ObjectOwner>,
 ) -> *const Object {
     if let Some(value) = root.with(|root| root.borrow().clone()) {
-        return Rc::into_raw(value);
+        return crate::ObjectOwner::into_raw(value);
     }
     finish(
         build().map(|value| {
             root.with(|root| root.replace(Some(value.clone())));
-            Rc::into_raw(value)
+            crate::ObjectOwner::into_raw(value)
         }),
         std::ptr::null(),
     )
@@ -219,18 +222,29 @@ mod tests {
         // returned handles are owned and used with their declared representations.
         unsafe {
             imre_args_init(pointers.len() as i32, pointers.as_ptr());
-            let first = Rc::from_raw(imre_sys_argv());
-            let alias = Rc::from_raw(imre_sys_argv());
-            assert!(Rc::ptr_eq(&first, &alias));
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&first))).as_small(), Some(3));
-            let unicode = Rc::from_raw(
-                imre_seq_get(Rc::as_ptr(&first), Int::small(2).unwrap().0) as *const Str
+            let first = crate::ObjectOwner::from_raw(imre_sys_argv());
+            let alias = crate::ObjectOwner::from_raw(imre_sys_argv());
+            assert!(crate::ObjectOwner::ptr_eq(&first, &alias));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&first))).as_small(),
+                Some(3)
             );
+            let unicode = StrOwner::from_raw(imre_seq_get(
+                crate::ObjectOwner::as_ptr(&first),
+                Int::small(2).unwrap().0,
+            ) as *const Str);
             assert_eq!(unicode.as_str(), "é🦀");
-            let added = Rc::new(Str::new("new argument"));
-            imre_seq_append(Rc::as_ptr(&first), Rc::as_ptr(&added) as usize, 3);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
-            let weak = Rc::downgrade(&first);
+            let added = StrOwner::new(Str::new("new argument"));
+            imre_seq_append(
+                crate::ObjectOwner::as_ptr(&first),
+                StrOwner::as_ptr(&added) as usize,
+                3,
+            );
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
+            let weak = crate::ObjectOwner::downgrade(&first);
             let pending = imre_exception_new(Kind::RuntimeError as u32, std::ptr::null());
             imre_error_set(pending);
             imre_args_clear();
@@ -238,7 +252,10 @@ mod tests {
             imre_object_release(pending);
             imre_object_release(pending);
             drop(first);
-            assert_eq!(Int(imre_seq_len(Rc::as_ptr(&alias))).as_small(), Some(4));
+            assert_eq!(
+                Int(imre_seq_len(crate::ObjectOwner::as_ptr(&alias))).as_small(),
+                Some(4)
+            );
             drop(alias);
             assert!(weak.upgrade().is_none());
         }

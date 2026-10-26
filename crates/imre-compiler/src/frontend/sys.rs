@@ -17,12 +17,17 @@ pub(super) fn displayable(ty: Type) -> bool {
 impl Checker<'_> {
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        let Some((flags, _)) = &self.graph.command_startup else {
-            return Ok(None);
-        };
         if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
             return Ok(None);
         }
+        if attr.attr.as_str() == "optimize" {
+            return Ok(Some(pipelines::integer(i64::from(
+                self.graph.python_optimization(),
+            ))));
+        }
+        let Some((flags, _)) = &self.graph.command_startup else {
+            return Ok(None);
+        };
         if attr.attr.as_str() == "safe_path" {
             return Ok(Some(Expr {
                 ty: Type::Bool,
@@ -77,6 +82,11 @@ impl Checker<'_> {
             }
             args.push(self.expr(&keyword.value)?);
         }
+        Ok(Self::type_error_after(args, ty, message))
+    }
+
+    /// Evaluate the supplied operands before raising a native argument error.
+    pub(super) fn type_error_after(mut args: Vec<Expr>, ty: Type, message: String) -> Expr {
         args.push(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
@@ -84,10 +94,104 @@ impl Checker<'_> {
                 message: Some(Box::new(unpacking::string(message))),
             },
         });
-        Ok(Expr {
+        Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::RaiseException, args),
-        })
+        }
+    }
+
+    fn intern_call(&mut self, call: &ast::ExprCall, query: bool) -> Result<Expr, String> {
+        let (name, result, op) = if query {
+            ("_is_interned", Type::Bool, Builtin::SysIsInterned)
+        } else {
+            ("intern", Type::Str, Builtin::SysIntern)
+        };
+        let count = call.arguments.args.len();
+        if !query && (count != 1 || !call.arguments.keywords.is_empty()) {
+            // Typeshed overloads intern() for LiteralString. This binder
+            // raises the real argument-count or keyword error at runtime.
+            self.graph.checked_overload(self.module, call.range());
+        }
+        if count == 0 {
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+        } else if let Some(extra) = call.arguments.args.get(1) {
+            self.graph
+                .checked_excess_argument(self.module, extra.range());
+        }
+        if !call.arguments.keywords.is_empty() {
+            self.graph.checked_keywords(
+                self.module,
+                call.arguments.keywords.iter().map(Ranged::range),
+            );
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes no keyword arguments"),
+            );
+        }
+        let [argument] = call.arguments.args.as_slice() else {
+            return self.sys_type_error(
+                call,
+                result,
+                format!("sys.{name}() takes exactly one argument ({count} given)"),
+            );
+        };
+        let value = self.expr(argument)?;
+        if !query {
+            self.graph.checked_overload(self.module, call.range());
+        }
+        if value.ty == Type::Str {
+            return Ok(Expr {
+                ty: result,
+                kind: ExprKind::Builtin(op, vec![value]),
+            });
+        }
+        if let Type::StrEnum(class) = value.ty {
+            if query {
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(value)],
+                        value: Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(false),
+                        }),
+                        clear: vec![],
+                    },
+                });
+            }
+            let class = &self.classes.declarations.definitions[class].name;
+            return Ok(Self::type_error_after(
+                vec![value],
+                result,
+                format!("can't intern {class}"),
+            ));
+        }
+        let ty = match value.ty {
+            Type::None => "None",
+            Type::Int => "int",
+            Type::Bool => "bool",
+            Type::Float => "float",
+            Type::Bytes => "bytes",
+            Type::ListInt | Type::List(_) => "list",
+            Type::Tuple(_) => "tuple",
+            Type::Dict(_) => "dict",
+            Type::Set(_) => "set",
+            Type::Class(class) => &self.classes.declarations.definitions[class].name,
+            _ => {
+                return Err(error(
+                    self.source,
+                    argument,
+                    "interning requires a concrete native argument type",
+                ));
+            }
+        };
+        Ok(Self::type_error_after(
+            vec![value],
+            result,
+            format!("{name}() argument must be str, not {ty}"),
+        ))
     }
 
     pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
@@ -104,6 +208,27 @@ impl Checker<'_> {
             return Ok(Some(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::BuiltinsHasLast, vec![]),
+            }));
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
+            && self.resolve(&call.func).is_none()
+            && call.arguments.keywords.is_empty()
+            && let [module, ast::Expr::StringLiteral(attr)] = call.arguments.args.as_slice()
+            && let Some(Binding::IntrinsicModule(namespace @ crate::modules::IntrinsicModule::Sys)) =
+                self.resolve(module)
+            && matches!(
+                namespace.symbol(attr.value.to_str()),
+                Some(Binding::Intrinsic(
+                    Intrinsic::SysIntern { .. }
+                        | Intrinsic::SysEncoding(_)
+                        | Intrinsic::SysException
+                        | Intrinsic::SysExit
+                ))
+            )
+        {
+            return Ok(Some(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(true),
             }));
         }
         match self.resolve(&call.func) {
@@ -149,6 +274,9 @@ impl Checker<'_> {
                 return self
                     .sys_no_args(call, name, unpacking::string("utf-8"))
                     .map(Some);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysIntern { query })) => {
+                return self.intern_call(call, query).map(Some);
             }
             Some(Binding::Intrinsic(Intrinsic::SysException)) => {
                 let result = Expr {
@@ -234,7 +362,8 @@ impl Checker<'_> {
         // SystemExit(a, b) stores the tuple of constructor arguments. sys.exit
         // passes a tuple as the argument vector to SystemExit, so only the
         // latter unwraps a singleton or omits an empty tuple.
-        if args.len() > 1 {
+        let mut from_tuple = args.len() > 1;
+        if from_tuple {
             args = vec![Expr {
                 ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
                 kind: ExprKind::Tuple(args),
@@ -257,12 +386,19 @@ impl Checker<'_> {
                     });
                     omit_none = false;
                 }
-                _ => {}
+                _ => from_tuple = true,
             }
         }
         let mut exception = Expr {
             ty: Type::Exception,
-            kind: ExprKind::Builtin(Builtin::SystemExitNew { omit_none }, args),
+            kind: ExprKind::Builtin(
+                if from_tuple {
+                    Builtin::SystemExitFromTuple
+                } else {
+                    Builtin::SystemExitNew { omit_none }
+                },
+                args,
+            ),
         };
         if !evaluate.is_empty() {
             exception = Expr {
@@ -299,6 +435,19 @@ pub(super) fn exit_payload_supported(ty: Type, types: &Types) -> bool {
 }
 
 impl Checker<'_> {
+    /// Expose the thread provider and its optional library version as a native struct sequence.
+    pub(super) fn sys_thread_info(&self) -> Expr {
+        let text = self.types.optional(Type::Str);
+        Expr {
+            ty: self.types.struct_sequence(
+                "sys.thread_info",
+                &["name", "lock", "version"],
+                vec![text, Type::None, text],
+            ),
+            kind: ExprKind::Builtin(Builtin::SysThreadInfo, vec![]),
+        }
+    }
+
     pub(super) fn sys_version_info(&self, implementation: bool) -> Expr {
         Expr {
             ty: self.types.struct_sequence(

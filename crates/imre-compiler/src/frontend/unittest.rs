@@ -10,6 +10,56 @@ struct Expected {
 }
 
 impl Checker<'_> {
+    /// Read the concrete case's class metadata even when a fixture receives a base-typed case.
+    pub(super) fn testcase_class_text(
+        &mut self,
+        attribute: &ast::ExprAttribute,
+    ) -> Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        let Some(owner) = attribute.value.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if owner.attr.as_str() != "__class__" || !matches!(name, "__module__" | "__qualname__") {
+            return Ok(None);
+        }
+        let receiver = self.expr(&owner.value)?;
+        let Type::Class(base) = receiver.ty else {
+            return Ok(None);
+        };
+        if !self.unittest_case(base) {
+            return Ok(None);
+        }
+        self.dispatch_record(base, receiver, attribute, |checker, class, _| {
+            let record = &checker.classes.declarations.definitions[class];
+            if record
+                .methods
+                .iter()
+                .any(|m| m.name.as_str() == "__class__")
+                || record.fields.iter().any(|f| f.name == "__class__")
+                || record.static_bindings.contains_key("__class__")
+                || record.static_bindings.contains_key(name)
+            {
+                return Err(error(
+                    checker.source,
+                    attribute,
+                    "custom TestCase class metadata requires its original descriptor",
+                ));
+            }
+            let module = &checker.graph.modules[record.definition.module];
+            let text = if name == "__qualname__" {
+                record.name.as_str()
+            } else if record.definition.module == checker.graph.entry {
+                "__main__"
+            } else if module.bundled && module.name == "unittest" && record.name == "TestCase" {
+                "unittest.case"
+            } else {
+                module.name.as_str()
+            };
+            Ok(unpacking::string(text))
+        })
+        .map(Some)
+    }
+
     pub(super) fn unittest_case(&self, class: usize) -> bool {
         let classes = &self.classes.declarations.definitions;
         std::iter::once(&class)
@@ -171,6 +221,7 @@ impl Checker<'_> {
                 ("tomllib", "TOMLDecodeError"),
                 ("json", "JSONDecodeError"),
                 ("csv", "Error"),
+                ("socket", "gaierror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;
@@ -277,11 +328,20 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         class: usize,
         receiver: &Expr,
+        name: &str,
     ) -> Result<Option<Expr>, String> {
         if !self.unittest_case(class) {
             return Ok(None);
         }
-        if call.arguments.args.len() > 1 {
+        let regex = name == "assertRaisesRegex";
+        if regex && call.arguments.args.len() > 2 {
+            return Err(error(
+                self.source,
+                call,
+                "callable assertRaisesRegex requires native callback argument forwarding",
+            ));
+        }
+        if !regex && call.arguments.args.len() > 1 {
             return self
                 .unittest_callable_raises(call, class, receiver)
                 .map(Some);
@@ -316,9 +376,18 @@ impl Checker<'_> {
             .first()
             .map(|value| self.unittest_expected(value, &mut body, this))
             .transpose()?;
+        let mut pattern = if regex {
+            call.arguments
+                .args
+                .get(1)
+                .map(|arg| self.unittest_pattern(arg, &mut body, &mut clear))
+                .transpose()?
+        } else {
+            None
+        };
         let mut msg_slot = None;
         let mut unexpected = None;
-        let mut duplicate = false;
+        let mut duplicate = None;
         for keyword in &call.arguments.keywords {
             let key = keyword
                 .arg
@@ -327,8 +396,16 @@ impl Checker<'_> {
                 .as_str();
             match key {
                 "expected_exception" => {
-                    duplicate = expected.is_some();
+                    if expected.is_some() {
+                        duplicate.get_or_insert(key);
+                    }
                     expected = Some(self.unittest_expected(&keyword.value, &mut body, this)?);
+                }
+                "expected_regex" if regex => {
+                    if pattern.is_some() {
+                        duplicate.get_or_insert(key);
+                    }
+                    pattern = Some(self.unittest_pattern(&keyword.value, &mut body, &mut clear)?);
                 }
                 "msg" => {
                     let value = self.expr(&keyword.value)?;
@@ -343,17 +420,30 @@ impl Checker<'_> {
                 }
             }
         }
-        let error = if duplicate {
-            Some(
-                "TestCase.assertRaises() got multiple values for argument 'expected_exception'"
-                    .into(),
-            )
+        let binding_failed =
+            duplicate.is_some() || expected.is_none() || regex && pattern.is_none();
+        let error = if let Some(key) = duplicate {
+            Some(format!(
+                "TestCase.{name}() got multiple values for argument '{key}'"
+            ))
+        } else if regex && expected.is_none() && pattern.is_none() {
+            Some(format!(
+                "TestCase.{name}() missing 2 required positional arguments: 'expected_exception' and 'expected_regex'"
+            ))
         } else if expected.is_none() {
-            Some("TestCase.assertRaises() missing 1 required positional argument: 'expected_exception'".into())
+            Some(format!(
+                "TestCase.{name}() missing 1 required positional argument: 'expected_exception'"
+            ))
+        } else if regex && pattern.is_none() {
+            Some(format!(
+                "TestCase.{name}() missing 1 required positional argument: 'expected_regex'"
+            ))
+        } else if let Some((_, Some(error))) = pattern {
+            Some(error.into())
         } else if expected.as_ref().is_some_and(Option::is_none) {
-            Some(
-                "assertRaises() arg 1 must be an exception type or tuple of exception types".into(),
-            )
+            Some(format!(
+                "{name}() arg 1 must be an exception type or tuple of exception types"
+            ))
         } else {
             unexpected
                 .map(|key| format!("'{key}' is an invalid keyword argument for this function"))
@@ -382,6 +472,41 @@ impl Checker<'_> {
                     .collect(),
             ),
         };
+        let mut pattern = pattern
+            .and_then(|(slot, _)| slot)
+            .filter(|_| !binding_failed);
+        if let Some(slot) = pattern
+            && self.local(slot).ty != Type::RegexPattern
+        {
+            // Python evaluates all arguments before re.compile inside unittest.
+            // A failed signature binding never enters the assertion at all.
+            let compiled = self.hidden(Type::RegexPattern);
+            body.push(Statement::Assign(
+                compiled,
+                Expr {
+                    ty: Type::RegexPattern,
+                    kind: ExprKind::Builtin(
+                        Builtin::UnittestCompilePattern,
+                        vec![Self::string_value(self.local(slot))],
+                    ),
+                },
+            ));
+            clear.push(compiled);
+            pattern = Some(compiled);
+        }
+        let spelling = pattern.map_or_else(
+            || unpacking::string(""),
+            |slot| Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::RegexSpelling, vec![self.local(slot)]),
+            },
+        );
+        let optional_pattern = self.types.optional(Type::RegexPattern);
+        let pattern = self.coerce(
+            pattern.map_or_else(absent, |slot| self.local(slot)),
+            optional_pattern,
+            call,
+        )?;
         let value = Expr {
             ty: Type::Class(context),
             kind: ExprKind::Construct {
@@ -392,6 +517,8 @@ impl Checker<'_> {
                     unpacking::string(label),
                     msg,
                     error,
+                    pattern,
+                    spelling,
                 ]),
             },
         };
@@ -403,6 +530,45 @@ impl Checker<'_> {
                 clear,
             },
         }))
+    }
+
+    /// Evaluate the pattern once, before the exception context is entered. A
+    /// compiled value retains its flags and original Python spelling.
+    fn unittest_pattern(
+        &mut self,
+        arg: &ast::Expr,
+        body: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> Result<(Option<usize>, Option<&'static str>), String> {
+        let value = if matches!(arg, ast::Expr::StringLiteral(_)) {
+            self.fixed_regex(arg, false)?
+        } else {
+            self.expr(arg)?
+        };
+        match value.ty {
+            Type::RegexPattern | Type::Str | Type::StrLiteral(_) => {
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                clear.push(slot);
+                Ok((Some(slot), None))
+            }
+            Type::None => {
+                body.push(Statement::Expr(value));
+                Ok((None, None))
+            }
+            Type::Bytes => Err(error(
+                self.source,
+                arg,
+                "native exception assertions do not support bytes regex patterns yet",
+            )),
+            _ => {
+                body.push(Statement::Expr(value));
+                Ok((
+                    None,
+                    Some("first argument must be string or compiled pattern"),
+                ))
+            }
+        }
     }
 
     /// Capture a forwarded value before entering the callback's exception
@@ -548,7 +714,7 @@ impl Checker<'_> {
                     }
                 }
                 _ => match &mut callee {
-                    ast::Expr::Attribute(attr) => {
+                    ast::Expr::Attribute(attr) => 'method: {
                         let unbound = if attr
                             .value
                             .as_name_expr()
@@ -566,6 +732,16 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
+                            // Sealed poll methods have no property lookup or user callback.
+                            if self.locals[slot] == Type::Poll
+                                && matches!(
+                                    attr.attr.as_str(),
+                                    "poll" | "register" | "modify" | "unregister"
+                                )
+                            {
+                                *attr.value = root;
+                                break 'method attr.attr.to_string();
+                            }
                             let Type::Class(owner) = self.locals[slot] else {
                                 return Err(error(
                                     self.source,
@@ -806,6 +982,15 @@ impl Checker<'_> {
             self.coerce(self.local(exc), self.classes.fields[class][caught], item)?,
         );
         let missing = self.classes.methods[class]["_missing"].id;
+        let check = self.classes.methods[class]["_check_regex"].id;
+        self.calls.insert(check);
+        let search = Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                check,
+                ir::CallArgs::positional(vec![self.local(root), self.local(exc)]),
+            ),
+        });
         self.calls.insert(missing);
         let fail = Statement::Expr(Expr {
             ty: Type::None,
@@ -818,7 +1003,7 @@ impl Checker<'_> {
                 name: Some(exc),
                 body: vec![
                     Statement::Assign(exceptional, flag(true)),
-                    Statement::If(matches, vec![store], vec![Statement::Raise(None)]),
+                    Statement::If(matches, vec![store, search], vec![Statement::Raise(None)]),
                 ],
             }],
             orelse: vec![],

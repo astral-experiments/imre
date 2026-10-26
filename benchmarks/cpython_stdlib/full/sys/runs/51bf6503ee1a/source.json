@@ -1,0 +1,14 @@
+{
+  "source": "51bf6503ee1a4df787bd2e72a16f0e67f47b0b87",
+  "tree": "409de85e509323bda0f8c2ee396ce244b97f55f0",
+  "branches": {
+    "stdout": "c544e93d6034421f68a64f113a0ee3c18c80ec8c",
+    "cp424": "4fc1c7d0689bb89c00c4c6416ec257206f7ed255",
+    "logging_writer": "c3a63465bcd9cb19fb95bcd50e02fcf82ccc5dd3"
+  },
+  "run": "https://github.com/astral-sh/imre/actions/runs/40208904863/job/121215714515",
+  "artifact_id": 12604049121,
+  "artifact_zip_sha256": "69cad8ec320b5a1039d634c6890424a79d71a31f2e06dea8169177a7a76184ea",
+  "hosted_json_sha256": "879d0ea7b199fe64bf3889324783f9121121f8e502bdcea5c6bffe940162ea38",
+  "format": "The checked-in JSON uses suite_evidence.write_reports; its parsed values equal the complete hosted artifact."
+}

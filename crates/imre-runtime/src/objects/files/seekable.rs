@@ -1,11 +1,11 @@
 //! Positioned binary I/O on ordinary files, in-memory files, and ZIP members.
 
-use super::super::{acquire_rc, c_int, zipfile::Member};
+use super::super::{c_int, zipfile::Member};
 use super::*;
 use num_traits::ToPrimitive;
 
 pub(super) struct Memory {
-    data: Rc<Bytes>,
+    data: crate::BytesOwner,
     position: u64,
 }
 
@@ -39,10 +39,10 @@ impl Memory {
         let end = start
             .checked_add(bytes.len())
             .ok_or_else(Error::allocation)?;
-        if Rc::get_mut(&mut self.data).is_none() {
-            self.data = Rc::new(copied(&self.data)?);
+        if crate::BytesOwner::get_mut(&mut self.data).is_none() {
+            self.data = crate::BytesOwner::new(copied(&self.data)?);
         }
-        let data = Rc::get_mut(&mut self.data).unwrap();
+        let data = crate::BytesOwner::get_mut(&mut self.data).unwrap();
         if end > data.len() {
             data.try_reserve(end - data.len())
                 .map_err(|_| Error::allocation())?;
@@ -68,9 +68,10 @@ impl Memory {
 }
 
 impl FileState {
-    pub(in crate::objects) fn memory(data: Rc<Bytes>) -> Rc<Object> {
+    pub(in crate::objects) fn memory(data: crate::BytesOwner) -> crate::ObjectOwner {
         Self {
             fd: None,
+            raw: false,
             name: None,
             kind: FileKind::Memory,
             stream: Some(Stream::Memory(Memory { data, position: 0 })),
@@ -78,9 +79,10 @@ impl FileState {
         .into_object()
     }
 
-    pub(in crate::objects) fn member(member: Member) -> Rc<Object> {
+    pub(in crate::objects) fn member(member: Member) -> crate::ObjectOwner {
         Self {
             fd: None,
+            raw: false,
             name: Some(member.name().clone()),
             kind: FileKind::Member,
             stream: Some(Stream::Member(Box::new(member))),
@@ -88,8 +90,8 @@ impl FileState {
         .into_object()
     }
 
-    pub(super) fn into_object(self) -> Rc<Object> {
-        Rc::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
+    pub(super) fn into_object(self) -> crate::ObjectOwner {
+        crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(Box::new(self)))))
     }
 
     pub(super) fn check_member(&mut self, message: &'static str) -> Result<()> {
@@ -168,7 +170,7 @@ impl FileState {
             Stream::Read(input) => input.seek(at),
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
-            Stream::Write(_) | Stream::TextMemory(_) => {
+            Stream::UnreadGzip { .. } | Stream::Write(_) | Stream::TextMemory(_) => {
                 Err(Error::new(Kind::UnsupportedOperation, "seek"))
             }
         }
@@ -177,6 +179,8 @@ impl FileState {
     pub(in crate::objects) fn read_into(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.stream()? {
             Stream::Read(input) => input.read_into(buf),
+            Stream::UnreadGzip { .. } if buf.is_empty() => Ok(0),
+            Stream::UnreadGzip { .. } => self.input()?.read_into(buf),
             Stream::Memory(m) => {
                 let n = m.remaining().len().min(buf.len());
                 buf[..n].copy_from_slice(&m.remaining()[..n]);
@@ -214,12 +218,12 @@ pub(in crate::objects) fn disk_offset(offset: i128) -> Result<u64> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_io(initial: *const Bytes) -> *const Object {
     let data = if initial.is_null() {
-        Rc::new(Vec::new())
+        crate::BytesOwner::new(Vec::new())
     } else {
         // SAFETY: the caller keeps the bytes owner live throughout construction.
-        unsafe { acquire_rc(initial as usize) }
+        unsafe { crate::acquire_bytes(initial as usize) }
     };
-    Rc::into_raw(FileState::memory(data))
+    crate::ObjectOwner::into_raw(FileState::memory(data))
 }
 
 /// Reposition the cursor using Python's signed offset and integer whence.
@@ -238,25 +242,14 @@ pub unsafe extern "C" fn imre_binary_seek(
         object(file).0.with_mut(|s| {
             let f = s.file_mut();
             f.check_member("seek on closed file.")?;
+            if let Some(Stream::Member(member)) = &mut f.stream {
+                return member.seek_offset(&offset, Int::borrow(whence).as_small().unwrap_or(-1));
+            }
             if f.kind == FileKind::GzipBinaryRead {
                 f.stream()?;
             }
-            let whence = if f.kind == FileKind::Member {
-                Int::borrow(whence).as_small().unwrap_or(-1)
-            } else {
-                i64::from(c_int(whence)?)
-            };
+            let whence = i64::from(c_int(whence)?);
             let off = match f.kind {
-                FileKind::Member => offset
-                    .as_small()
-                    .or_else(|| offset.big().to_i64())
-                    .unwrap_or_else(|| {
-                        if offset.big().sign() == num_bigint::Sign::Minus {
-                            i64::MIN
-                        } else {
-                            i64::MAX
-                        }
-                    }),
                 FileKind::Memory => {
                     let off = offset
                         .as_small()
@@ -295,12 +288,6 @@ pub unsafe extern "C" fn imre_binary_seek(
                 0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
                 1 => SeekFrom::Current(off),
                 2 => SeekFrom::End(off),
-                _ if f.kind == FileKind::Member => {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "whence must be os.SEEK_SET (0), os.SEEK_CUR (1), or os.SEEK_END (2)",
-                    ));
-                }
                 _ if f.kind == FileKind::Memory => {
                     return Err(Error::new(
                         Kind::ValueError,

@@ -1,0 +1,9 @@
+{
+  "compiler_revision": "bea88ce2b9df60a7273cec501db73d16eef5d4c2",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre_sha256": "3718cac26e71337a5c80922936378d09588765b84a8cf7cabe62bd864f9d0972",
+  "runtime_sha256": "2c18bde69a282aa23339cb500c8c9fbb17cc65ec85465797403da974e9304e9a",
+  "tree": "ef6017bcb94b604a06a61af1f11a309f08e1a5f3",
+  "verification": "local",
+  "mode": "public main after #900, #910 and #905"
+}

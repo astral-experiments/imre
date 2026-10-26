@@ -26,6 +26,76 @@ pub(super) fn comparison(
 }
 
 impl Checker<'_> {
+    /// Capture the integer mapping now; repetition and count conversion belong
+    /// to the returned iterator's pulls.
+    pub(super) fn counter_elements(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Option<Expr>,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let mut values: Vec<_> = receiver.into_iter().collect();
+        let first_extra = 1 - values.len();
+        for (index, arg) in call.arguments.args.iter().enumerate() {
+            values.push(self.expr(arg)?);
+            if index >= first_extra {
+                self.graph.checked_excess_argument(self.module, arg.range());
+            }
+        }
+        let positional = values.len();
+        let mut keyword_self = None;
+        let mut failure = None;
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().unwrap().as_str();
+            if name != "self" {
+                self.graph
+                    .checked_keywords(self.module, std::iter::once(keyword.range()));
+                failure
+                    .get_or_insert_with(|| format!("got an unexpected keyword argument '{name}'"));
+            } else if positional != 0 || keyword_self.replace(&keyword.value).is_some() {
+                self.graph
+                    .checked_repeated_keyword(self.module, keyword.range());
+                failure.get_or_insert_with(|| "got multiple values for argument 'self'".to_owned());
+            }
+        }
+        if positional == 0 && keyword_self.is_none() {
+            self.graph
+                .checked_missing_argument(self.module, call.range());
+        }
+        let failure = failure.or_else(|| match positional {
+            0 if keyword_self.is_none() => {
+                Some("missing 1 required positional argument: 'self'".into())
+            }
+            2.. => Some(format!(
+                "takes 1 positional argument but {positional} were given"
+            )),
+            _ => None,
+        });
+        if let Some(message) = failure {
+            return self.counter_call_error(call, values, format!("Counter.elements() {message}"));
+        }
+        let mapping = if let Some(keyword) = keyword_self {
+            self.expr(keyword)?
+        } else {
+            values.pop().unwrap()
+        };
+        let Some((key, Type::Int)) = self.types.mapping(mapping.ty) else {
+            return Err(error(
+                self.source,
+                call,
+                "elements requires a mapping with integer counts",
+            ));
+        };
+        if !self.types.is_counter(mapping.ty) {
+            // CPython's unbound method calls self.items(), including on dicts.
+            self.graph.checked_overload(self.module, call.range());
+        }
+        Ok(Expr {
+            ty: self.types.cursor(key),
+            kind: ExprKind::Builtin(Builtin::CounterElements, vec![mapping]),
+        })
+    }
+
     /// Bind both forms of the Python method in source order, including
     /// `Counter.most_common(n=..., self=...)`.
     pub(super) fn counter_most_common(

@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from contextlib import nullcontext
 import hashlib
 import importlib
 import json
@@ -18,6 +19,16 @@ def verify_files(root, files):
         data = (root / name).read_bytes()
         if hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() != expected:
             raise ValueError(f"upstream blob mismatch: {root / name}")
+
+
+def discovery_resources(manifest):
+    """Use the same resource set as the reference job for package discovery hooks."""
+    if not manifest.get("regrtest_discovery", False):
+        return nullcontext()
+    from test import support
+    from unittest.mock import patch
+    # Bare unittest's None enables optional resources; default regrtest uses [].
+    return patch.object(support, "use_resources", [])
 
 
 def load_suite(module_name):
@@ -81,6 +92,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--result", type=Path, required=True)
+    parser.add_argument("--write-bytecode", action="store_true", help="exercise tests that write bytecode; use a disposable CPython prefix")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text())
     version = ".".join(map(str, sys.version_info[:3]))
@@ -91,10 +103,13 @@ def main():
     # regrtest and its child processes import the interpreter's own Lib/test.
     # Verify those test bytes too. Do not replace package discovery with a glob.
     verify_interpreter_tests(manifest)
-    ids = id_counts(case.id() for case in cases(load_suite(module)))
+    with discovery_resources(manifest):
+        ids = id_counts(case.id() for case in cases(load_suite(module)))
     with tempfile.TemporaryDirectory() as work:
         xml = Path(work) / "reference.xml"
-        run = subprocess.run([sys.executable, "-B", "-m", "test", "--single-process",
+        flags = [] if args.write_bytecode else ["-B"]
+        resources = ["-u", ",".join(manifest["resources"])] if manifest.get("resources") else []
+        run = subprocess.run([sys.executable, *flags, "-m", "test", "--single-process", *resources,
                               "--tempdir", work, "--randseed", "1", "--junit-xml", xml,
                               module.removeprefix("test.")], cwd=work)
         results = reference_results(xml, ids)

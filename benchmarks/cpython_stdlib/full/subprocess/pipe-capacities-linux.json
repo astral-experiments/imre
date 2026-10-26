@@ -1,0 +1,413 @@
+{
+  "schema": "imre.subprocess.pipe-capacities/v1",
+  "imre_revision": "8d4c0ee6706cdaf04a311c542b2ac20e4ac32181",
+  "tested_tree": "265c2e2eb6621eecb0ad7caff2d16b672a3ee220",
+  "hosted": {
+    "product_pr": 906,
+    "pr_head": "791121b5953c53b6fd30d7ebf22b8653305121c7",
+    "run": 40183144953,
+    "job": 121138353074,
+    "artifact": 12595142638,
+    "archive_sha256": "fe93830ddaa83ebefb2f1b89ad5c66ac5e71f4b55ffc552641cd42ac9829a946"
+  },
+  "fixtures": {
+    "host_popen.py": "929f19f999ac0d6a2b2556e897e570a2de4f56a35eafc59c8aa69bdf250a79d0",
+    "pipe_capacity_originals.py": "a814ca0dceb70b52c530c6c4f415654867fad2e6647344ce2f2791274fb53d3b"
+  },
+  "reports": [
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 0,
+      "toolchain": {
+        "imre": "65b91523238951b9da6d1f8a1407a32f06bfbd435d412729899bd4830c4d2e31",
+        "runtime": "9b01426610cda9adedcc87d73fdf5088647f700b05da5d2a0fe1ab2bd3ecbcac",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_pipesize_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesize_default needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "acd627fe96680d1e8a416fecd042a855e18464fbd77f47d6de20fd60b60dcb96",
+              "selector_fixture": "PollSelector",
+              "native_parent_selector_calls": 0,
+              "requested": -1,
+              "reference_pipe_capacities": [
+                65536,
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 65536,
+                "stdout": 65536,
+                "stderr": 65536
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 0,
+              "wrote_pear": false,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "kill",
+                "exit"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_pipesizes": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesizes needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "970503a80ed7991642c1f3fed660be90252c0f68a85a00c268a3ff6a061521c9",
+              "selector_fixture": "PollSelector",
+              "native_parent_selector_calls": 0,
+              "requested": 32768,
+              "reference_pipe_capacities": [
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 32768,
+                "stdout": 32768,
+                "stderr": 32768
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 3,
+              "wrote_pear": true,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "stdin.write",
+                "stdin.close",
+                "stdout.close",
+                "stderr.close",
+                "kill",
+                "wait"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesize_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesize_default needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "14ec6602876df3f1f5dc2f4f7d3126f556c1d0e147f67345ef094d8133781772",
+              "selector_fixture": "SelectSelector",
+              "native_parent_selector_calls": 0,
+              "requested": -1,
+              "reference_pipe_capacities": [
+                65536,
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 65536,
+                "stdout": 65536,
+                "stderr": 65536
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 0,
+              "wrote_pear": false,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "kill",
+                "exit"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesizes": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesizes needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "3e963f4019d233cabf48388eea588349dc597039e82dbb3876a366cd91c67d13",
+              "selector_fixture": "SelectSelector",
+              "native_parent_selector_calls": 0,
+              "requested": 32768,
+              "reference_pipe_capacities": [
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 32768,
+                "stdout": 32768,
+                "stderr": 32768
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 3,
+              "wrote_pear": true,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "stdin.write",
+                "stdin.close",
+                "stdout.close",
+                "stderr.close",
+                "kill",
+                "wait"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "opt_level": 3,
+      "toolchain": {
+        "imre": "65b91523238951b9da6d1f8a1407a32f06bfbd435d412729899bd4830c4d2e31",
+        "runtime": "9b01426610cda9adedcc87d73fdf5088647f700b05da5d2a0fe1ab2bd3ecbcac",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "rows": {
+        "test.test_subprocess.ProcessTestCase.test_pipesize_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesize_default needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "28e6567d4dfd0b7ff73423ed154f16b277c3db6d5e92f4eefb6f38d903a02692",
+              "selector_fixture": "PollSelector",
+              "native_parent_selector_calls": 0,
+              "requested": -1,
+              "reference_pipe_capacities": [
+                65536,
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 65536,
+                "stdout": 65536,
+                "stderr": 65536
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 0,
+              "wrote_pear": false,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "kill",
+                "exit"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCase.test_pipesizes": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesizes needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "ce3d6fc0ad9d0d336395168c048ec125ecda55ae4e6533906583b5d6d12178e5",
+              "selector_fixture": "PollSelector",
+              "native_parent_selector_calls": 0,
+              "requested": 32768,
+              "reference_pipe_capacities": [
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 32768,
+                "stdout": 32768,
+                "stderr": 32768
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 3,
+              "wrote_pear": true,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "stdin.write",
+                "stdin.close",
+                "stdout.close",
+                "stderr.close",
+                "kill",
+                "wait"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesize_default": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesize_default needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "b5190299df426ed0683f27adb09e6b7d96788c81c7fd9b5ef23143ba53cba7d7",
+              "selector_fixture": "SelectSelector",
+              "native_parent_selector_calls": 0,
+              "requested": -1,
+              "reference_pipe_capacities": [
+                65536,
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 65536,
+                "stdout": 65536,
+                "stderr": 65536
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 0,
+              "wrote_pear": false,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "kill",
+                "exit"
+              ]
+            }
+          }
+        ],
+        "test.test_subprocess.ProcessTestCaseNoPoll.test_pipesizes": [
+          {
+            "body_attempt": {
+              "status": "blocked",
+              "reason": "ProcessTestCase.test_pipesizes needs its upstream method decorator"
+            },
+            "roles": {
+              "body": "cpython",
+              "assertions": "cpython",
+              "operation": "imre",
+              "fixture": "mixed"
+            },
+            "observed": {
+              "actor_sha256": "dbaaeb1156362a918bc69b1c9b049abf26e4e1b96dc9c2a407c377f809a840a6",
+              "selector_fixture": "SelectSelector",
+              "native_parent_selector_calls": 0,
+              "requested": 32768,
+              "reference_pipe_capacities": [
+                65536
+              ],
+              "native_pipe_capacities": {
+                "stdin": 32768,
+                "stdout": 32768,
+                "stderr": 32768
+              },
+              "distinct_pipe_inodes": 3,
+              "set_size_before_spawn": 3,
+              "wrote_pear": true,
+              "all_native_streams_closed": true,
+              "original_child": "pinned CPython running only the original stdio payload",
+              "kill_observation": "SIGKILL delivered",
+              "successful_reaps": 1,
+              "native_calls": [
+                "Popen",
+                "streams",
+                "stdin.fileno",
+                "stdout.fileno",
+                "stderr.fileno",
+                "stdin.write",
+                "stdin.close",
+                "stdout.close",
+                "stderr.close",
+                "kill",
+                "wait"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

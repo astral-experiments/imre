@@ -10,9 +10,10 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 STDLIB = HERE.parents[1]
 SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
-sys.path.insert(0, str(STDLIB))
+sys.path[:0] = [str(HERE), str(STDLIB)]
 from suite_inventory import cases, load_suite, verify_files
-from suite_native import Toolchain, native_method, run_in_fixtures
+from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures
+from native_cache import cache_assertion_blocker, check_cache_values, host_cache_case
 
 FIXTURE = """import logging
 
@@ -58,10 +59,46 @@ class NativeCase(unittest.TestCase):
             "observed root handler presence used by this method")
         return result
 
+    caching = work / "caching"
+    caching.mkdir()
+    check_cache_values(toolchain, caching)
+    caching_id = "test.test_logging.LoggerTest.test_caching"
+    cache_fixture = """import logging
+import unittest
+
+def configured_root() -> logging.Logger:
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s -> %(levelname)s: %(message)s")
+    return logging.getLogger()
+
+class NativeCase(unittest.TestCase):
+    root_logger: logging.Logger
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.root_logger = configured_root()
+"""
+    try:
+        execute_cache = native_method(toolchain, caching, SOURCE, "LoggerTest", caching_id, cache_fixture,
+            operation=("imre", "Populate logger caches and invalidate them on level and disable changes"))
+    except NativeCompileError as exc:
+        blocker = cache_assertion_blocker(exc, caching)
+        if blocker is None:
+            raise
+        cached = host_cache_case(toolchain, caching, blocker)
+    else:
+        def cached(case, method):
+            if case.root_logger.level != 10 or case.root_hdlr not in case.root_logger.handlers:
+                raise AssertionError("expected the original LoggerTest root at DEBUG with its handler")
+            result = execute_cache(case, method)
+            result["observation"]["evidence"]["fixture"] = (
+                "Original LoggerTest/BaseTest hooks on CPython; native basicConfig supplies an isolated root at DEBUG")
+            return result
+
     return {
         case_id: native_method(toolchain, children, SOURCE, "ChildLoggerTest", case_id,
             FIXTURE, operation=("imre", "Enumerate direct logger children by identity, excluding missing ancestors")),
         stopped_id: stopped,
+        caching_id: cached,
     }
 
 
@@ -98,7 +135,10 @@ def main():
             raise AssertionError((failures, skips, observed))
     args.result.write_text(json.dumps({"denominator": denominator, "opt_level": args.opt_level,
                                        "evidence": observed}, indent=2) + "\n")
-    print(f"-O{args.opt_level}: {len(observed)} native bodies and assertions with CPython hooks")
+    for case_id, records in observed.items():
+        for record in records:
+            evidence = record.get("observation", record)
+            print(f"-O{args.opt_level} {case_id}: {evidence['roles']}")
 
 
 if __name__ == "__main__":

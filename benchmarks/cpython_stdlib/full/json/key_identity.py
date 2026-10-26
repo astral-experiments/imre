@@ -15,7 +15,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bindings import Boundary, Probe
 from reference import BENCH, COMMIT, routine, verify
-from sweep import diagnostic, prepare
+from sweep import diagnostic, digest, prepare
 sys.path.insert(0, str(BENCH))
 from native_json_values import Native
 from suite_inventory import cases, load_suite
@@ -23,6 +23,95 @@ from suite_native import NativeCompileError, Toolchain, method_bytes, native_met
 
 METHOD = "test.test_json.test_decode.TestDecode.test_keys_reuse"
 SOURCE = BENCH / "upstream/Lib/test/test_json/test_decode.py"
+OPERATIONS = "json.loads, native JSONDecoder construction and decode, sorted decoded keys, identity and memo truth"
+
+
+def typed_body_fixture(*, string_identity=False, memo_truth=False, standalone=False):
+    """Bind both public entry points without copying any decoded value."""
+    prefix = """import json
+import unittest
+from typing import Any
+
+class DecoderModule:
+    def JSONDecoder(self):
+        return json.decoder.JSONDecoder()
+
+class JsonModule:
+    decoder: DecoderModule
+    def __init__(self):
+        self.decoder = DecoderModule()
+
+"""
+    base = "" if standalone else "(unittest.TestCase)"
+    init = "" if standalone else "        super().__init__()\n"
+    prefix += f"""class NativeCase{base}:
+    json: JsonModule
+    def __init__(self):
+{init}        self.json = JsonModule()
+
+    def loads(self, source: str) -> list[dict[str, Any]]:
+        return json.loads(source)
+
+"""
+    if string_identity:
+        prefix += """    def assertIs(self, first: str, second: str) -> None:
+        if first is not second:
+            raise AssertionError("expected identical native key owners")
+
+"""
+    if memo_truth:
+        prefix += """    def assertFalse(self, expr: dict[str, str], msg: str | None = None) -> None:
+        if expr:
+            raise AssertionError("expected an empty decoder memo")
+
+"""
+    return prefix + method_bytes(SOURCE, "TestDecode", "check_keys_reuse").decode()
+
+
+def native_key_fixture():
+    # A concrete child fixture can accept the two actual operand types without
+    # narrowing TestCase's public assertion signatures. CPython owns lifecycle.
+    return typed_body_fixture(string_identity=True, memo_truth=True, standalone=True)
+
+
+def native_identity_control(tools, directory):
+    """The same native assertion must reject equal keys from separate scans."""
+    directory.mkdir()
+    fixture = native_key_fixture()
+    program = fixture + "\n" + method_bytes(SOURCE, "TestDecode", "test_keys_reuse").decode() + '''
+case = NativeCase()
+case.test_keys_reuse()
+left = case.loads('[{"same_owner_spelling": 1}]')
+right = case.loads(' [{"same_owner_spelling": 2}]')
+left_keys, right_keys = sorted(left[0]), sorted(right[0])
+short: list[str] = []
+different = ["different spelling"]
+if left_keys != right_keys or left_keys == short or left_keys == different:
+    raise ValueError("expected string lists to compare by length and element value")
+first, second = left_keys[0], right_keys[0]
+if first != second or first is second:
+    raise ValueError("expected equal keys from independent native scans")
+try:
+    case.assertIs(first, second)
+except AssertionError:
+    print("rejected distinct owners")
+else:
+    raise ValueError("the identity assertion accepted distinct native owners")
+try:
+    case.assertFalse({"nonempty": "memo"})
+except AssertionError:
+    print("rejected nonempty memo")
+else:
+    raise ValueError("the truth assertion accepted a nonempty mapping")
+'''
+    try:
+        binary = tools.build(program.encode(), directory)
+    except NativeCompileError as exc:
+        return {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
+    child = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+    if child.returncode or child.stderr or child.stdout != "rejected distinct owners\nrejected nonempty memo\n":
+        return {"outcome": "failed", "exit": child.returncode, "stdout": child.stdout, "stderr": child.stderr}
+    return {"outcome": "pass", "operation": "distinct native string owners and nonempty memo rejected; string lists compared by value"}
 
 
 def component_checks(compiler):
@@ -222,7 +311,7 @@ def run(tools, work):
         if failed or skipped or set(complete) != set(ids):
             raise ValueError((failed, skipped, complete))
         results[mode] = {name: records[0] for name, records in complete.items()}
-    # Both complete-body attempts use the original helper and test method.
+    # Each complete-body attempt uses the original helper and test method.
     # An unshadowed fixture import isolates passing self.loads as a callable.
     owner, method = "TestDecode", "test_keys_reuse"
     general = prepare(SOURCE, owner, method)
@@ -230,16 +319,23 @@ def run(tools, work):
     unshadowed = unshadowed.replace("    json = json\n", "    json = native_json\n")
     unshadowed = unshadowed.replace("staticmethod(json.loads)", "staticmethod(native_json.loads)")
     attempts = results["native-body-attempts"] = {}
-    for name, fixture in (("general", general), ("unshadowed-module", unshadowed)):
+    for name, fixture in (("general", general), ("unshadowed-module", unshadowed),
+                          ("typed-module-bindings", typed_body_fixture()),
+                          ("typed-string-identity", typed_body_fixture(string_identity=True)),
+                          ("typed-key-assertions", typed_body_fixture(string_identity=True, memo_truth=True)),
+                          ("native-key-assertions", native_key_fixture())):
         directory = work / name
         directory.mkdir()
         try:
-            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture)
+            body = native_method(tools, directory, SOURCE, owner, ids[0], fixture, operation=("imre", OPERATIONS))
         except NativeCompileError as exc:
             attempts[name] = {"outcome": "blocked", "diagnostic": diagnostic(exc, directory)}
         else:
             passed, failed, skipped = run_in_fixtures(load_suite("test.test_json"), dict.fromkeys(ids, body))
-            attempts[name] = {"passed": list(passed), "failed": failed, "skipped": skipped}
+            attempts[name] = {"passed": list(passed), "failed": failed, "skipped": skipped,
+                              "observations": {key: [r["observation"] for r in rows] for key, rows in passed.items()}}
+        attempts[name]["fixture_sha256"] = hashlib.sha256(fixture.encode()).hexdigest()
+    results["native-distinct-owner-control"] = native_identity_control(tools, work / "distinct-owners")
     return results
 
 
@@ -257,7 +353,14 @@ def main():
         raise ValueError("host projection conflated distinct native owners")
     report = {"cpython_commit": COMMIT, "method": METHOD,
               "method_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "test_keys_reuse")).hexdigest(),
-              "fixture": "CPython module, class, instance, unmodified method, sorted and identity assertions",
+              "helper_sha256": hashlib.sha256(method_bytes(SOURCE, "TestDecode", "check_keys_reuse")).hexdigest(),
+              "sha256": {"imre": digest(args.imre), "runtime": digest(args.runtime)},
+              "fixture": "CPython supplies both original module, class and instance lifecycles",
+              "execution": {
+                  "repr": "CPython body and assertions; native values transported as repr",
+                  "native-owners": "CPython body and assertions; native key owners transported explicitly",
+                  "native-body-attempts": "unchanged method and helper compiled together; individual outcomes below",
+              },
               "operation": "Imre json.loads and a live JSONDecoder instance; key owner comparisons in Imre",
               "distinct-owner-negative-control": "passed",
               "compile-only-components": component_checks(args.imre), "levels": {}}

@@ -21,26 +21,20 @@
     },
     "test.test_sys.SysModuleTest.test_getdefaultencoding": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "calls": [
-        "default-argument",
-        "default"
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "b41ff7224ca4fe5cf266aa3439044a27a07e0c7a03680061baf2c50a7557e80b"
     },
     "test.test_sys.SysModuleTest.test_getfilesystemencoding": {
       "status": "pass",
-      "execution": "host-driven-native",
-      "body": "CPython",
-      "assertions": "CPython",
-      "fixture_execution": "CPython module/class/instance hooks",
-      "calls": [
-        "filesystem",
-        "platform",
-        "lookup"
-      ]
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "43b2b8ce0a812ea74e8efaf4b3ff2d51a127ae1970df98129709ba749f41ba7b",
+      "helper_sha256": "0236da157e45125162e664212c10446c30716b272ff48cee63a6a790ec2391a3"
     },
     "test.test_sys.SysModuleTest.test_ioencoding_nonascii": {
       "status": "upstream-skip",
@@ -55,6 +49,21 @@
       "calls": [
         "sys.argv",
         "sys.orig_argv"
+      ]
+    },
+    "test.test_sys.SysModuleTest.test_thread_info": {
+      "status": "pass",
+      "execution": "host-driven-native",
+      "body": "CPython",
+      "assertions": "CPython",
+      "fixture_execution": "original CPython module/class/instance hooks",
+      "calls": [
+        "thread_info",
+        "length",
+        "name",
+        "lock",
+        "platform",
+        "name"
       ]
     },
     "test.test_sys.TestSysJIT.test_jit_is_available": {

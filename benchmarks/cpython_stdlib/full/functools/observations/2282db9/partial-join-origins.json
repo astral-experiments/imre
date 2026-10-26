@@ -1,0 +1,98 @@
+{
+  "0": {
+    "test.test_functools.TestPartialC.test_with_bound_and_unbound_methods": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Native partials of bound and unbound str.join",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403"
+          }
+        }
+      }
+    ],
+    "test.test_functools.TestPartialPy.test_with_bound_and_unbound_methods": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Native partials of bound and unbound str.join",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 0,
+            "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403"
+          }
+        }
+      }
+    ]
+  },
+  "3": {
+    "test.test_functools.TestPartialC.test_with_bound_and_unbound_methods": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Native partials of bound and unbound str.join",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 3,
+            "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403"
+          }
+        }
+      }
+    ],
+    "test.test_functools.TestPartialPy.test_with_bound_and_unbound_methods": [
+      {
+        "execution": "native-body",
+        "body": "Imre",
+        "assertions": "Imre",
+        "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+        "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403",
+        "observation": {
+          "roles": {
+            "body": "imre",
+            "assertions": "imre",
+            "operation": "imre",
+            "fixture": "mixed"
+          },
+          "evidence": {
+            "operation": "Native partials of bound and unbound str.join",
+            "fixture": "CPython module/class/instance hooks; native instance in child",
+            "opt_level": 3,
+            "method_sha256": "276c90c33d376c5b477082664350e01114c917aa8f5e1e83fb2002573ad9f403"
+          }
+        }
+      }
+    ]
+  }
+}

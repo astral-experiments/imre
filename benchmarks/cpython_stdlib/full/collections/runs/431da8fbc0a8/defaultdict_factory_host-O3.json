@@ -1,0 +1,59 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "opt_level": 3,
+  "compiler_revision": "431da8fbc0a8c37ac3bbe15adbddc8042a6f3c3b",
+  "tests": {
+    "test.test_defaultdict.TestDefaultDict.test_callable_arg": [
+      {
+        "observation": {
+          "roles": {
+            "body": "cpython",
+            "assertions": "cpython",
+            "operation": "imre",
+            "fixture": "cpython"
+          },
+          "evidence": {
+            "method_sha256": "e393523f8bcabdaeec777ec977d73c1b3406ac58f436ad008255a90ff4f0a878",
+            "opt_level": 3,
+            "operation": "The linked Imre child builds the supplied dictionary and calls collections.defaultdict.",
+            "fixture": "Original CPython module, class and instance hooks, method and assertRaises.",
+            "native_calls": {
+              "defaultdict": 1
+            },
+            "child_results": [
+              {
+                "entries": 0,
+                "exit": 1,
+                "stderr": "TypeError: first argument must be callable or None\n"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "failures": [],
+  "skips": [],
+  "controls": {
+    "return": {
+      "original_test_failed": true,
+      "child_results": [
+        {
+          "entries": 0,
+          "exit": 0,
+          "stderr": ""
+        }
+      ]
+    },
+    "wrong-exception": {
+      "original_test_failed": true,
+      "child_results": [
+        {
+          "entries": 0,
+          "exit": 1,
+          "stderr": "ValueError: assertion control\n"
+        }
+      ]
+    }
+  }
+}

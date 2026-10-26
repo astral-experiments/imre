@@ -1,0 +1,20 @@
+{
+  "original_id": "test.test_builtin.BuiltinTest.test_ascii",
+  "complete_native_methods": 0,
+  "fixture_body_and_assertions": "CPython",
+  "native_operation": "builtin ascii",
+  "opt_levels": {
+    "0": {
+      "native_calls": 14,
+      "cpython_cycle_calls": 2,
+      "cpython_surrogate_calls": 3,
+      "wrong_reply_failed_assertion": true
+    },
+    "3": {
+      "native_calls": 14,
+      "cpython_cycle_calls": 2,
+      "cpython_surrogate_calls": 3,
+      "wrong_reply_failed_assertion": true
+    }
+  }
+}

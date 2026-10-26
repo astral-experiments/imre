@@ -1,0 +1,26 @@
+{
+  "tree": "921a8a8a8266be02d2436121ccd99f1df944b153",
+  "source_sha256": "64d10b9a124ee17ff3b043f45bf505ee09a362156cd572084a369543312b7950",
+  "compiler_sha256": "0ea1252952b6b6d7dbbd6060e14cde9075e1f8cbf2d8ef564c2c9e78f93f9f23",
+  "runtime_sha256": "1c9614ff3f4ab155e6f78441463e25ad3fa13dfcf91d8f550d63aefbcf808751",
+  "cpython": "3.14.5 (main, Oct 24 2026, 17:26:45) [GCC 13.3.0]",
+  "reference_bytes": 129,
+  "levels": {
+    "O0": {
+      "compile_status": 0,
+      "status": 0,
+      "matched": true,
+      "differing_lines": [],
+      "stdout": "True\n2\nTrue\nTrue\nTrue\n123\n425\nTrue\nTrue\n729\nFalse\nTrue\nTrue\nTrue\n723\nTrue\nTrue\nFalse\nTrue\n345\nTrue\nTrue\n2\n2\n9\nTrue\n10\n15\n127\n745\n"
+    },
+    "O3": {
+      "compile_status": 0,
+      "status": 0,
+      "matched": true,
+      "differing_lines": [],
+      "stdout": "True\n2\nTrue\nTrue\nTrue\n123\n425\nTrue\nTrue\n729\nFalse\nTrue\nTrue\nTrue\n723\nTrue\nTrue\nFalse\nTrue\n345\nTrue\nTrue\n2\n2\n9\nTrue\n10\n15\n127\n745\n"
+    }
+  },
+  "compiler_commit": "2282db951b2a97e9085767ba1a0140fbed38f92c",
+  "reference_stdout": "True\n2\nTrue\nTrue\nTrue\n123\n425\nTrue\nTrue\n729\nFalse\nTrue\nTrue\nTrue\n723\nTrue\nTrue\nFalse\nTrue\n345\nTrue\nTrue\n2\n2\n9\nTrue\n10\n15\n127\n745\n"
+}

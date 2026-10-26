@@ -1,5 +1,6 @@
 //! Borrowed compiler-emitted member metadata for recursive value representations.
 
+use crate::StrOwner;
 use std::cell::Cell;
 use std::ptr;
 
@@ -54,7 +55,7 @@ pub unsafe extern "C" fn imre_enum_lookup(text: *const Str, first: usize, count:
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_enum_string(tag: usize) -> *const Str {
     with_member(tag, |[class, name, _]| {
-        std::rc::Rc::into_raw(std::rc::Rc::new(Str::new(format!("{class}.{name}"))))
+        StrOwner::into_raw(StrOwner::new(Str::new(format!("{class}.{name}"))))
     })
 }
 
@@ -79,12 +80,11 @@ mod tests {
     use super::*;
     use crate::objects::values::imre_value_repr;
     use crate::objects::words::{NULLABLE, WordKind};
-    use std::rc::Rc;
 
     #[test]
     fn scalar_tags_own_no_roots_and_render_the_canonical_member() {
-        let texts = ["Status", "FIRST", "z\n", "LAST", "a"].map(|s| Rc::new(Str::new(s)));
-        let roots = texts.each_ref().map(Rc::as_ptr);
+        let texts = ["Status", "FIRST", "z\n", "LAST", "a"].map(|s| StrOwner::new(Str::new(s)));
+        let roots = texts.each_ref().map(StrOwner::as_ptr);
         let members = [
             [&roots[0], &roots[1], &roots[2]],
             [&roots[0], &roots[3], &roots[4]],
@@ -95,17 +95,20 @@ mod tests {
             imre_str_enum_table(members.as_ptr(), members.len());
             let kind = WordKind::new(10);
             drop(kind.acquire(1));
-            assert!(texts.iter().all(|s| Rc::strong_count(s) == 1));
+            assert!(texts.iter().all(|s| StrOwner::strong_count(s) == 1));
             assert!(compare(1, 2).is_gt());
             assert_eq!(
-                *Rc::from_raw(imre_value_repr(1, 10)),
+                *StrOwner::from_raw(imre_value_repr(1, 10)),
                 "<Status.FIRST: 'z\\n'>"
             );
             assert_eq!(
-                *Rc::from_raw(imre_value_repr(2, 10 | NULLABLE)),
+                *StrOwner::from_raw(imre_value_repr(2, 10 | NULLABLE)),
                 "<Status.LAST: 'a'>"
             );
-            assert_eq!(*Rc::from_raw(imre_value_repr(0, 10 | NULLABLE)), "None");
+            assert_eq!(
+                *StrOwner::from_raw(imre_value_repr(0, 10 | NULLABLE)),
+                "None"
+            );
             imre_str_enum_table(ptr::null(), 0);
         }
     }

@@ -156,6 +156,7 @@ def run(
     limited: bool = False,
     empty_name: bool = False,
     invalid: tuple[bytes, bytes] | None = None,
+    high_fds: bool = False,
 ):
     environment = files.environment()
     environment.update(IMRE_PROCESS_PARENT="inherited λ", IMRE_PROCESS_OVERRIDE="parent")
@@ -167,6 +168,21 @@ def run(
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
         environment[invalid[0]] = invalid[1]
+    if high_fds:
+        # Fill the target parent's descriptor table across exec, without
+        # changing the test runner's own soft limit or open files.
+        prepare = """import os, resource, sys
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+if soft != resource.RLIM_INFINITY and soft < 1060:
+    resource.setrlimit(resource.RLIMIT_NOFILE, (1060, hard))
+while True:
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.set_inheritable(fd, True)
+    if fd >= 1030:
+        break
+os.execv(sys.argv[1], sys.argv[1:])
+"""
+        command = [sys.executable, "-c", prepare, *command]
     return subprocess.run(
         command,
         cwd=directory,
@@ -237,6 +253,7 @@ def main() -> None:
                     "limited": name in {"cleanup", "stdin_fds", "timeouts"},
                     "descriptor": descriptor if name == "stdin_fds" else None,
                     "empty_name": name == "environment",
+                    "high_fds": name == "select_high_fds",
                 }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
                 if name == "unobserved_child":

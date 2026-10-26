@@ -59,6 +59,10 @@ pub(super) struct Helper {
 pub(super) struct Helpers {
     first: usize,
     functions: RefCell<Vec<Option<Helper>>>,
+    /// Lifted functions normally leave scope after checking their enclosing body.
+    pub(super) local_annotations:
+        RefCell<HashMap<usize, (ModuleId, std::rc::Rc<ast::StmtFunctionDef>)>>,
+    pub(super) list_builds: RefCell<HashMap<usize, ir::ListBuild>>,
 }
 
 impl Helpers {
@@ -66,7 +70,13 @@ impl Helpers {
         Self {
             first,
             functions: RefCell::new(Vec::new()),
+            local_annotations: RefCell::default(),
+            list_builds: RefCell::default(),
         }
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.functions.borrow().len()
     }
 
     pub(super) fn reserve(&self) -> usize {
@@ -196,12 +206,7 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
 impl Reads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
-        bound.extend(
-            function
-                .parameters
-                .iter_non_variadic_params()
-                .map(|p| p.name().to_string()),
-        );
+        bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
         self.bound.push(bound);
         self.visit_body(&function.body);
         self.bound.pop();
@@ -541,6 +546,9 @@ impl Checker<'_> {
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
+        // Eager displays share the enclosing Python frame, even when lowered to a helper.
+        let omitted_locals = self.omitted_assert_locals.clone();
+        let omitted_free = self.omitted_assert_free.clone();
         let mut helper = Checker::new(
             self.graph,
             self.module,
@@ -550,6 +558,8 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.omitted_assert_locals = omitted_locals;
+        helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.class = self.class;
         helper.class_receiver = self
@@ -612,16 +622,43 @@ impl Checker<'_> {
         }
         // The leaf establishes the result type after its target/filter facts are
         // known. No expression can read this private slot before initialization.
-        let gather_input = match &input {
+        let plain_iterable = match &input {
             Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } if iterable.ty == Type::Str => Some(iterable.clone()),
+            } => Some(iterable),
             _ => None,
         };
+        let gather_input = plain_iterable
+            .filter(|value| value.ty == Type::Str)
+            .cloned();
         let result = helper.hidden(Type::None);
+        let list_binding = if matches!(display.value, Yield::List(_))
+            && let [clause] = display.clauses
+            && clause.ifs.is_empty()
+            && let Some(target) = clause.target.as_name_expr()
+            && let Some(Expr {
+                ty,
+                kind: ExprKind::Local(iterable),
+            }) = plain_iterable
+            && self.types.element(*ty).is_some()
+        {
+            Some((*iterable, target.id.as_str()))
+        } else {
+            None
+        };
         let loops = helper.comprehension_clause(display, 0, Some(input), expected, result)?;
+        if let Some((iterable, target)) = list_binding {
+            self.helpers.list_builds.borrow_mut().insert(
+                id,
+                ir::ListBuild {
+                    iterable,
+                    item: helper.names[target],
+                    result,
+                },
+            );
+        }
         let ty = helper.locals[result];
         let empty = match display.value {
             Yield::List(_) => ExprKind::List(Vec::new()),

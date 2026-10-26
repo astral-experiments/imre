@@ -1,5 +1,7 @@
 //! Process text streams and their native encoding and buffering.
-use super::{Int, LazyLock, Mutex, OUTPUT, Output, Rc, Str, flush_stdout, initialize_io};
+use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
+mod intern;
+use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
 use std::io::{self, Write};
 mod encoding;
@@ -28,7 +30,7 @@ impl Write for StderrOutput {
         let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
         let encoded = self
             .codec
-            .encode(text, Some("backslashreplace"))
+            .encode(text, Some("backslashreplace"), || error_text(text))
             .map_err(|_| {
                 io::Error::other("could not encode standard error with backslashreplace")
             })?;
@@ -57,7 +59,7 @@ static STDERR: LazyLock<Mutex<StderrOutput>> = LazyLock::new(|| {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const Str {
     thread_local! {
-        static FIELDS: [(Rc<Str>, Rc<Str>); 3] = {
+        static FIELDS: [(StrOwner, StrOwner); 3] = {
             let settings = encoding::settings(false, None);
             let name = settings.codec.name_owner();
             std::array::from_fn(|fd| {
@@ -68,7 +70,7 @@ pub extern "C" fn imre_sys_stream_text(descriptor: u32, errors: u32) -> *const S
     }
     FIELDS.with(|fields| {
         let (name, handler) = &fields[descriptor as usize];
-        Rc::into_raw(Rc::clone(if errors != 0 { handler } else { name }))
+        StrOwner::into_raw(if errors != 0 { handler } else { name }.clone())
     })
 }
 
@@ -86,7 +88,12 @@ pub extern "C" fn imre_sys_stdout_errors() -> *const Str {
     imre_sys_stream_text(1, 1)
 }
 
-fn stdout_chunk(out: &mut Output, text: &str) -> super::Result<()> {
+/// Allocate exception input only when formatting produced borrowed text.
+fn error_text(text: &str) -> super::Result<StrOwner> {
+    StrOwner::try_new(Str::new(text)).map_err(|_| crate::Error::allocation())
+}
+
+fn stdout_chunk(out: &mut Output, text: &str, error_input: impl FnOnce() -> super::Result<StrOwner>) -> super::Result<()> {
     let settings = encoding::settings(false, None);
     if !out.captures.is_empty()
         || matches!(settings.codec, Codec::Utf8 { signature: false })
@@ -96,7 +103,7 @@ fn stdout_chunk(out: &mut Output, text: &str) -> super::Result<()> {
     }
     let encoded = settings
         .codec
-        .encode(text, Some(settings.errors.as_ref()))?;
+        .encode(text, Some(settings.errors.as_ref()), error_input)?;
     if matches!(settings.codec, Codec::Utf8 { signature: true }) {
         out.signature_emitted = true;
     }
@@ -106,10 +113,15 @@ fn stdout_chunk(out: &mut Output, text: &str) -> super::Result<()> {
 
 /// Encode before changing pending bytes, preserving the Python error on failure.
 pub(super) fn write_stdout(text: &str, newline: bool) -> super::Result<()> {
+    write_stdout_with(text, newline, || error_text(text))
+}
+
+/// Keep the original Python string when a direct stream write fails to encode it.
+pub(super) fn write_stdout_with(text: &str, newline: bool, error_input: impl FnOnce() -> super::Result<StrOwner>) -> super::Result<()> {
     let mut out = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    stdout_chunk(&mut out, text)?;
+    stdout_chunk(&mut out, text, error_input)?;
     if newline {
-        stdout_chunk(&mut out, "\n")?;
+        stdout_chunk(&mut out, "\n", || error_text("\n"))?;
     }
     Ok(())
 }
@@ -125,6 +137,15 @@ fn write_stream<W: Write>(stream: &Mutex<W>, text: &str, newline: bool) -> io::R
 
 pub(super) fn write_stderr(text: &str, newline: bool) -> io::Result<()> {
     write_stream(&STDERR, text, newline)
+}
+
+/// sys stream methods and default warning display share the buffered destinations.
+pub(super) fn write_standard_stream(stderr: bool, text: &str) -> super::Result<()> {
+    if stderr {
+        write_stderr(text, false).map_err(errno_error)
+    } else {
+        write_stdout(text, false)
+    }
 }
 
 pub(super) fn stderr_writer() -> std::sync::MutexGuard<'static, StderrOutput> {
@@ -157,13 +178,50 @@ pub extern "C" fn imre_sys_platform() -> *const Str {
         "windows" => "win32",
         other => other,
     };
-    Rc::into_raw(Rc::new(Str::new(platform)))
+    StrOwner::into_raw(StrOwner::new(Str::new(platform)))
+}
+
+/// Return a field of sys.thread_info from the target that runs the program.
+/// A null pointer represents an unknown library version or thread provider.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_thread_text(version: u32) -> *const Str {
+    if version != 0 {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        {
+            let mut buffer = [0u8; 256];
+            // SAFETY: confstr writes at most buffer.len() bytes, including the terminating nul.
+            let length = unsafe {
+                libc::confstr(
+                    libc::_CS_GNU_LIBPTHREAD_VERSION,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                )
+            };
+            if (2..=buffer.len()).contains(&length)
+                && let Ok(value) = std::str::from_utf8(&buffer[..length - 1])
+            {
+                return StrOwner::into_raw(StrOwner::new(Str::new(value)));
+            }
+        }
+        return std::ptr::null();
+    }
+
+    let name = if cfg!(windows) {
+        "nt"
+    } else if cfg!(all(unix, not(target_family = "wasm")))
+        || cfg!(all(target_os = "emscripten", target_feature = "atomics"))
+    {
+        "pthread"
+    } else {
+        return std::ptr::null();
+    };
+    StrOwner::into_raw(StrOwner::new(Str::new(name)))
 }
 
 /// Return the OS interface Python exposes on the target that built this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_name() -> *const Str {
-    Rc::into_raw(Rc::new(Str::new(if cfg!(windows) {
+    StrOwner::into_raw(StrOwner::new(Str::new(if cfg!(windows) {
         "nt"
     } else {
         "posix"
@@ -181,7 +239,10 @@ pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) ->
     let result = if stderr != 0 {
         write_stderr(text, false).map_err(errno_error)
     } else {
-        write_stdout(text, false)
+        write_stdout_with(text, false, || {
+            // SAFETY: the caller roots this exact string throughout the write.
+            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
+        })
     };
     match result {
         Ok(()) => Int::from_usize(text.chars().count()).into_raw(),

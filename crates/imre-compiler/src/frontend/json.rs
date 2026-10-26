@@ -112,6 +112,110 @@ pub(super) fn compare(
 }
 
 impl Checker<'_> {
+    /// A checked object yields its actual string keys; arrays and untyped
+    /// roots expose JSON values until an element is projected to a Python type.
+    pub(super) fn json_iteration(&self, value: Expr) -> Expr {
+        let element = match value.ty {
+            Type::JsonObject => Type::Str,
+            Type::JsonRoot | Type::JsonValue => Type::JsonValue,
+            _ => return value,
+        };
+        Expr {
+            ty: self.types.list(element),
+            kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
+        }
+    }
+
+    /// Expose loads or a saved decoder's decode method through the ordinary
+    /// callable ABI, with the same input and result checks as a direct call.
+    pub(super) fn json_load_callable(
+        &mut self,
+        receiver: Option<Expr>,
+        expected: Option<Type>,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let (params, returns) = expected
+            .and_then(|ty| self.types.signature(ty))
+            .unwrap_or_else(|| (vec![Type::Str], Type::JsonRoot));
+        let [input] = params.as_slice() else {
+            return Err(error(
+                self.source,
+                site,
+                "a JSON decoder callable requires one positional input",
+            ));
+        };
+        if *input != Type::Str && (receiver.is_some() || *input != Type::Bytes) {
+            return Err(error(
+                self.source,
+                site,
+                "a JSON decoder callable needs a supported text input",
+            ));
+        }
+        // A callable owns a compiler record as its context. The tuple holds
+        // the decoder using its own runtime object's retain/release ABI.
+        let context = receiver.map(|value| Expr {
+            ty: self.types.tuple(vec![Type::JsonDecoder]),
+            kind: ExprKind::Tuple(vec![value]),
+        });
+        let mut locals = Vec::new();
+        let mut operands = Vec::new();
+        let builtin = if let Some(context) = &context {
+            locals.push(context.ty);
+            operands.push(Expr {
+                ty: Type::JsonDecoder,
+                kind: ExprKind::Field(
+                    Box::new(Expr {
+                        ty: context.ty,
+                        kind: ExprKind::Local(0),
+                    }),
+                    0,
+                ),
+            });
+            Builtin::JsonDecoderDecode
+        } else {
+            Builtin::JsonLoads
+        };
+        operands.push(Expr {
+            ty: *input,
+            kind: ExprKind::Local(locals.len()),
+        });
+        locals.push(*input);
+        let value = self.coerce(
+            Expr {
+                ty: Type::JsonRoot,
+                kind: ExprKind::Builtin(builtin, operands),
+            },
+            returns,
+            site,
+        )?;
+        let id = self.helpers.reserve();
+        self.helpers.finish(
+            id,
+            comprehensions::Helper {
+                module: self.module,
+                calls: HashSet::new(),
+                class_reads: HashSet::new(),
+                recursion_error: self.graph.modules[self.module].error(
+                    site,
+                    "recursive calls through a JSON decoder are unsupported",
+                ),
+                function: ir::Function {
+                    params: (0..locals.len()).collect(),
+                    locals,
+                    returns,
+                    body: vec![Statement::Return(value)],
+                },
+            },
+        );
+        Ok(Expr {
+            ty: self.types.callable(params, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: context.map(Box::new),
+            },
+        })
+    }
+
     /// Nested array projections may be shared by independent document views.
     /// Only the original root list exposes the existing mutable Python list.
     pub(super) fn json_mutation_receiver(
@@ -774,7 +878,7 @@ pub(super) fn schemas(
 }
 
 fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
-    if types.is_default_list_dict(ty) || types.is_counter(ty) {
+    if types.is_default_list_dict(ty) || types.is_counter(ty) || types.is_ordered_dict(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
     if let Some(inner) = types.payload(ty).or_else(|| types.element(ty)) {

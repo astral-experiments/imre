@@ -1,0 +1,3269 @@
+{
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "compiler_sha256": "d82ff3505d555d99e4b8cf6c51f1281b66829db731970e6c56c3baaac3c10b63",
+  "compiler_tree": "e0d012f12c138cd432f7a72e0dc20c42f21523d4",
+  "runtime_sha256": "d02b66ec69247c7e8f6775816c4c7d523c46f91ad46c19cba28ee16af2654777",
+  "fixture_manifest_sha256": "eb43d0c33580d4a45ffa369afd186b3243f9bf38b15f80fbee02b50254f4bdd9",
+  "reference_sha256": "9312cef909518e6b5cd7ca38219e6a0a68d28bbb7adb77cd28ff2b10f9ea8775",
+  "schema": "imre.shutil-method-attempts.v1",
+  "denominator": 223,
+  "fixture_execution": "original CPython module/class/instance hooks for every attempted method",
+  "cases": {
+    "test.test_shutil.PublicAPITests.test_module_all_attribute": [
+      {
+        "owner": "PublicAPITests",
+        "source": "Lib/test/test_shutil.py:3544",
+        "method_sha256": "1778d18891bc9eabfaa04a6820e896672ddf2765fe960a8ca5457dfbbf54d1c4",
+        "decorated_sha256": "1778d18891bc9eabfaa04a6820e896672ddf2765fe960a8ca5457dfbbf54d1c4",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:8:9: Imre: unknown class method",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_archive": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1913",
+        "method_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
+        "decorated_sha256": "2eca05a3f702f40069ff5eae04b355157beae6a7b1f5008ae3b77f2f3e5220d3",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_archive_cwd": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1986",
+        "method_sha256": "262cc11ec324c881183575fe2b52a325647d8302cde33f371718d52ff28c26aa",
+        "decorated_sha256": "262cc11ec324c881183575fe2b52a325647d8302cde33f371718d52ff28c26aa",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_archive_cwd_default": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1969",
+        "method_sha256": "ac7e5c6435938403b746bba7767d7ef4a6c3a51973f966ded5391c840aa15f62",
+        "decorated_sha256": "ac7e5c6435938403b746bba7767d7ef4a6c3a51973f966ded5391c840aa15f62",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: unsupported sealed standard-library export shutil.register_archive_format",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2009",
+        "method_sha256": "e474716fb289109620631d62740f32228cad36e87ad903f2283f1d8157948159",
+        "decorated_sha256": "e474716fb289109620631d62740f32228cad36e87ad903f2283f1d8157948159",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_archive_owner_group": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1919",
+        "method_sha256": "df9bc24ffcc5d7e15aab19655fbe9740c89216ef32fee822069db7b93e98cdb4",
+        "decorated_sha256": "c7eb1fd14aed1e857ed36c939120ee673ce14362c9461d877743766aa47a41eb",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_tarfile": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1640",
+        "method_sha256": "5570009b4de6c562e6e4b9eab750e13790540ac4d92390f3b73b7e60e0555cac",
+        "decorated_sha256": "8a56f59368a7c04b5f67cac61f903fc770173266efa941b3d11b8f8741869e95",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_tarfile_in_curdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2028",
+        "method_sha256": "06ad77f4c34efb7202198e08917dcc5a84d59fb7357d4af5a74918c65fc5cad1",
+        "decorated_sha256": "06ad77f4c34efb7202198e08917dcc5a84d59fb7357d4af5a74918c65fc5cad1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2061",
+        "method_sha256": "426a75b2674c841ac71fec02618b3692fa1461b32e1d15ed5bbeb75d80e86864",
+        "decorated_sha256": "426a75b2674c841ac71fec02618b3692fa1461b32e1d15ed5bbeb75d80e86864",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1710",
+        "method_sha256": "97c672ef70edc4e9fbcc02efdcb050976f4d0f8463871e687affb8056aaa1a95",
+        "decorated_sha256": "97c672ef70edc4e9fbcc02efdcb050976f4d0f8463871e687affb8056aaa1a95",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_tarfile_without_rootdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1682",
+        "method_sha256": "0c426d5d04c152743ec7f9bc5bc74665b35090dbe897cc529ba2ea4d32e5774d",
+        "decorated_sha256": "6c283c9f52663759b00fa28b7f65f93540d86f4d8c435bc324b763bf69ce8162",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_zipfile": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1773",
+        "method_sha256": "6316e860a7873449659c5dc7fad1f402d96f97e7a4737c6cd1a7d42a83d9c54e",
+        "decorated_sha256": "e80d66567d1c83905a44906e7a16751d381f8a0dc78a473ee790853a5423b328",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_zipfile_in_curdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2037",
+        "method_sha256": "02d4423a73b0b000aaf039f9acbf3a3caf57868ca1eafed3fd81e88b55a909f0",
+        "decorated_sha256": "4a3855bba389c732e29cb3b3d055f291cc07d1d7d28d09caf96ebdf635e87884",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2085",
+        "method_sha256": "9194f94626ff7c0dc4cfb33228c0a85bca675f92d33952c282aff5adb373d112",
+        "decorated_sha256": "0cc76b4755e113589334799c85098cbc5760362d52b03e43ac71c46e224e626d",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1843",
+        "method_sha256": "44f162b528715f5b719a3aa07824c4aaac6e27a8f3c440bd737f19989242f8c1",
+        "decorated_sha256": "ccf1fab6ea5248071e4002065b6849c277ab0627570c1d18838df4055295f24c",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_make_zipfile_without_rootdir": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1813",
+        "method_sha256": "3beb4c453f424d7073567c3edb4ab59e51e452ac0d2133424fb3443d3d10ceb1",
+        "decorated_sha256": "5e2b79aec08d89d47c6d04a2cf75223e0f6665f21839bdd6c8f49adbe304e14c",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_register_archive_format": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2045",
+        "method_sha256": "883209aa283874017b2b167dab97a7f1070881adaa8bb1e539023bb3555a70e2",
+        "decorated_sha256": "883209aa283874017b2b167dab97a7f1070881adaa8bb1e539023bb3555a70e2",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: unsupported sealed standard-library export shutil.register_archive_format",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_tarfile_root_owner": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1948",
+        "method_sha256": "a47ca70e1fa2e2fafdd1b0a13645db20de2b4e1897902b1ccffd1308eeaa645f",
+        "decorated_sha256": "e170d96d7614feac882a2cd12db38a38da6cc673d84fc6403c40fbdc3c58a53a",
+        "decorators": [
+          "support.requires_zlib()",
+          "unittest.skipUnless(UID_GID_SUPPORT, 'Requires grp and pwd support')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_tarfile_vs_tar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1728",
+        "method_sha256": "62148fc937f314e530f1d7d512ea6cb696c5594b20285fccbd9d9d0497bd559a",
+        "decorated_sha256": "9ba426995e2c6932212752e83702a3d4de7e39b5164010de1661383602e60869",
+        "decorators": [
+          "support.requires_zlib()",
+          "unittest.skipUnless(shutil.which('tar'), 'Need the tar command to run')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_bztar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2151",
+        "method_sha256": "cfdde53e0bbcb7861fbce8bbbec4d7749a22346a3141eca4ffe92be5c2ef7817",
+        "decorated_sha256": "b970c1072af440c4f3daedc26908ccf2f6a727e0950b5183b979c5fcd39c648d",
+        "decorators": [
+          "support.requires_bz2()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_gztar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2147",
+        "method_sha256": "106120cb576e54e8763687063d836e79993000638230e906fd08ec6a1e0c4c56",
+        "decorated_sha256": "89e049d67405a688f14ddbb840b0115b7db2cfc53a384273467f4420f1315148",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_tar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2143",
+        "method_sha256": "99076c28a28e7402ea3191e55b97edc24c2d5325baded48df73e582ba51fdd0f",
+        "decorated_sha256": "99076c28a28e7402ea3191e55b97edc24c2d5325baded48df73e582ba51fdd0f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_xztar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2160",
+        "method_sha256": "08583e865d3efa17e94cbde89b80f1262f8c6ec7c9cb79252d1dc8cc4c81884b",
+        "decorated_sha256": "67f6675c61d377a3c2d8ce7e84f4d0769d04f93130a7ad3add802cc490e0c313",
+        "decorators": [
+          "support.requires_lzma()",
+          "unittest.skipIf(AIX and (not _maxdataOK()), 'AIX MAXDATA must be 0x20000000 or larger')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_zip": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2164",
+        "method_sha256": "059ceb806285db9c09c235b3e42311de17ec7b71dd75ebc37ace6542a030d67e",
+        "decorated_sha256": "9fb57c6a34604250d48042dee9e547c549b7fbb622f4087868f90bc0d7eea81b",
+        "decorators": [
+          "support.requires_zlib()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2169",
+        "method_sha256": "c53458c3f724c8fd60baa83c1b6fe5c7279df3589f9376ee941dc4e26dcc2a5d",
+        "decorated_sha256": "c53458c3f724c8fd60baa83c1b6fe5c7279df3589f9376ee941dc4e26dcc2a5d",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_archive_zstdtar": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2155",
+        "method_sha256": "d351af948c03593a247812b323d3e342144a6eb4d67ead3e51c17ba46a3d2cf4",
+        "decorated_sha256": "9f480835980deac6a99080bca0ccf4b925864d91edb6e261c07e04c9798a5df6",
+        "decorators": [
+          "support.requires_zstd()"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unpack_registry": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:2234",
+        "method_sha256": "ea2962d207e971d5e6b8d76c5375eeb8298742ef723f75fa812ea52563a14ad5",
+        "decorated_sha256": "ea2962d207e971d5e6b8d76c5375eeb8298742ef723f75fa812ea52563a14ad5",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: unsupported sealed standard-library export shutil.get_unpack_formats",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_unzip_zipfile": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1888",
+        "method_sha256": "7ab99b0cbc9be019cc057809d81807f1746997af13729afb43c220eb8f7d1bbd",
+        "decorated_sha256": "235f44e25cfec82766483359578b5c5baab14d55f7596ee0cf96e5b35d6a25b3",
+        "decorators": [
+          "support.requires_zlib()",
+          "unittest.skipUnless(shutil.which('unzip'), 'Need the unzip command to run')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestArchives.test_zipfile_vs_zip": [
+      {
+        "owner": "TestArchives",
+        "source": "Lib/test/test_shutil.py:1861",
+        "method_sha256": "3e788028955c8badc22b00879a3b82306df94f9cb91f7e611830bf7fbbd50f3b",
+        "decorated_sha256": "143d52f18cc43851572876e5b5ca6e02b7b7e3f29330a4a60ecde5562edae57c",
+        "decorators": [
+          "support.requires_zlib()",
+          "unittest.skipUnless(shutil.which('zip'), 'Need the zip command to run')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1356",
+        "method_sha256": "5f9b2d555cfa3b45d519c801e6048a5c5c7933b1235e992f9087e439030b87e8",
+        "decorated_sha256": "5f9b2d555cfa3b45d519c801e6048a5c5c7933b1235e992f9087e439030b87e8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy2": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1388",
+        "method_sha256": "424706c50921bcf6fc9599f918ec8178a5b4cf6614362803a1fd53e218a176db",
+        "decorated_sha256": "d60a7385748009bfad6644ae7574c2b0b745fae8d3000917d272ff46c4416011",
+        "decorators": [
+          "unittest.skipUnless(hasattr(os, 'utime'), 'requires os.utime')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy2_dir": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1467",
+        "method_sha256": "7b9b40404f3429fe21451dd1da78ff14e8718cf41fb7b229f1d5bf2dae0d21b3",
+        "decorated_sha256": "7b9b40404f3429fe21451dd1da78ff14e8718cf41fb7b229f1d5bf2dae0d21b3",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy2_symlinks": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1405",
+        "method_sha256": "d385881ea73ccfe23b72ceda1b52e8a9cfc60c4acfe312099d0c62e30fed8c6e",
+        "decorated_sha256": "630847dc55fccb7578367f048eb1c698fb9d9c8cb0f1009aecb7ae7e4247d653",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy2_xattr": [
+      {
+        "status": "reference-skip",
+        "reason": "no non-broken extended attribute support",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy_dir": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1464",
+        "method_sha256": "6132f59dcb58ef6c656be61af99ed64914fabdcb2e1b77b7654b9154a038c1f4",
+        "decorated_sha256": "6132f59dcb58ef6c656be61af99ed64914fabdcb2e1b77b7654b9154a038c1f4",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy_return_value": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1452",
+        "method_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95",
+        "decorated_sha256": "28cfe0a8d55255f315399cf57eb978b6073f1921afdcae609598e4de55040f95",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copy_symlinks": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1363",
+        "method_sha256": "0dc7a05f4564944474912fa339d19ecfc3870e961a859671ea4f77362c071634",
+        "decorated_sha256": "e0f63d133dd7f0449746078208e6c4cfbc7237efb6dc11ced0c570eee04dfba9",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_copy_dir": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1596",
+        "method_sha256": "07b9bccb98d15b46459bede77752edb3b42d30f72c4b29182e0f64fe2f77b944",
+        "decorated_sha256": "07b9bccb98d15b46459bede77752edb3b42d30f72c4b29182e0f64fe2f77b944",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_named_pipe": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1547",
+        "method_sha256": "4721f2b310103957a9a02d2aeb8c77961b4e832aa641865d8b4b928d61239e49",
+        "decorated_sha256": "13d2b3c5015bf1909d672bb2c55f379ff835114b1434b0761e8f3a307192e3a8",
+        "decorators": [
+          "unittest.skipUnless(hasattr(os, 'mkfifo'), 'requires os.mkfifo()')",
+          "unittest.skipIf(sys.platform == 'vxworks', 'fifo requires special path on VxWorks')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:11:5: Imre: method decorators cannot be stacked",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_nonexistent_dir": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1588",
+        "method_sha256": "a21e823c258c389eeb71c39ece473a3b28f9bba90e302587898be937c61212e4",
+        "decorated_sha256": "0231a8cb161f1a1d9cdbf81c9ce649fd85a7cf157da2b798da88858e459d9fb6",
+        "decorators": [
+          "unittest.skipIf(MACOS or SOLARIS or _winapi, 'On MACOS, Solaris and Windows the errors are not confusing (though different)')",
+          "unittest.skipIf(AIX, 'Not valid on AIX, see gh-92670')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_return_value": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1560",
+        "method_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705",
+        "decorated_sha256": "5c545f087d4996a8d0132e51b3cb6ee5a33f78a628fbc12aa8446cdaac0ce705",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_same_file": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1571",
+        "method_sha256": "d36c4fda6ce4f21002e063a668eb4cfb8fcdb46cf46ce601ceea208449c8837f",
+        "decorated_sha256": "d36c4fda6ce4f21002e063a668eb4cfb8fcdb46cf46ce601ceea208449c8837f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyfile_symlinks": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1489",
+        "method_sha256": "4efa303201f053e12292137a00503101661f50ce8dfc5431acad9287ba1335c9",
+        "decorated_sha256": "598749fe38579b80992cdd5b085a1ddb769289d45dad43c1e56bdc2108a4a0ef",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copymode_follow_symlinks": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1107",
+        "method_sha256": "062a2aa626a56640e9e43dc59421775d129f39aee89262c98ae9dc4ef1594d00",
+        "decorated_sha256": "8420c2c82bd5a9582237b8344c270417f01936d0a88f2bb6b70b8846c603ec24",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copymode_symlink_to_symlink": [
+      {
+        "status": "reference-skip",
+        "reason": "requires os.lchmod",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copymode_symlink_to_symlink_wo_lchmod": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1170",
+        "method_sha256": "40849c6b96646a133f6fced2be16402736d8db2918ed4232ea3ab33d3c378433",
+        "decorated_sha256": "3ebbbc9b5e95cdf67832fa4e485fd3811e03db5feec87652feadab465f1c09c5",
+        "decorators": [
+          "unittest.skipIf(hasattr(os, 'lchmod'), 'requires os.lchmod to be missing')",
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors": [
+      {
+        "status": "reference-skip",
+        "reason": "requires os.chflags, EOPNOTSUPP & ENOTSUP",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copystat_symlinks": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1185",
+        "method_sha256": "f91fd354812ad0f97fe390232334e6b33c68a0faafb76601eb7d624324fcc942",
+        "decorated_sha256": "610accae765d079fbed9375dd8d88829ae5eeaec806d00a98abafde2bdd3e755",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyxattr": [
+      {
+        "status": "reference-skip",
+        "reason": "no non-broken extended attribute support",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_copyxattr_symlinks": [
+      {
+        "status": "reference-skip",
+        "reason": "no non-broken extended attribute support",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1506",
+        "method_sha256": "18e1f35926fe88ece7029c28400ad4333b7f2556ec138ac856604c8551982281",
+        "decorated_sha256": "98b7510587e979718c82e78ef0e004652ecf96b260777349f4dc258f36cdfef9",
+        "decorators": [
+          "unittest.skipUnless(hasattr(os, 'link'), 'requires os.link')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:21:5: Imre: unsupported method decorator on a fixed-layout class",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself": [
+      {
+        "owner": "TestCopy",
+        "source": "Lib/test/test_shutil.py:1525",
+        "method_sha256": "54b35893536acf1e792d623705ba5e064edbb151b4b34db4fcf042eab96dc780",
+        "decorated_sha256": "11680b7a96e38a2ad9f45a6a7f06e3f9bce8f3b6f44a5a8f752fcff8e015c545",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFile.test_w_dest_close_fails": [
+      {
+        "owner": "TestCopyFile",
+        "source": "Lib/test/test_shutil.py:3091",
+        "method_sha256": "ae67c2ca0633fb7d82d7adc821515c4f9e230eb54565f17eafcd4a791684774b",
+        "decorated_sha256": "f44b37beefa07a472f00be1412eabd47ffc5054a59539f750c8c8ee786245ba7",
+        "decorators": [
+          "unittest.skipIf(MACOS, 'skipped on macOS')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFile.test_w_dest_open_fails": [
+      {
+        "owner": "TestCopyFile",
+        "source": "Lib/test/test_shutil.py:3073",
+        "method_sha256": "29f06011541568ddb066a1c4f3f66a1cef9391f4298924fb1ba8831f20b4880d",
+        "decorated_sha256": "aa4033a2d51992057c413b14662ca1d4499d5166260764208243690650817cc0",
+        "decorators": [
+          "unittest.skipIf(MACOS, 'skipped on macOS')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFile.test_w_source_close_fails": [
+      {
+        "owner": "TestCopyFile",
+        "source": "Lib/test/test_shutil.py:3112",
+        "method_sha256": "132c34c60954bd05e23d9b5c21da3513452d90eec14cc3d4e708223eec603f75",
+        "decorated_sha256": "bf5b2ed7d5ae75293d4bfc567c5b9ecac694cc55f397869770744d1db34305f0",
+        "decorators": [
+          "unittest.skipIf(MACOS, 'skipped on macOS')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFile.test_w_source_open_fails": [
+      {
+        "owner": "TestCopyFile",
+        "source": "Lib/test/test_shutil.py:3062",
+        "method_sha256": "846ea9f6122bc28b6073e2fed5469ae446f4c27ce49d878dcc79c947a8b8e790",
+        "decorated_sha256": "846ea9f6122bc28b6073e2fed5469ae446f4c27ce49d878dcc79c947a8b8e790",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFileObj.test_content": [
+      {
+        "owner": "TestCopyFileObj",
+        "source": "Lib/test/test_shutil.py:3160",
+        "method_sha256": "10598ecd63b54b78b1bc359a10c047a31ef89b39bf04f2433908bd3dc8cb9b0e",
+        "decorated_sha256": "10598ecd63b54b78b1bc359a10c047a31ef89b39bf04f2433908bd3dc8cb9b0e",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:13:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFileObj.test_file_not_closed": [
+      {
+        "owner": "TestCopyFileObj",
+        "source": "Lib/test/test_shutil.py:3165",
+        "method_sha256": "abcf8a016abff1746eddb5f35c619d370503c7d540b19eb4a51f3e24acc5bb2a",
+        "decorated_sha256": "abcf8a016abff1746eddb5f35c619d370503c7d540b19eb4a51f3e24acc5bb2a",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:8:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFileObj.test_file_offset": [
+      {
+        "owner": "TestCopyFileObj",
+        "source": "Lib/test/test_shutil.py:3171",
+        "method_sha256": "6ae1d118fb1d307845bf6a7de93adf6db9c3c811dc95fefcfbd3d73598865f2f",
+        "decorated_sha256": "6ae1d118fb1d307845bf6a7de93adf6db9c3c811dc95fefcfbd3d73598865f2f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:8:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyFileObj.test_win_impl": [
+      {
+        "status": "reference-skip",
+        "reason": "Windows only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:893",
+        "method_sha256": "4cd749bf988c669e8940d6fff2a669a07fcf4f240bfc6cab576b77ab7d8583b1",
+        "decorated_sha256": "4cd749bf988c669e8940d6fff2a669a07fcf4f240bfc6cab576b77ab7d8583b1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_custom_copy_function": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:976",
+        "method_sha256": "199df0df5fed05e6df5256e00b9f95886c2062adc265d54690bf88cc33a20d5b",
+        "decorated_sha256": "199df0df5fed05e6df5256e00b9f95886c2062adc265d54690bf88cc33a20d5b",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:1035",
+        "method_sha256": "0417033f735b679e760b136176dc0ae709280c27ba14106c08804fad2c084e10",
+        "decorated_sha256": "efcbb317f940e92313e47bd0bace7087d447c28bca8dc759b2d5cc0f0aa44dc2",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:771",
+        "method_sha256": "f270ab7a3ee1da5b17023ff19c1a984ec659721393904ac261472b758bec5c15",
+        "decorated_sha256": "f270ab7a3ee1da5b17023ff19c1a984ec659721393904ac261472b758bec5c15",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_named_pipe": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:997",
+        "method_sha256": "05f747ede888d83f769a723ecb3d8717ada5703d6be90722fae82eb26089133c",
+        "decorated_sha256": "a5757792a714ad0fd6abcc1f867a3618e7308100f18e114c3564c9b777a55f5f",
+        "decorators": [
+          "unittest.skipUnless(hasattr(os, 'mkfifo'), 'requires os.mkfifo()')",
+          "os_helper.skip_unless_symlink",
+          "unittest.skipIf(sys.platform == 'vxworks', 'fifo requires special path on VxWorks')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_retains_permissions": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:935",
+        "method_sha256": "8f216dbbb18a619293f06127e5ca7c434f2a882d2d6f2ea275f4e66abc881d2f",
+        "decorated_sha256": "8f216dbbb18a619293f06127e5ca7c434f2a882d2d6f2ea275f4e66abc881d2f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_return_value": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:1080",
+        "method_sha256": "32ec3efb8d46f59f4ee7ef761b0df48067f37285d2bd96585cf3dd3c1853dcae",
+        "decorated_sha256": "32ec3efb8d46f59f4ee7ef761b0df48067f37285d2bd96585cf3dd3c1853dcae",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_simple": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:752",
+        "method_sha256": "db3b1a30939bc476836d849ed3d2f2562f9179ec4c2fb5bf0c4863227f1d8b50",
+        "decorated_sha256": "db3b1a30939bc476836d849ed3d2f2562f9179ec4c2fb5bf0c4863227f1d8b50",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_special_func": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:1020",
+        "method_sha256": "a416e9ed1269ea51ea183653b156c18b99ca159257f7496b8164ae81ecebc6a4",
+        "decorated_sha256": "a416e9ed1269ea51ea183653b156c18b99ca159257f7496b8164ae81ecebc6a4",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_subdirectory": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:1090",
+        "method_sha256": "6e34a322b18f9ae02a630b34e2cbb51af5bdf6ce8f3f3db71e381bdc4528eb30",
+        "decorated_sha256": "6e34a322b18f9ae02a630b34e2cbb51af5bdf6ce8f3f3db71e381bdc4528eb30",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_symlink_dir": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:1062",
+        "method_sha256": "c60e6821d300e5990c3c0583af41ae9948940db85dadcf72955f1646fa5ac1e8",
+        "decorated_sha256": "1ba7bc58839bfbc83fb060f869a8619ac6330dd52e481ae4d6db299b33f40f26",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_symlinks": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:797",
+        "method_sha256": "1ed9002e9f2e71d07198d638ca3a0fa3d7efba7531e94ef1d89ee9b1c845529a",
+        "decorated_sha256": "e2c4cebdcf16a9b1cd865ead8628be8ff96ccaf254122077bdc0c732eb88210a",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_winerror": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:963",
+        "method_sha256": "1470cae99be5c8d417b3ab6ad32d27ff2f6e68d45587a823e8460b14367a74d3",
+        "decorated_sha256": "12f561debfd0de8bbbe090eebea59fa2c14f8a3a1395c134fd7f99b9166b9f82",
+        "decorators": [
+          "unittest.mock.patch('os.chmod')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestCopyTree.test_copytree_with_exclude": [
+      {
+        "owner": "TestCopyTree",
+        "source": "Lib/test/test_shutil.py:828",
+        "method_sha256": "6942b2d1c323ab50798bc987a6d03155eef1de678d8a637d35b9e81f63c98532",
+        "decorated_sha256": "6942b2d1c323ab50798bc987a6d03155eef1de678d8a637d35b9e81f63c98532",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestGetTerminalSize.test_bad_environ": [
+      {
+        "owner": "TestGetTerminalSize",
+        "source": "Lib/test/test_shutil.py:3489",
+        "method_sha256": "8b256f2cbdb5ae01623239937ec7ee916f4720f6876dc16e374fb6944c9c0d23",
+        "decorated_sha256": "8b256f2cbdb5ae01623239937ec7ee916f4720f6876dc16e374fb6944c9c0d23",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestGetTerminalSize.test_does_not_crash": [
+      {
+        "owner": "TestGetTerminalSize",
+        "source": "Lib/test/test_shutil.py:3464",
+        "method_sha256": "d3c63d7a55b270ed883eb37b0fb7ac7b79b8ed6ac84924dfa5b28973db56fd38",
+        "decorated_sha256": "d3c63d7a55b270ed883eb37b0fb7ac7b79b8ed6ac84924dfa5b28973db56fd38",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:12:16: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestGetTerminalSize.test_fallback": [
+      {
+        "owner": "TestGetTerminalSize",
+        "source": "Lib/test/test_shutil.py:3522",
+        "method_sha256": "ceaa01002c7a9acc83d39e092a2e45b704a95cf132d8bd579e8877bc51a251af",
+        "decorated_sha256": "c360d48a8554076f322fa969f55eabd74f7932da1579e46f29d39dfa97704dfa",
+        "decorators": [
+          "unittest.skipIf(support.is_wasi, 'WASI has no /dev/null')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestGetTerminalSize.test_os_environ_first": [
+      {
+        "owner": "TestGetTerminalSize",
+        "source": "Lib/test/test_shutil.py:3474",
+        "method_sha256": "46edc670e7e0f6f13ca6e214f33845cc2e1ccaee6380bf41f0d3edf6d9c164f2",
+        "decorated_sha256": "46edc670e7e0f6f13ca6e214f33845cc2e1ccaee6380bf41f0d3edf6d9c164f2",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestGetTerminalSize.test_stty_match": [
+      {
+        "status": "reference-skip",
+        "reason": "not on tty",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMisc.test_chown": [
+      {
+        "owner": "TestMisc",
+        "source": "Lib/test/test_shutil.py:2280",
+        "method_sha256": "1a3fad57ee781ec1f4023946bf9d10a509da95e762c70972e291566959529401",
+        "decorated_sha256": "d0261662c6955f453b025d631322910ba3ed9746bf908f09cf55c80a289b2adb",
+        "decorators": [
+          "unittest.skipUnless(UID_GID_SUPPORT, 'Requires grp and pwd support')",
+          "unittest.skipUnless(hasattr(os, 'chown'), 'requires os.chown')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMisc.test_disk_usage": [
+      {
+        "owner": "TestMisc",
+        "source": "Lib/test/test_shutil.py:2265",
+        "method_sha256": "20c3f0d395b38c402ab51fad75dcd6ea191f1905fe1939d67c7a7e4fedaf5660",
+        "decorated_sha256": "293c692a826663f85df3c427e443e069421bdbc1b13c301a110bc97b0a83cfd2",
+        "decorators": [
+          "unittest.skipUnless(hasattr(shutil, 'disk_usage'), 'disk_usage not available on this platform')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:8:5: Imre: unsupported method decorator on a fixed-layout class",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_destinsrc_false_negative": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2867",
+        "method_sha256": "f6184f9424a7a6260dd1d27869917181bcbd790baeaa40834c06ab963cbd3e86",
+        "decorated_sha256": "f6184f9424a7a6260dd1d27869917181bcbd790baeaa40834c06ab963cbd3e86",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_destinsrc_false_positive": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2879",
+        "method_sha256": "fd110d8299763a4bfc8e312dd8124e203f1fee51eef85e94d62284bc34d756d1",
+        "decorated_sha256": "fd110d8299763a4bfc8e312dd8124e203f1fee51eef85e94d62284bc34d756d1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_dont_move_dir_in_itself": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2862",
+        "method_sha256": "1820efba7e67dd94e659da8a4402d72b11cf513b4204c5482f913b0c572e7e5f",
+        "decorated_sha256": "1820efba7e67dd94e659da8a4402d72b11cf513b4204c5482f913b0c572e7e5f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:14:9: Imre: unknown class method",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_existing_file_inside_dest_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2857",
+        "method_sha256": "4be66876c705683a9339a0ae0edbcac527dede1c6823b48c513c25657f895dc1",
+        "decorated_sha256": "4be66876c705683a9339a0ae0edbcac527dede1c6823b48c513c25657f895dc1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:11:16: Imre: argument unpacking requires a source-defined function or method",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_as_rename_return_value": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2939",
+        "method_sha256": "dbd1d68a2e375d6e6efb6adf1bfd8bb855eec38cce7ec4795a1cf07098e17ec7",
+        "decorated_sha256": "dbd1d68a2e375d6e6efb6adf1bfd8bb855eec38cce7ec4795a1cf07098e17ec7",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:14:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dangling_symlink": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2913",
+        "method_sha256": "780982bd030439bfee4ab97244170ccdaf5cd5b14a5fcd89fb38613682e917af",
+        "decorated_sha256": "24d6dbc941f2cec1647e75efd854983276676f4a2eb776675e29a771ff1bc29e",
+        "decorators": [
+          "os_helper.skip_unless_symlink",
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2825",
+        "method_sha256": "cd584f230be0e6a9731e20997c017165d954fc70f0f20939ba33dfc0891f6a8f",
+        "decorated_sha256": "cd584f230be0e6a9731e20997c017165d954fc70f0f20939ba33dfc0891f6a8f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_altsep_to_dir": [
+      {
+        "status": "reference-skip",
+        "reason": "requires os.path.altsep",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_caseinsensitive": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2961",
+        "method_sha256": "402cf28089aa26aa0d854fb50c3266c8b293cc357aba8c45ec5f248289197dd1",
+        "decorated_sha256": "402cf28089aa26aa0d854fb50c3266c8b293cc357aba8c45ec5f248289197dd1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_other_fs": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2834",
+        "method_sha256": "26404fa9907dc534b697795162e86afc66e16196d219a27bbe62027964df6492",
+        "decorated_sha256": "9fdceafa7ea6f8359d24a36c7e8c465d41f037de43ad7b6a00bf791ff8088a4e",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_permission_denied": [
+      {
+        "status": "reference-skip",
+        "reason": "requires CAP_DAC_OVERRIDE",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_sep_to_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2848",
+        "method_sha256": "1972a7b50fe4ff8889a05aeb0cd24e27239e03314c59f512fc588337dfc5653a",
+        "decorated_sha256": "1972a7b50fe4ff8889a05aeb0cd24e27239e03314c59f512fc588337dfc5653a",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:20:45: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_special_function": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2952",
+        "method_sha256": "04e92e0b30b72f7286eb92667f90115390cd49c2d760e45a3f14a219896fa4a0",
+        "decorated_sha256": "e72b5d6744e0e4e191bdd9f16c690e4b47f669ff215721454dd88e6bce5994fb",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_symlink": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2924",
+        "method_sha256": "075dba73e1fbf40739859f339ac11451502e6498e1e9bf7d461eb6e1144d53a2",
+        "decorated_sha256": "4b5b149e7d7c542a2c8597e68d28ab76623e565677699743d25f81622088040e",
+        "decorators": [
+          "os_helper.skip_unless_symlink",
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_to_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2838",
+        "method_sha256": "710a58fd44575d015bd7ac051110e399a748f09e449efd00164c32ba21a9ea69",
+        "decorated_sha256": "710a58fd44575d015bd7ac051110e399a748f09e449efd00164c32ba21a9ea69",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:13:27: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_dir_to_dir_other_fs": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2844",
+        "method_sha256": "ae0c43aa4ff3575171c425c25f6b69dc45988eff95a06a1331e2b8bf274aa1a2",
+        "decorated_sha256": "0ca3d57d536f71cffc682ae8ce5c1bf1e3801062e23c2db31335c563fe4c7f84",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2797",
+        "method_sha256": "0644aa8603e32f510cf59230549b32cd082ab5dc07e80cd7f4f6d9a61400a6cc",
+        "decorated_sha256": "0644aa8603e32f510cf59230549b32cd082ab5dc07e80cd7f4f6d9a61400a6cc",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:15:9: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_other_fs": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2816",
+        "method_sha256": "49b9ec5d5220437427c7bff07331af1a02fa75ca086a88fc3e5fb27e1d532c2d",
+        "decorated_sha256": "c82cb0590b13d76456969b9d5350f720c273e58e1b570bb2ea3b2dc10ad797bb",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_special_function": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2944",
+        "method_sha256": "3ae48e532ce4c0f33d0f0b2371b86754ffb7781cfabcf4921f2bd695b0a24a59",
+        "decorated_sha256": "e59a37be949f8ace75e85a4a85ade054e449040e07d69a1e834a5bc13ac2630b",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_symlink": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2893",
+        "method_sha256": "c2a02374d481c78c9c538e0d58463d42328e66e6f653b19082ddaa83876cf5a1",
+        "decorated_sha256": "106752e6213f82b3901fa032f131f226adb2316a194eaa523116712f7dd04df8",
+        "decorators": [
+          "os_helper.skip_unless_symlink",
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_symlink_to_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2902",
+        "method_sha256": "6a3f984a0162f3de024233268f9cf6f930b90f7a742a1a3cec01654ce4842acf",
+        "decorated_sha256": "67a8902caea144a04629f429cf71c0b2bd79a39bfda33481630dd0e94d6ca6f3",
+        "decorators": [
+          "os_helper.skip_unless_symlink",
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_to_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2801",
+        "method_sha256": "0a5caa86e17167c82133cacc9e555fa44f39a3923f982c621f3a8f49593cdec8",
+        "decorated_sha256": "0a5caa86e17167c82133cacc9e555fa44f39a3923f982c621f3a8f49593cdec8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:17:9: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_to_dir_other_fs": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2821",
+        "method_sha256": "db193dc96503ca5afb043fc889ba0dafca7ed3c1a85228ee20de772383ddc6b2",
+        "decorated_sha256": "de5852eee81dcf40b6887fd013afe3982aa380cb1532b4465dba9a85c9228e72",
+        "decorators": [
+          "mock_rename"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_to_dir_pathlike_dst": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2810",
+        "method_sha256": "4aae11c33b0a852fd18ce8479bfe3a6c1d0d16db03aab5a8b5e742672a4024bc",
+        "decorated_sha256": "4aae11c33b0a852fd18ce8479bfe3a6c1d0d16db03aab5a8b5e742672a4024bc",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_file_to_dir_pathlike_src": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2805",
+        "method_sha256": "e5d0d0dd8cb969b9046782094f947fb4f85b46d1697e0cd727207ef842914016",
+        "decorated_sha256": "e5d0d0dd8cb969b9046782094f947fb4f85b46d1697e0cd727207ef842914016",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_return_value": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2934",
+        "method_sha256": "c2e6c87923a55a6bef273f3fc171b2e2d0ff5a5eb61b3bfbc908da7ada76f32e",
+        "decorated_sha256": "c2e6c87923a55a6bef273f3fc171b2e2d0ff5a5eb61b3bfbc908da7ada76f32e",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:14:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_symlink_to_dir_into_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:2998",
+        "method_sha256": "3a14d042575a7d2119bcdcfeb76d7e3208f09cb212d6e7d433ab9f41e70d0d63",
+        "decorated_sha256": "54a3d25d70b59df79678f497b7cbaa630449133de33241848f3069eb64e7f817",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestMove.test_move_symlink_to_dir_into_symlink_to_dir": [
+      {
+        "owner": "TestMove",
+        "source": "Lib/test/test_shutil.py:3002",
+        "method_sha256": "a0b837df3c2e4166f1c0460c723dbe9d5404de28fe181c3bef235cd1e245bb0e",
+        "decorated_sha256": "1ae304239b356e0d5811fa54f985e8d752fe341cdf19ff8ca3773054fb985644",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_both_onerror_and_onexc": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:500",
+        "method_sha256": "d4147046618c40c207e075137bfb5af54cda0df11e90a5b197111ae53841759e",
+        "decorated_sha256": "5c9e57d4f5e7ca705c364930962ec7dddaf87bbe58f323f76f4a28b23406a219",
+        "decorators": [
+          "unittest.skipIf(sys.platform[:6] == 'cygwin', \"This test can't be run on Cygwin (issue #1071513).\")",
+          "os_helper.skip_if_dac_override",
+          "os_helper.skip_unless_working_chmod"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_on_error": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:384",
+        "method_sha256": "ee6129c1e995ca12241f24c30f3d814f56dea6c6da943e10baa31a279393c886",
+        "decorated_sha256": "226390a7764bf9b417f84b0406a8e5a4cf4ada1a2a962bce8ddcf8bdeab9854b",
+        "decorators": [
+          "unittest.skipIf(sys.platform[:6] == 'cygwin', \"This test can't be run on Cygwin (issue #1071513).\")",
+          "os_helper.skip_if_dac_override",
+          "os_helper.skip_unless_working_chmod"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_on_exc": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:442",
+        "method_sha256": "7f835493a0e2583ff5213cb6cf78ae49509c9af7ac86dec374db48e3657197de",
+        "decorated_sha256": "f60f44daebe1e010a853c90dc23dbd3ab9f3ff184b6cae0432a07a7011dbc67c",
+        "decorators": [
+          "unittest.skipIf(sys.platform[:6] == 'cygwin', \"This test can't be run on Cygwin (issue #1071513).\")",
+          "os_helper.skip_if_dac_override",
+          "os_helper.skip_unless_working_chmod"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:739",
+        "method_sha256": "5ffcdc176dbc928698b9e7f185d910b3053fc1df83339e3e47472685bba1dee8",
+        "decorated_sha256": "5ffcdc176dbc928698b9e7f185d910b3053fc1df83339e3e47472685bba1dee8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:686",
+        "method_sha256": "86a9e7a7ce6fb79224b6d1ed90ca698c1b0c79960d267740e690c943d896f256",
+        "decorated_sha256": "2577f66045b28516ebed24edfb9775c2a4fb53ceaff7f46925871e189ddef5a9",
+        "decorators": [
+          "unittest.skipIf(sys.platform[:6] == 'cygwin', \"This test can't be run on Cygwin (issue #1071513).\")",
+          "os_helper.skip_if_dac_override",
+          "os_helper.skip_unless_working_chmod"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:536",
+        "method_sha256": "ebbe012bdc5741f66551f72c5785c07c96bcdf0415a3faf3ab1c6832f77dc0c7",
+        "decorated_sha256": "ebbe012bdc5741f66551f72c5785c07c96bcdf0415a3faf3ab1c6832f77dc0c7",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:23:26: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_dont_delete_file": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:630",
+        "method_sha256": "6bcbbd9e0bf9403ca0150ab65071eba3f6ab51ac0f973412fa4c2ac41cd419c8",
+        "decorated_sha256": "6bcbbd9e0bf9403ca0150ab65071eba3f6ab51ac0f973412fa4c2ac41cd419c8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_errors": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:317",
+        "method_sha256": "706c15bc99c18f298a5a4e2c61b000700fea36fb6cb7903c0d8560464ccc4273",
+        "decorated_sha256": "706c15bc99c18f298a5a4e2c61b000700fea36fb6cb7903c0d8560464ccc4273",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_errors_onerror": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:344",
+        "method_sha256": "5d69f37da525b7871b95bc5a080b61feb52c0356ae762bd3ba527be850f15ea1",
+        "decorated_sha256": "5d69f37da525b7871b95bc5a080b61feb52c0356ae762bd3ba527be850f15ea1",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_errors_onexc": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:362",
+        "method_sha256": "3365a2b0a8e928458f1506d66d23fb941a10cad6c54f4d7167ce1cf0332c9d06",
+        "decorated_sha256": "3365a2b0a8e928458f1506d66d23fb941a10cad6c54f4d7167ce1cf0332c9d06",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_close": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:575",
+        "method_sha256": "2e0b76005226674436196de79b3b048d1d3ea7231abdd90e2281f14e18151d88",
+        "decorated_sha256": "3100896665b0e641ae5b6a40f95b221764b99abfadad9d7648b73c398d26bc72",
+        "decorators": [
+          "unittest.skipUnless(shutil.rmtree.avoids_symlink_attacks, 'requires safe rmtree')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror": [
+      {
+        "status": "reference-skip",
+        "reason": "only relevant on Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc": [
+      {
+        "status": "reference-skip",
+        "reason": "only relevant on Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:196",
+        "method_sha256": "7b8e7fda274afbcfe103a748fd0187f53b3bcc518ca9705d473630c345b3074a",
+        "decorated_sha256": "0bef79a83dea5ed68fff7fb80e4952e429497672e44895489671606c331d3d85",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:215",
+        "method_sha256": "7211ea56308613a5203175642921bc1e0cf7cec5448e425b98311fe86ace05b6",
+        "decorated_sha256": "f9f0ddf3121b517b3e02746df75bab34da7d14e4d11ba18b07eb041bde013b9d",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_on_junction": [
+      {
+        "status": "reference-skip",
+        "reason": "only relevant on Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_on_named_pipe": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:668",
+        "method_sha256": "557b7fa0a894ffda83a2100d1f6c36851f569cd15608580b2f937c9b55a3c844",
+        "decorated_sha256": "5c4461f86de35436920d63f97cdbea1712bc3f3243b62f450fc73b19dfe744c2",
+        "decorators": [
+          "unittest.skipUnless(hasattr(os, 'mkfifo'), 'requires os.mkfifo()')",
+          "unittest.skipIf(sys.platform == 'vxworks', 'fifo requires special path on VxWorks')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:9:5: Imre: method decorators cannot be stacked",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_on_symlink": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:638",
+        "method_sha256": "84a7341c3ed27d087276cfaf60c918bf2ab92141c58d62ddec1f7c061657fbe0",
+        "decorated_sha256": "36ef7bab799408b74ea5cd13793f41e353026471be906aed67b0eb05422317e1",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:552",
+        "method_sha256": "518daa56dd1872e07c34cae544f2a825a17ce8bed9ed2a17ed9643cae4e70134",
+        "decorated_sha256": "518daa56dd1872e07c34cae544f2a825a17ce8bed9ed2a17ed9643cae4e70134",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:610",
+        "method_sha256": "033e97af35b53a073e21705ae418e12b0ec7e47f4edc2ae49a3eb807db6c6d93",
+        "decorated_sha256": "2a426d6ead46a5b38cd3ef69e489b4ff98d7d3a184209906b3e0b0d2b689e392",
+        "decorators": [
+          "unittest.skipUnless(shutil.rmtree.avoids_symlink_attacks, 'dir_fd is not supported')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported": [
+      {
+        "status": "reference-skip",
+        "reason": "dir_fd is supported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_bytes": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:186",
+        "method_sha256": "15f79c53229e58ce44e9b79c8c56143d2c95d60a7538b7ef1d946e3b910b264f",
+        "decorated_sha256": "15f79c53229e58ce44e9b79c8c56143d2c95d60a7538b7ef1d946e3b910b264f",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_junctions": [
+      {
+        "status": "reference-skip",
+        "reason": "only relevant on Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks": [
+      {
+        "owner": "TestRmTree",
+        "source": "Lib/test/test_shutil.py:234",
+        "method_sha256": "71b4b76b5b94c1c63225818d6750a33e2760ca582924884ff8db895c0a92c3b5",
+        "decorated_sha256": "044851c07ffefb18a4841df659130f0a059fa5f36c2aba5d2316cadeb9a8003d",
+        "decorators": [
+          "os_helper.skip_unless_symlink"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_absolute_cmd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2407",
+        "method_sha256": "4f4394986a9646889c97aa9a49c7497944cfa638b0dfaff4a443a0c4fb7a8670",
+        "decorated_sha256": "4f4394986a9646889c97aa9a49c7497944cfa638b0dfaff4a443a0c4fb7a8670",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_basic": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2402",
+        "method_sha256": "5bf69255b6e32858b536473853a7b82ca29a4e1269c686c22969830688013b78",
+        "decorated_sha256": "5bf69255b6e32858b536473853a7b82ca29a4e1269c686c22969830688013b78",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_cwd_non_win32": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2428",
+        "method_sha256": "b6b54ca7d9d82e152437ca042354c3eb5648f63de5b69fe894e09dc775c9207b",
+        "decorated_sha256": "05d2abc2d3a59bb444056d64b37d0dd396b0d23ee759dc6cc30eddd4361532b1",
+        "decorators": [
+          "unittest.skipUnless(sys.platform != 'win32', 'test is for non win32')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_cwd_win32": [
+      {
+        "status": "reference-skip",
+        "reason": "test is for win32",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path": [
+      {
+        "status": "reference-skip",
+        "reason": "test is for win32",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_dir_order_with_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_dir_order_without_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_empty_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2544",
+        "method_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
+        "decorated_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_empty_path_no_PATH": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2552",
+        "method_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
+        "decorated_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_environ_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2490",
+        "method_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
+        "decorated_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_environ_path_cwd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2507",
+        "method_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
+        "decorated_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_environ_path_empty": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2496",
+        "method_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
+        "decorated_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_environ_path_missing": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2526",
+        "method_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
+        "decorated_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_non_matching_mode": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2463",
+        "method_sha256": "a86f8150995473eb30481b0fb0194b86ccb4c8ab3ab2995c60ae2b77d77ecaa0",
+        "decorated_sha256": "75e54eb8bca88754a75241b5a3d0d53e48fa79b8affc2bc9f122943e6201945b",
+        "decorators": [
+          "os_helper.skip_if_dac_override"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_nonexistent_file": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2477",
+        "method_sha256": "4c190517268b717a6eeeecd41cfefe62126aead485b11f79be77ab58e67b833b",
+        "decorated_sha256": "4c190517268b717a6eeeecd41cfefe62126aead485b11f79be77ab58e67b833b",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_checking": [
+      {
+        "status": "reference-skip",
+        "reason": "pathext check is Windows-only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_with_empty_str": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_with_multidot_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_pathext_with_null_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_relative_cmd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2413",
+        "method_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
+        "decorated_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_relative_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2471",
+        "method_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
+        "decorated_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_same_dir_with_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_same_dir_without_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhich.test_win_path_needs_curdir": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_absolute_cmd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2407",
+        "method_sha256": "4f4394986a9646889c97aa9a49c7497944cfa638b0dfaff4a443a0c4fb7a8670",
+        "decorated_sha256": "4f4394986a9646889c97aa9a49c7497944cfa638b0dfaff4a443a0c4fb7a8670",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_basic": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2402",
+        "method_sha256": "5bf69255b6e32858b536473853a7b82ca29a4e1269c686c22969830688013b78",
+        "decorated_sha256": "5bf69255b6e32858b536473853a7b82ca29a4e1269c686c22969830688013b78",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_cwd_non_win32": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2428",
+        "method_sha256": "b6b54ca7d9d82e152437ca042354c3eb5648f63de5b69fe894e09dc775c9207b",
+        "decorated_sha256": "05d2abc2d3a59bb444056d64b37d0dd396b0d23ee759dc6cc30eddd4361532b1",
+        "decorators": [
+          "unittest.skipUnless(sys.platform != 'win32', 'test is for non win32')"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_cwd_win32": [
+      {
+        "status": "reference-skip",
+        "reason": "test is for win32",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path": [
+      {
+        "status": "reference-skip",
+        "reason": "test is for win32",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_empty_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2544",
+        "method_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
+        "decorated_sha256": "8eff010fecd48b05c22ae9d113ea63621f2094868b4548783311535796a5c6b6",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_empty_path_no_PATH": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2552",
+        "method_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
+        "decorated_sha256": "4f29ccd17765bad815ef2be7d29a0ba22dc85825bd89e93d3b94cb4889e46063",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_environ_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2490",
+        "method_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
+        "decorated_sha256": "94f8eecbf33283f08b3e7bf3a8a871a71b53016ba583426e44b48485f0446747",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_environ_path_cwd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2507",
+        "method_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
+        "decorated_sha256": "1b40b36069b7e36a713fb344f9b763e5c66e9272a38543826433839959c1dc66",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_environ_path_empty": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2496",
+        "method_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
+        "decorated_sha256": "29604c706f7a48270ae37090584ab8b3a23563939842f0763be5609520a22fca",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_environ_path_missing": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2526",
+        "method_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
+        "decorated_sha256": "9476fa7d51c78a6d2b51df8387032f2be5994bfbc2fea3e46da2f9b9efbcb065",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_non_matching_mode": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2463",
+        "method_sha256": "a86f8150995473eb30481b0fb0194b86ccb4c8ab3ab2995c60ae2b77d77ecaa0",
+        "decorated_sha256": "75e54eb8bca88754a75241b5a3d0d53e48fa79b8affc2bc9f122943e6201945b",
+        "decorators": [
+          "os_helper.skip_if_dac_override"
+        ],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_nonexistent_file": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2477",
+        "method_sha256": "4c190517268b717a6eeeecd41cfefe62126aead485b11f79be77ab58e67b833b",
+        "decorated_sha256": "4c190517268b717a6eeeecd41cfefe62126aead485b11f79be77ab58e67b833b",
+        "decorators": [],
+        "status": "body-completed",
+        "fixture": "original CPython module, class and instance fixtures; native child",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_checking": [
+      {
+        "status": "reference-skip",
+        "reason": "pathext check is Windows-only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_with_empty_str": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_pathext_with_null_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_relative_cmd": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2413",
+        "method_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
+        "decorated_sha256": "51dbc04cfb4f65d71e4e2e1ec783c7eb8a4118df959a42dede28564dd9ea86fb",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_relative_path": [
+      {
+        "owner": "TestWhich",
+        "source": "Lib/test/test_shutil.py:2471",
+        "method_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
+        "decorated_sha256": "ec532133b8550c3b89f6ba2df56a353f841b967b703c0369d0e2c64aedca61aa",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestWhichBytes.test_win_path_needs_curdir": [
+      {
+        "status": "reference-skip",
+        "reason": "test specific to Windows",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3369",
+        "method_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
+        "decorated_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3382",
+        "method_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
+        "decorated_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3346",
+        "method_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
+        "decorated_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file": [
+      {
+        "owner": "TestZeroCopyCopyFileRange",
+        "source": "Lib/test/test_shutil.py:3440",
+        "method_sha256": "9e2edf218c17c87ef576869e66b133bbf408f66e3ee61da00425e50a3f132e2a",
+        "decorated_sha256": "9e2edf218c17c87ef576869e66b133bbf408f66e3ee61da00425e50a3f132e2a",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3288",
+        "method_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
+        "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3328",
+        "method_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
+        "decorated_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3298",
+        "method_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
+        "decorated_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3263",
+        "method_sha256": "4d0caa6d18ca0d89869d3f4af78a3efee9300b743fe6d59e81b5418fc74b0dd9",
+        "decorated_sha256": "4d0caa6d18ca0d89869d3f4af78a3efee9300b743fe6d59e81b5418fc74b0dd9",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:9:16: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3319",
+        "method_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
+        "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3310",
+        "method_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
+        "decorated_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3245",
+        "method_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
+        "decorated_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_same_file": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3255",
+        "method_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
+        "decorated_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3356",
+        "method_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
+        "decorated_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3282",
+        "method_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
+        "decorated_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_empty_file": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_filesystem_full": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_non_existent_src": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_regular_copy": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_same_file": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception": [
+      {
+        "status": "reference-skip",
+        "reason": "macOS only",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_big_chunk": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3369",
+        "method_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
+        "decorated_sha256": "be69c4df0698665c03ac3f5a71fdca1272380f2a2b5bc18c79199b5153930e1c",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_blocksize_arg": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3382",
+        "method_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
+        "decorated_sha256": "c6057fefd5dda4b6d7cfae28cec4e7ea46ddf10f3cf8b9ce70d6937a1edd95d7",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_cant_get_size": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3346",
+        "method_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
+        "decorated_sha256": "d5761430e55db0638776b794c2e679b710dd570f7bf5755dfc69ae9a5e859afd",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_empty_file": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3269",
+        "method_sha256": "6b38e9d04e67634dd3c563117daf7fb5395bec193dbfb4ef96f757f6cdca2e28",
+        "decorated_sha256": "6b38e9d04e67634dd3c563117daf7fb5395bec193dbfb4ef96f757f6cdca2e28",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3288",
+        "method_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
+        "decorated_sha256": "ecc0ebfb8c2910170c21c61a745d045199ca767bc8a8b6fbb76f140650d5f457",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3328",
+        "method_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
+        "decorated_sha256": "28ce62783a35930d42ffe2b533ae046706184dfb2141cd392de695aafc6b24de",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported": [
+      {
+        "owner": "TestZeroCopySendfile",
+        "source": "Lib/test/test_shutil.py:3410",
+        "method_sha256": "65f0f1dac8d11a30b059c37651b018300da766ad1acd13ed35431aa847965540",
+        "decorated_sha256": "65f0f1dac8d11a30b059c37651b018300da766ad1acd13ed35431aa847965540",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_filesystem_full": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3298",
+        "method_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
+        "decorated_sha256": "cbf2029a8a88014fbd8e900dbe8389fee0ff68a03d9d8ef1f949f1c935bd7882",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:5:1: Imre: standard-library imports and shadowing are unsupported: \"errno\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_non_existent_src": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3263",
+        "method_sha256": "4d0caa6d18ca0d89869d3f4af78a3efee9300b743fe6d59e81b5418fc74b0dd9",
+        "decorated_sha256": "4d0caa6d18ca0d89869d3f4af78a3efee9300b743fe6d59e81b5418fc74b0dd9",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:9:16: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3319",
+        "method_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
+        "decorated_sha256": "b1c2580a23d052f9992cc496221133b7a65c1b309b0e0d49d7471ab3ba038133",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:3:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3310",
+        "method_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
+        "decorated_sha256": "7e446c493feee0dc55bc86f959f84f744ce28a37483da372bfa9080c2b240046",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:4:1: Imre: unsupported sealed standard-library export shutil._GiveupOnFastCopy",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_regular_copy": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3245",
+        "method_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
+        "decorated_sha256": "52f0da554ddeeecd0fc87c8bff1161c3b1ecbf0795d0ea6cffb418ff7a42e91b",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_same_file": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3255",
+        "method_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
+        "decorated_sha256": "98ba91a9725e6158db6a5b086ceb7229c70c9ab883e82c4c847fd77050f333a9",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:2:1: Imre: test/support/__init__.py:21:1: Imre: standard-library imports and shadowing are unsupported: \"warnings\"",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_small_chunks": [
+      {
+        "owner": "_ZeroCopyFileLinuxTest",
+        "source": "Lib/test/test_shutil.py:3356",
+        "method_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
+        "decorated_sha256": "9a0d774317a5b34e2098750e10763783535423d773d75ec92d8e8800e7e853d8",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:24:5: Imre: a context manager requires one bare yield on each successful path and an optional finally suite",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ],
+    "test.test_shutil.TestZeroCopySendfile.test_unhandled_exception": [
+      {
+        "owner": "_ZeroCopyFileTest",
+        "source": "Lib/test/test_shutil.py:3282",
+        "method_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
+        "decorated_sha256": "0fb7606ba40bceb12a4124eb334f90f047e77f2e3693e6c2388b778365e4e58c",
+        "decorators": [],
+        "status": "compile-blocked",
+        "reason": "case.py:10:14: Imre: name is not a local value; globals and first-class functions are unsupported",
+        "opt_levels": [
+          0,
+          3
+        ]
+      }
+    ]
+  }
+}

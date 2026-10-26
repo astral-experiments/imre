@@ -1,12 +1,35 @@
 """Logging classes compiled into the native program."""
 
+import logging
 import os.path
+import sys
 from logging import Formatter, LogRecord, getLevelNamesMapping
-from imre._logging import _Level, _lookup_handler, _rename_handler
+from imre._logging import _Level, _Lock, _lookup_handler, _print_active_exception, _rename_handler
 from pathlib import Path
 from typing import TextIO
+from logging import Logger as _AdapterLogger
 
 _default_formatter = Formatter()
+
+
+def _handle_error(record: LogRecord) -> None:
+    if not logging.raiseExceptions:
+        return
+    try:
+        sys.stderr.write("--- Logging error ---\n")
+        _print_active_exception()
+        sys.stderr.write("Call stack:\n")
+        sys.stderr.write(f"Logged from file {record.filename}, line {record.lineno}\n")
+        details = Formatter("Message: %(msg)r\nArguments: %(args)s")
+        try:
+            sys.stderr.write(details.formatMessage(record) + "\n")
+        except RecursionError:
+            raise
+        except Exception:
+            sys.stderr.write("Unable to print the message and arguments - possible formatting error.\n"
+                             "Use the traceback above to help find the error.\n")
+    except OSError:
+        pass
 
 
 class Filter:
@@ -39,12 +62,55 @@ def _handler_level(level: _Level) -> int:
     return level
 
 
+class LoggerAdapter:
+    logger: _AdapterLogger
+    extra: dict[str, str] | None
+    merge_extra: bool
+
+    def __init__(self, logger: _AdapterLogger, extra: dict[str, str] | None = None, merge_extra: bool = False) -> None:
+        self.logger = logger
+        self.extra = extra
+        self.merge_extra = merge_extra
+
+    def process(self, msg: str, kwargs: dict[str, dict[str, str] | None]) -> tuple[str, dict[str, dict[str, str] | None]]:
+        incoming = kwargs.get("extra")
+        if self.merge_extra and incoming is not None:
+            defaults = self.extra
+            if defaults is not None:
+                merged: dict[str, str] = {}
+                for key in defaults:
+                    merged[key] = defaults[key]
+                for key in incoming:
+                    merged[key] = incoming[key]
+                kwargs["extra"] = merged
+        else:
+            kwargs["extra"] = self.extra
+        return msg, kwargs
+
+    def isEnabledFor(self, level: int) -> bool:
+        return self.logger.isEnabledFor(level)
+
+    def setLevel(self, level: _Level) -> None:
+        self.logger.setLevel(_handler_level(level))
+
+    def getEffectiveLevel(self) -> int:
+        return self.logger.getEffectiveLevel()
+
+    def hasHandlers(self) -> bool:
+        return self.logger.hasHandlers()
+
+    @property
+    def name(self) -> str:
+        return self.logger.name
+
+
 class Handler:
     _name: str | None
     _closed: bool
     level: int
     formatter: Formatter | None
     filters: list[Filter]
+    lock: _Lock | None
 
     def __init__(self, level: _Level = 0) -> None:
         self.filters = []
@@ -52,6 +118,26 @@ class Handler:
         self.level = _handler_level(level)
         self.formatter = None
         self._closed = False
+        self.createLock()
+
+    def createLock(self) -> None:
+        self.lock = _Lock()
+
+    def acquire(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.acquire()
+
+    def release(self) -> None:
+        lock = self.lock
+        if lock is not None:
+            lock.release()
+
+    def _at_fork_reinit(self) -> None:
+        lock = self.lock
+        if lock is None:
+            raise AttributeError("'NoneType' object has no attribute '_at_fork_reinit'")
+        lock._at_fork_reinit()
 
     def get_name(self) -> str | None:
         return self._name
@@ -76,6 +162,9 @@ class Handler:
 
     def emit(self, record: LogRecord | None) -> None:
         raise NotImplementedError("emit must be implemented by Handler subclasses")
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
 
     def flush(self) -> None:
         pass
@@ -160,8 +249,20 @@ class FileHandler:
                 return
             stream = self._open()
             self.stream = stream
-        stream.write(self.format(record) + self.terminator)
-        self.flush()
+        try:
+            message = self.format(record)
+            stream = self.stream
+            if stream is None:
+                raise AttributeError("'NoneType' object has no attribute 'write'")
+            stream.write(message + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def handleError(self, record: LogRecord) -> None:
+        _handle_error(record)
 
     def handle(self, record: LogRecord) -> LogRecord:
         self.emit(record)
@@ -178,6 +279,20 @@ class FileHandler:
                     stream.close()
         finally:
             self._closed = True
+
+
+class NullHandler(Handler):
+    def handle(self, record: LogRecord | None):
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
 
 
 class BufferingFormatter:

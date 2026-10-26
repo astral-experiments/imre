@@ -1,6 +1,7 @@
 //! Snapshot each source directory before creating its destination. Finish siblings
 //! after a filesystem failure and retain each (source, destination, message) tuple.
 
+use crate::StrOwner;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -20,7 +21,7 @@ use ignore::{Ignore, Ignored};
 
 pub(super) enum Failure {
     Native(Error),
-    Raised(Rc<Object>),
+    Raised(crate::ObjectOwner),
 }
 
 impl From<Error> for Failure {
@@ -148,8 +149,8 @@ fn entry(
 
 fn path_word(name: &Name) -> usize {
     match name {
-        Name::Bytes(b) => Rc::into_raw(Rc::clone(b)) as usize | 1,
-        Name::Text(s) | Name::Path(s) => Rc::into_raw(Rc::clone(s)) as usize,
+        Name::Bytes(b) => crate::BytesOwner::into_raw(crate::BytesOwner::clone(b)) as usize | 1,
+        Name::Text(s) | Name::Path(s) => StrOwner::into_raw(StrOwner::clone(s)) as usize,
     }
 }
 
@@ -165,17 +166,18 @@ fn record(
         Failure::Raised(e) => {
             // SAFETY: this owner roots the original exception through both reads.
             unsafe {
-                if imre_exception_matches(Rc::as_ptr(&e), Kind::OSError as u32) == 0 {
+                if imre_exception_matches(crate::ObjectOwner::as_ptr(&e), Kind::OSError as u32) == 0
+                {
                     return Err(Failure::Raised(e));
                 }
                 if crate::objects::exceptions::append_tree_entries(&e, errors)? {
                     return Ok(());
                 }
-                let raw = imre_exception_message(Rc::as_ptr(&e));
+                let raw = imre_exception_message(crate::ObjectOwner::as_ptr(&e));
                 if let Some(display_error) = take_pending() {
                     return Err(Failure::Raised(display_error));
                 }
-                Rc::from_raw(raw)
+                StrOwner::from_raw(raw)
             }
         }
     };
@@ -195,7 +197,7 @@ fn record(
         tuple
             .add(2)
             .cast::<*const Str>()
-            .write(Rc::into_raw(message));
+            .write(StrOwner::into_raw(message));
         errors.values.push(tuple as usize);
     }
     Ok(())

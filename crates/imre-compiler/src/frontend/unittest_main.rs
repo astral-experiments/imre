@@ -135,6 +135,16 @@ impl Checker<'_> {
             let case = self.hidden(Type::Class(id));
             let mut invocation = vec![Statement::Assign(case, self.construct(call, id)?)];
             let class = &self.classes.declarations.definitions[id];
+            let method_slot = class
+                .fields
+                .iter()
+                .position(|field| field.name == "_testMethodName")
+                .ok_or("missing TestCase method name")?;
+            invocation.push(Statement::SetField(
+                self.local(case),
+                method_slot,
+                unpacking::string(&name),
+            ));
             let source = &self.graph.modules[class.definition.module];
             let origin = if class.definition.module == self.graph.entry {
                 "__main__"

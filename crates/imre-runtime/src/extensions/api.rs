@@ -77,6 +77,34 @@ extern "C" fn imre_py_long_from_long(value: c_long) -> Py {
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, size: isize) -> Py {
+    let Ok(size) = usize::try_from(size) else {
+        return extensions_error(
+            Kind::SystemError,
+            "Negative size passed to PyBytes_FromStringAndSize",
+            Py::NULL,
+        );
+    };
+    // CPython's bytes object also needs its variable header, cached hash and trailing NUL.
+    if size > isize::MAX as usize - (4 * size_of::<usize>() + 1) {
+        return extensions_error(Kind::OverflowError, "byte string is too large", Py::NULL);
+    }
+    let mut bytes = Vec::new();
+    if bytes.try_reserve_exact(size).is_err() {
+        return Error::memory_error().returning(Py::NULL);
+    }
+    if data.is_null() {
+        // C permits unspecified contents here. Do not expose uninitialized Rust memory.
+        bytes.resize(size, 0);
+    } else {
+        // SAFETY: C supplies a readable buffer of size bytes, with no termination requirement.
+        bytes.extend_from_slice(unsafe { std::slice::from_raw_parts(data.cast::<u8>(), size) });
+    }
+    Owned::try_bytes(bytes)
+        .map_or_else(|| Error::memory_error().returning(Py::NULL), Owned::into_py)
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn imre_py_parse_count(args: Py, count: usize) -> c_int {
     // SAFETY: an extension must pass a rooted argument tuple.
     if let Some(Boxed::Tuple(values)) = unsafe { args.boxed() } {

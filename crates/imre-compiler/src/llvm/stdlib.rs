@@ -51,6 +51,40 @@ impl Emitter<'_, '_> {
             }
             Builtin::StringFormat => {
                 let (template, fields) = args.split_first().unwrap();
+                let (pairs, tail) = fields.as_chunks::<2>();
+                debug_assert!(tail.is_empty());
+                if pairs.iter().any(|pair| pair[1].value.ty == Type::Int) {
+                    let count = fields.len() / 2;
+                    let storage = self.entry_alloca(format!("[{} x i64]", count * 3));
+                    for (index, pair) in pairs.iter().enumerate() {
+                        let name = &pair[0].value;
+                        let value = &pair[1].value;
+                        let word = self.word(value);
+                        let kind = representation_kind(value.ty, &self.module.types).to_string();
+                        for (offset, (ty, operand)) in [
+                            ("ptr", name.operand.as_str()),
+                            ("i64", word.as_str()),
+                            ("i64", kind.as_str()),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let slot = self.instruction(format!(
+                                "getelementptr i64, ptr {storage}, i64 {}",
+                                index * 3 + offset
+                            ));
+                            self.line(format!("store {ty} {operand}, ptr {slot}"));
+                        }
+                    }
+                    return Value {
+                        ty: Type::Str,
+                        operand: self.checked_instruction(format!(
+                            "call ptr @imre_str_format_fields(ptr {}, ptr {storage}, i64 {count})",
+                            template.value.operand
+                        )),
+                        small_integer: false,
+                    };
+                }
                 let handles = self.entry_alloca(format!("[{} x ptr]", fields.len()));
                 for (index, field) in fields.iter().enumerate() {
                     let slot =

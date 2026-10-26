@@ -90,34 +90,34 @@ impl Emitter<'_, '_> {
             if !roots.contains(&root) {
                 roots.push(root.clone());
             }
-            Some(root)
-        } else if values.iter().all(immutable_literal) {
+            root
+        } else if matches!(ty, Type::Tuple(_)) && values.iter().all(immutable_literal) {
             let unit = self.output.current;
             let roots = self.tuple_literals.entry(unit).or_default();
             let root = self
                 .output
                 .global_ref(format!("tuple_literal_{unit}_{}", roots.len()));
             roots.push(root.clone());
-            Some(root)
+            root
         } else {
-            None
+            return self.record_from_fields(ty, values);
         };
-        let cache = root.map(|root| {
-            let prior = self.instruction(format!("load ptr, ptr @{root}"));
-            let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
-            let build = self.label();
-            let ready = self.label();
-            self.branch(&missing, &build, &ready);
-            self.start(&build);
-            (root, ready)
-        });
+        self.rooted_record(ty, &root, |emitter| emitter.record_from_fields(ty, values))
+    }
 
-        let object = self.record_from_fields(ty, values);
-        let Some((root, ready)) = cache else {
-            return object;
-        };
-        // Transfer the constructor's owner to the root. Each evaluation takes
-        // its own reference, just as it would for a freshly allocated tuple.
+    /// Give the root the constructor's owner. Each read receives its own reference.
+    pub(super) fn rooted_record(
+        &mut self,
+        ty: Type,
+        root: &str,
+        build: impl FnOnce(&mut Self) -> Value,
+    ) -> Value {
+        let prior = self.instruction(format!("load ptr, ptr @{root}"));
+        let missing = self.instruction(format!("icmp eq ptr {prior}, null"));
+        let (construct, ready) = (self.label(), self.label());
+        self.branch(&missing, &construct, &ready);
+        self.start(&construct);
+        let object = build(self);
         self.line(format!("store ptr {}, ptr @{root}", object.operand));
         self.forget(&object);
         self.jump(&ready);
@@ -185,7 +185,12 @@ impl Emitter<'_, '_> {
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             self.output
                 .global(self.output.entry, root, "global", "ptr")
                 .push_str("null\n");
@@ -231,6 +236,19 @@ ready:
             if lazy_constructor(ty).is_some() {
                 continue;
             }
+            // Stock CPython interns ASCII name characters and its Latin-1
+            // character singletons. Distinct equal dynamic strings stay distinct.
+            let init = if ty == Type::Str
+                && self.uses_string_interning
+                && (bytes
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    || matches!(bytes.as_slice(), [_] | [0xc2..=0xc3, 0x80..=0xbf]))
+            {
+                "imre_str_interned_literal"
+            } else {
+                init
+            };
             let bytes_name = self.output.string_name(*id, "str");
             let root = self.output.string_name(*id, "literal");
             writeln!(
@@ -270,7 +288,12 @@ ready:
             )
             .unwrap();
         }
-        for root in self.tuple_literals.values().flatten() {
+        for root in self
+            .tuple_literals
+            .values()
+            .flatten()
+            .chain(&self.static_functions)
+        {
             writeln!(
                 self.output.entry_buffer(),
                 "  %{root} = load ptr, ptr @{root}\n  store ptr null, ptr @{root}\n  call void @imre_record_release(ptr %{root})"

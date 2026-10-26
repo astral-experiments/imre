@@ -1,5 +1,15 @@
 """Native call recording for fixed-layout unittest.mock users."""
 
+from _imre_mock import is_call_list, mark_call_list
+from dataclasses import dataclass, field
+
+
+def _format_list(parts: list[str], pretty: bool) -> str:
+    entries = ", ".join(parts)
+    if pretty and len(entries) + 2 > 80:
+        entries = ",\n ".join(parts)
+    return "[" + entries + "]"
+
 
 def _key(text: str, kind: str) -> str:
     if kind == "bool":
@@ -7,8 +17,65 @@ def _key(text: str, kind: str) -> str:
     return kind + ":" + text
 
 
+def _change_mapping(target: dict[str, str], values: dict[str, str], clear: bool) -> None:
+    if clear:
+        target.clear()
+    for key in values:
+        target[key] = values[key]
+
+
+class _DictionaryPatch:
+    in_dict: dict[str, str]
+    values: dict[str, str]
+    clear: bool
+    _original: dict[str, str] | None
+    _starts: int
+
+    def __init__(self, mapping: dict[str, str], values: dict[str, str], clear: bool) -> None:
+        self.in_dict = mapping
+        self.values = values
+        self.clear = clear
+        self._original = None
+        self._starts = 0
+
+    def _enter(self) -> dict[str, str]:
+        self._original = self.in_dict.copy()
+        _change_mapping(self.in_dict, self.values, self.clear)
+        return self.in_dict
+
+    def _exit(self) -> bool:
+        original = self._original
+        if original is not None:
+            _change_mapping(self.in_dict, original, True)
+        return False
+
+    def start(self) -> dict[str, str]:
+        result = self._enter()
+        self._starts += 1
+        return result
+
+    def stop(self) -> bool | None:
+        if self._starts == 0:
+            return None
+        self._starts -= 1
+        return self._exit()
+
+
+class _PatchFactory:
+    def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
+        if values is None:
+            raise TypeError("'NoneType' object is not iterable")
+        changes = values.copy()
+        _change_mapping(changes, kwargs, False)
+        return _DictionaryPatch(in_dict, changes, clear)
+
+
+patch = _PatchFactory()
+
+
+@dataclass(repr=False)
 class _Arg:
-    text: str
+    text: str = field(compare=False)
     key: str
 
     def __init__(self, text: str, kind: str) -> None:
@@ -16,13 +83,10 @@ class _Arg:
         self.key = _key(text, kind)
 
 
+@dataclass(repr=False)
 class _Call:
     _args: list[_Arg]
     _kwargs: dict[str, _Arg]
-
-    def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        self._args = args
-        self._kwargs = kwargs
 
     def _format(self, name: str) -> str:
         parts: list[str] = []
@@ -43,18 +107,13 @@ class _Call:
         parts: list[str] = []
         for value in values:
             parts.append(value._format("call"))
-        return "[" + ", ".join(parts) + "]"
+        return _format_list(parts, is_call_list(values))
 
-    def _matches(self, other: _Call) -> bool:
-        if len(self._args) != len(other._args) or len(self._kwargs) != len(other._kwargs):
-            return False
-        for i in range(len(self._args)):
-            if self._args[i].key != other._args[i].key:
-                return False
-        for key in self._kwargs:
-            if key not in other._kwargs or self._kwargs[key].key != other._kwargs[key].key:
-                return False
-        return True
+
+def _new_call_list() -> list[_Call]:
+    result: list[_Call] = []
+    mark_call_list(result)
+    return result
 
 
 class _Ancestor:
@@ -82,7 +141,7 @@ class _Node:
         self.called = False
         self.call_count = 0
         self.call_args = None
-        self.call_args_list = []
+        self.call_args_list = _new_call_list()
         self.side_effect = side_effect
         self._mock_name = name
         self._children = {}
@@ -97,7 +156,7 @@ class _Node:
             node.called = False
             node.call_count = 0
             node.call_args = None
-            node.call_args_list = []
+            node.call_args_list = _new_call_list()
             # Children retain this private list to report subsequent ancestor calls.
             while len(node._history):
                 node._history.pop()
@@ -178,10 +237,7 @@ class Mock:
     def _calls_repr(self) -> str:
         if len(self._node._history) == 0:
             return ""
-        entries = ", ".join(self._node._history)
-        if len(entries) + 2 > 80:
-            entries = ",\n ".join(self._node._history)
-        return "\nCalls: [" + entries + "]."
+        return "\nCalls: " + _format_list(self._node._history, True) + "."
 
     def reset_mock(self, *, return_value: bool = False, side_effect: bool = False) -> None:
         self._node._reset(self._nodes, return_value, side_effect)
@@ -201,7 +257,7 @@ class Mock:
     def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         expected = _Call(args, kwargs)
         observed = self._node.call_args
-        if observed is not None and expected._matches(observed):
+        if observed is not None and expected == observed:
             return
         actual = "not called." if observed is None else observed._format(self._name())
         raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)
@@ -209,7 +265,7 @@ class Mock:
     def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         expected = _Call(args, kwargs)
         for actual in self._node.call_args_list:
-            if expected._matches(actual):
+            if expected == actual:
                 return
         raise AssertionError(expected._format(self._name()) + " call not found")
 

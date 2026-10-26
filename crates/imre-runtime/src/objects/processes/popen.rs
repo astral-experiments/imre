@@ -6,31 +6,24 @@ use crate::StorageCell;
 use crate::objects::files::{FileState, errno_error};
 use std::cell::RefCell;
 
+mod active;
 mod communicate;
 mod control;
+mod selector;
 
-use control::ChildControl;
+pub(super) use active::cleanup;
+pub(in crate::objects) use active::retain_live_owner;
+use control::{ChildControl, ReturnCode};
 use std::sync::Arc;
 
-type Pipes = [Option<Rc<Object>>; 3];
-
-thread_local! {
-    // Like subprocess._active: dropping the last handle neither kills a live
-    // child nor blocks. A subsequent launch collects its status and pipes.
-    static ACTIVE: RefCell<Vec<(Arc<ChildControl>, Pipes)>> = const { RefCell::new(Vec::new()) };
-}
-
-pub(super) fn cleanup() {
-    ACTIVE.with_borrow_mut(|children| {
-        children.retain_mut(|(child, _)| !matches!(child.poll(), Ok(Some(_))));
-    });
-}
+type Pipes = [Option<crate::ObjectOwner>; 3];
 
 pub(in crate::objects) struct Popen {
     args: OwnedWord,
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
+    finalized: bool,
 }
 
 impl Popen {
@@ -53,22 +46,32 @@ impl Popen {
         self.control.signal(signal)
     }
 
-    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<i32>> {
+    fn wait(&self, timeout: Option<&Deadline>) -> Result<Option<ReturnCode>> {
         self.control.wait(timeout)
     }
 }
 
-impl Drop for Popen {
-    fn drop(&mut self) {
+impl Popen {
+    /// Python calls __del__ only once, including when _active keeps self alive.
+    fn finalize(&mut self) -> bool {
+        if self.finalized {
+            return false;
+        }
+        self.finalized = true;
         // The public warning is about an unobserved returncode. Even a child
         // which has already exited can still be waiting for its parent to reap it.
         if self.control.status().is_none() {
             crate::objects::warnings::unobserved_child(self.control.pid);
         }
-        if !matches!(self.control.poll(), Ok(Some(_))) {
-            ACTIVE.with_borrow_mut(|children| {
-                children.push((self.control.clone(), std::mem::take(&mut self.pipes)))
-            });
+        !matches!(self.control.poll(), Ok(Some(_)))
+    }
+}
+
+impl Drop for Popen {
+    fn drop(&mut self) {
+        if self.finalize() {
+            // Internal run/call temporaries need not have a language-level owner.
+            active::defer_internal(self.control.clone(), std::mem::take(&mut self.pipes));
         }
     }
 }
@@ -112,6 +115,30 @@ struct RedirectConfig {
     words: [usize; 3],
 }
 
+/// Callers setting bit 18 supply this extension of both earlier layouts.
+#[repr(C)]
+struct ChildConfig {
+    redirect: RedirectConfig,
+    group: usize,
+    mask: usize,
+    new_session: bool,
+}
+
+/// Bit 19 adds the exact pass_fds collection after the bit-18 prefix.
+#[repr(C)]
+struct PassFdsConfig {
+    child: ChildConfig,
+    keep: usize,
+    kind: u32,
+}
+
+#[derive(Default)]
+struct LaunchExtras {
+    redirects: [usize; 3],
+    child: Option<(usize, usize, bool)>,
+    keep: Option<(usize, u32)>,
+}
+
 impl LaunchConfig {
     fn has_redirects(streams: u32) -> bool {
         [12, 0, 4]
@@ -120,16 +147,33 @@ impl LaunchConfig {
     }
 
     /// # Safety
-    /// A configuration requesting mode 6 or 7 must be the first field of a
-    /// RedirectConfig. Older callers use only fixed modes and need no trailer.
-    unsafe fn redirect_words(config: *const Self) -> [usize; 3] {
-        // SAFETY: the launch prefix is present for either ABI layout.
+    /// Bit 18 selects ChildConfig; stream modes 6/7 select RedirectConfig.
+    /// Older callers using fixed streams supply only the original prefix.
+    unsafe fn extras(config: *const Self) -> LaunchExtras {
+        // SAFETY: the launch prefix is present for all three ABI layouts.
         let streams = unsafe { (*config).streams };
-        if Self::has_redirects(streams) {
-            // SAFETY: the mode proves that the caller provided the trailer.
-            unsafe { (*config.cast::<RedirectConfig>()).words }
+        if streams & (1 << 18) != 0 {
+            let keep = (streams & (1 << 19) != 0).then(|| {
+                // SAFETY: bit 19 promises the complete pass_fds trailer.
+                let full = unsafe { &*config.cast::<PassFdsConfig>() };
+                (full.keep, full.kind)
+            });
+            // SAFETY: bit 18 promises the full child settings layout.
+            let config = unsafe { &*config.cast::<ChildConfig>() };
+            LaunchExtras {
+                redirects: config.redirect.words,
+                child: Some((config.group, config.mask, config.new_session)),
+                keep,
+            }
+        } else if Self::has_redirects(streams) {
+            LaunchExtras {
+                // SAFETY: a borrowed stream promises the three-word extension.
+                redirects: unsafe { (*config.cast::<RedirectConfig>()).words },
+                child: None,
+                keep: None,
+            }
         } else {
-            [0; 3]
+            LaunchExtras::default()
         }
     }
     pub(super) fn basic(
@@ -141,10 +185,10 @@ impl LaunchConfig {
         bufsize: usize,
         close_fds: bool,
     ) -> Self {
-        if Self::has_redirects(streams) {
+        if Self::has_redirects(streams) || streams & (1 << 18) != 0 {
             fail(
                 "SystemError",
-                "borrowed descriptors require a launch configuration trailer",
+                "these child settings require a launch configuration trailer",
             );
         }
         Self {
@@ -210,23 +254,46 @@ pub unsafe extern "C" fn imre_popen_command(
 
 /// # Safety
 /// The settings and the owners of every argument must live through spawn.
-/// A stream of mode 6 or 7 requires the RedirectConfig trailer.
+/// A borrowed stream requires RedirectConfig; bit 18 requires ChildConfig.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *const Object {
     // SAFETY: the compiler supplies the exact settings layout and rooted owners.
-    let result = unsafe { spawn(&*config, LaunchConfig::redirect_words(config)) }.map(|child| {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Popen(Box::new(
-            child,
-        ))))))
+    let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.map(|child| {
+        crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+            Storage::Popen(Box::new(child)),
+        ))))
     });
     finish(result, std::ptr::null())
+}
+
+/// Popen acquires these handles before opening a parent stream with bufsize.
+fn check_buffer_error_handles(modes: [u32; 3]) -> io::Result<()> {
+    let mut pipes = [const { None }; 3];
+    let mut devnull = None;
+    for (pipe, mode) in pipes.iter_mut().zip(modes) {
+        match mode {
+            1 => *pipe = Some(io::pipe()?),
+            2 if devnull.is_none() => {
+                devnull = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/null")?,
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Create a native child with independently owned pipe ends and the original argv owner.
 ///
 /// # Safety
 /// The caller roots the argv, optional directory/environment and buffer size.
-unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
+unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
+    // CPython runs _cleanup before validating the new Popen's arguments.
+    cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
     let streams = config.streams | (u32::from(!config.close_fds) << 17);
@@ -237,6 +304,13 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
             "STDOUT can only be used for stderr",
         ));
     }
+    if !config.close_fds
+        && let Some((word, kind)) = extras.keep
+        // SAFETY: the launch trailer retains the original collection.
+        && unsafe { super::pass_fds::nonempty(word, kind) }
+    {
+        crate::objects::warnings::pass_fds_override()?;
+    }
     let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];
     let mut oversized = false;
@@ -244,7 +318,7 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
         descriptors[i] = match mode {
             6 => {
                 // SAFETY: mode 6 denotes the caller's rooted integer descriptor.
-                let fd = unsafe { Int::borrow(words[i]) };
+                let fd = unsafe { Int::borrow(extras.redirects[i]) };
                 c_int(&fd).unwrap_or_else(|| {
                     oversized = true;
                     // Preserve the launch-mode comparison to fd 2 without truncation.
@@ -257,7 +331,7 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
             }
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
-                object(words[i] as *const Object)
+                object(extras.redirects[i] as *const Object)
                     .0
                     .with(|s| s.file().fileno())
             }?,
@@ -268,12 +342,64 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
         let size = unsafe { Int::borrow(config.bufsize) };
-        c_int(&size).ok_or_else(c_int_overflow)?
+        match c_int(&size) {
+            Some(size) => size,
+            None => {
+                // Before reporting bufsize, preserve any error acquiring the pipe handles.
+                check_buffer_error_handles(modes).map_err(errno_error)?;
+                return Err(c_int_overflow());
+            }
+        }
     } else {
         -1
     };
+    let child = |may_spawn| {
+        let Some((group, mask, new_session)) = extras.child else {
+            return Ok(ChildAttributes::default());
+        };
+        let group = (group != 0).then(|| {
+            // SAFETY: a non-null group is a rooted Python integer.
+            unsafe { Int::borrow(group) }
+        });
+        // SAFETY: the caller roots the requested mask and descriptor collection.
+        let mask = unsafe { Int::borrow(mask) };
+        let direct = may_spawn
+            && !new_session
+            && group.as_ref().is_none_or(|n| n.as_small() == Some(-1))
+            && mask.big().sign() == num_bigint::Sign::Minus
+            && extras.keep.is_none_or(|(word, kind)| {
+                // SAFETY: the bit-19 trailer supplies the collection's exact kind.
+                !unsafe { super::pass_fds::nonempty(word, kind) }
+            });
+        if direct {
+            return Ok(ChildAttributes::default());
+        }
+        // Fork/exec iterates pass_fds before C narrows the group and mask.
+        if extras.keep.is_some_and(|(_, kind)| kind == 0) {
+            return Err(Error::new(
+                Kind::TypeError,
+                "'NoneType' object is not iterable",
+            ));
+        }
+        let group = group
+            .as_ref()
+            .map_or(Ok(-1), |n| c_int(n).ok_or_else(c_int_overflow))?;
+        let mask = c_int(&mask).ok_or_else(c_int_overflow)?;
+        let keep = match extras.keep {
+            // SAFETY: the bit-19 trailer retains the collection and its exact kind.
+            Some((word, kind)) => unsafe { super::pass_fds::copy(word, kind)? },
+            None => Vec::new(),
+        };
+        Ok(ChildAttributes {
+            new_session,
+            group,
+            mask: (mask >= 0).then_some(mask as libc::mode_t),
+            keep,
+        })
+    };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
-    let child = unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized) };
+    let child =
+        unsafe { launch_error::spawn(&args, config, streams, descriptors, oversized, child) };
     child.map(|mut child| {
         let text = streams & (1 << 16) != 0;
         let pipe = |fd: OwnedFd, read| FileState::pipe(fd.into(), read, text, bufsize);
@@ -287,6 +413,7 @@ unsafe fn spawn(config: &LaunchConfig, words: [usize; 3]) -> Result<Popen> {
             args,
             control: Arc::new(ChildControl::new(child)),
             communication: Default::default(),
+            finalized: false,
         }
     })
 }
@@ -346,7 +473,7 @@ pub unsafe extern "C" fn imre_call_command(
 }
 
 /// # Safety
-/// The rooted settings (including any RedirectConfig trailer) and deadline word
+/// The rooted settings (including any redirect or child trailer) and deadline word
 /// must match the compiler's layouts.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_call_config(
@@ -356,44 +483,47 @@ pub unsafe extern "C" fn imre_call_config(
     check: bool,
 ) -> usize {
     // SAFETY: the settings and the values to which they point are rooted.
-    let result =
-        unsafe { spawn(&*config, LaunchConfig::redirect_words(config)) }.and_then(|mut p| {
-            // SAFETY: the deadline kind was selected for this rooted word by the compiler.
-            let timeout = unsafe { Deadline::from_word(kind, word) };
-            let waited = p.wait(timeout.as_ref());
-            let killed = if matches!(waited, Ok(Some(_))) {
-                Ok(())
-            } else {
-                p.signal(|| Ok(libc::SIGKILL))
-            };
-            p.close_wait()?;
-            killed?;
-            match waited? {
-                Some(code) if check && code != 0 => {
-                    let absent = || OwnedWord {
-                        word: 0,
-                        kind: WordKind::new(0),
-                    };
-                    raise_process(ProcessError {
-                        cmd: p.args.clone(),
-                        returncode: code,
-                        stdout: absent(),
-                        stderr: absent(),
-                    });
-                    Ok(0)
-                }
-                Some(code) => Ok(exit_word(code)),
-                None => {
-                    raise_timeout(TimeoutError {
-                        cmd: p.args.clone(),
-                        timeout: timeout.expect("timed wait"),
-                        stdout: None,
-                        stderr: None,
-                    });
-                    Ok(0)
-                }
+    let result = unsafe { spawn(&*config, LaunchConfig::extras(config)) }.and_then(|mut p| {
+        // SAFETY: the deadline kind was selected for this rooted word by the compiler.
+        let timeout = unsafe { Deadline::from_word(kind, word) };
+        let waited = p
+            .wait(timeout.as_ref())
+            .map(|code| code.map(ReturnCode::kernel));
+        let killed = if matches!(waited, Ok(Some(_))) {
+            Ok(())
+        } else {
+            p.signal(|| Ok(libc::SIGKILL))
+        };
+        p.close_wait()?;
+        killed?;
+        match waited? {
+            Some(code) if check && code != 0 => {
+                let absent = || OwnedWord {
+                    word: 0,
+                    kind: WordKind::new(0),
+                };
+                raise_process(ProcessError {
+                    positional_streams: false,
+                    cmd: p.args.clone(),
+                    returncode: code,
+                    stdout: absent(),
+                    stderr: absent(),
+                });
+                Ok(0)
             }
-        });
+            Some(code) => Ok(exit_word(code)),
+            None => {
+                raise_timeout(TimeoutError {
+                    cmd: p.args.clone(),
+                    timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
+                    stdout: None,
+                    stderr: None,
+                });
+                Ok(0)
+            }
+        }
+    });
     finish(result, 0)
 }
 
@@ -407,7 +537,9 @@ pub unsafe extern "C" fn imre_popen_pipe(handle: *const Object, index: u32) -> *
         with_process(handle, |p| {
             p.pipes[index as usize]
                 .as_ref()
-                .map_or(std::ptr::null(), |file| Rc::into_raw(file.clone()))
+                .map_or(std::ptr::null(), |file| {
+                    crate::ObjectOwner::into_raw(file.clone())
+                })
         })
     }
 }
@@ -451,7 +583,20 @@ pub unsafe extern "C" fn imre_child_status(control: *const ChildControl, poll: b
     } else {
         Ok(control.status())
     };
-    finish(result.map(|s| s.map_or(0, exit_word)), 0)
+    finish(result.map(|s| s.map_or(0, ReturnCode::into_word)), 0)
+}
+
+/// # Safety
+/// The caller roots the Popen's control and the optional Python integer through the store.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_child_set_status(control: *const ChildControl, word: usize) {
+    let value = (word != 0).then(|| {
+        // SAFETY: a nonzero word is a rooted integer on the calling thread.
+        let value = unsafe { Int::borrow(word) };
+        ReturnCode::from_int(&value)
+    });
+    // SAFETY: the Popen continues to own this control while its mutex is held.
+    unsafe { (*control).set_status(value) };
 }
 
 /// # Safety
@@ -470,12 +615,13 @@ pub unsafe extern "C" fn imre_child_wait(
     unsafe {
         let timeout = Deadline::from_word(kind, word);
         match (*control).wait(timeout.as_ref()) {
-            Ok(Some(code)) => exit_word(code),
+            Ok(Some(code)) => code.into_word(),
             Ok(None) => {
                 let cmd = with_process(owner, |p| p.args.clone());
                 raise_timeout(TimeoutError {
                     cmd,
                     timeout: timeout.expect("timed wait"),
+                    wait_budget: None,
                     stdout: None,
                     stderr: None,
                 });
