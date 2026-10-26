@@ -2605,6 +2605,13 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if let (Some(source), Some(target)) = (self.types.members(value.ty), self.types.members(expected))
+            && source.iter().all(|member| target.contains(member))
+        {
+            // The closed unions share runtime tags. Widening preserves the
+            // original member and its owner rather than converting an IntEnum.
+            return Ok(Expr { ty: expected, kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]) });
+        }
         if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,

@@ -528,6 +528,7 @@ impl Checker<'_> {
         match payload {
             // Handler.formatter is optional until explicit or basic configuration assigns it.
             Type::LogFormatter => {}
+            Type::Str if attr.attr.as_str() == "encode" => {}
             Type::Class(_)
                 if matches!(&*attr.value, ast::Expr::Attribute(_))
                     && self

@@ -67,8 +67,8 @@ class HTTPServer(socketserver.TCPServer):
     def server_bind(self) -> None:
         super().server_bind()
         host, port = self.server_address
-        self._bound_name = socket.getfqdn(host)
-        self._bound_port = port
+        self.server_name = socket.getfqdn(host)
+        self.server_port = port
 
     @property
     def server_name(self) -> str:
@@ -233,25 +233,25 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
                     not parts[0] or not parts[1] or
                     parts[0].strip("0123456789") or parts[1].strip("0123456789") or
                     len(parts[0]) > 10 or len(parts[1]) > 10):
-                self.send_error(400, "Bad request version (" + repr(version) + ")")
+                self.send_error(HTTPStatus.BAD_REQUEST, "Bad request version (" + repr(version) + ")")
                 return False
             try:
                 major = int(parts[0])
                 minor = int(parts[1])
             except ValueError:
-                self.send_error(400, "Bad request version (" + repr(version) + ")")
+                self.send_error(HTTPStatus.BAD_REQUEST, "Bad request version (" + repr(version) + ")")
                 return False
             if (major > 1 or (major == 1 and minor >= 1)) and self.protocol_version.encode() >= b"HTTP/1.1":
                 self.close_connection = False
             if major >= 2:
-                self.send_error(505, "Invalid HTTP version (" + version[5:] + ")")
+                self.send_error(HTTPStatus.HTTP_VERSION_NOT_SUPPORTED, "Invalid HTTP version (" + version[5:] + ")")
                 return False
             self.request_version = version
         if len(words) < 2 or len(words) > 3:
-            self.send_error(400, "Bad request syntax (" + repr(self.requestline) + ")")
+            self.send_error(HTTPStatus.BAD_REQUEST, "Bad request syntax (" + repr(self.requestline) + ")")
             return False
         if len(words) == 2 and words[0] != "GET":
-            self.send_error(400, "Bad HTTP/0.9 request type (" + repr(words[0]) + ")")
+            self.send_error(HTTPStatus.BAD_REQUEST, "Bad HTTP/0.9 request type (" + repr(words[0]) + ")")
             return False
         self.command = words[0]
         self.path = words[1]
@@ -264,10 +264,10 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         while True:
             line = self.rfile.readline(65537)
             if len(line) > 65536:
-                self.send_error(431, "Line too long", "got more than 65536 bytes when reading header line")
+                self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Line too long", "got more than 65536 bytes when reading header line")
                 return False
             if len(lines) >= 100:
-                self.send_error(431, "Too many headers", "got more than 100 headers")
+                self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Too many headers", "got more than 100 headers")
                 return False
             if line == b"\r\n" or line == b"\n" or not line:
                 break
@@ -286,7 +286,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         return True
 
     def handle_expect_100(self) -> bool:
-        self.send_response_only(100)
+        self.send_response_only(HTTPStatus.CONTINUE)
         self.end_headers()
         return True
 
@@ -297,7 +297,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
                 self.requestline = ""
                 self.request_version = ""
                 self.command = ""
-                self.send_error(414)
+                self.send_error(HTTPStatus.REQUEST_URI_TOO_LONG)
                 return
             if not self.raw_requestline:
                 self.close_connection = True
@@ -308,7 +308,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
             try:
                 getattr(self, "do_" + command)
             except AttributeError:
-                self.send_error(501, "Unsupported method (" + repr(self.command) + ")")
+                self.send_error(HTTPStatus.NOT_IMPLEMENTED, "Unsupported method (" + repr(self.command) + ")")
                 return
             getattr(self, "do_" + command)()
             self.wfile.flush()
@@ -322,19 +322,20 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         while not self.close_connection:
             self.handle_one_request()
 
-    def send_response(self, code: int, message: str | None = None) -> None:
+    def send_response(self, code: int | HTTPStatus, message: str | None = None) -> None:
         self.log_request(code)
         self.send_response_only(code, message)
         self.send_header("Server", self.version_string())
         self.send_header("Date", self.date_time_string())
 
-    def send_response_only(self, code: int, message: str | None = None) -> None:
+    def send_response_only(self, code: int | HTTPStatus, message: str | None = None) -> None:
         if self.request_version != "HTTP/0.9":
+            number = int(code)
             if message is None:
-                message = self.responses[code][0] if code in self.responses else ""
+                message = self.responses[number][0] if number in self.responses else ""
             if self._buffer is None:
                 self._headers_buffer = []
-            self._headers_buffer.append((self.protocol_version + " " + str(code) + " " + message + "\r\n").encode("latin-1"))
+            self._headers_buffer.append((self.protocol_version + " " + str(number) + " " + message + "\r\n").encode("latin-1"))
 
     def send_header(self, keyword: str, value: str) -> None:
         if self.request_version != "HTTP/0.9":
@@ -360,18 +361,19 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
             self.wfile.write(data)
             self._headers_buffer = []
 
-    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
-        short, long = self.responses.get(code, ("???", "???"))
+    def send_error(self, code: int | HTTPStatus, message: str | None = None, explain: str | None = None) -> None:
+        number = int(code)
+        short, long = self.responses.get(number, ("???", "???"))
         if message is None:
             message = short
         if explain is None:
             explain = long
-        self.log_error("code %d, message %s", code, message)
+        self.log_error("code %d, message %s", number, message)
         self.send_response(code, message)
         self.send_header("Connection", "close")
         body = b""
-        if code >= 200 and code != 204 and code != 205 and code != 304:
-            fields: dict[str, object] = {"code": code, "message": _escape(message), "explain": _escape(explain)}
+        if number >= 200 and number != 204 and number != 205 and number != 304:
+            fields: dict[str, object] = {"code": number, "message": _escape(message), "explain": _escape(explain)}
             content = self.error_message_format % fields
             body = content.encode("utf-8", "replace")
             self.send_header("Content-Type", self.error_content_type)
@@ -395,8 +397,15 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         year, month, day, hh, mm, ss, wd, yd, dst = time.localtime(time.time())
         return "%02d/%s/%04d %02d:%02d:%02d" % (day, str(self.monthname[month]), year, hh, mm, ss)
 
-    def log_request(self, code: int, size: str = "-") -> None:
-        self.log_message('"%s" %s %s', self.requestline, str(code), size)
+    def log_request(self, code: str | int | HTTPStatus = "-", size: str | int = "-") -> None:
+        if isinstance(code, HTTPStatus):
+            text = str(code.value)
+        elif isinstance(code, str):
+            text = code
+        else:
+            text = str(code)
+        size_text = size if isinstance(size, str) else str(size)
+        self.log_message('"%s" %s %s', self.requestline, text, size_text)
 
     def log_error(self, format: str, *args: object) -> None:
         self.log_message(format, *args)

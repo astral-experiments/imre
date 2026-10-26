@@ -121,11 +121,16 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.instance_attributes.insert(method.to_owned());
             }
         }
-        if matches!(expr, ast::Expr::Subscript(s) if s.ctx == ast::ExprContext::Store) {
-            self.found.attributes.insert("__setitem__".to_owned());
-            self.found
-                .instance_attributes
-                .insert("__setitem__".to_owned());
+        if let ast::Expr::Subscript(sub) = expr {
+            let method = match sub.ctx {
+                ast::ExprContext::Store => Some("__setitem__"),
+                ast::ExprContext::Load => Some("__getitem__"),
+                _ => None,
+            };
+            if let Some(method) = method {
+                self.found.attributes.insert(method.to_owned());
+                self.found.instance_attributes.insert(method.to_owned());
+            }
         }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func)
@@ -358,6 +363,15 @@ impl Reachable {
                     // constructing the descriptor, even when no method is explicitly called.
                     let mut accessors = HashSet::new();
                     for item in &class.body {
+                        // Binding a setter reads the preceding property, even when
+                        // no later code reads the descriptor through an instance.
+                        if let ast::Stmt::FunctionDef(method) = item
+                            && method.decorator_list.iter().any(|d| matches!(&d.expression,
+                                ast::Expr::Attribute(a) if a.attr.as_str() == "setter" &&
+                                a.value.as_name_expr().is_some_and(|n| n.id == method.name.id)))
+                        {
+                            accessors.insert(method.name.as_str());
+                        }
                         if let ast::Stmt::Assign(assign) = item
                             && let Some((get, set)) =
                                 crate::classes::property_accessors(graph, id.module, &assign.value)
@@ -439,7 +453,6 @@ impl Reachable {
                                         | "__bool__"
                                         | "__fspath__"
                                         | "__iter__"
-                                        | "__getitem__"
                                         | "__str__"
                                 )
                                 || (matches!(name, "__getitem__" | "__len__" | "__contains__")
