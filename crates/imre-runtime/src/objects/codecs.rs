@@ -77,39 +77,49 @@ fn normalize(name: &str) -> Result<String> {
     Ok(normalized)
 }
 
+/// An owned entry in the native registry, shared by typed and boxed callers.
+#[derive(Clone)]
+pub(crate) struct CodecInfo(ObjectOwner);
+
+impl CodecInfo {
+    pub(crate) fn lookup(name: &str) -> Result<Self> {
+        if name.contains('\0') {
+            return Err(Error::new(Kind::ValueError, "embedded null character"));
+        }
+        let key = normalize(name)?;
+        REGISTRY.with_borrow_mut(|entries| {
+            if let Some(entry) = entries.get(&key) {
+                return Ok(Self(entry.clone()));
+            }
+            let codec = Codec::by_key(&key, name)?;
+            entries.try_reserve(1).map_err(|_| Error::allocation())?;
+            let info = ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecInfo(codec))))
+                .map_err(|_| Error::memory_error())?;
+            entries.insert(key, info.clone());
+            Ok(Self(info))
+        })
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const Object {
+        ObjectOwner::as_ptr(&self.0)
+    }
+
+    pub(crate) fn codec(&self) -> Codec {
+        // SAFETY: lookup constructs and retains only CodecInfo storage.
+        unsafe { codec(self.as_ptr()) }
+    }
+}
+
 /// # Safety
 /// The caller roots the encoding name until the registry returns an owned entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_codec_lookup(name: *const Str) -> *const Object {
     // SAFETY: the native name is borrowed from the generated call.
-    let name = unsafe { &*name };
-    if name.contains('\0') {
-        return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
-    }
-    let key = match normalize(name) {
-        Ok(key) => key,
-        Err(error) => return error.returning(std::ptr::null()),
-    };
-    REGISTRY.with_borrow_mut(|entries| {
-        if let Some(entry) = entries.get(&key) {
-            return ObjectOwner::into_raw(entry.clone());
-        }
-        match Codec::by_key(&key, name) {
-            Ok(codec) => {
-                if entries.try_reserve(1).is_err() {
-                    return Error::allocation().returning(std::ptr::null());
-                }
-                let Ok(info) =
-                    ObjectOwner::try_new(Object(StorageCell::new(Storage::CodecInfo(codec))))
-                else {
-                    return Error::memory_error().returning(std::ptr::null());
-                };
-                entries.insert(key, info.clone());
-                ObjectOwner::into_raw(info)
-            }
-            Err(e) => e.returning(std::ptr::null()),
-        }
-    })
+    let info = CodecInfo::lookup(unsafe { &*name });
+    finish(
+        info.map(|entry| ObjectOwner::into_raw(entry.0)),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

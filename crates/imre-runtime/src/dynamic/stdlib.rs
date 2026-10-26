@@ -8,6 +8,7 @@ use super::{
 };
 use crate::objects::interpreter_stdlib as system;
 
+pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
 mod files;
@@ -23,6 +24,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "codecs"
             | "io"
             | "sysconfig"
             | "os"
@@ -298,6 +300,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps" | "loads")
+        | ("codecs", "lookup")
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "compile")
@@ -325,6 +328,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "codecs.lookup" {
+        return codecs::lookup(ctx, args, kwargs);
+    }
     if name == "operator.attrgetter" {
         return operator::attrgetter(ctx, args, kwargs);
     }
