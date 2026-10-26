@@ -178,6 +178,7 @@ impl Context {
                 | Value::AstWalk(_)
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -284,6 +285,9 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::FormatIterator { input, offset, .. } = *self.heap.get(id) {
+            return Ok(offset < self.str_value(input)?.len());
+        }
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
         }
@@ -350,6 +354,7 @@ impl Context {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Generator { code, .. } => {
                 let code = *code;
@@ -412,6 +417,7 @@ impl Context {
             Value::AstWalk(_)
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)

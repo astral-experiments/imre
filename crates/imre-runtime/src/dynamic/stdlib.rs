@@ -15,6 +15,7 @@ pub(super) mod datetime;
 mod email;
 mod files;
 mod fnmatch;
+mod formatters;
 mod functools;
 mod hashlib;
 mod hmac;
@@ -70,6 +71,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "_string"
             | "inspect"
             | "collections"
             | "_collections_abc"
@@ -406,6 +408,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
@@ -600,6 +603,8 @@ pub(super) fn call(
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
+        | "_string.formatter_parser"
+        | "_string.formatter_field_name_split"
         | "collections.defaultdict"
         | "functools.lru_cache"
         | "functools._cached"
@@ -621,6 +626,12 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "_string.formatter_parser" | "_string.formatter_field_name_split" => {
+            return ctx.format_cursor(
+                argument(args, 0)?,
+                name == "_string.formatter_field_name_split",
+            );
+        }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
             let id = option(args, 0, kwargs, "s")?

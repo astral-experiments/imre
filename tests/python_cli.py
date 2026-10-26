@@ -376,6 +376,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
+            "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_datetime.py",
