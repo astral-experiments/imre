@@ -34,23 +34,28 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         &["read", "readall", "readinto"],
     );
     let text = class(ctx, module, "TextIOBase", io, &[]);
-    class(
+    let string_io = class(
         ctx,
         module,
         "StringIO",
         text,
-        &["__init__", "write", "getvalue", "read"],
+        &["__init__", "write", "getvalue", "read", "isatty"],
     );
+    ctx.builtins.insert("_io.StringIO".into(), string_io);
 }
 
 fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'static str]) -> Id {
     let scope = ctx.scope("io", Some(module));
     let ancestors = ctx.lineage(base);
     let owner = ctx.alloc(Value::Class {
-        name: format!("io.{name}"),
+        name: name.into(),
         scope,
         ancestors,
     });
+    let module_name = ctx.text(if name == "StringIO" { "_io" } else { "io" });
+    ctx.bind(scope, "__module__", module_name);
+    let qualname = ctx.text(name);
+    ctx.bind(scope, "__qualname__", qualname);
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
@@ -91,12 +96,15 @@ pub(in super::super) fn call(
     if name == "__init__" {
         return string_io_init(ctx, receiver, rest, kwargs);
     }
-    if let Value::Instance {
-        text_memory: Some(file),
-        ..
-    } = ctx.heap.get(receiver)
+    if ctx
+        .builtins
+        .get("_io.StringIO")
+        .is_some_and(|&class| ctx.instance_of(receiver, class))
     {
-        return string_io_method(ctx, file.clone(), receiver, name, rest, kwargs);
+        let Value::Instance { text_memory, .. } = ctx.heap.get(receiver) else {
+            unreachable!("StringIO methods have an instance receiver");
+        };
+        return string_io_method(ctx, text_memory.clone(), receiver, name, rest, kwargs);
     }
     let arity = match name {
         "read" => 1..=2,
@@ -259,7 +267,7 @@ fn string_io_init(
 
 fn string_io_method(
     ctx: &mut Context,
-    file: crate::objects::TextFile,
+    file: Option<crate::objects::TextFile>,
     receiver: Id,
     name: &str,
     args: &[Id],
@@ -289,6 +297,19 @@ fn string_io_method(
             format!("StringIO.{name}() takes {expected} ({} given)", args.len()),
         ));
     }
+    if name == "__exit__" {
+        let close = ctx.lookup_attr(receiver, "close")?;
+        return ctx.call(close, Vec::new(), Vec::new());
+    }
+    let Some(file) = file else {
+        return match name {
+            "close" | "flush" => Ok(NONE),
+            _ => Err(Error::new(
+                "ValueError",
+                "I/O operation on uninitialized object",
+            )),
+        };
+    };
     match name {
         "write" => {
             let Value::Str(text) = ctx.heap.get(args[0]) else {
@@ -342,14 +363,11 @@ fn string_io_method(
             file.close()?;
             Ok(NONE)
         }
-        "__exit__" => {
-            let close = ctx.lookup_attr(receiver, "close")?;
-            ctx.call(close, Vec::new(), Vec::new())
-        }
-        "__enter__" if file.closed() => {
+        "__enter__" | "isatty" if file.closed() => {
             Err(Error::new("ValueError", "I/O operation on closed file."))
         }
         "__enter__" => Ok(receiver),
+        "isatty" => Ok(FALSE),
         "readable" | "writable" | "seekable" if file.closed() => {
             Err(Error::new("ValueError", "I/O operation on closed file"))
         }

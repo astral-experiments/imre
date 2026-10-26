@@ -56,6 +56,13 @@ def main():
         assert actual.stdout == expected.stdout == "stdout π\n".encode()
         assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
 
+        string_io = root / "string_io.py"
+        string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
+        expected = run(sys.executable, "-B", string_io)
+        actual = run(imre, "run", string_io, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
