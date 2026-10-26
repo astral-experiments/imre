@@ -119,7 +119,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::Instance {
         class,
         dictionary: None,
-        text: None,
+        scalar: None,
         text_memory: None,
         fields: fields
             .iter()
@@ -379,7 +379,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "IntEnum")
+        | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
@@ -433,6 +433,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
+    }
+    if name == "enum._simple_enum" {
+        return ctx.enum_decorator(args, kwargs);
+    }
+    if name == "enum._convert" {
+        return ctx.decorate_enum(args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(function) = name.strip_prefix("email.utils.") {

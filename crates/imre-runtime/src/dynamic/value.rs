@@ -165,6 +165,7 @@ impl Context {
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
@@ -298,6 +299,7 @@ pub(super) enum Value {
         frozen: bool,
     },
     Dict(Vec<(Id, Id)>),
+    MappingProxy(Id),
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -334,7 +336,7 @@ pub(super) enum Value {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
-        text: Option<Id>,
+        scalar: Option<Id>,
         text_memory: Option<crate::objects::TextFile>,
     },
     Native(String),
@@ -450,7 +452,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
-            Self::DictView { dict, .. } => visit.push(*dict),
+            Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
@@ -518,13 +520,13 @@ impl Value {
                 class,
                 fields,
                 dictionary,
-                text,
+                scalar,
                 ..
             } => {
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
-                visit.extend(text);
+                visit.extend(scalar);
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
             Self::StaticMethod {

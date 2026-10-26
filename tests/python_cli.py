@@ -411,6 +411,9 @@ except ImportError:
     print('missing child')
 """)
             compare("-IB", "-c", imports)
+        http = fixtures.parents[1] / "crates/imre-compiler/stdlib/http/__init__.py"
+        plugin.write_bytes(http.read_bytes())
+        compare("-IB", "-c", imports + (fixtures / "boxed_http_enums.py").read_text())
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",

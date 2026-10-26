@@ -100,6 +100,9 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "bytes"
             | "dict"
             | "frozenset"
+            | "enum.Enum"
+            | "enum.IntEnum"
+            | "enum.StrEnum"
             | "int"
             | "list"
             | "object"
@@ -702,7 +705,15 @@ pub(super) fn call(
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
+                    collections::entries(ctx, *dict)?.len()
+                }
+                Value::Class { .. } => {
+                    let values = ctx
+                        .enum_values(args[0])
+                        .ok_or_else(|| type_error("object has no len()"))?;
+                    collections::entries(ctx, values)?.len()
+                }
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
