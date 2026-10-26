@@ -172,6 +172,7 @@ pub(super) fn search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         &args[1..],
         kwargs,
         ["string", "pos", "endpos"],
+        3,
     )?;
     let string = string.ok_or_else(|| {
         Error::new(

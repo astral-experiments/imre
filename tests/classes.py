@@ -283,7 +283,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

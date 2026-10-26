@@ -67,12 +67,12 @@ pub(super) fn attribute(
 }
 
 /// Keep the underlying callable read-only while allowing changes to the wrapper metadata.
-pub(super) fn set_attribute(
+pub(super) fn update_attribute(
     ctx: &mut Context,
     wrapper: Id,
     dictionary: Id,
     name: &str,
-    value: Id,
+    value: Option<Id>,
 ) -> Result<()> {
     match name {
         "__func__" | "__wrapped__" => Err(Error::new("AttributeError", "readonly attribute")),
@@ -81,6 +81,9 @@ pub(super) fn set_attribute(
             "attribute '__isabstractmethod__' of 'staticmethod' objects is not writable",
         )),
         "__dict__" => {
+            let Some(value) = value else {
+                return Err(Error::new("TypeError", "cannot delete __dict__"));
+            };
             if ctx.dict_storage(value).is_none() {
                 return Err(Error::new(
                     "TypeError",
@@ -97,11 +100,15 @@ pub(super) fn set_attribute(
             Ok(())
         }
         _ => {
-            let key = ctx.text(name);
             let storage = ctx
                 .dict_storage(dictionary)
                 .expect("staticmethod dictionary");
-            ctx.put_item(storage, key, value)
+            if let Some(value) = value {
+                let key = ctx.text(name);
+                ctx.put_item(storage, key, value)
+            } else {
+                ctx.delete_dict_attribute(wrapper, storage, name)
+            }
         }
     }
 }
