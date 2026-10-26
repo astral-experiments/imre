@@ -287,6 +287,17 @@ jobs:
         run: |
           python3 benchmarks/cpython_stdlib/full/inspect/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-inspect.json"
           cmp benchmarks/cpython_stdlib/full/inspect/native-linux.json "$RUNNER_TEMP/cpython-inspect.json"
+      - name: Compare MIME lookups and original test roles with CPython
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: |
+          suite=benchmarks/cpython_stdlib/full/mimetypes
+          results="$RUNNER_TEMP/cpython-mimetypes"
+          args=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18)
+          python3 -B "$suite/run.py" "${args[@]}" --output "$results"
+          python3 -B "$suite/api.py" "${args[@]}" --output "$results/api-linux.json"
+          roles='[.[].records[] | {id, occurrence, opt_level, roles, classification}]'
+          diff -u <(jq "$roles" "$suite/evidence-linux.json") <(jq "$roles" "$results/evidence-linux.json")
       - name: Check typing overloads against the original CPython typing and warnings fixtures
         run: |
           python3 benchmarks/cpython_stdlib/full/typing/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-typing-overloads.json"

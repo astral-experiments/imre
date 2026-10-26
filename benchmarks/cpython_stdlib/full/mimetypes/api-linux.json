@@ -1,0 +1,90 @@
+[
+  {
+    "opt_level": 0,
+    "reachable_only": false,
+    "configuration": "builtins",
+    "mapping_extensions": 215,
+    "lookups": 972,
+    "output_sha256": "2ddfe3c5a3661d75e978e96e1a39abb360f73f3d9204439c0b842d5ca5c76f04",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {}
+  },
+  {
+    "opt_level": 0,
+    "reachable_only": false,
+    "configuration": "system",
+    "mapping_extensions": 1581,
+    "lookups": 6436,
+    "output_sha256": "bd2be3aad58d456e0b1e1707b0a4798ccbaed1e62277e3ffdf55d99c9983ced2",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {
+      "/etc/mime.types": "ff550bea7258b481ed07b7301a658d253bbbfd6c8ed2faca73ba7152a68406f9"
+    }
+  },
+  {
+    "opt_level": 0,
+    "reachable_only": true,
+    "configuration": "builtins",
+    "mapping_extensions": 215,
+    "lookups": 972,
+    "output_sha256": "2ddfe3c5a3661d75e978e96e1a39abb360f73f3d9204439c0b842d5ca5c76f04",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {}
+  },
+  {
+    "opt_level": 0,
+    "reachable_only": true,
+    "configuration": "system",
+    "mapping_extensions": 1581,
+    "lookups": 6436,
+    "output_sha256": "bd2be3aad58d456e0b1e1707b0a4798ccbaed1e62277e3ffdf55d99c9983ced2",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {
+      "/etc/mime.types": "ff550bea7258b481ed07b7301a658d253bbbfd6c8ed2faca73ba7152a68406f9"
+    }
+  },
+  {
+    "opt_level": 3,
+    "reachable_only": false,
+    "configuration": "builtins",
+    "mapping_extensions": 215,
+    "lookups": 972,
+    "output_sha256": "2ddfe3c5a3661d75e978e96e1a39abb360f73f3d9204439c0b842d5ca5c76f04",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {}
+  },
+  {
+    "opt_level": 3,
+    "reachable_only": false,
+    "configuration": "system",
+    "mapping_extensions": 1581,
+    "lookups": 6436,
+    "output_sha256": "bd2be3aad58d456e0b1e1707b0a4798ccbaed1e62277e3ffdf55d99c9983ced2",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {
+      "/etc/mime.types": "ff550bea7258b481ed07b7301a658d253bbbfd6c8ed2faca73ba7152a68406f9"
+    }
+  },
+  {
+    "opt_level": 3,
+    "reachable_only": true,
+    "configuration": "builtins",
+    "mapping_extensions": 215,
+    "lookups": 972,
+    "output_sha256": "2ddfe3c5a3661d75e978e96e1a39abb360f73f3d9204439c0b842d5ca5c76f04",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {}
+  },
+  {
+    "opt_level": 3,
+    "reachable_only": true,
+    "configuration": "system",
+    "mapping_extensions": 1581,
+    "lookups": 6436,
+    "output_sha256": "bd2be3aad58d456e0b1e1707b0a4798ccbaed1e62277e3ffdf55d99c9983ced2",
+    "configuration_stdout_sha256": "c76a37fe01f35ebb3b12a5947dcd69f50f42814624b7e30c4fb279bb149f7970",
+    "knownfile_sha256": {
+      "/etc/mime.types": "ff550bea7258b481ed07b7301a658d253bbbfd6c8ed2faca73ba7152a68406f9"
+    }
+  }
+]

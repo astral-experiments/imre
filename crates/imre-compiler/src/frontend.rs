@@ -5800,6 +5800,33 @@ impl<'a> Checker<'a> {
         Ok((op, result))
     }
 
+    /// MIME module tables are rebound by init(). Qualified loads and stores
+    /// use the same owned state fields as the bundled implementation.
+    fn mime_attribute(&self, attr: &ast::ExprAttribute) -> Option<ast::ExprAttribute> {
+        let Binding::Module(module) = self.resolve(&attr.value)? else {
+            return None;
+        };
+        if !self.graph.modules[module].is_bundled("mimetypes")
+            || !matches!(
+                attr.attr.as_str(),
+                "knownfiles"
+                    | "inited"
+                    | "suffix_map"
+                    | "encodings_map"
+                    | "types_map"
+                    | "common_types"
+            )
+        {
+            return None;
+        }
+        let mut state = attr.clone();
+        state.attr.id = "_state".into();
+        state.ctx = ast::ExprContext::Load;
+        let mut field = attr.clone();
+        field.value = Box::new(ast::Expr::Attribute(state));
+        Some(field)
+    }
+
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         let value = self.typed_expr(expression)?;
         Ok(if matches!(value.ty, Type::StrLiteral(_)) {
@@ -5810,6 +5837,11 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let ast::Expr::Attribute(attribute) = expression
+            && let Some(field) = self.mime_attribute(attribute)
+        {
+            return self.typed_expr(&ast::Expr::Attribute(field));
+        }
         if let Some(name) = self.unbound_assert_root(expression) {
             return self.omitted_assert_read(name, None, expression);
         }

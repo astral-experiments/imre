@@ -1,0 +1,41 @@
+{
+  "module": "test.test_mimetypes",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "platform": "linux",
+  "denominator": 29,
+  "reference": {
+    "test.test_mimetypes.CommandLineTest.test_invocation": "pass",
+    "test.test_mimetypes.CommandLineTest.test_invocation_error": "pass",
+    "test.test_mimetypes.CommandLineTest.test_multiple_inputs": "pass",
+    "test.test_mimetypes.CommandLineTest.test_multiple_inputs_error": "pass",
+    "test.test_mimetypes.CommandLineTest.test_parse_args": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_add_type_with_undotted_extension_deprecated": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_added_types_are_used": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_bytes_path": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_case_sensitivity": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_data_urls": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_default_data": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_encoding": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_file_parsing": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_filename_with_url_delimiters": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_guess_all_types": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_guess_file_type": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_guess_known_extensions": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_init_reinitializes": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_init_stability": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_keywords_args_api": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_non_standard_types": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_path_like_ob": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_preferred_extension": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_read_mime_types": "pass",
+    "test.test_mimetypes.MimeTypesTestCase.test_url": "pass",
+    "test.test_mimetypes.MiscTestCase.test__all__": "pass",
+    "test.test_mimetypes.MiscTestCase.test_lazy_import": "pass",
+    "test.test_mimetypes.Win32MimeTypesTestCase.test_registry_accelerator": {
+      "skipped": "Windows only"
+    },
+    "test.test_mimetypes.Win32MimeTypesTestCase.test_registry_parsing": {
+      "skipped": "Windows only"
+    }
+  }
+}

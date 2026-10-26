@@ -1,0 +1,3 @@
+upstream/** linguist-vendored=true -text whitespace=-trailing-space
+reference-linux.json linguist-generated=true
+evidence-linux.json linguist-generated=true

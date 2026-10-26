@@ -85,6 +85,13 @@ impl Checker<'_> {
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
         if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+            && let Some(field) = self.mime_attribute(attribute)
+        {
+            let mut state_assignment = assignment.clone();
+            state_assignment.targets[0] = ast::Expr::Attribute(field);
+            return self.assignment_statement(&state_assignment);
+        }
+        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
             && attribute.attr.as_str() == "default_factory"
             && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
                 || self.unshadowed_builtin(&assignment.value, "list"))
