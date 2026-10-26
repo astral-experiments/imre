@@ -11,6 +11,7 @@ use crate::objects::interpreter_stdlib as system;
 mod contextvars;
 mod files;
 mod json;
+mod operator;
 mod regex;
 
 pub(super) fn is_module(name: &str) -> bool {
@@ -28,6 +29,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "operator"
             | "collections"
             | "enum"
             | "typing"
@@ -259,6 +261,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache")
+        | ("operator", "attrgetter")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
@@ -280,6 +283,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "operator.attrgetter" {
+        return operator::attrgetter(ctx, args, kwargs);
+    }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);

@@ -72,6 +72,7 @@ impl Context {
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
             | ("contextvars.Token", Value::ContextToken { .. })
+            | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
@@ -221,6 +222,7 @@ impl Context {
                 builtins::call(self, &name, &args, &kwargs)
             }
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs),
+            Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::Method { callable, receiver } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);

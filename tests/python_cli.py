@@ -287,9 +287,10 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
-        contextvars = Path(__file__).with_name("fixtures") / "boxed_contextvars.py"
-        plugin.write_bytes(contextvars.read_bytes())
-        compare("-IB", "-c", imports + "arithmetic.current()")
+        for filename in ("boxed_contextvars.py", "boxed_attrgetter.py"):
+            fixture = Path(__file__).with_name("fixtures") / filename
+            plugin.write_bytes(fixture.read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
         checked = run(
             imre,
             "-IB",

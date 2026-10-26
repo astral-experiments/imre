@@ -148,6 +148,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
     },
     Native(String),
+    AttrGetter(std::rc::Rc<[Vec<String>]>),
     Raised(Error),
     Method {
         callable: Id,
@@ -265,6 +266,7 @@ impl Value {
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::Native(_)
+            | Self::AttrGetter(_)
             | Self::TokenMissing
             | Self::File(_)
             | Self::RegexPattern(_)
