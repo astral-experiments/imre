@@ -576,10 +576,12 @@ impl Function<'_, '_> {
         self.label(&handler);
         let exc = self.op("take_error", &[]);
         self.live.push(exc.clone());
+        self.caught.push(exc.clone());
         for h in &stmt.handlers {
             let ast::ExceptHandler::ExceptHandler(h) = h;
             let next = self.name("b");
             if let Some(class) = &h.type_ {
+                self.checkpoint(class.as_ref());
                 let class = self.expr(class);
                 let matches = self.op("matches", &[&exc, &class]);
                 let matches = self.value(&format!("icmp eq i64 {matches}, 2"));
@@ -590,9 +592,7 @@ impl Function<'_, '_> {
             if let Some(name) = &h.name {
                 self.bind(name.as_str(), &exc);
             }
-            self.caught.push(exc.clone());
             self.statements(&h.body);
-            self.caught.pop();
             if !self.terminated
                 && let Some(name) = &h.name
             {
@@ -603,6 +603,7 @@ impl Function<'_, '_> {
             self.label(&next);
         }
         self.raise(&exc, None, true);
+        self.caught.pop();
         self.live.pop();
         self.label(&done);
     }

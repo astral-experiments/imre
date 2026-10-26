@@ -127,6 +127,21 @@ for i in range(5000):
 print(type(saved.tb_next) is TracebackType, type(saved.tb_next.tb_frame) is FrameType)
 
 
+def current_error_type():
+    assert sys.exception() is sys.exc_info()[1]
+    return type(sys.exception())
+
+
+try:
+    raise KeyError("outer matcher")
+except KeyError as outer:
+    try:
+        raise ValueError("inner matcher")
+    except current_error_type():
+        print("selected", str(sys.exception()))
+    print(sys.exception() is outer)
+
+
 def make(base, marker):
     class Reused(base):
         pass
