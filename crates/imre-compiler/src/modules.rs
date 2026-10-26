@@ -28,6 +28,24 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+/// Python source modules bundled for runtime imports.
+pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "_imre_socketserver_reader" => Some((
+            "_imre_socketserver_reader.py",
+            include_str!("../stdlib/_socketserver_reader.py"),
+        )),
+        "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        "http" => Some((
+            "http/__init__.py",
+            include_str!("../stdlib/http/__init__.py"),
+        )),
+        "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+        "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+        _ => None,
+    }
+}
+
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
 // frozen test modules have no corresponding stubs in the pinned typeshed inventory.
 const INTRINSIC_MODULES: &[&str] = &[
@@ -2752,22 +2770,19 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            "_imre_socketserver_reader" => Some((
+                "_imre_socketserver_reader.py",
+                include_str!("../stdlib/_socketserver_reader_typed.py"),
+            )),
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
-            "http" => Some((
-                "http/__init__.py",
-                include_str!("../stdlib/http/__init__.py"),
-            )),
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "mimetypes" if cfg!(unix) => {
                 Some(("mimetypes.py", include_str!("../stdlib/mimetypes.py")))
             }
-            "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
-            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
-            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
@@ -2780,7 +2795,7 @@ impl<'a> Loader<'a> {
                 "unittest/mock.py",
                 include_str!("../stdlib/unittest/mock.py"),
             )),
-            _ => None,
+            _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;

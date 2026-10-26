@@ -1,6 +1,8 @@
 """Synchronous IPv4 TCP servers using native socket objects."""
 from __future__ import annotations
 
+from _imre_socketserver_reader import _SocketReader
+import selectors
 import socket
 import sys
 
@@ -34,42 +36,6 @@ def _run_handler(handler: BaseRequestHandler) -> None:
         handler.finish()
 
 
-class _SocketReader:
-    _socket: socket.socket
-    _pending: bytes
-    closed: bool
-
-    def __init__(self, sock: socket.socket) -> None:
-        self._socket = sock
-        self._pending = b""
-        self.closed = False
-
-    def readline(self, size: int = -1) -> bytes:
-        if self.closed:
-            raise ValueError("readline of closed file")
-        n = 0
-        done = False
-        while True:
-            while n < len(self._pending) and (size < 0 or n < size):
-                n += 1
-                if self._pending[n - 1] == 10:
-                    done = True
-                    break
-            if done or n == size:
-                break
-            chunk = self._socket.recv(8192)
-            if not chunk:
-                break
-            self._pending = self._pending + chunk
-        line = self._pending[:n]
-        self._pending = self._pending[n:]
-        return line
-
-    def close(self) -> None:
-        self.closed = True
-        self._pending = b""
-
-
 class _SocketWriter:
     _socket: socket.socket
     closed: bool
@@ -101,23 +67,37 @@ class StreamRequestHandler(BaseRequestHandler):
     rbufsize = -1
     wbufsize = 0
     disable_nagle_algorithm = False
+    _connection: socket.socket | None
     _reader: _SocketReader | None
     _writer: _SocketWriter | None
 
     def __init__(self, request: socket.socket, client_address: tuple[str, int], server: TCPServer) -> None:
+        self._connection = None
         self._reader = None
         self._writer = None
         super().__init__(request, client_address, server)
 
     def setup(self) -> None:
+        self.connection = self.request
         if self.timeout is not None:
             raise NotImplementedError("socketserver stream timeout only supports None")
         if self.rbufsize != -1 or self.wbufsize != 0:
             raise NotImplementedError("custom socketserver stream buffer sizes are unsupported")
         if self.disable_nagle_algorithm:
-            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self._reader = _SocketReader(self.request)
-        self._writer = _SocketWriter(self.request)
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._reader = _SocketReader(self.connection)
+        self._writer = _SocketWriter(self.connection)
+
+    @property
+    def connection(self) -> socket.socket:
+        connection = self._connection
+        if connection is None:
+            raise AttributeError("connection")
+        return connection
+
+    @connection.setter
+    def connection(self, value: socket.socket) -> None:
+        self._connection = value
 
     @property
     def rfile(self) -> _SocketReader:
@@ -148,10 +128,14 @@ class TCPServer:
     allow_reuse_port = False
     timeout = None
     request_queue_size = 5
+    _shutdown_requested: bool
+    _server_stopped: bool
 
     def __init__(self, server_address: tuple[str, int], RequestHandlerClass: type[BaseRequestHandler], bind_and_activate: bool = True) -> None:
         self.server_address = server_address
         self.RequestHandlerClass = RequestHandlerClass
+        self._shutdown_requested = False
+        self._server_stopped = False
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _activate(self, bind_and_activate)
 
@@ -210,6 +194,32 @@ class TCPServer:
             sys.stderr.write(str(exc) + "\n")
         sys.stderr.write("----------------------------------------\n")
 
+    def serve_forever(self, poll_interval: float | None = 0.5) -> None:
+        self._server_stopped = False
+        try:
+            with selectors.PollSelector() as selector:
+                selector.register(self.fileno(), selectors.EVENT_READ)
+                while not self._shutdown_requested:
+                    ready = selector.select(poll_interval)
+                    if self._shutdown_requested:
+                        break
+                    if ready:
+                        self._handle_request_noblock()
+                    self.service_actions()
+        finally:
+            self._shutdown_requested = False
+            self._server_stopped = True
+
+    def shutdown(self) -> None:
+        self._shutdown_requested = True
+        # Wait for the loop's finally block, including a request already being handled.
+        with selectors.PollSelector() as waiter:
+            while not self._server_stopped:
+                waiter.select(0.01)
+
+    def service_actions(self) -> None:
+        """Hook for work between requests and on idle polls."""
+
     def handle_request(self) -> None:
         if self.fileno() < 0:
             raise ValueError("Invalid file descriptor: -1")
@@ -217,6 +227,9 @@ class TCPServer:
             raise NotImplementedError("socketserver listener timeout only supports None")
         if not self.socket.getblocking():
             raise NotImplementedError("nonblocking listener requires selector integration")
+        self._handle_request_noblock()
+
+    def _handle_request_noblock(self) -> None:
         try:
             request, client_address = self.get_request()
         except OSError:

@@ -273,12 +273,20 @@ impl Context {
             };
             let mut selected = None;
             let mut namespace = None;
-            for root in self.items(search)? {
-                let Ok(root) = self.str_value(root) else {
-                    continue;
-                };
-                let root = if root.is_empty() {
+            // A bundled package contributes its own __path__. A first-party
+            // regular package can never acquire one of its children implicitly.
+            let search = self.items(search)?;
+            let bundle = self.config["bundled_root"]
+                .as_str()
+                .map(std::path::Path::new);
+            let roots = search
+                .iter()
+                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
+            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
+                let root = if root.as_os_str().is_empty() {
                     std::env::current_dir()
+                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
+                    Ok(root.to_owned())
                 } else {
                     std::path::absolute(root)
                 };
