@@ -605,8 +605,11 @@ impl Context {
                 _ => {}
             },
             Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
+            Value::RegexPattern(pattern) if name == "groups" => {
+                return Ok(self.int(pattern.group_count() as i64));
+            }
             Value::RegexPattern(pattern) if name == "pattern" => {
-                return Ok(self.text(&pattern.source));
+                return Ok(pattern.source);
             }
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);

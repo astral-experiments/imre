@@ -237,7 +237,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
             "pattern"
         }
-        Value::RegexMatch { .. } if attr == "group" => "match",
+        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {
