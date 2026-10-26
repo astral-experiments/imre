@@ -513,17 +513,42 @@ impl Context {
             return self.exact_type(obj);
         }
         match self.heap.get(obj).clone() {
-            Value::Raised(_) if name == "__traceback__" => return self.exception_traceback(obj),
+            Value::Raised(error)
+                if matches!(
+                    name,
+                    "__traceback__" | "__context__" | "__cause__" | "__suppress_context__"
+                ) =>
+            {
+                match name {
+                    "__traceback__" => return self.exception_traceback(obj),
+                    "__context__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.context).unwrap_or(NONE));
+                    }
+                    "__cause__" => {
+                        return Ok(error.trace.as_ref().and_then(|t| t.cause).unwrap_or(NONE));
+                    }
+                    "__suppress_context__" => {
+                        return Ok(if error.trace.as_ref().is_some_and(|t| t.cause.is_some()) {
+                            TRUE
+                        } else {
+                            FALSE
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Value::Traceback {
                 frame,
                 next,
                 lineno,
+                ..
             } => match name {
                 "tb_frame" => return Ok(frame),
                 "tb_next" => return Ok(next),
                 "tb_lineno" => return Ok(self.int(lineno)),
                 _ => {}
             },
+            Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
@@ -1021,11 +1046,11 @@ impl Context {
                 code,
                 defaults,
             } => {
-                let code = self.code_object(code);
+                let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
-                let sig: serde_json::Value = serde_json::from_str(self.str_value(code.parameters)?)
+                let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
                     .map_err(|e| Error::new("SystemError", e.to_string()))?;
                 let names = |key: &str| -> Vec<String> {
                     sig[key]
@@ -1103,7 +1128,7 @@ impl Context {
                 if sig["class_cell"] == true {
                     frame.class_cell = class_cell;
                 }
-                let value = self.execute(code.entry, local)?;
+                let value = self.execute(code, local)?;
                 if let Some(expected) = sig["return_type"].as_str() {
                     self.require_scalar(value, expected, &format!("{name} return value"))?;
                 }
@@ -1164,7 +1189,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(self.code_object(code).entry, scope)?;
+        self.execute(code, scope)?;
         let ancestors = self.linearized_bases(&bases)?;
         let class = self.alloc(Value::Class {
             name: name.clone(),
