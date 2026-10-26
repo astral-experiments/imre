@@ -45,9 +45,14 @@ def current():
     print(data.get("visits"), dict.get(data, "visits"))
 
     pairs = dict.__iter__({"first": None, "second": None, "third": None})
+    from operator import length_hint
+
+    print(length_hint(pairs))
     for key in pairs:
         print(key)
         break
+    print(length_hint(pairs))
+
     class Shared(dict):
         def __iter__(self):
             return pairs
@@ -55,7 +60,7 @@ def current():
     for key in Shared():
         print(key)
         break
-    print(list(pairs))
+    print(length_hint(pairs), list(pairs), length_hint(pairs))
 
     def replace_and_append(value):
         if value == 1:

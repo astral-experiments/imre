@@ -141,18 +141,23 @@ impl Context {
         }))
     }
 
-    /// Reads the current position and permanently detaches the source on exhaustion.
-    fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+    /// Borrows the unconsumed part of the iterator's current sequence.
+    fn iterator_remaining(&self, id: Id) -> Result<&[Id]> {
         let Value::Iterator { sequence, offset } = self.heap.get(id) else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
         let Some(sequence) = sequence else {
-            return Ok(None);
+            return Ok(&[]);
         };
         let (Value::List(values) | Value::Tuple(values)) = self.heap.get(*sequence) else {
             unreachable!("iterator sequence")
         };
-        let item = values.get(*offset).copied();
+        Ok(values.get(*offset..).unwrap_or_default())
+    }
+
+    /// Reads the current position and permanently detaches the source on exhaustion.
+    fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let item = self.iterator_remaining(id)?.first().copied();
         if item.is_none()
             && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
         {
@@ -189,9 +194,9 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let mut values = Vec::new();
-                while let Some(item) = self.next_item(id)? {
-                    values.push(item);
+                let values = self.iterator_remaining(id)?.to_vec();
+                if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
+                    *sequence = None;
                 }
                 Ok(values)
             }

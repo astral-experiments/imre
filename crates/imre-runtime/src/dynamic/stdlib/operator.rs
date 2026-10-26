@@ -205,8 +205,8 @@ impl Context {
             Err(error) if error.kind == "TypeError" => {}
             Err(error) => return Err(error),
         }
-        if let Value::Iterator { values, offset } = self.heap.get(value) {
-            return Ok(self.int((values.len() - offset) as i64));
+        if matches!(self.heap.get(value), Value::Iterator { .. }) {
+            return Ok(self.int(self.iterator_remaining(value)?.len() as i64));
         }
         if let Some(hint) = self.bound_slot(value, "__length_hint__")? {
             let hint = match self.call(hint, vec![], vec![]) {
