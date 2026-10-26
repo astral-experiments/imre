@@ -94,7 +94,7 @@ try:
     with open("failing-output", "w", encoding="utf-8") as stream:
         stream.write("prefix" + text + "suffix")
 except OSError as error:
-    print(error.errno, error.strerror)
+    print((error.errno, error.strerror))
 """,
     "text_roundtrip": r"""
 with open("input.txt", "r", encoding="utf-8") as source:
@@ -487,19 +487,19 @@ stream.write("buffered")
 try:
     stream.flush()
 except OSError as error:
-    print(error.errno, error.strerror, repr(error.args))
+    print((error.errno, error.strerror, repr(error.args)))
 print(stream.closed)
 try:
     stream.close()
 except OSError as error:
-    print(error.errno, error.strerror, repr(error.args))
+    print((error.errno, error.strerror, repr(error.args)))
 print(stream.closed)
 stream.close()
 print(stream.closed)
 try:
     Path("failing-output").write_bytes(b"buffered")
 except OSError as error:
-    print(error.errno, error.strerror, repr(error.args))
+    print((error.errno, error.strerror, repr(error.args)))
 """,
     "close_replaces_completion": r"""
 def owned_return() -> list[int]:
