@@ -1850,6 +1850,7 @@ pub(crate) enum LogOperation {
     LockReset,
     HandlerLookup,
     PrintActiveException,
+    New,
     AddLevel,
     LevelName,
     LevelForName,

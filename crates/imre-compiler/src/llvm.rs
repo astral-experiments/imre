@@ -4435,6 +4435,7 @@ impl Emitter<'_, '_> {
                     RemoveHandler => "imre_log_remove_handler",
                     WriteStream => "imre_text_output_write",
                     FlushStream => "imre_text_output_flush",
+                    New => "imre_log_new",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -9612,6 +9613,7 @@ declare i64 @imre_log_lock_count(ptr)
 declare void @imre_log_lock_reset(ptr)
 declare i64 @imre_log_handler_lookup(ptr)
 declare void @imre_log_print_active_exception()
+declare ptr @imre_log_new(ptr, i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)

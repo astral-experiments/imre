@@ -535,7 +535,6 @@ mod tests {
         imre_list_append, imre_list_get_index, imre_list_len, imre_list_new, imre_list_set_index,
     };
     use num_bigint::BigInt;
-    use std::rc::Rc;
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
@@ -584,11 +583,11 @@ mod tests {
             unsafe {
                 let result = imre_str_int_list(StrOwner::as_ptr(&source));
                 assert!(!result.is_null());
-                let result = Rc::from_raw(result);
+                let result = crate::ListOwner::from_raw(result);
                 let other = imre_str_int_list(StrOwner::as_ptr(&source));
                 assert!(!other.is_null());
-                let other = Rc::from_raw(other);
-                assert!(!Rc::ptr_eq(&result, &other));
+                let other = crate::ListOwner::from_raw(other);
+                assert!(!crate::ListOwner::ptr_eq(&result, &other));
                 assert_eq!(StrOwner::strong_count(&source), 1);
                 drop(source);
                 assert!(weak.upgrade().is_none());
@@ -599,9 +598,12 @@ mod tests {
                     }
                 });
                 if !expected.is_empty() {
-                    assert_eq!(imre_list_set_index(Rc::as_ptr(&result), 0, integer(9)), 1);
                     assert_eq!(
-                        Int(imre_list_get_index(Rc::as_ptr(&other), 0)).as_small(),
+                        imre_list_set_index(crate::ListOwner::as_ptr(&result), 0, integer(9)),
+                        1
+                    );
+                    assert_eq!(
+                        Int(imre_list_get_index(crate::ListOwner::as_ptr(&other), 0)).as_small(),
                         Some(expected[0])
                     );
                 }
@@ -656,7 +658,7 @@ mod tests {
                 unsafe {
                     let result = imre_str_int_list(&source);
                     assert!(!result.is_null());
-                    let result = Rc::from_raw(result);
+                    let result = crate::ListOwner::from_raw(result);
                     assert!(imre_str_int_list(&invalid).is_null());
                     clear_error(
                         Kind::ValueError,
@@ -852,15 +854,21 @@ mod tests {
         // SAFETY: constructors transfer one owner to Rc. All calls borrow these
         // live exact handles, and error pointers are checked before adoption.
         unsafe {
-            let list = Rc::from_raw(imre_list_new());
+            let list = crate::ListOwner::from_raw(imre_list_new());
             let sequence = crate::ObjectOwner::from_raw(imre_seq_new(3));
             assert!(imre_str_slice(StrOwner::as_ptr(&text), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
-            assert!(imre_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
+            assert!(imre_list_slice(crate::ListOwner::as_ptr(&list), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
-            assert_eq!(imre_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(0)), 1);
+            assert_eq!(
+                imre_list_slice_sum(crate::ListOwner::as_ptr(&list), 0, 0, integer(0)),
+                1
+            );
             clear_error(Kind::ValueError, "slice step cannot be zero");
-            assert_eq!(imre_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(-1)), 1);
+            assert_eq!(
+                imre_list_slice_sum(crate::ListOwner::as_ptr(&list), 0, 0, integer(-1)),
+                1
+            );
             assert_eq!(imre_error_pending(), 0);
             assert!(
                 imre_seq_slice(crate::ObjectOwner::as_ptr(&sequence), 0, 0, integer(0)).is_null()
@@ -880,20 +888,36 @@ mod tests {
         // SAFETY: source and slice are distinct owned lists. Every selected
         // BigInt gains an independent reference, as does each successful read.
         unsafe {
-            let source = Rc::from_raw(imre_list_new());
-            imre_list_append(Rc::as_ptr(&source), Shared::as_ptr(&big) as usize);
-            imre_list_append(Rc::as_ptr(&source), integer(7));
-            let slice = Rc::from_raw(imre_list_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
-            let subtotal = Int(imre_list_slice_sum(Rc::as_ptr(&source), 0, 0, integer(-1)));
-            assert!(!Rc::ptr_eq(&source, &slice));
-            assert_eq!(imre_list_set_index(Rc::as_ptr(&source), 0, integer(9)), 1);
+            let source = crate::ListOwner::from_raw(imre_list_new());
+            imre_list_append(
+                crate::ListOwner::as_ptr(&source),
+                Shared::as_ptr(&big) as usize,
+            );
+            imre_list_append(crate::ListOwner::as_ptr(&source), integer(7));
+            let slice = crate::ListOwner::from_raw(imre_list_slice(
+                crate::ListOwner::as_ptr(&source),
+                0,
+                0,
+                integer(-1),
+            ));
+            let subtotal = Int(imre_list_slice_sum(
+                crate::ListOwner::as_ptr(&source),
+                0,
+                0,
+                integer(-1),
+            ));
+            assert!(!crate::ListOwner::ptr_eq(&source, &slice));
+            assert_eq!(
+                imre_list_set_index(crate::ListOwner::as_ptr(&source), 0, integer(9)),
+                1
+            );
             drop((source, big));
             assert_eq!(weak.strong_count(), 1);
             assert_eq!(
-                Int(imre_list_get_index(Rc::as_ptr(&slice), 0)).as_small(),
+                Int(imre_list_get_index(crate::ListOwner::as_ptr(&slice), 0)).as_small(),
                 Some(7)
             );
-            let saved = Int(imre_list_get_index(Rc::as_ptr(&slice), 1));
+            let saved = Int(imre_list_get_index(crate::ListOwner::as_ptr(&slice), 1));
             drop(slice);
             assert_eq!(saved.big().as_ref(), &(BigInt::from(1_u8) << 400_u32));
             assert_eq!(
@@ -910,12 +934,12 @@ mod tests {
         // SAFETY: a kind-4 sequence stores exact List pointers; slice copies own
         // the same child allocation, while sequence buffers stay independent.
         unsafe {
-            let child = Rc::from_raw(imre_list_new());
-            let weak = Rc::downgrade(&child);
+            let child = crate::ListOwner::from_raw(imre_list_new());
+            let weak = crate::ListOwner::downgrade(&child);
             let source = crate::ObjectOwner::from_raw(imre_seq_new(4));
             imre_seq_append(
                 crate::ObjectOwner::as_ptr(&source),
-                Rc::as_ptr(&child) as usize,
+                crate::ListOwner::as_ptr(&child) as usize,
                 4,
             );
             let slice = crate::ObjectOwner::from_raw(imre_seq_slice(
@@ -926,15 +950,19 @@ mod tests {
             ));
             assert!(!crate::ObjectOwner::ptr_eq(&source, &slice));
             drop(source);
-            imre_list_append(Rc::as_ptr(&child), integer(17));
+            imre_list_append(crate::ListOwner::as_ptr(&child), integer(17));
             drop(child);
-            let saved = Rc::from_raw(
-                imre_seq_get_index(crate::ObjectOwner::as_ptr(&slice), 0) as *const List
-            );
+            let saved = crate::ListOwner::from_raw(imre_seq_get_index(
+                crate::ObjectOwner::as_ptr(&slice),
+                0,
+            ) as *const List);
             drop(slice);
-            assert_eq!(Int(imre_list_len(Rc::as_ptr(&saved))).as_small(), Some(1));
             assert_eq!(
-                Int(imre_list_get_index(Rc::as_ptr(&saved), 0)).as_small(),
+                Int(imre_list_len(crate::ListOwner::as_ptr(&saved))).as_small(),
+                Some(1)
+            );
+            assert_eq!(
+                Int(imre_list_get_index(crate::ListOwner::as_ptr(&saved), 0)).as_small(),
                 Some(17)
             );
             drop(saved);

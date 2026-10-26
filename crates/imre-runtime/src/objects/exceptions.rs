@@ -2879,7 +2879,7 @@ mod tests {
         let weak = Shared::downgrade(&big);
         let integer = Int(Shared::into_raw(big) as usize);
         // SAFETY: the constructor transfers one owned list reference.
-        let list = unsafe { Rc::from_raw(imre_list_new()) };
+        let list = unsafe { crate::ListOwner::from_raw(imre_list_new()) };
         let zero = Int::small(0).unwrap();
         // SAFETY: all integer/list inputs stay rooted, and each successful owned
         // result is adopted exactly once. Failure sentinels are never acquired.
@@ -2888,24 +2888,24 @@ mod tests {
             drop(take_error(Kind::ZeroDivisionError));
             assert_eq!(imre_int_parse(&Str::new("12__3")), 1);
             drop(take_error(Kind::ValueError));
-            imre_list_append(Rc::as_ptr(&list), integer.0);
+            imre_list_append(crate::ListOwner::as_ptr(&list), integer.0);
             drop(integer);
             assert_eq!(weak.strong_count(), 1);
-            imre_list_copy_index(Rc::as_ptr(&list), 1, 0);
+            imre_list_copy_index(crate::ListOwner::as_ptr(&list), 1, 0);
             drop(take_error(Kind::IndexError));
             assert_eq!(weak.strong_count(), 1);
-            assert_eq!(imre_list_get_index(Rc::as_ptr(&list), 7), 0);
+            assert_eq!(imre_list_get_index(crate::ListOwner::as_ptr(&list), 7), 0);
             drop(take_error(Kind::IndexError));
             let huge = Int::new(BigInt::from(1_u8) << 100_u32);
-            assert!(imre_list_repeat(Rc::as_ptr(&list), huge.0).is_null());
+            assert!(imre_list_repeat(crate::ListOwner::as_ptr(&list), huge.0).is_null());
             drop(take_error(Kind::OverflowError));
             let capacity = Int::new(BigInt::from(isize::MAX));
-            assert!(imre_list_repeat(Rc::as_ptr(&list), capacity.0).is_null());
+            assert!(imre_list_repeat(crate::ListOwner::as_ptr(&list), capacity.0).is_null());
             drop(take_error(Kind::MemoryError));
-            let popped = Int(imre_list_pop(Rc::as_ptr(&list)));
+            let popped = Int(imre_list_pop(crate::ListOwner::as_ptr(&list)));
             assert_eq!(popped.big().as_ref(), &(BigInt::from(1_u8) << 120_u32));
             drop(popped);
-            assert_eq!(imre_list_pop(Rc::as_ptr(&list)), 0);
+            assert_eq!(imre_list_pop(crate::ListOwner::as_ptr(&list)), 0);
             drop(take_error(Kind::IndexError));
         }
         assert!(weak.upgrade().is_none());

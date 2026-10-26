@@ -263,15 +263,23 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const () {
     if kind == 2 {
-        // SAFETY: no callback runs during this exclusive move of the buffer.
-        let saved = unsafe {
-            (&*list.cast::<List>())
-                .0
-                .with_mut(|values| std::mem::replace(values, crate::sorting_empty_ints()))
+        let mut marker = crate::sorting_empty_ints();
+        let saved = crate::cached_list(&mut marker)
+            .map_or_else(|| crate::ListOwner::try_new(List::new(marker)), Ok);
+        let Ok(saved) = saved else {
+            return super::Error::allocation().returning(std::ptr::null());
         };
-        crate::new_list(saved).cast()
+        // SAFETY: the new owner is private and no callback runs during the swap.
+        unsafe {
+            (&*list.cast::<List>()).0.with_mut(|values| {
+                saved
+                    .0
+                    .with_mut(|temporary| std::mem::swap(values, temporary))
+            });
+        }
+        crate::ListOwner::into_raw(saved).cast()
     } else {
-        // SAFETY: the exact descriptor and cached length travel with the owners.
+        // SAFETY: the descriptor and cached length travel with their owners.
         let saved = unsafe {
             object(list.cast()).0.with_mut(|storage| {
                 let words = if storage.sequence_storage().rows().is_some() {
@@ -282,19 +290,17 @@ pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const 
                     words.check_kind(kind);
                     words
                 };
-                Ok(std::mem::replace(words, Words::sorting_empty(kind)))
+                let owner = crate::ObjectOwner::try_new(Object(StorageCell::new(
+                    Storage::Sequence(Words::sorting_empty(kind)),
+                )))
+                .map_err(|_| super::Error::allocation())?;
+                owner
+                    .0
+                    .with_mut(|temporary| std::mem::swap(words, temporary.sequence_storage_mut()));
+                Ok(crate::ObjectOwner::into_raw(owner).cast())
             })
         };
-        // Preserve the header verbatim, including a surrounding sort's marker.
-        crate::finish(
-            saved.map(|saved| {
-                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-                    Storage::Sequence(saved),
-                ))))
-                .cast()
-            }),
-            std::ptr::null(),
-        )
+        crate::finish(saved, std::ptr::null())
     }
 }
 

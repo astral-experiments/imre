@@ -2,7 +2,7 @@
 
 use super::super::exceptions::{Result, push_string_repr, string_repr, write_string_repr};
 use super::super::json::readonly::document::Value;
-use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, name, object};
+use super::{Error, Int, Kind, LOGGERS, Object, Str, finish, levels, object, state};
 use crate::StrOwner;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -56,7 +56,8 @@ pub unsafe extern "C" fn imre_log_is_enabled(logger: *const Object, level: usize
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_disabled(logger: *const Object) -> bool {
     // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).disabled
+    let logger = unsafe { state(logger) };
+    logger.standalone_propagate.is_none() && control(&logger.name).disabled
 }
 
 /// # Safety
@@ -64,7 +65,11 @@ pub unsafe extern "C" fn imre_log_disabled(logger: *const Object) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
     // SAFETY: the caller roots this logger while its name is borrowed.
-    control(&unsafe { name(logger) }).propagate
+    let logger = unsafe { state(logger) };
+    logger
+        .standalone_propagate
+        .as_ref()
+        .map_or_else(|| control(&logger.name).propagate, std::cell::Cell::get)
 }
 
 /// Change the same control that fileConfig, dictConfig and emission observe.
@@ -74,9 +79,17 @@ pub unsafe extern "C" fn imre_log_propagate(logger: *const Object) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Object) {
     // SAFETY: the input retains the native logger for this operation.
-    let key = unsafe { name(logger) };
-    CONTROLS
-        .with_borrow_mut(|controls| controls.entry(key.to_string()).or_default().propagate = value);
+    let logger = unsafe { state(logger) };
+    if let Some(propagate) = &logger.standalone_propagate {
+        propagate.set(value);
+    } else {
+        CONTROLS.with_borrow_mut(|controls| {
+            controls
+                .entry(logger.name.to_string())
+                .or_default()
+                .propagate = value
+        });
+    }
 }
 
 /// Check reachable installed handlers. The fallback handler is not attached
@@ -87,24 +100,21 @@ pub unsafe extern "C" fn imre_log_set_propagate(value: bool, logger: *const Obje
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_log_has_handlers(logger: *const Object) -> bool {
     // SAFETY: the incoming logger stays live for the walk.
-    let key = unsafe { name(logger) };
+    let logger = unsafe { state(logger) };
     LOGGERS.with_borrow(|logs| {
-        let mut current = key.as_str();
+        let mut current = logger.as_ref();
         loop {
-            let attached = &logs.entries[current].handlers;
-            // SAFETY: every registry entry owns a concrete list of handler records.
-            if unsafe { attached.0.with(|s| !s.sequence_storage().values.is_empty()) } {
+            // SAFETY: the current logger retains its concrete handler list throughout the borrow.
+            if unsafe { current.handlers.0.with(|s| !s.sequence_storage().values.is_empty()) } {
                 return true;
             }
-            if current == "root" {
-                return logs.format.is_some();
-            }
-            if !control(current).propagate {
+            let Some(parent) = logs.parent(current) else {
+                return current.standalone_propagate.is_none() && logs.format.is_some();
+            };
+            if !control(&current.name).propagate {
                 return false;
             }
-            current = logs
-                .parent_name(current)
-                .expect("non-root logger has a parent");
+            current = &parent.logger;
         }
     })
 }
@@ -121,9 +131,13 @@ pub unsafe extern "C" fn imre_log_routed_emit(
     found: bool,
 ) {
     // SAFETY: the caller holds each owner through this synchronous call.
-    let logger_name = unsafe { name(logger) };
-    let (root, configured) =
-        LOGGERS.with_borrow(|logs| (reaches_root(logs, &logger_name), logs.format.is_some()));
+    let receiver = unsafe { state(logger) };
+    let (root, configured) = LOGGERS.with_borrow(|logs| {
+        (
+            receiver.standalone_propagate.is_none() && reaches_root(logs, &receiver.name),
+            logs.format.is_some(),
+        )
+    });
     if found && !(root && configured) {
         return;
     }

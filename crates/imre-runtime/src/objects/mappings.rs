@@ -3227,8 +3227,9 @@ mod tests {
                     crate::BytesOwner::from_raw(super::super::bytes::imre_bytes_validate_utf8(
                         crate::BytesOwner::as_ptr(&bytes),
                     ));
-                let from_text = Rc::from_raw(imre_dict_gather_str_int(&text, pointer));
-                let from_bytes = Rc::from_raw(imre_dict_gather_bytes_int(
+                let from_text =
+                    crate::ListOwner::from_raw(imre_dict_gather_str_int(&text, pointer));
+                let from_bytes = crate::ListOwner::from_raw(imre_dict_gather_bytes_int(
                     crate::BytesOwner::as_ptr(&validated),
                     pointer,
                 ));
@@ -3260,7 +3261,7 @@ mod tests {
                 );
             }
             let text = Str::new("aaé\u{301}😺\0a\u{7f}\u{80}");
-            let gathered = Rc::from_raw(imre_dict_gather_str_int(&text, pointer));
+            let gathered = crate::ListOwner::from_raw(imre_dict_gather_str_int(&text, pointer));
             let values = gathered.0.with(|values| {
                 values
                     .iter()
@@ -3268,8 +3269,10 @@ mod tests {
                     .collect::<Vec<_>>()
             });
             assert_eq!(values, [0, 0, 1, 2, 3, 4, 0, 5, 6]);
-            let ascii_edges =
-                Rc::from_raw(imre_dict_gather_str_int(&Str::new("\0\u{7f}"), pointer));
+            let ascii_edges = crate::ListOwner::from_raw(imre_dict_gather_str_int(
+                &Str::new("\0\u{7f}"),
+                pointer,
+            ));
             ascii_edges.0.with(|values| {
                 assert_eq!(values[0].as_small(), Some(4));
                 assert_eq!(values[1].as_small(), Some(5));
@@ -3280,7 +3283,8 @@ mod tests {
                 StrOwner::as_ptr(&keys[0]) as usize,
                 integer(-7),
             );
-            let changed = Rc::from_raw(imre_dict_gather_str_int(&Str::new("aaa"), pointer));
+            let changed =
+                crate::ListOwner::from_raw(imre_dict_gather_str_int(&Str::new("aaa"), pointer));
             changed.0.with(|values| {
                 assert!(values.iter().all(|value| value.as_small() == Some(-7)));
             });
@@ -3295,11 +3299,13 @@ mod tests {
                 StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
             assert_eq!(message.as_str(), "'a'");
             imre_dict_set(pointer, StrOwner::as_ptr(&keys[0]) as usize, integer(29));
-            let restored = Rc::from_raw(imre_dict_gather_str_int(&Str::new("a"), pointer));
+            let restored =
+                crate::ListOwner::from_raw(imre_dict_gather_str_int(&Str::new("a"), pointer));
             restored
                 .0
                 .with(|values| assert_eq!(values[0].as_small(), Some(29)));
-            let empty = Rc::from_raw(imre_dict_gather_str_int(&Str::new(""), pointer));
+            let empty =
+                crate::ListOwner::from_raw(imre_dict_gather_str_int(&Str::new(""), pointer));
             empty.0.with(|values| assert!(values.is_empty()));
         }
         assert_eq!(imre_error_pending(), 0);
@@ -3345,7 +3351,7 @@ mod tests {
                     StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
                 assert_eq!(message.as_str(), expected);
             }
-            let gathered = Rc::from_raw(imre_dict_gather_str_int(
+            let gathered = crate::ListOwner::from_raw(imre_dict_gather_str_int(
                 &Str::new("aaa"),
                 crate::ObjectOwner::as_ptr(&dictionary),
             ));
@@ -3356,7 +3362,7 @@ mod tests {
                 Int::from_usize(7).into_raw(),
             );
             assert_eq!(weak.strong_count(), 3);
-            let replaced = Rc::from_raw(imre_dict_gather_str_int(
+            let replaced = crate::ListOwner::from_raw(imre_dict_gather_str_int(
                 &Str::new("aaa"),
                 crate::ObjectOwner::as_ptr(&dictionary),
             ));
@@ -3407,7 +3413,7 @@ mod tests {
                 imre_dict_set(pointer, StrOwner::as_ptr(&keys[key]) as usize, word);
                 assert_eq!(count(), expected);
                 let before = Shared::strong_count(&large);
-                let gathered = Rc::from_raw(imre_dict_gather_str_int(
+                let gathered = crate::ListOwner::from_raw(imre_dict_gather_str_int(
                     StrOwner::as_ptr(&keys[key]),
                     pointer,
                 ));
