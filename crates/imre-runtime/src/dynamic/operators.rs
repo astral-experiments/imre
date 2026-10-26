@@ -690,7 +690,17 @@ impl Context {
         Ok(())
     }
 
-    fn repeat_bytes(&mut self, bytes: Id, multiplier: Id) -> Result<Id> {
+    /// Returns the immutable sequence payload used by builtin repetition.
+    fn repeat_storage(&self, id: Id) -> Option<Id> {
+        if matches!(self.heap.get(id), Value::Bytes(_)) {
+            Some(id)
+        } else {
+            self.string_storage(id)
+        }
+    }
+
+    /// Uses the index protocol for either operand order.
+    fn repeat_immutable(&mut self, sequence: Id, multiplier: Id) -> Result<Id> {
         let count = self.index_value(multiplier)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
@@ -700,12 +710,14 @@ impl Context {
                 ),
             )
         })?;
-        let Value::Bytes(data) = self.heap.get(bytes) else {
-            unreachable!()
-        };
-        Ok(match crate::objects::repeat_bytes(data, &count)? {
-            Some(repeated) => self.alloc(Value::Bytes(repeated)),
-            None => bytes,
+        Ok(match self.heap.get(sequence) {
+            Value::Bytes(data) => match crate::objects::repeat_bytes(data, &count)? {
+                Some(repeated) => self.alloc(Value::Bytes(repeated)),
+                None => sequence,
+            },
+            Value::Str(_) if count.as_small() == Some(1) => sequence,
+            Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
+            _ => unreachable!("immutable repetition payload"),
         })
     }
 
@@ -764,8 +776,12 @@ impl Context {
                 }
                 _ => {}
             },
-            "*" if matches!(self.heap.get(a), Value::Bytes(_)) => return self.repeat_bytes(a, b),
-            "*" if matches!(self.heap.get(b), Value::Bytes(_)) => return self.repeat_bytes(b, a),
+            "*" if let Some(sequence) = self.repeat_storage(a) => {
+                return self.repeat_immutable(sequence, b);
+            }
+            "*" if let Some(sequence) = self.repeat_storage(b) => {
+                return self.repeat_immutable(sequence, a);
+            }
             _ => {}
         }
         if op == "*" {
