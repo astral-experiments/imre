@@ -213,6 +213,33 @@ pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
     })
 }
 
+fn sequence_index(length: &BigUint, secure: bool) -> Result<BigUint> {
+    if length.is_zero() {
+        return Err(Error::new(
+            Kind::IndexError,
+            "Cannot choose from an empty sequence",
+        ));
+    }
+    if length.bits() >= u64::from(usize::BITS) {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        ));
+    }
+    if !secure {
+        return shared().below(length);
+    }
+    let limit = length.to_u64().expect("sequence length fits Py_ssize_t");
+    // The interval [threshold, 2^64) contains an equal number of each residue.
+    let threshold = limit.wrapping_neg() % limit;
+    loop {
+        let draw = getrandom::u64().map_err(|error| super::files::os_error(error.into()))?;
+        if draw >= threshold {
+            return Ok(BigUint::from(draw % limit));
+        }
+    }
+}
+
 /// Sample a native sequence index after its length has been checked.
 /// # Safety
 /// The length must be a live, nonnegative Python integer.
@@ -220,15 +247,17 @@ pub unsafe extern "C" fn imre_random_bits(count: usize) -> usize {
 pub unsafe extern "C" fn imre_random_choice_index(length: usize) -> usize {
     // SAFETY: the compiler roots the result of len().
     let length = unsafe { Int::borrow(length) };
-    let length = length.big();
-    integer_result(if length.is_zero() {
-        Err(Error::new(
-            Kind::IndexError,
-            "Cannot choose from an empty sequence",
-        ))
-    } else {
-        shared().below(length.magnitude()).map(BigInt::from)
-    })
+    integer_result(sequence_index(length.big().magnitude(), false).map(BigInt::from))
+}
+
+/// Draw an unbiased index using the system's cryptographic random source.
+/// # Safety
+/// The length must be a live, nonnegative Python integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_secrets_choice_index(length: usize) -> usize {
+    // SAFETY: the compiler roots the result of len().
+    let length = unsafe { Int::borrow(length) };
+    integer_result(sequence_index(length.big().magnitude(), true).map(BigInt::from))
 }
 
 /// Select from an arithmetic progression without materializing it. A range used
@@ -249,10 +278,11 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
         }
         return Ok(start + BigInt::from(shared().below((stop - start + 1u32).magnitude())?));
     }
+    let sequence = matches!(mode, 2 | 4);
     if step.is_zero() {
         return Err(Error::new(
             Kind::ValueError,
-            if mode == 2 {
+            if sequence {
                 "range() arg 3 must not be zero"
             } else {
                 "zero step for randrange()"
@@ -265,7 +295,7 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
         (start, stop)
     };
     if hi <= lo {
-        if mode == 2 {
+        if sequence {
             return Err(Error::new(
                 Kind::IndexError,
                 "Cannot choose from an empty sequence",
@@ -281,13 +311,12 @@ fn progression(start: &BigInt, stop: &BigInt, step: &BigInt, mode: u32) -> Resul
         return Err(Error::new(Kind::ValueError, message));
     }
     let count = (hi - lo - 1u32).magnitude() / step.magnitude() + 1u32;
-    if mode == 2 && count.bits() >= usize::BITS as u64 {
-        return Err(Error::new(
-            Kind::OverflowError,
-            "Python int too large to convert to C ssize_t",
-        ));
-    }
-    Ok(start + step * BigInt::from(shared().below(&count)?))
+    let index = if sequence {
+        sequence_index(&count, mode == 4)?
+    } else {
+        shared().below(&count)?
+    };
+    Ok(start + step * BigInt::from(index))
 }
 
 /// # Safety

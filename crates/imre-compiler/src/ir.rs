@@ -846,11 +846,11 @@ pub(crate) enum RandomOperation {
     Seed,
     Float,
     Bits,
-    ChoiceIndex,
+    ChoiceIndex { secure: bool },
     Randint,
     Randrange,
     RandrangeOne,
-    ChoiceRange,
+    ChoiceRange { secure: bool },
 }
 
 #[derive(Clone)]
