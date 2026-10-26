@@ -248,7 +248,9 @@ def _deliver(logger: Logger, level: int, message: str, path: str, lineno: int) -
 
 def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force: bool,
                   stream: _TextOutput | None, style: str, handlers: list[Handler] | None,
-                  level_name: str | None, default_format: bool, stream_supplied: bool) -> None:
+                  filename: str | Path | None, filemode: str, encoding: str | None, errors: str | None,
+                  level_name: str | None, default_format: bool, stream_supplied: bool, filename_supplied: bool,
+                  unused: str, unused_with_handlers: str) -> None:
     with _config_lock:
         root = getLogger("")
         if force:
@@ -259,9 +261,17 @@ def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force
             return
         chosen: list[Handler]
         if handlers is None:
-            chosen = [StreamHandler(stream)]
+            if stream_supplied and filename_supplied:
+                raise ValueError("'stream' and 'filename' should not be specified together")
+            chosen = []
+            if filename is not None and filename:
+                file_errors = None if "b" in filemode else errors
+                chosen.append(FileHandler(filename, filemode, encoding=encoding, errors=file_errors))
+            else:
+                chosen.append(StreamHandler(stream))
         else:
-            if stream_supplied:
+            unused = unused_with_handlers
+            if stream_supplied or filename_supplied:
                 raise ValueError("'stream' or 'filename' should not be specified together with 'handlers'")
             chosen = handlers
         if style != "%" and style != "{" and style != "$":
@@ -282,11 +292,14 @@ def _basic_config(level: int | None, fmt: str | None, datefmt: str | None, force
             root.setLevel(level_name)
         elif level is not None:
             root.setLevel(level)
+        if unused:
+            raise ValueError("Unrecognised argument(s): " + unused)
 
 
 def _auto_config() -> None:
     if not getLogger("").handlers:
-        _basic_config(None, None, None, False, None, "%", None, None, True, False)
+        _basic_config(None, None, None, False, None, "%", None, None, "a", None, "backslashreplace",
+                      None, True, False, False, "", "")
 
 
 def _logfile_name(filename: str | Path) -> str:

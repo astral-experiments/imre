@@ -379,12 +379,17 @@ impl Checker<'_> {
             .ok_or_else(|| error(self.source, call, "missing logging.Handler"))?;
         let list = self.types.list(handler);
         let handlers = self.types.optional(list);
+        let filename = self
+            .types
+            .union(&[Type::Str, Type::Path, Type::None])
+            .expect("optional filename");
+        let default_errors = self.coerce(text("backslashreplace"), string, call)?;
         let kw = ParameterKind::KeywordOnly;
         let boolean = |n| Expr {
             ty: Type::Bool,
             kind: ExprKind::Bool(n),
         };
-        let params = [
+        let mut params = vec![
             parameter("level", level, kw, absent(level)),
             parameter("format", string, kw, absent(string)),
             parameter("datefmt", string, kw, absent(string)),
@@ -392,7 +397,31 @@ impl Checker<'_> {
             parameter("stream", output, kw, absent(output)),
             parameter("style", Type::Str, kw, text("%")),
             parameter("handlers", handlers, kw, absent(handlers)),
+            parameter("filename", filename, kw, absent(filename)),
+            parameter("filemode", Type::Str, kw, text("a")),
+            parameter("encoding", string, kw, absent(string)),
+            parameter("errors", string, kw, default_errors),
         ];
+        let known = params.len();
+        let mut unused = Vec::new();
+        let mut unused_with_handlers = Vec::new();
+        for keyword in &call.arguments.keywords {
+            let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
+                continue;
+            };
+            if !params[..known].iter().any(|p| p.name == name) {
+                unused.push(name);
+                unused_with_handlers.push(name);
+                if !params[known..].iter().any(|p| p.name == name) {
+                    params.push(Parameter {
+                        kind: kw,
+                        ..required(name, Type::None)
+                    });
+                }
+            } else if name == "filemode" {
+                unused_with_handlers.push(name);
+            }
+        }
         let mut name = false;
         let mut args = self.arguments_with(call, &params, None, |checker, index, arg| {
             if index == 0 {
@@ -402,6 +431,9 @@ impl Checker<'_> {
                     return checker.coerce(value, string, arg);
                 }
                 return checker.coerce(value, level, arg);
+            }
+            if index >= known {
+                return checker.expr(arg);
             }
             if index == 6 && !matches!(arg, ast::Expr::List(_) | ast::Expr::ListComp(_)) {
                 let value = checker.expr(arg)?;
@@ -423,6 +455,21 @@ impl Checker<'_> {
             }
             checker.expr_expected(arg, params[index].ty)
         })?;
+        let mut scope = calls::ArgumentScope::default();
+        if !unused.is_empty() {
+            // Hold every operand in call order, including the options used only
+            // for their names. Pass the known parameters to the bundled function.
+            let held: Vec<_> = args
+                .values
+                .into_iter()
+                .map(|v| scope.hold(self, v))
+                .collect();
+            args.values = args.order[..known]
+                .iter()
+                .map(|&i| held[i].clone())
+                .collect();
+            args.order = (0..known).collect();
+        }
         let extra = args.values.len();
         if name {
             args.order.push(args.order[0]);
@@ -438,11 +485,31 @@ impl Checker<'_> {
                 .iter()
                 .any(|k| k.arg.as_ref().is_some_and(|n| n.as_str() == s))
         };
-        for flag in [!supplied("format"), supplied("stream")] {
+        for flag in [
+            !supplied("format"),
+            supplied("stream"),
+            supplied("filename"),
+        ] {
             args.order.push(args.values.len());
             args.values.push(boolean(flag));
         }
-        self.logging_source_call("_basic_config", args, call)
+        // Whether these options conflict depends on the live root. The native
+        // binder has already checked the type of every argument expression.
+        let runtime_options = !unused.is_empty()
+            || (supplied("filename") && supplied("stream"))
+            || (supplied("handlers")
+                && ["filename", "stream", "filemode"]
+                    .iter()
+                    .any(|s| supplied(s)));
+        for names in [unused, unused_with_handlers] {
+            args.order.push(args.values.len());
+            args.values.push(text(&names.join(", ")));
+        }
+        let result = self.logging_source_call("_basic_config", args, call)?;
+        if runtime_options {
+            self.graph.checked_overload(self.module, call.range());
+        }
+        Ok(scope.finish(result))
     }
 
     /// Share _checkLevel between global suppression and logger thresholds.
