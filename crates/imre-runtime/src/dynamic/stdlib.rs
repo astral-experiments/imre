@@ -34,6 +34,7 @@ pub(super) fn is_module(name: &str) -> bool {
         name,
         "sys"
             | "codecs"
+            | "types"
             | "io"
             | "sysconfig"
             | "ast"
@@ -191,6 +192,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "FrameType") => ctx.builtin("frame"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
@@ -301,7 +304,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.alloc(Value::Native(format!("operator.{name}")))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
-        ("sys", "exit")
+        ("sys", "exit" | "exc_info" | "exception")
         | (
             "sysconfig",
             "get_path"
@@ -472,6 +475,7 @@ pub(super) fn call(
         "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
         | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "sys.exc_info" | "sys.exception" => (0, &[]),
         "sys.exit"
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
@@ -745,6 +749,16 @@ pub(super) fn call(
         "warnings.warn" => {
             eprintln!("Warning: {}", ctx.str_value(argument(args, 0)?)?);
             NONE
+        }
+        "sys.exception" => ctx.heap.active_exception(),
+        "sys.exc_info" => {
+            let exc = ctx.heap.active_exception();
+            let (class, traceback) = if exc == NONE {
+                (NONE, NONE)
+            } else {
+                (ctx.exact_type(exc)?, ctx.exception_traceback(exc)?)
+            };
+            ctx.alloc(Value::Tuple(vec![class, exc, traceback]))
         }
         "sys.exit" => {
             // PyErr_SetObject normalizes a tuple as the exception's constructor
