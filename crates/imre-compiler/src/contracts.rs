@@ -95,6 +95,9 @@ impl Builtin {
                         | crate::ir::CalendarOp::Delta
                         | crate::ir::CalendarOp::Zone
                         | crate::ir::CalendarOp::Now
+                        | crate::ir::CalendarOp::EmailParseDate
+                        | crate::ir::CalendarOp::EmailFormatDateTime
+                        | crate::ir::CalendarOp::EmailFormatDate
                         | crate::ir::CalendarOp::Shift { .. }
                         | crate::ir::CalendarOp::Negate
                 ),
@@ -426,6 +429,7 @@ impl Builtin {
             | Self::CsvNext { .. }
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
             | Self::JsonErrorField(_)
             | Self::HashRecord
@@ -501,7 +505,6 @@ impl Builtin {
             | Self::IsNone
             | Self::MockCallList { .. }
             | Self::JsonIsInt
-            | Self::JsonEmptyObject
             | Self::WallTime
             | Self::CacheNew
             | Self::CacheTable
@@ -998,6 +1001,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_len"
                 | "imre_json_get_receiver"
                 | "imre_json_add"
+                | "imre_json_empty_object"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"
@@ -1020,6 +1024,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_calendar_delta"
                 | "imre_calendar_zone"
                 | "imre_calendar_now"
+                | "imre_email_parsedate"
+                | "imre_email_format_datetime"
+                | "imre_email_formatdate"
                 | "imre_calendar_shift"
                 | "imre_calendar_negate"
                 | "imre_calendar_compare"

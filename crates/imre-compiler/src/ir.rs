@@ -192,6 +192,9 @@ pub(crate) enum CalendarOp {
     Text { iso: bool },
     NullableEqual,
     TotalSeconds,
+    EmailParseDate,
+    EmailFormatDateTime,
+    EmailFormatDate,
 }
 
 /// Each captured stream has one exact text or byte representation. An inherited

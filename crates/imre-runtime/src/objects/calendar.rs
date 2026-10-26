@@ -1,6 +1,7 @@
 //! Immutable Python calendar values. Civil dates use an ordinal and microseconds of day;
 //! fixed zones keep their original offset and owner, including the canonical UTC singleton.
 use super::*;
+mod maildates;
 /// # Safety
 /// The rooted receiver is an exact timedelta.
 #[unsafe(no_mangle)]

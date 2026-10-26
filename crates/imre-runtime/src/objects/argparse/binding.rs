@@ -190,7 +190,9 @@ impl OptionSpec {
                     .unwrap_or_else(|| Int::from_usize(0)),
                 _ => unreachable!("count produces integers"),
             };
-            return Ok(Bound::Scalar(Scalar::Int(Int::new(n.big().as_ref() + 1))));
+            let next = Int::try_new(n.big().as_ref() + 1)
+                .map_err(|_| Stop::Exception(Error::allocation()))?;
+            return Ok(Bound::Scalar(Scalar::Int(next)));
         }
         self.bind(parser, Some(&[]))
     }

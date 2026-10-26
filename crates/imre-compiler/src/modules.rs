@@ -112,6 +112,8 @@ pub(crate) enum IntrinsicModule {
     PosixPath,
     Urllib,
     UrllibParse,
+    Email,
+    EmailUtils,
     Collections,
     CollectionsNative,
     CollectionsAbc,
@@ -428,6 +430,9 @@ pub(crate) enum Intrinsic {
     Fnmatch(FnmatchOperation),
     Unquote,
     UrlSplit,
+    EmailParseDate,
+    EmailFormatDateTime,
+    EmailFormatDate,
     SplitResult { bytes: bool },
 }
 
@@ -493,6 +498,8 @@ impl IntrinsicModule {
             "os" => Some(Self::Os),
             "posix" if cfg!(unix) => Some(Self::Posix),
             "os.path" | "posixpath" => Some(Self::PosixPath),
+            "email" => Some(Self::Email),
+            "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "importlib" => Some(Self::Importlib),
@@ -558,6 +565,9 @@ impl IntrinsicModule {
             } else {
                 Self::JsonDecoder
             }));
+        }
+        if self == Self::Email && name == "utils" {
+            return Some(Binding::IntrinsicModule(Self::EmailUtils));
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -977,6 +987,9 @@ impl IntrinsicModule {
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
+            (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
+            (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
             (Self::UrllibParse, "SplitResultBytes") => Intrinsic::SplitResult { bytes: true },
