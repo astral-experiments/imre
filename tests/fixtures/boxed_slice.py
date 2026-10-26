@@ -38,6 +38,12 @@ def current():
     print(s.indices(Index("length", 8, visits)), visits)
     huge = 10 ** 65
     print(slice(-huge, None, -huge).indices(2 * huge))
+    print(list(range(-(2 ** 63), 2 ** 63 - 1)[-3:]))
+    try:
+        class Derived(slice):
+            pass
+    except TypeError as error:
+        print(str(error))
     for args in [(), (1, 2, 3, 4)]:
         try:
             slice(*args)

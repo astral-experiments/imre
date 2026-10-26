@@ -705,13 +705,15 @@ impl Context {
         scope: Id,
         mut bases: Vec<Id>,
     ) -> Result<Id> {
-        if bases.iter().any(
-            |&base| matches!(self.heap.get(base), Value::Native(name) if name == "typing.TypeVar"),
-        ) {
-            return Err(Error::new(
-                "TypeError",
-                "type 'typing.TypeVar' is not an acceptable base type",
-            ));
+        for &base in &bases {
+            if let Value::Native(name) = self.heap.get(base)
+                && matches!(name.as_str(), "typing.TypeVar" | "slice")
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not an acceptable base type"),
+                ));
+            }
         }
         if bases.is_empty() {
             bases.push(self.builtin("object"));

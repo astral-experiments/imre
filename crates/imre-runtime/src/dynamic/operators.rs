@@ -662,19 +662,7 @@ impl Context {
     fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
         let obj = self.string_storage(obj).unwrap_or(obj);
         if let Value::Range { start, stop, step } = *self.heap.get(obj) {
-            let len = builtins::range_len(start, stop, step)?;
-            let [first, last, stride] = super::slice::sequence_bounds(self, parts, len)?;
-            let step = i128::from(step);
-            let at = |i| i128::from(start) + i128::from(i) * step;
-            let narrow = |n| {
-                i64::try_from(n)
-                    .map_err(|_| Error::new("OverflowError", "range bound is too large"))
-            };
-            return Ok(self.alloc(Value::Range {
-                start: narrow(at(first))?,
-                stop: narrow(at(last))?,
-                step: narrow(i128::from(stride) * step)?,
-            }));
+            return super::slice::range(self, parts, start, stop, step);
         }
         if !matches!(
             self.heap.get(obj),

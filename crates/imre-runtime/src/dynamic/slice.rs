@@ -1,5 +1,6 @@
 //! First-class slice objects for runtime-loaded Python.
-use num_traits::Signed;
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive};
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::Int;
@@ -76,9 +77,8 @@ pub(super) fn method(
     if length.big().is_negative() {
         return Err(Error::new("ValueError", "length should not be negative"));
     }
-    let bounds = components(ctx, parts)?.map(|v| v.map(|n| n.big().into_owned()));
     let values =
-        normalize(bounds, length.big().into_owned()).map(|n| ctx.alloc(Value::Int(Int::new(n))));
+        indices(ctx, parts, length.big().into_owned())?.map(|n| ctx.alloc(Value::Int(Int::new(n))));
     Ok(ctx.alloc(Value::Tuple(values.to_vec())))
 }
 
@@ -146,6 +146,32 @@ fn normalize<T: Signed + Ord + Clone>([start, stop, step]: [Option<T>; 3], lengt
         bound(stop, if reverse { &low } else { &high }),
         step,
     ]
+}
+
+fn indices(ctx: &mut Context, parts: [Id; 3], length: BigInt) -> Result<[BigInt; 3]> {
+    let bounds = components(ctx, parts)?.map(|v| v.map(|n| n.big().into_owned()));
+    Ok(normalize(bounds, length))
+}
+
+/// Slicing a range returns its actual new endpoints and step, even for an empty range.
+pub(super) fn range(
+    ctx: &mut Context,
+    parts: [Id; 3],
+    start: i64,
+    stop: i64,
+    step: i64,
+) -> Result<Id> {
+    let len = super::builtins::range_len(start, stop, step)?;
+    let [first, last, stride] = indices(ctx, parts, BigInt::from(len))?;
+    let narrow = |n: BigInt| {
+        n.to_i64()
+            .ok_or_else(|| Error::new("OverflowError", "range bound is too large"))
+    };
+    Ok(ctx.alloc(Value::Range {
+        start: narrow(first * step + start)?,
+        stop: narrow(last * step + start)?,
+        step: narrow(stride * step)?,
+    }))
 }
 
 /// Clip bounds only when addressing storage whose actual length fits a machine word.
