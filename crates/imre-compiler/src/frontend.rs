@@ -7604,8 +7604,10 @@ impl<'a> Checker<'a> {
                     return Ok(value);
                 }
                 if matches!(attribute.attr.as_str(), "encoding" | "errors")
-                    && (receiver.ty == Type::TextIO
-                        || self.types.payload(receiver.ty) == Some(Type::TextIO))
+                    && matches!(
+                        self.types.payload(receiver.ty).unwrap_or(receiver.ty),
+                        Type::TextIO | Type::TextOutput
+                    )
                 {
                     return Ok(Expr {
                         ty: self.types.optional(Type::Str),
@@ -8551,6 +8553,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::FileEncodingUsesUtf8
                 | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),
             )) => {

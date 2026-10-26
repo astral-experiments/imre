@@ -297,7 +297,7 @@ impl Storage {
         })
     }
 
-    fn path_text(&self) -> &StrOwner {
+    pub(super) fn path_text(&self) -> &StrOwner {
         match self {
             Self::PurePath(p) => &p.text,
             _ => self.path_value().spelling(),

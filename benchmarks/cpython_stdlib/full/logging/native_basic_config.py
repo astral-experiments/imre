@@ -109,7 +109,7 @@ def main():
     if Path(test_logging.__file__).read_bytes() != SOURCE.read_bytes():
         raise ValueError("loaded test_logging differs from the verified source")
     fixtures = [HERE.parents[3] / "tests/fixtures/files" / name
-                for name in ("logging_root_stream_config.py", "logging_basic_filename.py")]
+                for name in ("logging_root_stream_config.py", "logging_basic_filename.py", "logging_file_codecs.py")]
     expected = {}
     for source in fixtures:
         with tempfile.TemporaryDirectory() as tmp:
