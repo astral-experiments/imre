@@ -126,8 +126,10 @@ def listener(command, wrong=False, requests=1, *, legacy=False):
         variant = "legacy" if legacy else "wrong" if wrong else "normal"
         with subprocess.Popen([*command, variant, str(requests)], stdout=subprocess.PIPE, stderr=errors) as child:
             try:
-                if not select.select([child.stdout], [], [], 10)[0]:
-                    raise AssertionError("listener did not publish its port")
+                # HTTPServer.server_bind performs a reverse lookup before the
+                # port can be published, even for a loopback listener.
+                if not select.select([child.stdout], [], [], 60)[0]:
+                    raise TimeoutError(f"{command[0]} did not publish its TCP port within 60 seconds")
                 line = child.stdout.readline()
                 if not line:
                     errors.seek(0)
@@ -187,6 +189,8 @@ def date_case(command, wrong=False):
 
 
 def public_contracts(command):
+    # Compare the child's bound name with an independent CPython lookup.
+    command = [*command, socket.getfqdn("127.0.0.1")]
     with listener(command) as port:
         with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
             conn.sendall(b"GET /old\r\n")

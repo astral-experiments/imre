@@ -1,6 +1,5 @@
 """Exercise HTTP handler subclass hooks, header shapes, status keys and delayed binding."""
 import sys
-import socket
 import socketserver
 from typing import Callable
 from http import HTTPStatus
@@ -90,7 +89,7 @@ except AttributeError:
     pass
 server.server_bind()
 assert server.server_port == server.server_address[1]
-assert server.server_name == socket.getfqdn(server.server_address[0])
+assert server.server_name == sys.argv[1]
 server.server_activate()
 print(server.server_port)
 sys.stdout.flush()
