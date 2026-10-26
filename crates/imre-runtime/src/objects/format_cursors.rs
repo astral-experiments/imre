@@ -1,10 +1,10 @@
 //! Independent cursors for the two grammars used by string.Formatter.
-mod grammar;
 use super::{
     Error, Int, Kind, Object, OwnedWord, Str, finish, itertools, literal_string, records, unions,
     words::WordKind,
 };
 use crate::StrOwner;
+use crate::format_grammar as grammar;
 use records::RecordDescriptor;
 use std::{cell::Cell, ops::Range};
 

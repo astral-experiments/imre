@@ -107,6 +107,12 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
+        if let Value::ClassMethod(callable) = *self.heap.get(value) {
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: owner,
+            }));
+        }
         if let Some(get) = self.slot(value, "__get__") {
             return self.call(get, vec![value, receiver, owner], Vec::new());
         }
@@ -283,6 +289,7 @@ impl Context {
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
+            Value::ClassMethod(_) => "classmethod",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",

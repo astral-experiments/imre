@@ -162,7 +162,10 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => return Ok(id),
+            Value::Iterator { .. }
+            | Value::AstWalk(_)
+            | Value::Zip { .. }
+            | Value::FormatIterator { .. } => return Ok(id),
             Value::List(_)
             | Value::Tuple(_)
             | Value::Bytes(_)
@@ -178,7 +181,10 @@ impl Context {
                 let result = self.call(method, Vec::new(), Vec::new())?;
                 return if matches!(
                     self.heap.get(result),
-                    Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. }
+                    Value::Iterator { .. }
+                        | Value::AstWalk(_)
+                        | Value::Zip { .. }
+                        | Value::FormatIterator { .. }
                 ) {
                     Ok(result)
                 } else {
@@ -236,6 +242,9 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::FormatIterator { input, offset, .. } = *self.heap.get(id) {
+            return Ok(offset < self.str_value(input)?.len());
+        }
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
@@ -251,6 +260,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::FormatIterator { .. }) {
+            return self.next_format_row(id);
+        }
         if matches!(self.heap.get(id), Value::AstWalk(_)) {
             return stdlib::ast::advance(self, id);
         }
@@ -280,7 +292,10 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_) | Value::Zip { .. }) {
+        if matches!(
+            self.heap.get(id),
+            Value::AstWalk(_) | Value::Zip { .. } | Value::FormatIterator { .. }
+        ) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);

@@ -31,6 +31,11 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
+        "string" => Some((
+            "string/__init__.py",
+            include_str!("../stdlib/string/cpython.py"),
+        )),
         "_imre_socketserver_poll" => Some((
             "_imre_socketserver_poll.py",
             if cfg!(any(target_os = "linux", target_os = "macos")) {

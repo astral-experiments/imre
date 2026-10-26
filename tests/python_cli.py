@@ -360,6 +360,7 @@ def report(text):
             "boxed_bytes_add.py",
             "boxed_int_to_bytes.py",
             "boxed_contextvars.py",
+            "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_datetime.py",

@@ -103,6 +103,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "list"
             | "object"
             | "property"
+            | "classmethod"
             | "staticmethod"
             | "range"
             | "set"
@@ -737,6 +738,11 @@ pub(super) fn call(
                 .to_owned();
             let value = format_value(ctx, args[0], &spec)?;
             Ok(ctx.text(value))
+        }
+        "classmethod" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            Ok(ctx.alloc(Value::ClassMethod(args[0])))
         }
         "staticmethod" => {
             if !kwargs.is_empty() {

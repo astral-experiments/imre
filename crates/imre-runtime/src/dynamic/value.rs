@@ -169,6 +169,11 @@ impl Context {
             Value::Code(_) => "code",
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
+            Value::ClassMethod(_) => "classmethod",
+            Value::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
             Value::Partial { .. } => "partial",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
@@ -361,6 +366,7 @@ pub(super) enum Value {
         callable: Id,
         receiver: Id,
     },
+    ClassMethod(Id),
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -392,6 +398,11 @@ pub(super) enum Value {
         offset: usize,
         reverse: bool,
     },
+    FormatIterator {
+        input: Id,
+        offset: usize,
+        kind: FormatKind,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
@@ -418,6 +429,12 @@ pub(super) enum Value {
     TokenMissing,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum FormatKind {
+    Markup,
+    Field,
+}
+
 #[derive(Clone)]
 pub(super) struct CachedCall {
     pub args: Vec<Id>,
@@ -430,6 +447,8 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::FormatIterator { input, .. } => visit.push(*input),
+            Self::ClassMethod(callable) => visit.push(*callable),
             Self::Zip {
                 inputs, pending, ..
             } => {
