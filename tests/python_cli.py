@@ -343,6 +343,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
+            "boxed_code_objects.py",
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
@@ -356,6 +357,7 @@ def report(text):
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_module_globals.py",
+            "boxed_frozenset.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -366,6 +368,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
             "boxed_bytes_separators.py",
+            "boxed_reversed_list.py",
             "boxed_string_new.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())

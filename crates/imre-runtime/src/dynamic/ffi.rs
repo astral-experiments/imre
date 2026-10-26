@@ -89,23 +89,19 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
-            "set" => Ok(self.alloc(Value::Set(Vec::new()))),
+            "set" => Ok(self.alloc(Value::Set {
+                items: Vec::new(),
+                frozen: false,
+            })),
             "dict" => Ok(self.dict(Vec::new())),
             "tuple" => {
                 let vs = self.items(a)?;
                 Ok(self.alloc(Value::Tuple(vs)))
             }
             "append" => {
-                if matches!(self.heap.get(a), Value::Set(_)) {
-                    if !builtins::hashable(self, b) {
-                        return Err(Error::new("TypeError", "unhashable set element"));
-                    }
-                    if self.contains(b, a)? {
-                        return Ok(a);
-                    }
-                }
                 match self.heap.get_mut(a) {
-                    Value::List(v) | Value::Set(v) => v.push(b),
+                    Value::List(v) => v.push(b),
+                    Value::Set { frozen: false, .. } => builtins::set_add(self, a, b)?,
                     _ => return Err(Error::new("TypeError", "expected a list or set")),
                 }
                 Ok(a)
@@ -334,6 +330,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         token_missing: NONE,
+        native_code_objects: HashMap::new(),
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
@@ -499,24 +496,127 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
 ) -> Id {
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
-    let owner = ctx.scope_data(scope);
-    let class_cell = owner.class_cell;
-    let scope = if owner.class_body.is_some() && !annotation_scope {
-        owner.parent.unwrap_or(scope)
-    } else {
-        scope
-    };
-    let fields =
-        super::function_fields::FunctionFields::new(ctx, scope, name, qualname, doc, annotate);
-    let result = ctx.alloc(Value::Function {
-        fields,
+    let location = ctx.heap.current_location().unwrap_or(value::Location {
+        file: "<native>",
+        line: 1,
+    });
+    let code = ctx.prelinked_code(code, scope, name, parameters, location);
+    ctx.define_function(
         code,
         scope,
-        class_cell,
-        parameters,
+        name,
         defaults,
-    });
-    finish(ctx, Ok(result))
+        qualname,
+        doc,
+        annotate,
+        annotation_scope,
+    )
+}
+
+/// Static per-definition record emitted beside its native entry point.
+#[repr(C)]
+pub(super) struct PrelinkedSite {
+    entry: Code,
+    filename: *const c_char,
+    first_line: u32,
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
+    ctx: *mut Context,
+    site: *const PrelinkedSite,
+    scope: Id,
+    name: Id,
+    parameters: Id,
+    defaults: Id,
+    qualname: Id,
+    doc: Id,
+    annotate: Id,
+    annotation_scope: bool,
+) -> Id {
+    // SAFETY: the compiler supplies a live context and a distinct static record for this definition.
+    let (ctx, definition) = unsafe { (&mut *ctx, &*site) };
+    let key = site as usize;
+    let code = if let Some(&code) = ctx.native_code_objects.get(&key) {
+        code
+    } else {
+        // SAFETY: the filename is a nul-terminated constant in the native executable.
+        let file = unsafe { cstr(definition.filename) };
+        let code = ctx.prelinked_code(
+            definition.entry,
+            scope,
+            name,
+            parameters,
+            value::Location {
+                file,
+                line: definition.first_line,
+            },
+        );
+        ctx.native_code_objects.insert(key, code);
+        code
+    };
+    ctx.define_function(
+        code,
+        scope,
+        name,
+        defaults,
+        qualname,
+        doc,
+        annotate,
+        annotation_scope,
+    )
+}
+
+impl Context {
+    fn prelinked_code(
+        &mut self,
+        entry: Code,
+        scope: Id,
+        name: Id,
+        parameters: Id,
+        location: value::Location,
+    ) -> Id {
+        let filename = self.text(location.file);
+        let module_definition = self.scope_data(scope).parent.is_none();
+        self.alloc(Value::Code(value::CodeObject {
+            entry,
+            name,
+            parameters,
+            filename,
+            first_line: location.line,
+            module_definition,
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn define_function(
+        &mut self,
+        code: Id,
+        scope: Id,
+        name: Id,
+        defaults: Id,
+        qualname: Id,
+        doc: Id,
+        annotate: Id,
+        annotation_scope: bool,
+    ) -> Id {
+        let owner = self.scope_data(scope);
+        let class_cell = owner.class_cell;
+        let scope = if owner.class_body.is_some() && !annotation_scope {
+            owner.parent.unwrap_or(scope)
+        } else {
+            scope
+        };
+        let fields =
+            super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        self.alloc(Value::Function {
+            fields,
+            code,
+            scope,
+            class_cell,
+            defaults,
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -561,6 +661,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
             .values()
             .chain(ctx.classes.values())
             .chain(ctx.builtins.values())
+            .chain(ctx.native_code_objects.values())
             .chain(ctx.codec_entries.roots())
             .copied()
             .chain(ctx.contexts.iter().copied())

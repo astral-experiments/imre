@@ -65,3 +65,17 @@ def current():
             print(issubclass(child, parent))
         except TypeError as error:
             print(str(error))
+
+    class MissingAttribute(AttributeError):
+        pass
+
+    class DetailMissing(MissingAttribute):
+        pass
+
+    details = [7]
+    error = DetailMissing(details)
+    details.append(8)
+    try:
+        raise error
+    except AttributeError as caught:
+        print(isinstance(caught, DetailMissing), caught.args, caught.args[0] is details)

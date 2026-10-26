@@ -213,11 +213,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "CodeType") => ctx.builtin("code"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
-        ("datetime", "datetime" | "date" | "timedelta" | "timezone") => {
+        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
         }
         ("socket", name) => return socket::attribute(ctx, name),
