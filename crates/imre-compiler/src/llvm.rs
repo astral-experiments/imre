@@ -131,6 +131,7 @@ impl Type {
             | Self::ZipInfo
             | Self::Context
             | Self::ContextMissing
+            | Self::WeakProxy(_)
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
@@ -229,6 +230,7 @@ impl Type {
             | Self::ZipInfo
             | Self::Context
             | Self::ContextMissing
+            | Self::WeakProxy(_)
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
@@ -927,6 +929,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -3745,6 +3748,7 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::Context
                 | Type::ContextMissing
+                | Type::WeakProxy(_)
                 | Type::ContextVar(_)
                 | Type::ContextToken(_)
                 | Type::CsvReader
@@ -5991,6 +5995,17 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::HashCopy => self.call("imre_hash_copy", Type::Hash, &[&args[0].value]),
+            Builtin::WeakProxyNew => self.call(
+                "imre_weak_proxy_new",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::WeakProxyCallable => {
+                self.call("imre_weak_proxy_callable", returns, &[&args[0].value])
+            }
+            Builtin::WeakProxyTarget => {
+                self.call("imre_weak_proxy_target", returns, &[&args[0].value])
+            }
             Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
@@ -7667,6 +7682,7 @@ impl Emitter<'_, '_> {
                     | Type::ZipInfo
                     | Type::Context
                     | Type::ContextMissing
+                    | Type::WeakProxy(_)
                     | Type::ContextVar(_)
                     | Type::ContextToken(_)
                     | Type::CsvReader
@@ -7989,6 +8005,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -8102,6 +8119,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -8765,6 +8783,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ZipInfo
         | Type::Context
         | Type::ContextMissing
+        | Type::WeakProxy(_)
         | Type::ContextVar(_)
         | Type::ContextToken(_)
         | Type::CsvReader
@@ -9349,6 +9368,9 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_weak_proxy_new(ptr, i1 zeroext)
+declare zeroext i1 @imre_weak_proxy_callable(ptr)
+declare ptr @imre_weak_proxy_target(ptr)
 declare ptr @imre_contextvars_new(i1 zeroext)
 declare ptr @imre_contextvars_copy(ptr)
 declare ptr @imre_contextvars_var(ptr, i32, i64)

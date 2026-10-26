@@ -525,6 +525,7 @@ impl Reachable {
                                         | "__post_init__"
                                         | "__hash__"
                                         | "__bool__"
+                                        | "__call__"
                                         | "__fspath__"
                                         | "__iter__"
                                         | "__str__"
