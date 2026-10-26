@@ -198,7 +198,8 @@ def main() -> None:
             project.mkdir()
             reference_dir = project / "cpython"
             seed(reference_dir, stat_clock=name == "path_stat")
-            reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup", runner=runner)
+            cwd = "empty-directory" if name == "removed_cwd" else "."
+            reference = files.run([args.python, "-E", "-B", str(source)], reference_dir / cwd, limit_descriptors=name == "cleanup", runner=runner)
             files.check_result(reference, None, f"CPython {name}")
             stdout = reference.stdout
             expected_files = snapshot(reference_dir)
@@ -208,7 +209,7 @@ def main() -> None:
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
                 native_dir = project / f"imre-O{level}"
                 seed(native_dir, stat_clock=name == "path_stat")
-                actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
+                actual = files.run([str(binary)], native_dir / cwd, limit_descriptors=name == "cleanup", runner=runner)
                 files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
