@@ -50,7 +50,7 @@ with selectors.DefaultSelector() as selector:
         else:
             ready = selector.select(timeout=0.01)
         assert len(ready) == 1 and ready[0][0] is key and ready[0][1] == selectors.EVENT_READ
-    updated = selector.modify(fileobj=fd, events=selectors.EVENT_WRITE, data="writer")
+    updated = selector.modify(fileobj=peer, events=selectors.EVENT_WRITE, data="writer")
     assert updated is not key and updated.fileobj is peer and updated.data == "writer"
     ready = selector.select(0)
     assert len(ready) == 1 and ready[0][0] is updated and ready[0][1] == selectors.EVENT_WRITE
@@ -87,4 +87,11 @@ except RuntimeError:
     pass
 else:
     raise AssertionError("get_key on closed selector was accepted")
+
+# Poll modifies the existing registration in place when addressed by descriptor.
+with selectors.PollSelector() as poller:
+    alias = SocketView(fd)
+    poller.register(alias, selectors.EVENT_READ)
+    updated = poller.modify(fd, selectors.EVENT_WRITE)
+    assert updated.fileobj is alias and poller.get_key(fd) is updated
 print("boxed selector file objects passed")
