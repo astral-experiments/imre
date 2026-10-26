@@ -799,7 +799,7 @@ pub unsafe extern "C" fn imre_path_absolute(path: *const Object) -> *const Objec
                 crate::ObjectOwner::increment_strong_count(path);
                 return Ok(path);
             }
-            let cwd = std::env::current_dir().map_err(files::os_error)?;
+            let cwd = std::env::current_dir().map_err(files::errno_error)?;
             Ok(new_path(join(
                 &path_utf8(cwd.into_os_string())?,
                 storage.path(),
