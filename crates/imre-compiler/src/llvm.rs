@@ -122,6 +122,7 @@ impl Type {
             | Self::Socket
             | Self::CodecWriterClass
             | Self::CodecWriter
+            | Self::TextOutput
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -217,6 +218,7 @@ impl Type {
             | Self::Socket
             | Self::CodecWriterClass
             | Self::CodecWriter
+            | Self::TextOutput
             | Self::Sha256
             | Self::JsonDecoder
             | Self::ZipFile
@@ -909,6 +911,7 @@ impl Emitter<'_, '_> {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -3706,6 +3709,7 @@ impl Emitter<'_, '_> {
                 | Type::Socket
                 | Type::CodecWriterClass
                 | Type::CodecWriter
+                | Type::TextOutput
                 | Type::Sha256
                 | Type::JsonDecoder
                 | Type::ZipFile
@@ -4408,6 +4412,11 @@ impl Emitter<'_, '_> {
                     LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
                     PrintActiveException => "imre_log_print_active_exception",
+                    Handlers => "imre_log_handlers",
+                    AddHandler => "imre_log_add_handler",
+                    RemoveHandler => "imre_log_remove_handler",
+                    WriteStream => "imre_text_output_write",
+                    FlushStream => "imre_text_output_flush",
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
@@ -7423,6 +7432,7 @@ impl Emitter<'_, '_> {
                     | Type::Socket
                     | Type::CodecWriterClass
                     | Type::CodecWriter
+                    | Type::TextOutput
                     | Type::Sha256
                     | Type::JsonDecoder
                     | Type::ZipFile
@@ -7719,6 +7729,7 @@ impl Emitter<'_, '_> {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -7828,6 +7839,7 @@ impl Emitter<'_, '_> {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -8482,6 +8494,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Socket
         | Type::CodecWriterClass
         | Type::CodecWriter
+        | Type::TextOutput
         | Type::Sha256
         | Type::JsonDecoder
         | Type::ZipFile
@@ -9572,7 +9585,12 @@ declare i1 @imre_log_propagate(ptr)
 declare void @imre_log_set_propagate(i1, ptr)
 declare i1 @imre_log_has_handlers(ptr)
 declare i1 @imre_log_is_enabled(ptr, i64)
-declare void @imre_log_routed_emit(ptr, i64, ptr)
+declare void @imre_log_routed_emit(ptr, i64, ptr, i1)
+declare ptr @imre_log_handlers(ptr)
+declare void @imre_log_add_handler(ptr, ptr)
+declare void @imre_log_remove_handler(ptr, ptr)
+declare i64 @imre_text_output_write(ptr, ptr)
+declare void @imre_text_output_flush(ptr)
 declare ptr @imre_log_name(ptr)
 declare i64 @imre_log_parent(ptr)
 declare ptr @imre_log_root(ptr)

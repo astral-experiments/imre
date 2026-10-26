@@ -26,7 +26,7 @@ pub(super) fn member(value: usize) -> (usize, WordKind) {
         0 => 3,                                      // str
         1 => 8,                                      // bytes
         2 => 5,                                      // list[str] or frozenset[str]
-        3 => 5,                                      // exception
+        3 => 5,                                      // always-true Object (exception or LogRecord)
         4 => 6,                                      // fixed record
         6 => 5,                                      // pathlib.Path
         5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag

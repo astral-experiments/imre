@@ -2,6 +2,7 @@
 use crate::StrOwner;
 mod cache;
 mod config;
+mod delivery;
 mod handler;
 mod hierarchy;
 mod levels;
@@ -22,6 +23,7 @@ use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish, object}
 
 struct Entry {
     handle: crate::ObjectOwner,
+    handlers: crate::ObjectOwner,
     level: Int,
     creation_order: usize,
     enabled: cache::EnabledCache,
@@ -34,6 +36,7 @@ impl Entry {
                 StrOwner::new(Str::from(name)),
             )))),
             level: Int::small(level).unwrap(),
+            handlers: super::Words::new(6).into_object(),
             creation_order,
             enabled: cache::EnabledCache::new(),
         }

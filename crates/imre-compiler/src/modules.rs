@@ -182,6 +182,8 @@ pub(crate) enum Intrinsic {
     HandlerLookup,
     PrintActiveException,
     HandlerLevelType,
+    TextOutputType,
+    HandlerFallback,
     LevelMap { names: bool },
     LogRecord,
     MakeLogRecord,
@@ -2257,6 +2259,8 @@ impl<'a> Loader<'a> {
                             "_lookup_handler" => Intrinsic::HandlerLookup,
                             "_print_active_exception" => Intrinsic::PrintActiveException,
                             "_Level" => Intrinsic::HandlerLevelType,
+                            "_TextOutput" => Intrinsic::TextOutputType,
+                            "_fallback" => Intrinsic::HandlerFallback,
                             _ => {
                                 return Err(format!(
                                     "unknown private logging symbol: {}",

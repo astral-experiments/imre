@@ -261,6 +261,8 @@ impl Builtin {
                         | crate::ir::LogOperation::DictConfigTyped
                         | crate::ir::LogOperation::FileConfig
                         | crate::ir::LogOperation::CheckLevel
+                        | crate::ir::LogOperation::WriteStream
+                        | crate::ir::LogOperation::FlushStream
                         | crate::ir::LogOperation::LockAcquire
                         | crate::ir::LogOperation::LockAcquireInt
                         | crate::ir::LogOperation::LockEnter

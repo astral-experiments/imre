@@ -1798,6 +1798,7 @@ fn annotation_with_aliases(
         }
         Some(Binding::Intrinsic(Intrinsic::LogFormatter)) => return Ok(Type::LogFormatter),
         Some(Binding::Intrinsic(Intrinsic::HandlerLevelType)) => return Ok(types.string_or_int()),
+        Some(Binding::Intrinsic(Intrinsic::TextOutputType)) => return Ok(Type::TextOutput),
         Some(Binding::Intrinsic(Intrinsic::HandlerLock)) => return Ok(Type::HandlerLock),
         Some(Binding::Intrinsic(Intrinsic::LogRecord)) => return Ok(Type::LogRecord),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
@@ -2601,6 +2602,15 @@ impl<'a> Checker<'a> {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
+        }
+        if matches!(value.ty, Type::CodecWriter | Type::StringIO | Type::TextIO)
+            && self.types.payload(expected).unwrap_or(expected) == Type::TextOutput
+        {
+            let stream = Expr {
+                ty: Type::TextOutput,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+            return self.coerce(stream, expected, node);
         }
         if value.ty == Type::StringIO
             && self.types.payload(expected).unwrap_or(expected) == Type::TextIO
@@ -8407,6 +8417,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::HandlerRename
                 | Intrinsic::HandlerLookup
+                | Intrinsic::HandlerFallback
                 | Intrinsic::PrintActiveException),
             )) => {
                 return self.handler_operation(op, call);
@@ -9011,6 +9022,9 @@ impl<'a> Checker<'a> {
                 Type::Context | Type::ContextVar(_) | Type::ContextToken(_)
             ) {
                 return self.context_method(receiver, attribute.attr.as_str(), call);
+            }
+            if receiver.ty == Type::TextOutput {
+                return self.text_output_method(receiver, attribute, call);
             }
             if receiver.ty == Type::StringIO
                 && matches!(

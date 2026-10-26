@@ -314,6 +314,7 @@ impl Types {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
@@ -658,6 +659,9 @@ impl Types {
             [Type::Bool, Type::Int] | [Type::Int, Type::Bool] => {
                 Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::Int])))
             }
+            [Type::Bool, Type::LogRecord] | [Type::LogRecord, Type::Bool] => {
+                Type::Union(self.intern(Shape::Union(vec![Type::Bool, Type::LogRecord])))
+            }
             choices @ [_, _, ..]
                 if choices
                     .iter()
@@ -810,6 +814,7 @@ impl Types {
             | Type::Socket
             | Type::CodecWriterClass
             | Type::CodecWriter
+            | Type::TextOutput
             | Type::Sha256
             | Type::JsonDecoder
             | Type::ZipFile
