@@ -158,6 +158,7 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("hmac.HMAC", Value::Hmac(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
@@ -223,6 +224,15 @@ impl Context {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
                 "block_size" => return Ok(self.int(64)),
+                _ => {}
+            },
+            Value::Hmac(mac) => match name {
+                "digest_size" => return Ok(mac.digest_size),
+                "block_size" => return Ok(mac.block_size),
+                "name" => {
+                    let name = self.lookup_attr(mac.inner, "name")?;
+                    return Ok(self.text(format!("hmac-{}", self.str_value(name)?)));
+                }
                 _ => {}
             },
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),

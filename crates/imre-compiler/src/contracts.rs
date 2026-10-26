@@ -108,6 +108,7 @@ impl Builtin {
                 PreservesOwners,
             ),
             Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
             Self::ImportErrorNew { .. }
@@ -1114,6 +1115,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_count"
                 | "imre_bytes_list"
                 | "imre_bytes_contains_int"
+                | "imre_hmac_compare_digest_str"
                 | "imre_byte_output_finish"
                 | "imre_bytes_get"
                 | "imre_bytes_get_index"
