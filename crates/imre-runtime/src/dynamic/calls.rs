@@ -629,6 +629,11 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::ClassMethod(callable)
+                if matches!(name, "__func__" | "__wrapped__") =>
+            {
+                return Ok(callable);
+            }
             Value::StaticMethod {
                 callable,
                 dictionary,
