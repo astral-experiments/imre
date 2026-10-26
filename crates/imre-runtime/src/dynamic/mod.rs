@@ -437,6 +437,8 @@ impl Context {
         } else if stdlib::is_module(name) {
             if matches!(name, "email" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
+            } else if name == "collections" {
+                locations.push(stdlib::package_path(self, name)?);
             }
             None
         } else {
@@ -501,7 +503,12 @@ impl Context {
             ));
         }
         let scope = self.scope(name, None);
-        let name_id = self.text(name);
+        // CPython's private module publishes its ABCs under the public name.
+        let name_id = self.text(if name == "_collections_abc" {
+            "collections.abc"
+        } else {
+            name
+        });
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
@@ -541,6 +548,11 @@ impl Context {
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
                 }
+            }
+            "collections" => {
+                let abc = self.module("_collections_abc")?;
+                self.bind(scope, "abc", abc);
+                self.modules.insert("collections.abc".to_owned(), abc);
             }
             _ => {}
         }

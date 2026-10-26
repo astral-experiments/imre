@@ -372,6 +372,20 @@ def report(text):
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
+        for first_import in ("import collections", "import _collections_abc"):
+            plugin.write_text(f"""{first_import}
+import collections
+print(collections.abc.__name__, collections.__package__, bool(collections.__path__))
+import collections.abc as dotted
+from collections import abc
+import _collections_abc
+print(abc is dotted, abc is _collections_abc, repr(abc.__package__))
+try:
+    import collections.unknown_child
+except ImportError:
+    print('missing child')
+""")
+            compare("-IB", "-c", imports)
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",

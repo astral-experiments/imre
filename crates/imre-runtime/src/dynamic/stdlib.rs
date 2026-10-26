@@ -1,6 +1,6 @@
 //! Python system modules available to native functions with runtime-selected imports.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
     Context,
@@ -62,6 +62,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib.machinery"
             | "functools"
             | "collections"
+            | "_collections_abc"
             | "enum"
             | "errno"
             | "typing"
@@ -139,6 +140,14 @@ fn language_version(ctx: &Context) -> Result<(u8, u8)> {
 
 fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
     system::InterpreterLayout::new(&ctx.executable, language_version(ctx)?).map_err(os_error)
+}
+
+/// Resolve a native package's search directory relative to this executable's installation.
+pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
+    let stdlib = layout(ctx)?
+        .path("posix_prefix", "stdlib", true)
+        .expect("the default scheme defines the standard library path");
+    Ok(Path::new(&stdlib).join(name))
 }
 
 fn full_version(ctx: &Context) -> Result<String> {
