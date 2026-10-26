@@ -120,7 +120,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
         Value::RegexMatch { .. } if attr == "group" => "match",
-        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
+            if attr == "__get__" =>
+        {
+            "function"
+        }
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "contextvars.ContextVar"
         }
@@ -279,6 +283,9 @@ pub(super) fn call(
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
+                Value::Instance { .. } => ctx
+                    .instance_len(args[0])?
+                    .ok_or_else(|| type_error("object has no len()"))?,
                 _ => return Err(type_error("object has no len()")),
             };
             let size = i64::try_from(size).map_err(|_| {
@@ -359,13 +366,14 @@ pub(super) fn call(
                 ));
             }
             let result = ctx.module(&name)?;
-            if fromlist.is_some_and(|id| ctx.truth(id)) {
+            if ctx.optional_truth(fromlist, false)? {
                 return Ok(result);
             }
             ctx.module(name.split('.').next().unwrap())
         }
         "print" => {
             let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
+            let flush = ctx.optional_truth(flush, false)?;
             if file.is_some_and(|id| id != NONE) {
                 return Err(type_error("print supports standard output"));
             }
@@ -386,13 +394,7 @@ pub(super) fn call(
                 .join(sep);
             let mut out = io::stdout().lock();
             write!(out, "{values}{end}")
-                .and_then(|()| {
-                    if flush.is_some_and(|id| ctx.truth(id)) {
-                        out.flush()
-                    } else {
-                        Ok(())
-                    }
-                })
+                .and_then(|()| if flush { out.flush() } else { Ok(()) })
                 .map_err(|err| Error::new("OSError", err.to_string()))?;
             Ok(NONE)
         }
