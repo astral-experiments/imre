@@ -44,6 +44,10 @@ impl Checker<'_> {
                     let pair = checker.types.tuple(vec![Type::Str, Type::Str]);
                     checker.expr_expected(arg, checker.types.list(pair))?
                 }
+                2..=4 => {
+                    let value = checker.expr(arg)?;
+                    checker.optional_scalar_value(value, Type::Str, arg)?
+                }
                 5 => match checker.resolve(arg) {
                     Some(Binding::Intrinsic(Intrinsic::QuotePlus)) => boolean(true),
                     Some(Binding::Intrinsic(Intrinsic::Quote)) => boolean(false),
@@ -159,6 +163,7 @@ impl FormEncoder {
         value: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        let value = Checker::enum_integer(Checker::enum_text(value));
         let binary = value.ty == Type::Bytes;
         let value = match value.ty {
             Type::Bytes | Type::Str | Type::StrLiteral(_) => value,
