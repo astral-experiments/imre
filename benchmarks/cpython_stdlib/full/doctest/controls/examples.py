@@ -28,6 +28,10 @@
     left right
     >>> print("prefix-middle-suffix")  # doctest: +ELLIPSIS
     prefix...suffix
+    >>> print('# doctest: +SKIP')
+    # doctest: +SKIP
+    >>> print("# doctest: +UNKNOWN")  # doctest: +ELLIPSIS
+    # doctest: +...
     >>> raise ValueError("should not run")  # doctest: +SKIP
 """
 
