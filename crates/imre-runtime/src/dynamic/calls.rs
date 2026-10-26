@@ -175,18 +175,58 @@ impl Context {
         }
     }
 
+    pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+        if let Value::Tuple(classes) = self.heap.get(parent) {
+            for &class in classes {
+                if self.python_subclass_check(child, class)? {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+        let is_class = |id| self.builtin_type_name(id) == Some("type");
+        if !is_class(child) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 1 must be a class",
+            ));
+        }
+        if !is_class(parent) {
+            return Err(Error::new(
+                "TypeError",
+                "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+            ));
+        }
+        Ok(self.subclass(child, parent))
+    }
+
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) {
             return true;
         }
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
-            return ancestors.iter().any(|&b| self.equal_class(b, target));
+            return ancestors.iter().any(|&base| {
+                self.equal_class(base, target)
+                    || (matches!(self.heap.get(base), Value::Native(_))
+                        && self.subclass(base, target))
+            });
         }
-        if let (Value::Native(actual), Value::Native(parent)) =
+        if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            return self.builtin_type_name(class) == Some("type")
-                && (parent == "object" || (actual == "bool" && parent == "int"));
+            if parent == "object" {
+                return self.builtin_type_name(class) == Some("type");
+            }
+            if let (Some(child), Some(parent)) = (
+                builtins::exception_kind(child),
+                builtins::exception_kind(parent),
+            ) {
+                return crate::objects::exceptions::imre_builtin_exception_subclass(
+                    child as u32,
+                    parent as u32,
+                );
+            }
+            return child == "bool" && parent == "int";
         }
         false
     }

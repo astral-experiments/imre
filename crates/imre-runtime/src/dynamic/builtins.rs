@@ -13,49 +13,58 @@ mod text;
 pub(super) use collections::{hashable, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
-pub(super) fn is_exception(name: &str) -> bool {
-    matches!(
-        name,
-        "BaseException"
-            | "Exception"
-            | "RuntimeError"
-            | "RecursionError"
-            | "NotImplementedError"
-            | "TypeError"
-            | "ValueError"
-            | "EOFError"
-            | "UnicodeError"
-            | "UnicodeDecodeError"
-            | "UnicodeEncodeError"
-            | "ArithmeticError"
-            | "OverflowError"
-            | "ZeroDivisionError"
-            | "LookupError"
-            | "IndexError"
-            | "KeyError"
-            | "NameError"
-            | "AttributeError"
-            | "ImportError"
-            | "ModuleNotFoundError"
-            | "OSError"
-            | "ConnectionError"
-            | "ConnectionRefusedError"
-            | "ConnectionResetError"
-            | "ConnectionAbortedError"
-            | "BrokenPipeError"
-            | "BlockingIOError"
-            | "TimeoutError"
-            | "FileNotFoundError"
-            | "IsADirectoryError"
-            | "NotADirectoryError"
-            | "PermissionError"
-            | "AssertionError"
-            | "MemoryError"
-            | "SystemExit"
-            | "StopIteration"
-            | "Warning"
-            | "RuntimeWarning"
+pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+    use crate::objects::exceptions::Kind;
+    macro_rules! kinds {
+        ($($kind:ident),* $(,)?) => {
+            match name { $(stringify!($kind) => Some(Kind::$kind),)* _ => None }
+        };
+    }
+    kinds!(
+        BaseException,
+        Exception,
+        RuntimeError,
+        RecursionError,
+        NotImplementedError,
+        TypeError,
+        ValueError,
+        EOFError,
+        UnicodeError,
+        UnicodeDecodeError,
+        UnicodeEncodeError,
+        ArithmeticError,
+        OverflowError,
+        ZeroDivisionError,
+        LookupError,
+        IndexError,
+        KeyError,
+        NameError,
+        AttributeError,
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        ConnectionError,
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        BlockingIOError,
+        TimeoutError,
+        FileNotFoundError,
+        IsADirectoryError,
+        NotADirectoryError,
+        PermissionError,
+        AssertionError,
+        MemoryError,
+        SystemExit,
+        StopIteration,
+        Warning,
+        RuntimeWarning,
     )
+}
+
+pub(super) fn is_exception(name: &str) -> bool {
+    exception_kind(name).is_some()
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
@@ -66,6 +75,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "ord"
                 | "callable"
                 | "isinstance"
+                | "issubclass"
                 | "getattr"
                 | "globals"
                 | "setattr"
@@ -491,6 +501,11 @@ pub(super) fn call(
                 Err(e) if e.kind == "AttributeError" && args.len() == 3 => Ok(args[2]),
                 result => result,
             }
+        }
+        "issubclass" => {
+            positional(name, kwargs)?;
+            arity(name, args, 2, 2)?;
+            Ok(boolean(ctx.python_subclass_check(args[0], args[1])?))
         }
         "isinstance" => {
             positional(name, kwargs)?;

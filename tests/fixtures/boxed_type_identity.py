@@ -39,3 +39,15 @@ def current():
         type(1, label=True)
     except TypeError as error:
         print(str(error))
+
+    class Missing(KeyError):
+        pass
+
+    print(issubclass(Missing, Missing), issubclass(Missing, LookupError), issubclass(KeyError, Missing))
+    print(issubclass(bool, int), issubclass(SystemExit, BaseException), issubclass(SystemExit, Exception))
+    print(issubclass(EOFError, Exception), issubclass(IsADirectoryError, OSError))
+    for child, parent in ((Missing, (str, (LookupError, 7))), (7, ()), (Missing, (str, 7)), (7, Missing)):
+        try:
+            print(issubclass(child, parent))
+        except TypeError as error:
+            print(str(error))
