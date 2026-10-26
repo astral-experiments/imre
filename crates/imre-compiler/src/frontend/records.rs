@@ -1328,7 +1328,74 @@ impl Checker<'_> {
         })
     }
 
+    /// Decimal accepts exact scalar values without first converting a Python int through str().
+    fn decimal_constructor(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        let arg = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([], []) => None,
+            ([arg], []) => Some(arg),
+            ([], [kw]) if kw.arg.as_deref() == Some("value") => Some(&kw.value),
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "Decimal requires a supported scalar value",
+                ));
+            }
+        };
+        let text = if let Some(arg) = arg {
+            let value = Self::string_value(self.expr(arg)?);
+            match value.ty {
+                ty if ty == Type::Class(class) => return Ok(value),
+                Type::Str => value,
+                Type::Int | Type::Bool => {
+                    let integer = if value.ty == Type::Bool {
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        }
+                    } else {
+                        value
+                    };
+                    Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::DecimalIntegerText, vec![integer]),
+                    }
+                }
+                _ => {
+                    return Err(error(
+                        self.source,
+                        arg,
+                        "native Decimal construction requires a string, integer or Decimal",
+                    ));
+                }
+            }
+        } else {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str("0".into()),
+            }
+        };
+        let initializer = self.classes.methods[class]["__init__"].id;
+        self.calls.insert(initializer);
+        Ok(Expr {
+            ty: Type::Class(class),
+            kind: ExprKind::Construct {
+                initializer,
+                args: ir::CallArgs::positional(vec![text]),
+            },
+        })
+    }
+
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        let decl = &self.classes.declarations.definitions[class];
+        if decl.name == "Decimal"
+            && self.graph.modules[decl.definition.module].is_bundled("decimal")
+        {
+            return self.decimal_constructor(call, class);
+        }
         if self.classes.declarations.definitions[class]
             .forwarder
             .is_some()

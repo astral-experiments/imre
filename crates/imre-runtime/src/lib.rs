@@ -969,6 +969,20 @@ pub extern "C" fn imre_print_none() {
     output_text("None");
 }
 
+/// Convert an integer coefficient without applying the int-to-string digit limit.
+/// # Safety
+/// The compiler roots the canonical integer handle for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_decimal_int_text(value: usize) -> *const Str {
+    // SAFETY: the compiler keeps the integer alive throughout decimal construction.
+    let value = unsafe { Int::borrow(value) };
+    let text = Str::from(value.big().to_string());
+    match checked_owned_str(text) {
+        Ok(text) => text,
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
 /// Formats an integer without changing its ownership or arbitrary precision.
 ///
 /// # Safety
