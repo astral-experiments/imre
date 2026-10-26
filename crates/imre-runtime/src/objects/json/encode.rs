@@ -212,7 +212,7 @@ unsafe fn separators(
                     let item = |i| field(rows.row(i).as_ptr() as usize, child);
                     return pair(item(0), item(1));
                 }
-                let words = &s.sequence().values;
+                let words = &s.sequence()?.values;
                 length(words.len())?;
                 pair(
                     field(words[0], schema.child()),
@@ -603,7 +603,7 @@ impl Encoder<'_> {
                     // SAFETY: the rooted list cannot mutate during the callback-free encoding.
                     unsafe {
                         items.0.with(|storage| {
-                            let children = &storage.sequence().values;
+                            let children = &storage.sequence_storage().values;
                             for (i, &value) in children.iter().enumerate() {
                                 self.separator(i, depth, false)?;
                                 // SAFETY: the root list owns each checked immutable child handle.
@@ -699,7 +699,7 @@ impl Encoder<'_> {
                         }
                         self.array(
                             storage
-                                .sequence()
+                                .sequence()?
                                 .values
                                 .iter()
                                 .map(|&value| (value, schema.child())),
@@ -1132,7 +1132,7 @@ mod tests {
                 let child = unsafe {
                     object(value.word as *const Object)
                         .0
-                        .with(|storage| storage.sequence().values[0])
+                        .with(|storage| storage.sequence_storage().values[0])
                 };
                 let mut retry = encoder();
                 // SAFETY: `value` still roots the child and all its descendants.

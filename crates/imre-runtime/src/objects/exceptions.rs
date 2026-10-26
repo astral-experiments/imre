@@ -19,6 +19,8 @@ use std::rc::Rc;
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
+use allocator_api2::boxed::Box;
+
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, fail, object};
 
@@ -384,7 +386,7 @@ enum Payload {
     Positional(imports::Positional),
     Process(Box<super::processes::ProcessError>),
     Timeout(Box<super::processes::TimeoutError>),
-    Group(Box<[GroupMember]>),
+    Group(std::boxed::Box<[GroupMember]>),
 }
 
 /// Indirect so retaining several arguments does not grow every Object allocation.
@@ -444,6 +446,57 @@ impl GroupMember {
 }
 
 impl Exception {
+    /// Own every argument before invoking a formatter that can reinitialize the exception.
+    fn display_snapshot(&self) -> Result<Self> {
+        fn boxed<T>(value: T) -> Result<Box<T>> {
+            Box::try_new(value).map_err(|_| Error::allocation())
+        }
+
+        let payload = match &self.payload {
+            Payload::Arguments(arguments) => {
+                let mut args = smallvec::SmallVec::new();
+                args.try_reserve_exact(arguments.args.len())
+                    .map_err(|_| Error::allocation())?;
+                args.extend(arguments.args.iter().cloned());
+                let os_paths = arguments
+                    .os_paths
+                    .as_deref()
+                    .cloned()
+                    .map(boxed)
+                    .transpose()?;
+                Payload::Arguments(boxed(BuiltinArguments {
+                    message: arguments.message.clone(),
+                    args,
+                    os_paths,
+                })?)
+            }
+            Payload::Import(value) => Payload::Import(boxed((**value).clone())?),
+            Payload::Process(value) => Payload::Process(boxed((**value).clone())?),
+            Payload::Timeout(value) => Payload::Timeout(boxed((**value).clone())?),
+            Payload::Group(members) => {
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(members.len())
+                    .map_err(|_| Error::allocation())?;
+                copy.extend_from_slice(members);
+                Payload::Group(copy.into_boxed_slice())
+            }
+            Payload::Empty
+            | Payload::Message(_)
+            | Payload::Json(_)
+            | Payload::Tree(_)
+            | Payload::Key(_)
+            | Payload::Exit(_)
+            | Payload::ExitArguments(_)
+            | Payload::Positional(_) => self.payload.clone(),
+        };
+        Ok(Self {
+            kind: self.kind,
+            payload,
+            suppress_context: self.suppress_context,
+            details: self.details.clone(),
+        })
+    }
+
     fn attach_directory_frame(&mut self, mut details: Rc<ExceptionDetails>) {
         if let Some(previous) = self.details.as_deref() {
             let fresh = Rc::get_mut(&mut details).unwrap();
@@ -1656,7 +1709,8 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
         2 => word != 1, // tagged zero
         // SAFETY: the immutable exit code owns this string.
         3 => !unsafe { &*(word as *const Str) }.is_empty(),
-        4 | 5 | 10 => super::boxed_values::python_length(kind, word) != Some(0),
+        4 | 5 | 10 => super::boxed_values::python_length(kind, word)
+            .map_or_else(|error| error.returning(false), |length| length != Some(0)),
         7 => f64::from_bits(word as u64) != 0.0,
         // SAFETY: the view owns this exact byte buffer.
         8 => !unsafe { &*(word as *const super::Bytes) }.is_empty(),
@@ -1928,10 +1982,12 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
     }
     use std::fmt::Write as _;
     // SAFETY: release the storage borrow before a nested display method can mutate the exception.
-    let snapshot = unsafe {
-        object(value)
-            .0
-            .with(|s| Storage::Exception(s.exception().clone()))
+    let snapshot = match unsafe { object(value).0.with(|s| s.exception().display_snapshot()) } {
+        Ok(exception) => Storage::Exception(exception),
+        Err(error) => {
+            error.raise();
+            return std::ptr::null();
+        }
     };
     let s = &snapshot;
     // SAFETY: the snapshot retains the arguments throughout reentrant formatting.
@@ -2261,6 +2317,10 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
                     .ok()
                     .map(ExitText::Rendered)
             };
+            if message.is_none() {
+                // CPython discards an error raised while writing the exit diagnostic.
+                drop(take_pending());
+            }
             (1, Some(message))
         }
     });
@@ -2901,5 +2961,42 @@ mod tests {
         assert!(rendered.starts_with("'\\x00"));
         assert!(rendered.ends_with("\\x00'"));
         assert!(rendered.capacity() < 128 * 1024);
+    }
+
+    #[test]
+    fn unhandled_exit_discards_failed_exception_text() {
+        unsafe extern "C" fn failed_text(_: *const usize) -> *const Str {
+            Error::new(Kind::TypeError, "display failed").raise();
+            std::ptr::null()
+        }
+
+        assert_eq!(imre_error_pending(), 0);
+        let code = new_exception(Kind::ValueError, Payload::Empty);
+        // SAFETY: `code` is fresh and unescaped, and the failing formatter never
+        // reads the dummy record word.
+        unsafe {
+            code.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!()
+                };
+                exception.details_mut().layout = Some(Rc::new(NamedPayload {
+                    record: OwnedWord::from_owned(0, WordKind::new(0)),
+                    text: Some(failed_text),
+                    repr: None,
+                    dataclass_repr: false,
+                    takes_record_owner: false,
+                }));
+            });
+        }
+        // SAFETY: the local object owner roots the exception during acquisition.
+        let code_word =
+            unsafe { WordKind::new(5).acquire(crate::ObjectOwner::as_ptr(&code) as usize) };
+        replace_pending(Some(new_exception(
+            Kind::SystemExit,
+            Payload::Exit(Some(code_word)),
+        )));
+
+        assert_eq!(imre_error_unhandled(), 1);
+        assert_eq!(imre_error_pending(), 0);
     }
 }

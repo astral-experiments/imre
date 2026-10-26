@@ -27,6 +27,7 @@ import recursion_case
 import thread_case
 from filesystem_case import filesystem_method
 from metadata import metadata_observer
+import module_names_case
 
 MODULE = "test.test_sys"
 SYS = MODULE + ".SysModuleTest."
@@ -107,6 +108,13 @@ def select(toolchain, work, source, module):
                              capture_output=True, check=True, timeout=15)
     if (native.stdout, native.stderr) != (control.stdout, control.stderr):
         raise AssertionError((native, control))
+    executions[module_names_case.CASE_ID] = module_names_case.execution(
+        toolchain, directory(work, "module-names-method"), source)
+    names_control = HERE / "module_names.py"
+    names_program = toolchain.build(names_control.read_bytes(), directory(work, "module-names"))
+    names_reference = subprocess.run([sys.executable, names_control], capture_output=True, check=True, timeout=15)
+    if output(names_program) != (names_reference.stdout, names_reference.stderr):
+        raise AssertionError("module names or frozen set operations differ from CPython")
 
     # Both implementations check internal consistency using their own language version.
     metadata = HERE / "version_info.py"
@@ -214,6 +222,8 @@ def main():
     files = {name: manifest["files"][name] for name in filenames}
     verify_files(STDLIB / "upstream", files)
     if args.cpython_source:
+        module_names_case.verify_table(
+            args.cpython_source, STDLIB.parents[1] / "crates/imre-runtime/native/stdlib-module-names.txt")
         sys.path.insert(0, str(args.cpython_source.resolve() / "Lib"))
     verify_interpreter_tests({"files": files})
     import test

@@ -44,7 +44,19 @@ pub(super) struct Summary {
 }
 
 pub(super) fn analyze(module: &Module) -> Vec<Option<Summary>> {
-    module.functions.iter().map(summarize).collect()
+    module
+        .functions
+        .iter()
+        .enumerate()
+        .map(|(id, function)| {
+            // Inlining this arithmetic would skip the observable Python frame.
+            if module.source_frames.get(id).is_some_and(Option::is_some) {
+                None
+            } else {
+                summarize(function)
+            }
+        })
+        .collect()
 }
 
 /// Summarizes final IR only. No calls, heap reads, scopes, handlers, parameter

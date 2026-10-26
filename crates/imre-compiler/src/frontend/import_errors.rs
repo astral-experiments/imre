@@ -81,8 +81,7 @@ impl Checker<'_> {
             }
             return Ok(Self::type_error_after(operands, ty, message));
         }
-        if let Some(name) = keywords.unexpected {
-            let message = format!("ImportError() got an unexpected keyword argument '{name}'");
+        if let Some(message) = keywords.init_error {
             if let Some(target) = receiver {
                 let args = args
                     .iter()

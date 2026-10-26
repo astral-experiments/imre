@@ -10,7 +10,10 @@ changelog-contributors = false
 major-labels = []
 minor-labels = ["breaking"]
 ignore-labels = ["internal", "internal:ci", "internal:testing", "internal:automations"]
-version-files = [{ path = "Cargo.toml", field = "workspace.package.version" }]
+version-files = [
+    { path = "Cargo.toml", field = "workspace.package.version" },
+    { path = "crates/imre-compiler/src/wheel/setuptools/pyproject.toml", field = "project.version" },
+]
 version-format = "cargo"
 
 [tool.rooster.section-labels]

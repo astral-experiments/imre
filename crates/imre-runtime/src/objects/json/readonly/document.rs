@@ -4,7 +4,6 @@
 use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
@@ -72,7 +71,7 @@ impl Value {
         // SAFETY: only native list[document value] owners enter this path.
         unsafe {
             source.0.with(|s| {
-                s.sequence()
+                s.sequence_storage()
                     .values
                     .iter()
                     .map(|&word| crate::ObjectOwner::acquire_word(word))
@@ -115,7 +114,7 @@ impl Value {
                 // SAFETY: the document roots its exact list and every child throughout the snapshot.
                 let children = unsafe {
                     owner.0.with(|s| {
-                        let words = &s.sequence().values;
+                        let words = &s.sequence_storage().values;
                         let mut children = Vec::new();
                         children
                             .try_reserve_exact(words.len())
@@ -160,7 +159,9 @@ impl Value {
         let mut nodes = Vec::new();
         let index = self.snapshot(&mut nodes, &mut HashMap::new(), 0)?;
         Ok(View {
-            nodes: Nodes::Document(Rc::new(nodes)),
+            nodes: Nodes::Snapshot(
+                crate::shared::Shared::try_new(nodes).map_err(|_| Error::allocation())?,
+            ),
             index,
         })
     }
@@ -298,7 +299,7 @@ impl Value {
             Self::String(s) => !s.is_empty(),
             Self::Datetime(_) => true,
             // SAFETY: these owners keep the list or table alive for the length read.
-            Self::Array(a) => unsafe { a.0.with(|s| !s.sequence().values.is_empty()) },
+            Self::Array(a) => unsafe { a.0.with(|s| !s.sequence_storage().values.is_empty()) },
             // SAFETY: this owner pins a native dictionary with its original storage.
             Self::Table(t) => unsafe { t.0.with(|s| !s.dictionary().is_empty()) },
         }
@@ -462,7 +463,7 @@ pub unsafe extern "C" fn imre_document(op: u32, a: usize, b: usize, c: usize) ->
                     Value::read(value).check_acyclic(&target)?;
                 }
                 let old = target.0.with_mut(|s| {
-                    let words = s.sequence_mut();
+                    let words = s.concrete_sequence_mut();
                     let new = values
                         .into_iter()
                         .map(|v| crate::ObjectOwner::into_raw(v) as usize)
@@ -535,9 +536,7 @@ mod tests {
         let Ok(view) = value.view() else {
             panic!("shallow shared graph must fit")
         };
-        let Nodes::Document(nodes) = view.nodes else {
-            unreachable!()
-        };
+        let nodes = &*view.nodes;
         assert_eq!(nodes.len(), 23);
         for node in &nodes[1..] {
             assert!(matches!(node, Node::Array(items) if items.len() == 2 && items[0] == items[1]));

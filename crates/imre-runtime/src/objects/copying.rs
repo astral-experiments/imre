@@ -152,7 +152,7 @@ impl Graph {
                         if let Some(rows) = words.rows() {
                             return Ok(Storage::Sequence(rows.repeat(1)?));
                         }
-                        let words = words.resolved();
+                        let words = words.resolved()?;
                         let mut out = Words::new(words.kind.raw());
                         out.values
                             .try_reserve_exact(words.values.len())

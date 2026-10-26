@@ -104,7 +104,15 @@ pub unsafe extern "C" fn imre_async_process_spawn(
     stderr: u32,
 ) -> *const Object {
     // SAFETY: the exact argv stays rooted during this arity check.
-    if unsafe { object(args).0.with(|s| s.sequence().values.is_empty()) } {
+    let empty = unsafe {
+        object(args)
+            .0
+            .with(|s| s.sequence().map(|words| words.values.is_empty()))
+    };
+    if match empty {
+        Ok(empty) => empty,
+        Err(error) => return error.returning(std::ptr::null()),
+    } {
         return Error::new(
             Kind::TypeError,
             "create_subprocess_exec() missing 1 required positional argument: 'program'",

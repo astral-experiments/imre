@@ -1131,6 +1131,10 @@ pub(crate) fn lower_with_caller_cache(
                 .command_startup
                 .as_ref()
                 .is_some_and(|(flags, _)| flags.isolated),
+            command_utf8_mode: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.utf8_mode),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -2063,6 +2067,11 @@ fn annotation_with_aliases(
                     types.list(element)
                 })
             }
+            ast::Expr::Name(name)
+                if name.id == "frozenset" && nested(&value.slice)? == Type::Str =>
+            {
+                Ok(Type::FrozenStrings)
+            }
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
                 if !types.hashable_key(element) {
@@ -2557,10 +2566,16 @@ impl<'a> Checker<'a> {
         {
             return self.document_coerce(value, expected, node);
         }
+        if value.ty == Type::FrozenStrings && expected == Type::StringKeys {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            });
+        }
         if value.ty == expected {
             return Ok(value);
         }
-        if self.types.cache_signature(value.ty) == Some(expected) {
+        if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -2747,8 +2762,8 @@ impl<'a> Checker<'a> {
     ) -> Result<Expr, String> {
         if self.types.is_len_argument(expected) {
             self.pack_len_value(value, site)
-        } else if self.types.is_unread_argument(expected) {
-            self.pack_unread_value(value, site, expected)
+        } else if self.types.is_callback_argument(expected) {
+            self.pack_callback_value(value, site, expected)
         } else {
             self.coerce(value, expected, site)
         }
@@ -2786,7 +2801,7 @@ impl<'a> Checker<'a> {
             }
             return self.coerce(value, expected, expression);
         }
-        if self.types.is_len_argument(expected) || self.types.is_unread_argument(expected) {
+        if self.types.is_len_argument(expected) || self.types.is_callback_argument(expected) {
             let value = self.expr(expression)?;
             // A partial consumes its marker before the target's own argument ABI.
             // Keep the evaluated value so a lookup or callback runs exactly once.
@@ -3355,9 +3370,10 @@ impl<'a> Checker<'a> {
             ExprKind::Present(value) => value.as_ref(),
             _ => value,
         };
-        if self.locals[slot] == documents::ANY
-            && let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
-            && matches!(args[0].ty, documents::LIST | documents::MAP)
+        if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
+            && ((self.locals[slot] == documents::ANY
+                && matches!(args[0].ty, documents::LIST | documents::MAP))
+                || self.types.index_callable_signature(args[0].ty) == Some(self.locals[slot]))
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -3812,10 +3828,7 @@ impl<'a> Checker<'a> {
             );
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let string = iterable.ty == Type::Str;
         let bytes = iterable.ty == Type::Bytes;
         let element = self
@@ -5363,6 +5376,8 @@ impl<'a> Checker<'a> {
             && self.types.payload(nullable) == Some(value.ty)
         {
             self.coerce(value, nullable, target)?
+        } else if let Some(signature) = self.types.index_callable_signature(value.ty) {
+            self.coerce(value, signature, target)?
         } else {
             value
         };
@@ -5475,6 +5490,11 @@ impl<'a> Checker<'a> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::OptionalStrConcat, vec![left, right]),
             });
+        }
+        if op == ast::Operator::Mod
+            && let Some(formatted) = single_dispatch::format_argument(self.types, &left, &right)
+        {
+            return Ok(formatted);
         }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
@@ -5839,6 +5859,12 @@ impl<'a> Checker<'a> {
                 }
                 Intrinsic::LogRoot => return Ok(self.root_logger()),
                 Intrinsic::LevelMap { names } => return Ok(self.logging_level_map(names)),
+                Intrinsic::SysStdlibModuleNames => {
+                    return Ok(Expr {
+                        ty: Type::FrozenStrings,
+                        kind: ExprKind::Builtin(Builtin::SysStdlibModuleNames, vec![]),
+                    });
+                }
                 Intrinsic::SysImplementation => {
                     return Ok(Expr {
                         ty: Type::SysImplementation,
@@ -6204,11 +6230,7 @@ impl<'a> Checker<'a> {
                             self.types.deque_element(receiver.ty)
                         {
                             (element, Builtin::DequeContains)
-                        } else if let Some(element) = self
-                            .types
-                            .set_element(receiver.ty)
-                            .or((receiver.ty == Type::StringKeys).then_some(Type::Str))
-                        {
+                        } else if let Some(element) = self.types.readable_set_element(receiver.ty) {
                             (element, Builtin::SetContains)
                         } else if let Some(ty) = self.types.element(receiver.ty)
                             && self.types.is_value_struct(ty)
@@ -6641,6 +6663,7 @@ impl<'a> Checker<'a> {
                         | Type::BuiltinClass
                         | Type::Path
                         | Type::PurePath(_)
+                        | Type::FrozenStrings
                         | Type::Set(_)
                         | Type::Deque(_)
                         | Type::SimpleNamespace(_)
@@ -6967,15 +6990,27 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
-                if attribute.attr.as_str() == "encoding"
-                    && matches!(
-                        self.resolve(&attribute.value),
-                        Some(Binding::Intrinsic(
-                            Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr
-                        ))
-                    )
+                if let Some(Binding::Intrinsic(
+                    stream @ (Intrinsic::Stdin | Intrinsic::Stdout | Intrinsic::Stderr),
+                )) = self.resolve(&attribute.value)
+                    && matches!(attribute.attr.as_str(), "encoding" | "errors")
                 {
-                    return Ok(unpacking::string("utf-8"));
+                    let descriptor = match stream {
+                        Intrinsic::Stdin => 0,
+                        Intrinsic::Stdout => 1,
+                        Intrinsic::Stderr => 2,
+                        _ => unreachable!(),
+                    };
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::SysStreamText {
+                                descriptor,
+                                errors: attribute.attr.as_str() == "errors",
+                            },
+                            vec![],
+                        ),
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
@@ -8596,6 +8631,12 @@ impl<'a> Checker<'a> {
                     vec![receiver],
                 ));
             }
+            if receiver.ty == Type::FrozenStrings
+                && attribute.attr.as_str() == "copy"
+                && call.arguments.is_empty()
+            {
+                return Ok(receiver);
+            }
             if receiver.ty == Type::ImportException && attribute.attr.as_str() == "__init__" {
                 return self.import_error(call, 41, Some(receiver));
             }
@@ -9098,9 +9139,10 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
-        // A standard stream passed positionally is displayed like any other
-        // value. Imre's text streams have a fixed UTF-8 encoding.
+        // Passing stderr as a positional value displays the open text stream.
         if matches!(name.id.as_str(), "print" | "repr" | "str")
+            && !self.names.contains_key(name.id.as_str())
+            && self.resolve(&call.func).is_none()
             && call.arguments.keywords.is_empty()
             && call
                 .arguments
@@ -9116,8 +9158,23 @@ impl<'a> Checker<'a> {
                 }
                 pieces.push(
                     if self.resolve(arg) == Some(Binding::Intrinsic(Intrinsic::Stderr)) {
-                        unpacking::string(
-                            "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='utf-8'>",
+                        unpacking::concat(
+                            unpacking::concat(
+                                unpacking::string(
+                                    "<_io.TextIOWrapper name='<stderr>' mode='w' encoding='",
+                                ),
+                                Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Builtin(
+                                        Builtin::SysStreamText {
+                                            descriptor: 2,
+                                            errors: false,
+                                        },
+                                        vec![],
+                                    ),
+                                },
+                            ),
+                            unpacking::string("'>"),
                         )
                     } else {
                         self.expr_expected(arg, Type::Str)?
@@ -9358,11 +9415,17 @@ impl<'a> Checker<'a> {
             });
         }
         if name.id == "frozenset"
+            && let [value] = args.as_slice()
+            && value.ty == Type::FrozenStrings
+        {
+            return Ok(value.clone());
+        }
+        if name.id == "frozenset"
             && args.len() == 1
             && self.types.element(args[0].ty) == Some(Type::Str)
         {
             return Ok(Expr {
-                ty: Type::StringKeys,
+                ty: Type::FrozenStrings,
                 kind: ExprKind::Builtin(Builtin::FreezeStrings, args),
             });
         }
@@ -9695,6 +9758,7 @@ impl<'a> Checker<'a> {
                             | Type::Dict(_)
                             | Type::Set(_)
                             | Type::Deque(_)
+                            | Type::FrozenStrings
                             | Type::StringKeys
                             | Type::CodecInfo
                             | Type::Tuple(_)
