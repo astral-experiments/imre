@@ -129,6 +129,7 @@ impl Context {
                         "ast.AST.__init__"
                             | "object.__getattribute__"
                             | "object.__setattr__"
+                            | "object.__delattr__"
                             | "object.__init__"
                     ) || name == "list.pop"
                         || name.starts_with("dict.")
@@ -168,8 +169,8 @@ impl Context {
             (None, _) if name == "__class__" => Ok(class),
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) if name == "__getattribute__" => {
-                let method = self.builtin("object.__getattribute__");
+            (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
+                let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
             (None, None) => Err(self.missing_attribute(object, name)),
@@ -727,7 +728,10 @@ impl Context {
             }
             Value::Native(class)
                 if class == "object"
-                    && matches!(name, "__getattribute__" | "__setattr__" | "__init__") =>
+                    && matches!(
+                        name,
+                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
@@ -789,6 +793,152 @@ impl Context {
         }
         Err(self.missing_attribute(obj, name))
     }
+    pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
+            let name = self.text(name);
+            self.call(hook, vec![name], Vec::new())?;
+            return Ok(());
+        }
+        self.default_delete_attr(obj, name)
+    }
+
+    pub(super) fn delete_dict_attribute(
+        &mut self,
+        obj: Id,
+        dictionary: Id,
+        name: &str,
+    ) -> Result<()> {
+        let key = self.text(name);
+        match self.delete_item(dictionary, key) {
+            Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
+            result => result,
+        }
+    }
+
+    /// Bypass the object's deletion hook, while honoring data descriptors on its class.
+    pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(descriptor) = self.slot(obj, name)
+            && self.data_descriptor(descriptor)
+        {
+            match *self.heap.get(descriptor) {
+                Value::Property(property) => return property.remove(self, obj),
+                Value::ReadOnlyDescriptor { owner, name, .. } => {
+                    return Err(Error::new(
+                        "AttributeError",
+                        format!("attribute '{name}' of '{owner}' objects is not writable"),
+                    ));
+                }
+                _ => {}
+            }
+            let delete = self
+                .bound_slot(descriptor, "__delete__")?
+                .ok_or_else(|| Error::new("AttributeError", "__delete__"))?;
+            self.call(delete, vec![obj], Vec::new())?;
+            return Ok(());
+        }
+        if name == "__class__" {
+            return Err(Error::new("TypeError", "can't delete __class__ attribute"));
+        }
+        match *self.heap.get(obj) {
+            Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
+            Value::Property(_) if matches!(name, "__doc__" | "__name__") => {
+                let Value::Property(property) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                if name == "__doc__" {
+                    property.doc = NONE;
+                } else {
+                    property.name = None;
+                }
+                Ok(())
+            }
+            Value::StaticMethod { dictionary, .. } => {
+                super::static_method::update_attribute(self, obj, dictionary, name, None)
+            }
+            Value::Module { scope, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
+                let key = self.text(name);
+                if self.remove_binding(scope, name, key)? {
+                    Ok(())
+                } else {
+                    Err(self.missing_attribute(obj, name))
+                }
+            }
+            Value::Class {
+                scope,
+                name: ref class,
+                ..
+            } => {
+                let error = match name {
+                    "__name__" | "__qualname__" | "__bases__" | "__type_params__"
+                    | "__module__" | "__doc__" => Error::new(
+                        "TypeError",
+                        format!("cannot delete '{name}' attribute of immutable type '{class}'"),
+                    ),
+                    "__dict__" | "__mro__" => Error::new(
+                        "AttributeError",
+                        format!("attribute '{name}' of 'type' objects is not writable"),
+                    ),
+                    "__base__" => Error::new("AttributeError", "readonly attribute"),
+                    "__annotate__" => {
+                        Error::new("TypeError", "cannot delete __annotate__ attribute")
+                    }
+                    _ => {
+                        let key = self.text(name);
+                        if self.remove_binding(scope, name, key)? {
+                            return Ok(());
+                        }
+                        let Value::Class { name: class, .. } = self.heap.get(obj) else {
+                            unreachable!()
+                        };
+                        Error::new(
+                            "AttributeError",
+                            format!("type object '{class}' has no attribute '{name}'"),
+                        )
+                    }
+                };
+                Err(error)
+            }
+            Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
+                if self
+                    .namedtuple_fields(class)
+                    .is_some_and(|fields| fields.iter().any(|field| field == name))
+                {
+                    return Err(Error::new("AttributeError", "can't delete attribute"));
+                }
+                let Value::Instance { fields, .. } = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                if name == "__dict__" {
+                    fields.clear();
+                    return Ok(());
+                }
+                fields
+                    .remove(name)
+                    .map(|_| ())
+                    .ok_or_else(|| self.missing_attribute(obj, name))
+            }
+            Value::Native(ref class) if self.builtin_type_name(obj) == Some("type") => {
+                Err(Error::new(
+                    "TypeError",
+                    format!("cannot set '{name}' attribute of immutable type '{class}'"),
+                ))
+            }
+            _ => Err(Error::new(
+                "AttributeError",
+                format!(
+                    "'{}' object has no attribute '{name}' and no __dict__ for setting new attributes",
+                    self.type_name(obj)
+                ),
+            )),
+        }
+    }
+
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
             let name = self.text(name);
@@ -800,7 +950,13 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
-            return super::static_method::set_attribute(self, obj, dictionary, name, value);
+            return super::static_method::update_attribute(
+                self,
+                obj,
+                dictionary,
+                name,
+                Some(value),
+            );
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);

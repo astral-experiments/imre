@@ -54,6 +54,9 @@ impl Function<'_, '_> {
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
                             }
+                            Some(Place::Attr(obj, name)) => {
+                                self.op("delattr", &[&obj, &name]);
+                            }
                             _ => {
                                 self.unsupported("deletion target");
                             }

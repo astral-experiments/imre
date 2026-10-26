@@ -364,6 +364,23 @@ impl Context {
         dict
     }
 
+    fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            if self.scope_name(scope, name).is_none() {
+                return Ok(false);
+            }
+            self.delete_item(namespace, key)?;
+            return Ok(true);
+        }
+        let Value::Scope(data) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        if let Some(order) = &mut data.class_body {
+            order.retain(|member| member != name);
+        }
+        Ok(data.names.shift_remove(name).is_some())
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
