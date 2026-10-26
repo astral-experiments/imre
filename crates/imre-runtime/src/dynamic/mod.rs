@@ -208,6 +208,9 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
+            if name == "urllib" {
+                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            }
             None
         } else {
             let (search, child) = if let Some((parent, child)) = parent {

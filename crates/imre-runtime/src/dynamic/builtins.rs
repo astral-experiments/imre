@@ -119,6 +119,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::Bytes(_) if attr == "decode" => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
+        Value::NamedTuple {
+            class: Some("SplitResult" | "SplitResultBytes"),
+            ..
+        } if attr == "geturl" => "urllib.parse.SplitResult",
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
         Value::Socket(_)

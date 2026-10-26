@@ -254,6 +254,20 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            (
+                "urllib.parse.SplitResult",
+                Value::NamedTuple {
+                    class: Some("SplitResult"),
+                    ..
+                },
+            )
+            | (
+                "urllib.parse.SplitResultBytes",
+                Value::NamedTuple {
+                    class: Some("SplitResultBytes"),
+                    ..
+                },
+            ) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
@@ -428,6 +442,11 @@ impl Context {
                 }
                 if class == Some("time.struct_time") && matches!(name, "tm_zone" | "tm_gmtoff") {
                     return Ok(NONE);
+                }
+                if matches!(class, Some("SplitResult" | "SplitResultBytes"))
+                    && let Some(property) = stdlib::urllib::property(self, values[1], name)?
+                {
+                    return Ok(property);
                 }
             }
             _ => {}
