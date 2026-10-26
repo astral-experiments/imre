@@ -6142,6 +6142,26 @@ impl<'a> Checker<'a> {
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
+                Intrinsic::OsSeparator { alternate, posix } => {
+                    if posix {
+                        return Ok(if alternate {
+                            Expr {
+                                ty: Type::None,
+                                kind: ExprKind::None,
+                            }
+                        } else {
+                            unpacking::string("/")
+                        });
+                    }
+                    return Ok(Expr {
+                        ty: if alternate {
+                            self.types.optional(Type::Str)
+                        } else {
+                            Type::Str
+                        },
+                        kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
+                    });
+                }
                 Intrinsic::OsDevnull => {
                     return Ok(Expr {
                         ty: Type::Str,
