@@ -89,11 +89,11 @@ except AttributeError:
     pass
 sys.stderr.write('binding the loopback HTTP server\n')
 server.server_bind()
-sys.stderr.write('checking bound name and activating the listener\n')
+sys.stderr.write('port=' + str(server.server_port) + ' address=' + repr(server.server_address) + ' server_name=' + repr(server.server_name) + ' expected=' + repr(sys.argv[1]) + '\n')
 assert server.server_port == server.server_address[1]
 assert server.server_name == sys.argv[1]
 server.server_activate()
 print(server.server_port)
 sys.stdout.flush()
-server.handle_request()
+sys.stderr.write('passed bound address and name\n')
 server.server_close()
