@@ -18,6 +18,7 @@ mod fnmatch;
 mod functools;
 mod hashlib;
 mod hmac;
+mod inspect;
 mod time;
 pub(super) use files::ReadSource;
 pub(super) mod io;
@@ -28,6 +29,7 @@ mod pickle;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
+mod structure;
 mod traceback;
 pub(super) mod urllib;
 
@@ -35,6 +37,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "abc"
             | "codecs"
             | "types"
             | "io"
@@ -63,6 +66,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "inspect"
             | "collections"
             | "_collections_abc"
             | "enum"
@@ -116,6 +120,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::Instance {
         class,
         dictionary: None,
+        scalar: None,
         text_memory: None,
         fields: fields
             .iter()
@@ -209,16 +214,35 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
-        ("re", "A" | "U") => {
+        ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
+        ("re", "A" | "U" | "X") => {
             let module = ctx.module("re")?;
-            ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
+            let flag = match name {
+                "A" => "ASCII",
+                "U" => "UNICODE",
+                _ => "VERBOSE",
+            };
+            ctx.lookup_attr(module, flag)?
         }
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("_collections_abc", "Callable") => {
+            super::typing::named_class(ctx, "collections.abc", "Callable")
+        }
+        (
+            "typing",
+            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
+            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+        ) => ctx.builtin(&format!("typing.{name}")),
+        ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
-        ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
+        ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
         }
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
@@ -354,7 +378,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_version_tuple"
             | "python_implementation",
         )
-        | ("struct", "calcsize" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("codecs", "lookup")
@@ -368,8 +392,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "IntEnum")
+        | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
@@ -393,14 +418,41 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "struct.Struct" {
+        return structure::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("struct.Struct.") {
+        return structure::method(ctx, method, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("inspect.") {
+        return inspect::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("typing.") {
+        return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "types.GenericAlias" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "GenericAlias() takes no keyword arguments",
+            ));
+        }
+        let [origin, parameters] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("GenericAlias expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
     }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
@@ -412,6 +464,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
+    }
+    if name == "enum._simple_enum" {
+        return ctx.enum_decorator(args, kwargs);
+    }
+    if name == "enum._convert" {
+        return ctx.decorate_enum(args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(function) = name.strip_prefix("email.utils.") {
@@ -459,6 +517,7 @@ pub(super) fn call(
                 function,
                 args,
                 keywords,
+                ..
             } => {
                 let Value::Dict(entries) = ctx.heap.get(keywords) else {
                     unreachable!()
@@ -478,6 +537,7 @@ pub(super) fn call(
             function,
             args,
             keywords,
+            coroutine_marker: None,
         }));
     }
     if name == "pattern.search" {
@@ -508,6 +568,7 @@ pub(super) fn call(
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
         | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
@@ -721,11 +782,7 @@ pub(super) fn call(
             };
             let values =
                 system::struct_unpack(format, bytes).map_err(|e| Error::new("struct.error", e))?;
-            let items = values
-                .into_iter()
-                .map(|n| ctx.alloc(Value::Int(crate::Int::from_usize(n as usize))))
-                .collect();
-            ctx.alloc(Value::Tuple(items))
+            structure::unsigned_tuple(ctx, values)
         }
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
@@ -778,6 +835,7 @@ pub(super) fn call(
             ctx.alloc(Value::Method {
                 callable,
                 receiver: argument(args, 0)?,
+                explicit: false,
             })
         }
         "warnings.warn" => {
@@ -815,6 +873,13 @@ pub(super) fn call(
             || name == "subprocess.run" =>
         {
             return files::call(ctx, name, args, kwargs);
+        }
+        "match.groups" => {
+            return regex::match_groups(
+                ctx,
+                argument(args, 0)?,
+                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
+            );
         }
         name if name.starts_with("pattern.") || name == "match.group" => {
             return regex::call(ctx, name, args);

@@ -13,8 +13,16 @@ impl Context {
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
             lineage.extend(ancestors);
         } else {
-            if matches!(self.heap.get(class), Value::Native(name) if name == "bool") {
-                lineage.push(self.builtin("int"));
+            if let Value::Native(name) = self.heap.get(class) {
+                match name.as_str() {
+                    "bool" => lineage.push(self.builtin("int")),
+                    "enum.IntEnum" | "enum.StrEnum" => {
+                        let scalar = if name == "enum.IntEnum" { "int" } else { "str" };
+                        lineage.push(self.builtin(scalar));
+                        lineage.push(self.builtin("enum.Enum"));
+                    }
+                    _ => {}
+                }
             }
             let object = self.builtin("object");
             if class != object {

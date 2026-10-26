@@ -66,6 +66,8 @@ impl Builtin {
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
             Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
+            Self::MarkCoroutine(_) => Contract::new(false, Unknown),
+            Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
             Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, Unknown),
             Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
@@ -818,6 +820,12 @@ impl Builtin {
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
             Self::FunctionWrappedSet => {
                 matches!(result, Type::Callable(_)) && signature(&[result, result], result)
+            }
+            Self::IsCoroutineFunction => {
+                matches!(args, [arg] if matches!(arg.ty, Type::Callable(_))) && result == Type::Bool
+            }
+            Self::MarkCoroutine(_) => {
+                matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
             Self::FunctionWrappedGet => {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)

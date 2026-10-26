@@ -631,7 +631,7 @@ pub(crate) fn lower_with_caller_cache(
                         graph.runtime_overload(module_id, function.name.range());
                         typing::strip_overload(&mut function);
                     }
-                    if cached.is_some() {
+                    if cached.is_some() || inspect::marks_function(graph, module_id, &function) {
                         function.decorator_list.clear();
                     }
                     let element = native_generators::item_type(
@@ -899,12 +899,15 @@ pub(crate) fn lower_with_caller_cache(
         }
     }
     let initializer_start = definitions.len();
-    let class_globals = classes.declarations.has_class_values(graph.entry);
-    let helpers = Helpers::new(definitions.len() + graph.initializers(class_globals).count());
+    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+        || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
+            matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
+        });
+    let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
-    for (module_id, range) in graph.initializers(class_globals) {
+    for (module_id, range) in graph.initializers(entry_declarations) {
         let checker = Checker::new(
             graph,
             module_id,
@@ -1896,6 +1899,9 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
+            nested(&value.value)
+        }
         ast::Expr::Subscript(value)
             if matches!(&*value.value, ast::Expr::Name(name) if name.id.as_str() == "type")
                 && graph.resolve_type(module, &value.value).is_none() =>
@@ -8006,6 +8012,13 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(local) = self.local_class(&call.func)?
+            && let Some(base) = local.abstract_base
+            && !local.abstract_methods.is_empty()
+        {
+            let message = mapping_abc::abstract_message(&local.name, &local.abstract_methods);
+            return self.abstract_class_call(base, call, message);
+        }
         if let Some(value) = self.literal_attrgetter_call(call)? {
             return Ok(value);
         }
@@ -8877,6 +8890,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::InspectIsMethodDescriptor)) => {
                 return self.is_method_descriptor(call);
             }
+            Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark })) => {
+                return self.inspect_coroutine(call, mark);
+            }
             Some(Binding::Intrinsic(Intrinsic::InspectGetattrStatic)) => {
                 return self.static_attribute(call);
             }
@@ -9124,13 +9140,31 @@ impl<'a> Checker<'a> {
                 && let (Some(child), Some(parent)) =
                     (self.class_reference(child), self.class_reference(parent))
             {
-                let result = child == parent
-                    || self.classes.declarations.definitions[child]
-                        .bases
-                        .contains(&parent);
+                let result = self
+                    .classes
+                    .declarations
+                    .subclass(self.graph, child, parent);
                 return Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Bool(result),
+                });
+            }
+            if let [child, parent] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+                && let Some(Binding::Definition(parent)) = self.resolve(parent)
+                && self.graph.is_abstract_context_manager(parent)
+                && let Some(local) = self.local_class(child)?
+            {
+                let nominal = local.abstract_base.is_some_and(|base| {
+                    let classes = &self.classes.declarations;
+                    classes.subclass(self.graph, base, classes.ids[&parent])
+                });
+                let protocol = ["__enter__", "__exit__"]
+                    .iter()
+                    .all(|name| local.attributes.get(*name) == Some(&Some(true)));
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(nominal || protocol),
                 });
             }
             if let Some(answer) = self.mapping_issubclass(call)? {

@@ -1,7 +1,8 @@
 //! Wall time and the civil-time tuples used by HTTP dates and request logging.
 use super::*;
 use crate::dynamic::builtins::bind;
-use crate::objects::time::{ClockParts, wall_time};
+use crate::objects::Calendar;
+use crate::objects::time::{ClockParts, LocalTime, wall_time};
 
 const FIELDS: [&str; 9] = [
     "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
@@ -86,6 +87,45 @@ fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
     }
 }
 
+/// Convert the tuple in field order, including any struct_time timezone attributes.
+fn mktime(ctx: &mut Context, value: Id) -> Result<Id> {
+    let tuple = ctx.builtin("tuple");
+    if !ctx.instance_of(value, tuple) {
+        return Err(Error::new(
+            "TypeError",
+            "Tuple or struct_time argument required",
+        ));
+    }
+    let fields: [Id; 9] = ctx
+        .items(value)?
+        .try_into()
+        .map_err(|_| Error::new("TypeError", "mktime(): illegal time tuple argument"))?;
+    let mut parts = [0; 9];
+    for (part, field) in parts.iter_mut().zip(fields) {
+        *part = Calendar::component(&ctx.index_integer(field)?)?;
+    }
+    let mut local = LocalTime::new(parts)?;
+    if matches!(
+        ctx.heap.get(value),
+        Value::NamedTuple {
+            class: Some("time.struct_time"),
+            ..
+        }
+    ) {
+        let zone = ctx.lookup_attr(value, "tm_zone")?;
+        if zone != NONE {
+            local.set_zone(ctx.str_value(zone).map_err(|_| {
+                Error::new("TypeError", "bad argument type for built-in operation")
+            })?);
+        }
+        let offset = ctx.lookup_attr(value, "tm_gmtoff")?;
+        if offset != NONE {
+            local.set_offset(&ctx.index_integer(offset)?)?;
+        }
+    }
+    Ok(ctx.alloc(Value::Float(local.timestamp()?)))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -95,7 +135,11 @@ pub(super) fn call(
     if name == "struct_time" {
         return construct(ctx, args, kwargs);
     }
-    let function = if name == "time" { "time.time" } else { name };
+    let function = match name {
+        "time" => "time.time",
+        "mktime" => "time.mktime",
+        _ => name,
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -108,6 +152,16 @@ pub(super) fn call(
             "TypeError",
             format!("time.time() takes no arguments ({} given)", args.len()),
         )),
+        "mktime" => match args {
+            [value] => mktime(ctx, *value),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "time.mktime() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            )),
+        },
         "gmtime" | "localtime" => {
             if args.len() > 1 {
                 return Err(Error::new(

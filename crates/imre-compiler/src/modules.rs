@@ -31,6 +31,15 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "contextlib" => Some((
+            "contextlib.py",
+            concat!(
+                include_str!("../stdlib/contextlib.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_exitstack.py")
+            ),
+        )),
         "_imre_socketserver_poll" => Some((
             "_imre_socketserver_poll.py",
             if cfg!(any(target_os = "linux", target_os = "macos")) {
@@ -249,6 +258,7 @@ pub(crate) enum Intrinsic {
     Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
+    InspectCoroutine { mark: bool },
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
@@ -731,6 +741,8 @@ impl IntrinsicModule {
             }),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
+            (Self::Inspect, "iscoroutinefunction") => Intrinsic::InspectCoroutine { mark: false },
+            (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
@@ -1173,6 +1185,7 @@ pub(crate) struct SourceGraph {
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
+    required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
@@ -1187,6 +1200,12 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_abstract_context_manager(&self, definition: DefinitionId) -> bool {
+        let source = &self.modules[definition.module];
+        source.is_bundled(CONTEXTLIB_ABSTRACT)
+            && source.export("AbstractContextManager") == Some(Binding::Definition(definition))
+    }
+
     /// Resolve a bundled logging definition called implicitly by native lowering.
     pub(crate) fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
         let module = self
@@ -1336,9 +1355,17 @@ impl SourceGraph {
         self.reachable.is_some()
     }
 
+    fn required_definitions(&self, module: ModuleId) -> Option<&reachability::Reachable> {
+        if let Some((library, roots)) = &self.required_library
+            && *library == module
+        {
+            return Some(roots);
+        }
+        self.reachable.as_ref()
+    }
+
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
-        self.reachable
-            .as_ref()
+        self.required_definitions(definition.module)
             .is_none_or(|r| r.definitions.contains(&definition))
     }
 
@@ -1355,8 +1382,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
-        self.reachable
-            .as_ref()
+        self.required_definitions(module)
             .is_none_or(|r| r.methods.contains(&(module, method.start())))
     }
 
@@ -1544,6 +1570,10 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if let Some((library, roots)) = &self.required_library {
+            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
+                .extend_from_slice(&roots.skipped[*library]);
+        }
         // The bundled _simple_enum factories are lowered to immutable member tables.
         // Keep the actual category property bodies and every caller in ty's check.
         if let Some((id, http)) = self
@@ -1600,7 +1630,7 @@ impl SourceGraph {
     /// Entry segments preserve globals, platform import checks, and definition-time effects.
     pub(crate) fn initializers(
         &self,
-        class_globals: bool,
+        entry_declarations: bool,
     ) -> impl Iterator<Item = (ModuleId, Range<usize>)> + '_ {
         self.initialization
             .iter()
@@ -1608,7 +1638,7 @@ impl SourceGraph {
                 let module = &self.modules[*id];
                 *id != self.entry
                     || !module.snapshots.is_empty()
-                    || class_globals
+                    || entry_declarations
                     || !module.entry_globals.is_empty()
                     || !module.overloads.is_empty()
                     || (!segment.is_empty()
@@ -1881,6 +1911,8 @@ fn resolve_binding(
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
+pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
+const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -1907,6 +1939,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     }
     module.symbol(name).or_else(|| {
         let implementation = match module {
+            IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
+            IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -1921,7 +1955,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    (IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    | (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
@@ -2149,6 +2184,7 @@ impl<'a> Loader<'a> {
             mutable_documents: false,
             mutable_builtin_len: false,
             reachable: None,
+            required_library: None,
             entry_filename,
             inputs: self.inputs,
             session: self.session,
@@ -2160,7 +2196,18 @@ impl<'a> Loader<'a> {
             initialization: self.initialization,
             errno_names: self.errno_names,
         };
-        graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
+        if reachable_only {
+            graph.reachable = Some(reachability::Reachable::collect(&graph, false));
+        } else if let Some(library) = graph
+            .modules
+            .iter()
+            .position(|m| m.is_bundled(CONTEXTLIB_EXIT_STACK))
+        {
+            // A sealed library can own higher-order methods that require object dispatch.
+            // Strict builds still visit even an uncalled first-party function using them.
+            graph.required_library =
+                Some((library, reachability::Reachable::collect(&graph, true)));
+        }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
         graph.mutable_builtin_len = graph.writes_builtin_len();
@@ -2671,6 +2718,23 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Contextlib)
+                && imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|a| a.name.as_str() == "AbstractContextManager")
+                }))
+            .then_some((CONTEXTLIB_ABSTRACT, include_str!("../stdlib/contextlib.py"))),
+            (module == Some(IntrinsicModule::Contextlib)
+                && imports
+                    .is_none_or(|names| names.iter().any(|a| a.name.as_str() == "ExitStack")))
+            .then_some((
+                CONTEXTLIB_EXIT_STACK,
+                concat!(
+                    "from contextlib import AbstractContextManager\n",
+                    include_str!("../stdlib/contextlib_exitstack.py")
+                ),
+            )),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {
                     names
