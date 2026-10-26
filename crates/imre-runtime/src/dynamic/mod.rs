@@ -198,7 +198,7 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
-            Value::List(values) if *reverse => {
+            Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
             Value::List(values) | Value::Tuple(values) => {
