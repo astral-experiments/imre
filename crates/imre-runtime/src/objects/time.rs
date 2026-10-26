@@ -168,14 +168,16 @@ unsafe fn mktime_fields(
         unsafe {
             let zone = *original.add(9);
             if zone != 0 {
-                if extra_kind(original, 9).base() != 3 {
-                    return Err(Error::new(
-                        Kind::TypeError,
-                        "bad argument type for built-in operation",
-                    ));
+                let text = match extra_kind(original, 9).base() {
+                    3 => Some(crate::StrOwner::acquire_word(zone)),
+                    10 => super::string_enums::string_value(zone),
+                    _ => None,
                 }
+                .ok_or_else(|| {
+                    Error::new(Kind::TypeError, "bad argument type for built-in operation")
+                })?;
                 if let Some(bytes) = zone_bytes {
-                    bytes.extend_from_slice((&*(zone as *const crate::Str)).as_bytes());
+                    bytes.extend_from_slice(text.as_bytes());
                     bytes.push(0);
                     tm.tm_zone = bytes.as_mut_ptr().cast();
                 }
