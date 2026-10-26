@@ -12,10 +12,12 @@ class Tagged(Formatter):
 
 
 class Child(Tagged):
-    pass
+    native = classmethod(len)
 
 
 def current():
+    assert type(Child.native) is type(Child.owner)
+    assert Child.native.__func__ is len and Child.native.__self__ is Child
     print(Child.owner() is Child, Child().owner() is Child, Tagged.owner.__self__ is Tagged)
     for source in ("a{{", "x{name!r:>5}終", "{0[X].attr}"):
         print(list(formatter_parser(source)))

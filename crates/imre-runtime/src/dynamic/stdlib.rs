@@ -38,6 +38,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "abc"
             | "codecs"
             | "types"
             | "io"
@@ -227,6 +228,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
+        ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
@@ -844,6 +846,7 @@ pub(super) fn call(
             ctx.alloc(Value::Method {
                 callable,
                 receiver: argument(args, 0)?,
+                explicit: false,
             })
         }
         "warnings.warn" => {

@@ -11,7 +11,7 @@ mod collections;
 mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
-pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
+pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
     use crate::objects::exceptions::Kind;
@@ -562,6 +562,28 @@ pub(super) fn call(
         };
     }
     match name {
+        "method" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("method() takes no keyword arguments"));
+            }
+            let &[callable, receiver] = args else {
+                return Err(type_error(format!(
+                    "method expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            if !ctx.callable(callable) {
+                return Err(type_error("first argument must be callable"));
+            }
+            if receiver == NONE {
+                return Err(type_error("instance must not be None"));
+            }
+            Ok(ctx.alloc(Value::Method {
+                callable,
+                receiver,
+                explicit: true,
+            }))
+        }
         "object" => {
             if !args.is_empty() || !kwargs.is_empty() {
                 return Err(type_error("object() takes no arguments"));
