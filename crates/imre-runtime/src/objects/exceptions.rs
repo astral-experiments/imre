@@ -336,7 +336,7 @@ pub(super) struct Exception {
     kind: Kind,
     payload: Payload,
     suppress_context: bool,
-    details: Option<Rc<ExceptionDetails>>,
+    details: Option<crate::Shared<ExceptionDetails>>,
 }
 
 #[derive(Clone, Default)]
@@ -498,9 +498,9 @@ impl Exception {
         })
     }
 
-    fn attach_directory_frame(&mut self, mut details: Rc<ExceptionDetails>) {
+    fn attach_directory_frame(&mut self, mut details: crate::Shared<ExceptionDetails>) {
         if let Some(previous) = self.details.as_deref() {
-            let fresh = Rc::get_mut(&mut details).unwrap();
+            let fresh = crate::Shared::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
             fresh.origins.clone_from(&previous.origins);
             fresh.named = previous.named;
@@ -513,8 +513,23 @@ impl Exception {
         self.details = Some(details);
     }
 
+    fn try_details_mut(&mut self) -> Result<&mut ExceptionDetails> {
+        if self
+            .details
+            .as_mut()
+            .and_then(crate::Shared::get_mut)
+            .is_none()
+        {
+            let copy = self.details.as_deref().cloned().unwrap_or_default();
+            self.details = Some(crate::Shared::try_new(copy).map_err(|_| Error::allocation())?);
+        }
+        Ok(crate::Shared::get_mut(self.details.as_mut().unwrap()).unwrap())
+    }
+
     fn details_mut(&mut self) -> &mut ExceptionDetails {
-        Rc::make_mut(self.details.get_or_insert_with(Default::default))
+        self.try_details_mut().unwrap_or_else(|_| {
+            std::alloc::handle_alloc_error(std::alloc::Layout::new::<ExceptionDetails>())
+        })
     }
 
     fn cause(&self) -> Option<&crate::ObjectOwner> {
@@ -523,7 +538,7 @@ impl Exception {
 
     fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
-        Rc::into_inner(self.details.take()?)?.cause
+        crate::Shared::try_unwrap(self.details.take()?).ok()?.cause
     }
 
     /// KeyError uses repr for one key unless an earlier builtin in the MRO overrides str.
@@ -968,7 +983,7 @@ pub unsafe extern "C" fn imre_prepare_directory_frame(
         // SAFETY: the template is a live immutable exception.
         unsafe { template.0.with(|storage| storage.exception().clone()) }
     });
-    error.details = Some(Rc::new(ExceptionDetails {
+    error.details = Some(crate::Shared::new(ExceptionDetails {
         directories: Some(Rc::new(DirectoryFrame {
             managers: Vec::with_capacity(count),
             outer: None,
@@ -1093,7 +1108,7 @@ fn exception_object(kind: Kind, payload: Payload, cause: Option<crate::ObjectOwn
         payload,
         suppress_context: cause.is_some(),
         details: cause.map(|cause| {
-            Rc::new(ExceptionDetails {
+            crate::Shared::new(ExceptionDetails {
                 cause: Some(cause),
                 ..Default::default()
             })

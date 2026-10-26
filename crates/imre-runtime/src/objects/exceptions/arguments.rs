@@ -82,8 +82,18 @@ fn layout<const N: usize>() -> &'static RecordDescriptor {
     }
 }
 
-fn view(field: OwnedWord) -> crate::ObjectOwner {
-    crate::ObjectOwner::new(Object(StorageCell::new(Storage::ObjectValue(field))))
+fn view(field: OwnedWord) -> Result<crate::ObjectOwner> {
+    crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::ObjectValue(field))))
+        .map_err(|_| Error::allocation())
+}
+
+fn text_argument(value: std::fmt::Arguments<'_>) -> Result<OwnedWord> {
+    let mut text = String::new();
+    std::fmt::Write::write_fmt(&mut super::super::values::ReprWriter(&mut text), value)
+        .map_err(|_| Error::allocation())?;
+    rendered(text.into())
+        .map(string)
+        .map_err(|_| Error::allocation())
 }
 
 fn string(text: crate::StrOwner) -> OwnedWord {
@@ -101,15 +111,20 @@ fn tuple(fields: Fields) -> Result<OwnedWord> {
         5 => layout::<5>(),
         _ => unreachable!("source arguments already have an exact tuple"),
     };
+    // Root every fallible view before exposing the raw record's uninitialized slots.
+    let mut views = SmallVec::<[crate::ObjectOwner; 5]>::new();
+    for field in fields {
+        views.push(view(field)?);
+    }
     // SAFETY: the static tuple layout describes one owned object view per slot.
     unsafe {
         let raw = records::allocate_record(descriptor);
         if raw.is_null() {
             return Err(Error::allocation());
         }
-        for (i, field) in fields.into_iter().enumerate() {
+        for (i, field) in views.into_iter().enumerate() {
             raw.add(i)
-                .write(crate::ObjectOwner::into_raw(view(field)) as usize);
+                .write(crate::ObjectOwner::into_raw(field) as usize);
         }
         Ok(OwnedWord::from_owned(raw as usize, WordKind::new(6)))
     }
@@ -121,7 +136,7 @@ fn empty() -> Result<crate::ObjectOwner> {
         if let Some(empty) = entry.get() {
             return Ok(empty.clone());
         }
-        let value = view(tuple(Fields::new())?);
+        let value = view(tuple(Fields::new())?)?;
         entry.set(value.clone()).unwrap_or_else(|_| unreachable!());
         Ok(value)
     })
@@ -134,18 +149,17 @@ fn project(exception: &Exception, owner: &crate::ObjectOwner) -> Result<crate::O
         Payload::Message(text) => smallvec![string(text.clone())],
         Payload::Key(key) | Payload::Exit(Some(key)) => smallvec![key.clone()],
         Payload::Arguments(arguments) => arguments.args.clone(),
-        Payload::Import(import) => return Ok(view(import.args.0.clone())),
+        Payload::Import(import) => return view(import.args.0.clone()),
         Payload::Positional(args) | Payload::ExitArguments(args) => {
-            return Ok(view(args.0.clone()));
+            return view(args.0.clone());
         }
-        Payload::Tree(errors) => return Ok(view(errors.args(layout::<1>())?)),
+        Payload::Tree(errors) => return view(errors.args(layout::<1>())?),
         Payload::Json(error) => {
             // JSONDecodeError calls ValueError.__init__ with this fully rendered string.
-            let text = format!(
+            smallvec![text_argument(format_args!(
                 "{}: line {} column {} (char {})",
                 error.msg, error.lineno, error.colno, error.pos
-            );
-            smallvec![string(StrOwner::new(text.into()))]
+            ))?]
         }
         Payload::Process(error) => error.arguments(),
         Payload::Timeout(error) => error.arguments(),
@@ -169,10 +183,11 @@ fn project(exception: &Exception, owner: &crate::ObjectOwner) -> Result<crate::O
                         .push(crate::ObjectOwner::into_raw(member.get(owner)) as usize);
                 }
                 values.update_header();
-                crate::ObjectOwner::new(Object(StorageCell::new(Storage::Sequence(values))))
+                crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Sequence(values))))
+                    .map_err(|_| Error::allocation())?
             };
             smallvec![
-                Error::string_arg("unhandled errors in a TaskGroup"),
+                text_argument(format_args!("unhandled errors in a TaskGroup"))?,
                 OwnedWord {
                     kind: WordKind::new(5),
                     word: crate::ObjectOwner::into_raw(list) as usize
@@ -180,7 +195,7 @@ fn project(exception: &Exception, owner: &crate::ObjectOwner) -> Result<crate::O
             ]
         }
     };
-    Ok(view(tuple(fields)?))
+    view(tuple(fields)?)
 }
 
 /// Return an independently owned, immutable view of the original positional arguments.
@@ -217,7 +232,7 @@ pub unsafe extern "C" fn imre_exception_args(value: *const Object) -> *const Obj
             } else {
                 Cached::Owned(v.clone())
             };
-            e.details_mut().args = Some(cached);
+            e.try_details_mut()?.args = Some(cached);
             Ok(v)
         })
     };
