@@ -336,6 +336,8 @@ pub(crate) enum Intrinsic {
     RegexPattern,
     RegexMatch,
     StrEnum,
+    IntEnum,
+    SimpleEnum,
     EnumAuto,
     DefaultDict,
     ChainMap,
@@ -861,6 +863,8 @@ impl IntrinsicModule {
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
+            (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
+            (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections | Self::CollectionsNative, "_count_elements") => {
                 Intrinsic::CountElements
@@ -1372,6 +1376,36 @@ impl SourceGraph {
             })
             .collect();
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        // The bundled _simple_enum factories are lowered to immutable member tables.
+        // Keep the actual category property bodies and every caller in ty's check.
+        if let Some((id, http)) = self
+            .modules
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.is_bundled("http"))
+        {
+            let ranges =
+                &mut skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[id];
+            for stmt in &http.parsed.syntax().body {
+                match stmt {
+                    ast::Stmt::ImportFrom(import) if import.module.as_deref() == Some("enum") => {
+                        ranges.push(import.range());
+                    }
+                    ast::Stmt::ClassDef(class) => {
+                        ranges.extend(class.body.iter().filter_map(|s| {
+                            if let ast::Stmt::FunctionDef(f) = s
+                                && f.name.as_str() == "__new__"
+                            {
+                                Some(f.range())
+                            } else {
+                                None
+                            }
+                        }))
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.python_optimization() > 0 {
             use ast::visitor::{Visitor, walk_stmt};
 
@@ -2517,6 +2551,10 @@ impl<'a> Loader<'a> {
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
+            "http" => Some((
+                "http/__init__.py",
+                include_str!("../stdlib/http/__init__.py"),
+            )),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
             "string" => Some((

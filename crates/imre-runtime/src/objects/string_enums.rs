@@ -11,6 +11,37 @@ type Member = [*const *const Str; 3];
 thread_local! { static PLAIN: Cell<*const u8> = const { Cell::new(ptr::null()) }; }
 thread_local! { static MEMBERS: Cell<(*const Member, usize)> = const { Cell::new((ptr::null(), 0)) }; }
 
+// Optional parallel rows share the canonical tags and lifetime of MEMBERS.
+#[repr(C)]
+pub struct HttpMember {
+    code: usize,
+    phrase: *const *const Str,
+    description: *const *const Str,
+}
+
+thread_local! { static HTTP: Cell<*const HttpMember> = const { Cell::new(ptr::null()) }; }
+
+/// Installs optional HTTP fields for the current enum table.
+///
+/// # Safety
+/// A non-null table must have a row per registered member and live until cleared.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_http_enum_table(rows: *const HttpMember) {
+    HTTP.set(rows);
+}
+
+// None is an ordinary enum; Some(0) is HTTPMethod; HTTPStatus stores its tagged int.
+fn http_code(tag: usize) -> Option<usize> {
+    let rows = HTTP.get();
+    if rows.is_null() {
+        return None;
+    }
+    assert!((1..=MEMBERS.get().1).contains(&tag));
+    // SAFETY: the registered parallel table has the same index range as MEMBERS.
+    let row = unsafe { &*rows.add(tag - 1) };
+    (!row.description.is_null()).then_some(row.code)
+}
+
 /// Installs one module's read-only member table after its string pool is initialized.
 ///
 /// # Safety
@@ -60,7 +91,8 @@ pub(super) fn string_value(tag: usize) -> Option<crate::StrOwner> {
     with_member(tag, |[_, _, value]| {
         let plain = PLAIN.get();
         // SAFETY: with_member proved this index and roots the registered enum value.
-        (plain.is_null() || unsafe { *plain.add(tag - 1) } == 0)
+        (http_code(tag).unwrap_or(0) == 0
+            && (plain.is_null() || unsafe { *plain.add(tag - 1) } == 0))
             .then(|| unsafe { crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize) })
     })
 }
@@ -82,7 +114,7 @@ pub unsafe extern "C" fn imre_enum_lookup(text: *const Str, first: usize, count:
     // SAFETY: the caller roots the immutable lookup value.
     let text = unsafe { &*text };
     for tag in first..first + count {
-        if with_member(tag, |[_, _, value]| value == text) {
+        if http_code(tag).unwrap_or(0) == 0 && with_member(tag, |[_, _, value]| value == text) {
             return tag;
         }
     }
@@ -90,6 +122,37 @@ pub unsafe extern "C" fn imre_enum_lookup(text: *const Str, first: usize, count:
         super::exceptions::Error::new(
             super::exceptions::Kind::ValueError,
             format!("{} is not a valid {class}", string_repr(text)),
+        )
+        .raise();
+    });
+    0
+}
+
+/// Return a class's canonical tag for a Python integer, or zero for a missing dictionary key.
+/// Status codes are immediate Python integers, so a heap integer cannot compare equal.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_enum_find_int(word: usize, first: usize, count: usize) -> usize {
+    (first..first + count)
+        .find(|&tag| http_code(tag) == Some(word))
+        .unwrap_or(0)
+}
+
+/// Looks up a rooted Python integer without equating its decimal text to a string.
+///
+/// # Safety
+/// The caller roots the canonical integer and supplies the class's member range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_enum_lookup_int(word: usize, first: usize, count: usize) -> usize {
+    let tag = imre_enum_find_int(word, first, count);
+    if tag != 0 {
+        return tag;
+    }
+    // SAFETY: the caller roots word, and int_str returns one owned string reference.
+    let text = unsafe { StrOwner::from_raw(crate::imre_int_str(word)) };
+    with_member(first, |[class, _, _]| {
+        super::exceptions::Error::new(
+            super::exceptions::Kind::ValueError,
+            format!("{text} is not a valid {class}"),
         )
         .raise();
     });
@@ -118,8 +181,17 @@ pub(super) fn write_repr(
         output.write_str(class)?;
         output.write_char('.')?;
         output.write_str(name)?;
-        output.write_str(": ")?;
-        super::exceptions::write_quoted_repr(value, output)?;
+        match http_code(tag) {
+            Some(0) => {}
+            Some(_) => {
+                output.write_str(": ")?;
+                output.write_str(value)?;
+            }
+            None => {
+                output.write_str(": ")?;
+                super::exceptions::write_quoted_repr(value, output)?;
+            }
+        }
         output.write_char('>')
     })
 }

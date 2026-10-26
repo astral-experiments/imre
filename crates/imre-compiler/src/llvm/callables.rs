@@ -28,9 +28,9 @@ pub(super) fn adapters(
                     receiver.is_some(),
                     matches!(returns, Type::Coroutine(_)),
                 ));
-                enum_receiver |= receiver
-                    .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
+                enum_receiver |= receiver.as_ref().is_some_and(|r| {
+                    matches!(r.ty, Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_))
+                });
                 object_receiver |= receiver
                     .as_ref()
                     .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
@@ -105,7 +105,7 @@ pub(super) fn adapters(
         let scalar = bound
             && matches!(
                 function.locals[function.params[0]],
-                Type::StrEnum(_) | Type::Enum(_)
+                Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
             );
         let mut inputs = Vec::new();
         if bound {
@@ -200,7 +200,7 @@ impl Emitter<'_, '_> {
         // nonowning tag in that word; only its adapter converts the bits back.
         let scalar = receiver
             .as_ref()
-            .is_some_and(|r| matches!(r.ty, Type::StrEnum(_) | Type::Enum(_)));
+            .is_some_and(|r| matches!(r.ty, Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)));
         let policy = self.module.types.cache_adapter(function);
         let layout = if policy.is_some() {
             "cache_callable"

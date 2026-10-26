@@ -46,7 +46,7 @@ impl Emitter<'_, '_> {
                         .instruction(format!("call i32 @imre_json_truth(ptr {})", value.operand));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
-                Type::Enum(_) => "true".into(),
+                Type::Enum(_) | Type::IntEnum(_) => "true".into(),
                 Type::StrEnum(class) => {
                     match self.module.class_metadata[class]
                         .enum_members

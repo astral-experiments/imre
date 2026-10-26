@@ -2964,7 +2964,11 @@ impl<'a> Checker<'a> {
                 if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
                     return self.coerce(field, expected, expression);
                 }
-                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
+                if let Type::Class(class)
+                | Type::IntEnum(class)
+                | Type::StrEnum(class)
+                | Type::Enum(class) = receiver.ty
+                {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
                     return self.coerce(value, expected, expression);
@@ -6302,40 +6306,43 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
-                    let (key_type, builtin) =
-                        if let Some((target_key, _)) = self.types.mapping(receiver.ty) {
-                            if target_key == Type::Int && key.ty == Type::ObjectValue {
-                                (key.ty, Builtin::Errno(ir::ErrnoOperation::MemberContains))
-                            } else {
-                                (target_key, Builtin::DictContains)
-                            }
-                        } else if receiver.ty == Type::ReadOnlyObjectMapping {
-                            (Type::Str, Builtin::DictContains)
-                        } else if let Some((key, _)) = self.types.chainmap_entries(receiver.ty) {
-                            (key, Builtin::ChainMapContains)
-                        } else if receiver.ty == Type::Str {
-                            (Type::Str, Builtin::StringContains)
-                        } else if let Some(element @ (Type::Int | Type::Str | Type::Bool)) =
-                            self.types.deque_element(receiver.ty)
-                        {
-                            (element, Builtin::DequeContains)
-                        } else if let Some(element) = self.types.readable_set_element(receiver.ty) {
-                            (element, Builtin::SetContains)
-                        } else if let Some(ty) = self.types.element(receiver.ty)
-                            && self.types.is_value_struct(ty)
-                        {
-                            (ty, Builtin::StructListContains)
-                        } else if receiver.ty == Type::ListInt {
-                            (self.types.optional(Type::Int), Builtin::IntListContains)
-                        } else if self.types.element(receiver.ty) == Some(Type::Str) {
-                            (Type::Str, Builtin::StringListContains)
+                    let (key_type, builtin) = if let Some((target_key, _)) =
+                        self.types.mapping(receiver.ty)
+                    {
+                        if target_key == Type::Int && key.ty == Type::ObjectValue {
+                            (key.ty, Builtin::Errno(ir::ErrnoOperation::MemberContains))
+                        } else if matches!(target_key, Type::IntEnum(_)) && key.ty == Type::Int {
+                            (Type::Int, Builtin::DictContains)
                         } else {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "membership requires a concrete dictionary or set",
-                            ));
-                        };
+                            (target_key, Builtin::DictContains)
+                        }
+                    } else if receiver.ty == Type::ReadOnlyObjectMapping {
+                        (Type::Str, Builtin::DictContains)
+                    } else if let Some((key, _)) = self.types.chainmap_entries(receiver.ty) {
+                        (key, Builtin::ChainMapContains)
+                    } else if receiver.ty == Type::Str {
+                        (Type::Str, Builtin::StringContains)
+                    } else if let Some(element @ (Type::Int | Type::Str | Type::Bool)) =
+                        self.types.deque_element(receiver.ty)
+                    {
+                        (element, Builtin::DequeContains)
+                    } else if let Some(element) = self.types.readable_set_element(receiver.ty) {
+                        (element, Builtin::SetContains)
+                    } else if let Some(ty) = self.types.element(receiver.ty)
+                        && self.types.is_value_struct(ty)
+                    {
+                        (ty, Builtin::StructListContains)
+                    } else if receiver.ty == Type::ListInt {
+                        (self.types.optional(Type::Int), Builtin::IntListContains)
+                    } else if self.types.element(receiver.ty) == Some(Type::Str) {
+                        (Type::Str, Builtin::StringListContains)
+                    } else {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "membership requires a concrete dictionary or set",
+                        ));
+                    };
                     let key = if receiver.ty == Type::ListInt {
                         self.coerce(key, key_type, expression)?
                     } else if key_type == Type::Str {
@@ -6560,7 +6567,7 @@ impl<'a> Checker<'a> {
                     && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                     && (self.types.payload(left.ty).is_some()
                         || self.types.payload(right.ty).is_some())
-                    && let ty @ (Type::StrEnum(_) | Type::Enum(_)) =
+                    && let ty @ (Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)) =
                         self.types.payload(left.ty).unwrap_or(left.ty)
                     && self.types.payload(right.ty).unwrap_or(right.ty) == ty
                 {
@@ -6609,6 +6616,13 @@ impl<'a> Checker<'a> {
                     && !values.iter().all(|v| v.ty == values[0].ty)
                 {
                     values = values.into_iter().map(Self::string_value).collect();
+                }
+                if values.iter().any(|v| matches!(v.ty, Type::IntEnum(_)))
+                    && values
+                        .iter()
+                        .all(|v| matches!(v.ty, Type::IntEnum(_) | Type::Int | Type::Float))
+                {
+                    values = values.into_iter().map(Self::enum_integer).collect();
                 }
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
@@ -6806,6 +6820,9 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
+                if let Some(member) = self.enum_name_lookup(subscript)? {
+                    return Ok(member);
+                }
                 if let ast::Expr::Attribute(attr) = &*subscript.value
                     && attr.attr.as_str() == "exceptions"
                 {
@@ -6925,7 +6942,13 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
-                    let key = self.expr_expected(&subscript.slice, key)?;
+                    // Reading an ordinary enum-keyed dictionary may probe with an equal integer.
+                    // A default factory can insert the supplied key, which changes its stored type.
+                    let integer = (matches!(key, Type::IntEnum(_))
+                        && !self.types.is_default_list_dict(list.ty)
+                        && !self.types.is_counter(list.ty))
+                    .then_some(Type::Int);
+                    let key = self.expr_expected_or(&subscript.slice, key, integer)?;
                     let required = self.required_group_key(&list, &key);
                     let expression = self.projected_group(&list, &key).unwrap_or_else(|| Expr {
                         ty: value,
@@ -7292,12 +7315,36 @@ impl<'a> Checker<'a> {
                     Self::exception_record(receiver)
                 };
                 let receiver = self.checked_record_receiver(receiver, attribute);
-                if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty {
+                if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
+                {
                     match attribute.attr.as_str() {
                         "name" => {
                             return Ok(Expr {
                                 ty: Type::Str,
                                 kind: ExprKind::Builtin(Builtin::StrEnumName, vec![receiver]),
+                            });
+                        }
+                        "value" if matches!(receiver.ty, Type::IntEnum(_)) => {
+                            return Ok(Self::enum_integer(receiver));
+                        }
+                        "phrase" if matches!(receiver.ty, Type::IntEnum(_)) => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(Builtin::HttpEnumPhrase, vec![receiver]),
+                            });
+                        }
+                        "description"
+                            if self.classes.declarations.definitions[class]
+                                .enum_members
+                                .as_ref()
+                                .is_some_and(|m| m.http.is_some()) =>
+                        {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(
+                                    Builtin::HttpEnumDescription,
+                                    vec![receiver],
+                                ),
                             });
                         }
                         "value" => {
@@ -8052,7 +8099,10 @@ impl<'a> Checker<'a> {
                     Some(value) => value,
                     None => self.expr(&method.value)?,
                 };
-                if let Type::Class(class) | Type::StrEnum(class) | Type::Enum(class) = object.ty
+                if let Type::Class(class)
+                | Type::IntEnum(class)
+                | Type::StrEnum(class)
+                | Type::Enum(class) = object.ty
                     && self.classes.methods[class].contains_key(method.attr.as_str())
                 {
                     return self.class_method_call(call, method, class, Some(object));
@@ -8784,7 +8834,7 @@ impl<'a> Checker<'a> {
                 }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
-            if let Type::StrEnum(class) | Type::Enum(class) = receiver.ty
+            if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
                 && self.classes.methods[class].contains_key(attribute.attr.as_str())
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
@@ -9155,7 +9205,8 @@ impl<'a> Checker<'a> {
                         "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
-                let key = self.expr_expected(&call.arguments.args[0], key_type)?;
+                let integer = (!pop && matches!(key_type, Type::IntEnum(_))).then_some(Type::Int);
+                let key = self.expr_expected_or(&call.arguments.args[0], key_type, integer)?;
                 if !pop
                     && call.arguments.args.len() == 1
                     && let Some(capture) = self.projected_group(&receiver, &key)
@@ -9497,6 +9548,16 @@ impl<'a> Checker<'a> {
                 }
             });
         }
+        if name.id == "int"
+            && args.len() == 1
+            && matches!(args[0].ty, Type::Union(_))
+            && let Some(value) = self.int_enum_union_value(args[0].clone())
+        {
+            return Ok(value);
+        }
+        if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name.id == "int" {
+            return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
+        }
         if args.len() == 1
             && matches!(args[0].ty, Type::Enum(_) | Type::BuiltinClass)
             && matches!(name.id.as_str(), "str" | "print")
@@ -9520,10 +9581,15 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1
-            && matches!(args[0].ty, Type::StrEnum(_))
-            && matches!(name.id.as_str(), "str" | "print" | "len")
+            && (matches!(args[0].ty, Type::StrEnum(_))
+                && matches!(name.id.as_str(), "str" | "print" | "len")
+                || matches!(args[0].ty, Type::IntEnum(_))
+                    && matches!(name.id.as_str(), "str" | "print"))
         {
-            let text = Self::enum_text(args.into_iter().next().unwrap());
+            let text = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::StrEnumValue, args),
+            };
             return Ok(match name.id.as_str() {
                 "str" => text,
                 "print" => Expr {

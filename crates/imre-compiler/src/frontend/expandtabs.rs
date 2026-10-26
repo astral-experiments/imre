@@ -157,7 +157,7 @@ impl Checker<'_> {
                 record.as_ref().map_or("tuple", |r| r.name.as_str())
             }
             Type::PlainObject => "object",
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
+            Type::Class(id) | Type::IntEnum(id) | Type::StrEnum(id) | Type::Enum(id) => {
                 self.classes.declarations.definitions[id].name.as_str()
             }
             _ => {

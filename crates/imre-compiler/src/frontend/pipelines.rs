@@ -301,6 +301,9 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Option<Iteration>, String> {
+        if let Some(input) = self.enum_iteration(expression) {
+            return Ok(Some(input));
+        }
         if let ast::Expr::Generator(generator) = expression {
             return Ok(Some(Iteration::Prepared(
                 self.generator_input(generator, element, None)?,
