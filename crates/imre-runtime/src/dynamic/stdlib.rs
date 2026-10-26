@@ -433,7 +433,7 @@ pub(super) fn call(
                 let Value::Dict(entries) = ctx.heap.get(keywords) else {
                     unreachable!()
                 };
-                let keywords = ctx.dict(entries.clone());
+                let keywords = ctx.dict(entries.to_vec());
                 (function, ctx.items(args)?, keywords)
             }
             _ => (function, Vec::new(), ctx.dict(Vec::new())),
@@ -733,7 +733,7 @@ pub(super) fn call(
         }),
         "collections.defaultdict" => ctx.alloc(Value::DefaultDict {
             factory: args.first().copied().unwrap_or(NONE),
-            entries: Vec::new(),
+            entries: Default::default(),
         }),
         "contextlib.contextmanager" => {
             let callable = ctx.alloc(Value::Native("contextlib._manager".into()));

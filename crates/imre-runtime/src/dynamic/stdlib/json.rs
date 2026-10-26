@@ -61,7 +61,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
                             entries[position] = (key, value);
                         }
                     }
-                    ctx.alloc(Value::Dict(entries))
+                    ctx.dict(entries)
                 }
             })
         },
@@ -153,7 +153,7 @@ impl Encoder {
                         self.output.push(']');
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, entries.clone())?;
+                        self.object(ctx, entries.to_vec())?;
                     }
                     _ => {
                         let default = self.default.ok_or_else(|| {

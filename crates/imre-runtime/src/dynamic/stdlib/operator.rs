@@ -205,6 +205,9 @@ impl Context {
             Err(error) if error.kind == "TypeError" => {}
             Err(error) => return Err(error),
         }
+        if let Value::DictionaryIterator(cursor) = self.heap.get(value) {
+            return Ok(self.int(self.dictionary_hint(cursor) as i64));
+        }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
             return Ok(self.int(self.iterator_remaining(value)?.len() as i64));
         }

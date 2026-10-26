@@ -3,6 +3,7 @@
 
 mod builtins;
 mod calls;
+mod dictionary;
 mod ffi;
 mod function_fields;
 mod operators;
@@ -80,7 +81,7 @@ impl Context {
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
-        self.alloc(Value::Dict(entries))
+        self.alloc(Value::Dict(entries.into()))
     }
 
     fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {
@@ -125,7 +126,13 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
+            Value::Iterator { .. } | Value::AstWalk(_) | Value::DictionaryIterator(_) => {
+                return Ok(id);
+            }
+            Value::DictView { dict, kind } => return Ok(self.dictionary_iterator(*dict, *kind)),
+            Value::Dict(_) | Value::DefaultDict { .. } => {
+                return Ok(self.dictionary_iterator(id, value::DictViewKind::Keys));
+            }
             Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
             Value::Instance {
                 dictionary: Some(_),
@@ -137,7 +144,7 @@ impl Context {
                 let result = self.call(method, Vec::new(), Vec::new())?;
                 return if matches!(
                     self.heap.get(result),
-                    Value::Iterator { .. } | Value::AstWalk(_)
+                    Value::Iterator { .. } | Value::AstWalk(_) | Value::DictionaryIterator(_)
                 ) {
                     Ok(result)
                 } else {
@@ -182,6 +189,9 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if matches!(self.heap.get(id), Value::DictionaryIterator(_)) {
+            return Ok(self.dictionary_entry(id)?.is_some());
+        }
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
@@ -194,6 +204,9 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::DictionaryIterator(_)) {
+            return self.next_dictionary_item(id);
+        }
         if matches!(self.heap.get(id), Value::AstWalk(_)) {
             return stdlib::ast::advance(self, id);
         }
@@ -211,7 +224,10 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_)) {
+        if matches!(
+            self.heap.get(id),
+            Value::AstWalk(_) | Value::DictionaryIterator(_)
+        ) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);

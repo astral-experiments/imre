@@ -52,6 +52,7 @@ impl Context {
                 | Value::Bytes(_)
                 | Value::Range { .. }
                 | Value::Iterator { .. }
+                | Value::DictionaryIterator(_)
         ) {
             return Ok(false);
         }

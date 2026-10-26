@@ -200,14 +200,15 @@ pub(super) enum Value {
         extras: Vec<(&'static str, Id)>,
     },
     Set(Vec<Id>),
-    Dict(Vec<(Id, Id)>),
+    Dict(super::dictionary::Entries),
+    DictionaryIterator(super::dictionary::Cursor),
     DictView {
         dict: Id,
         kind: DictViewKind,
     },
     DefaultDict {
         factory: Id,
-        entries: Vec<(Id, Id)>,
+        entries: super::dictionary::Entries,
     },
     Scope(Scope),
     ClassCell(Option<Id>),
@@ -303,6 +304,7 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::DictionaryIterator(cursor) => visit.extend(cursor.owner),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
