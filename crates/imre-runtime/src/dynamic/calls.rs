@@ -145,6 +145,7 @@ impl Context {
                 return Ok(self.alloc(Value::Method {
                     callable: value,
                     receiver,
+                    explicit: false,
                 }));
             }
         }
@@ -205,7 +206,7 @@ impl Context {
     }
 
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
-        if self.equal_class(class, target) {
+        if self.equal_class(class, target) || self.structural_context_manager(class, target) {
             return true;
         }
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
@@ -282,13 +283,13 @@ impl Context {
             | Value::Set { .. }
             | Value::Range { .. }
             | Value::Iterator { .. }
-            | Value::Generator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
+            | Value::Generator { .. }
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
@@ -298,6 +299,7 @@ impl Context {
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
                 Value::Native(_) => "builtin_function_or_method",
@@ -638,6 +640,7 @@ impl Context {
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
                 _ => {}
             },
+            Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function { scope, fields, .. } => {
                 if name == "__globals__" {
@@ -647,10 +650,14 @@ impl Context {
                     return Ok(value);
                 }
             }
-            Value::Method { callable, receiver } => match name {
+            Value::Method {
+                callable,
+                receiver,
+                explicit,
+            } => match name {
                 "__func__" => return Ok(callable),
                 "__self__" => return Ok(receiver),
-                _ if matches!(self.heap.get(callable), Value::Function { .. }) => {
+                _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
                     return self.lookup_attr(callable, name);
                 }
                 _ => {}
@@ -878,6 +885,7 @@ impl Context {
             return Ok(self.alloc(Value::Method {
                 callable: fun,
                 receiver: obj,
+                explicit: false,
             }));
         }
         Err(self.missing_attribute(obj, name))
@@ -980,6 +988,11 @@ impl Context {
                     _ => {
                         let key = self.text(name);
                         if self.remove_binding(scope, name, key)? {
+                            if name == "__abstractmethods__"
+                                && let Value::Scope(data) = self.heap.get_mut(scope)
+                            {
+                                data.is_abstract = false;
+                            }
                             return Ok(());
                         }
                         let Value::Class { name: class, .. } = self.heap.get(obj) else {
@@ -1038,6 +1051,24 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__abstractmethods__"
+            && let Value::Class { scope, .. } = *self.heap.get(obj)
+        {
+            return self.set_abstract_methods(scope, value);
+        }
+        if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {
+                return Err(Error::new(
+                    "TypeError",
+                    "exception context must be None or derive from BaseException",
+                ));
+            }
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.tracing().context = (value != NONE).then_some(value);
+            return Ok(());
+        }
         if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
             return super::static_method::update_attribute(
                 self,
@@ -1211,6 +1242,7 @@ impl Context {
                                 | "bytearray"
                                 | "range"
                                 | "function"
+                                | "method"
                                 | "object"
                                 | "property"
                                 | "staticmethod"
@@ -1241,7 +1273,9 @@ impl Context {
                 }
                 self.call(function, positional, merged)
             }
-            Value::Method { callable, receiver } => {
+            Value::Method {
+                callable, receiver, ..
+            } => {
                 let mut all = Vec::with_capacity(args.len() + 1);
                 all.push(receiver);
                 all.extend(args);
@@ -1290,10 +1324,15 @@ impl Context {
                 Ok(result)
             }
             Value::Class {
-                name, ancestors, ..
+                name,
+                scope,
+                ancestors,
             } => {
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.scope_data(scope).is_abstract {
+                    return Err(self.abstract_class_error(scope, &name)?);
                 }
                 if self.classes.get("collections.abc.Callable") == Some(&callable) {
                     return Err(Error::new(
@@ -1383,6 +1422,26 @@ impl Context {
             } => {
                 let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();
+                if parameters == NONE {
+                    if let Some((key, _)) = kwargs.first() {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("{name}() got an unexpected keyword argument '{key}'"),
+                        ));
+                    }
+                    if !args.is_empty() {
+                        let verb = if args.len() == 1 { "was" } else { "were" };
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{name}() takes 0 positional arguments but {} {verb} given",
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let globals = self.module_globals(scope);
+                    return self.exec_source(code, globals, None);
+                }
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
                 let sig: serde_json::Value = serde_json::from_str(self.str_value(parameters)?)
@@ -1560,6 +1619,7 @@ impl Context {
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }
         }
+        self.init_abstract_class(class, &name, scope)?;
         self.classes.insert(name, class);
         if self.has_base(class, "enum.Enum") {
             self.populate_enum(class, None)?;

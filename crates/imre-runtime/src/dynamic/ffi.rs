@@ -18,7 +18,7 @@ impl Context {
             }
             "assign" => {
                 let name = self.str_value(b)?.to_owned();
-                self.bind(a, &name, c);
+                self.bind_source_name(a, &name, c)?;
                 Ok(c)
             }
             "declare_global" => {
@@ -362,6 +362,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         contexts: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
+        source_builtins: None,
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
@@ -545,7 +546,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
     // SAFETY: all operands are generated from this context; code has the native function ABI.
     let ctx = unsafe { &mut *ctx };
     let location = ctx.heap.current_location().unwrap_or(value::Location {
-        file: "<native>",
+        file: "<native>".into(),
         line: 1,
         span: None,
     });
@@ -597,7 +598,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
             name,
             parameters,
             value::Location {
-                file,
+                file: file.into(),
                 line: definition.first_line,
                 span: None,
             },
@@ -629,18 +630,19 @@ impl Context {
         let filename = self.text(location.file);
         let module_definition = self.scope_data(scope).parent.is_none();
         self.alloc(Value::Code(value::CodeObject {
-            entry,
+            body: value::Body::Native(entry),
             name,
             parameters,
             filename,
             first_line: location.line,
             module_definition,
             coroutine: false,
+            nested: Vec::new(),
         }))
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn define_function(
+    pub(super) fn define_function(
         &mut self,
         code: Id,
         scope: Id,
@@ -653,11 +655,12 @@ impl Context {
     ) -> Id {
         let owner = self.scope_data(scope);
         let class_cell = owner.class_cell;
-        let scope = if owner.class_body.is_some() && !annotation_scope {
-            owner.parent.unwrap_or(scope)
-        } else {
-            scope
-        };
+        let scope =
+            if owner.exec_locals.is_some() || (owner.class_body.is_some() && !annotation_scope) {
+                owner.parent.unwrap_or(scope)
+            } else {
+                scope
+            };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
         self.alloc(Value::Function {
@@ -707,24 +710,35 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     };
     // SAFETY: file names are static constants in the generated native program.
     let file = unsafe { cstr(file) };
-    ctx.heap.statement(
-        ctx.modules
-            .values()
-            .chain(ctx.classes.values())
-            .chain(ctx.typing.roots())
-            .chain(ctx.builtins.values())
-            .chain(ctx.native_code_objects.values())
-            .chain(ctx.codec_entries.roots())
-            .copied()
-            .chain(ctx.contexts.iter().copied())
-            .chain(ctx.pending.iter().flat_map(Error::roots))
-            .chain([ctx.argv, ctx.sys_path, ctx.token_missing]),
+    ctx.checkpoint(
         live,
         value::Location {
-            file,
+            file: file.into(),
             line,
             span: None,
         },
         caught,
     );
+}
+
+impl Context {
+    pub(super) fn checkpoint(&mut self, live: &[Id], location: value::Location, caught: Id) {
+        self.heap.statement(
+            self.modules
+                .values()
+                .chain(self.classes.values())
+                .chain(self.typing.roots())
+                .chain(self.builtins.values())
+                .chain(self.native_code_objects.values())
+                .chain(self.codec_entries.roots())
+                .copied()
+                .chain(self.contexts.iter().copied())
+                .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.source_builtins)
+                .chain([self.argv, self.sys_path, self.token_missing]),
+            live,
+            location,
+            caught,
+        );
+    }
 }

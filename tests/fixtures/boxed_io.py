@@ -115,3 +115,15 @@ def exercise(path):
         return item
 
     print([truncate(item) for item in target], bytes(target))
+
+    lines = path + ".lines"
+    with open(lines, "w") as output:
+        output.write("first\r\n\nthird\rlast")
+    for mode in ("r", "rb"):
+        with open(lines, mode) as stream:
+            for line in stream:
+                print(line)
+                break
+            print(stream.readline(), [line for line in stream], stream.readline())
+        with open(lines, mode) as stream:
+            print(iter(stream) is stream, list(zip(stream, stream)), next(stream, "done"))

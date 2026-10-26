@@ -117,6 +117,7 @@ impl Context {
         }
         let callable = self.builtin("enum._convert");
         Ok(self.alloc(Value::Method {
+            explicit: false,
             callable,
             receiver: *base,
         }))

@@ -32,7 +32,7 @@ impl Context {
             code,
             scope,
             running: false,
-            exhausted: false,
+            offset: Some(0),
         }))
     }
 
@@ -42,7 +42,7 @@ impl Context {
             code,
             scope,
             running,
-            exhausted,
+            offset,
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
@@ -50,7 +50,7 @@ impl Context {
         if *running {
             return Err(Error::new("ValueError", "generator already executing"));
         }
-        if *exhausted {
+        if offset.is_none() {
             return Ok(None);
         }
         *running = true;
@@ -61,13 +61,15 @@ impl Context {
             _ => unreachable!("compiled generator step result"),
         });
         let Value::Generator {
-            running, exhausted, ..
+            running, offset, ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
         };
         *running = false;
-        *exhausted = !matches!(result, Ok(Some(_)));
+        if !matches!(result, Ok(Some(_))) {
+            *offset = None;
+        }
         match result {
             Err(e) if self.is_stop_iteration(&e) => {
                 Err(Error::new("RuntimeError", "generator raised StopIteration"))
