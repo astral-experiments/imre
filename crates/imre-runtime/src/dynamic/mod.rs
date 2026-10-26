@@ -105,6 +105,18 @@ impl Context {
             Err(Error::new("TypeError", "expected str"))
         }
     }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
+        }
+    }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
             Value::Int(n) => Ok(n.clone()),
