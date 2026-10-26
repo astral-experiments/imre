@@ -210,7 +210,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
+        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch") => "pattern",
         Value::RegexMatch { .. } if attr == "group" => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>

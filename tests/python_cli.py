@@ -336,6 +336,7 @@ def report(text):
             "boxed_ast.py",
             "boxed_bytes_add.py",
             "boxed_contextvars.py",
+            "boxed_re_ascii.py",
             "boxed_datetime.py",
             "boxed_time.py",
             "boxed_codecs.py",

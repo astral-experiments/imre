@@ -468,6 +468,10 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
+            Value::RegexPattern(pattern) if name == "pattern" => {
+                return Ok(self.text(&pattern.source));
+            }
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
