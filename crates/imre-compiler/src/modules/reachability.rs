@@ -377,9 +377,11 @@ impl Reachable {
                         // Binding a setter reads the preceding property, even when
                         // no later code reads the descriptor through an instance.
                         if let ast::Stmt::FunctionDef(method) = item
-                            && method.decorator_list.iter().any(|d| matches!(&d.expression,
+                            && method.decorator_list.iter().any(|d| {
+                                matches!(&d.expression,
                                 ast::Expr::Attribute(a) if a.attr.as_str() == "setter" &&
-                                a.value.as_name_expr().is_some_and(|n| n.id == method.name.id)))
+                                a.value.as_name_expr().is_some_and(|n| n.id == method.name.id))
+                            })
                         {
                             accessors.insert(method.name.as_str());
                         }
@@ -448,7 +450,8 @@ impl Reachable {
                                 || (source.is_bundled("selectors")
                                     && class.name.as_str() == "PollSelector"
                                     && name == "close")
-                                || (refs.found.http_commands && (name.starts_with("do_") || name == "__getattr__")
+                                || (refs.found.http_commands
+                                    && (name.starts_with("do_") || name == "__getattr__")
                                     && graph.is_http_handler(id))
                                 || refs.found.attributes.contains(name)
                                 || matches!(
@@ -483,7 +486,7 @@ impl Reachable {
                     found.methods.len(),
                     found.attributes.len(),
                     found.properties.len(),
-                found.http_commands,
+                    found.http_commands,
                 )
             {
                 break;
@@ -771,7 +774,7 @@ fn exception_base(graph: &SourceGraph, id: DefinitionId) -> bool {
 }
 
 /// The HTTP dispatcher constructs a method name from a fixed prefix and the request command.
- pub(crate) fn http_command_key(key: &ast::Expr) -> bool {
+pub(crate) fn http_command_key(key: &ast::Expr) -> bool {
     matches!(key, ast::Expr::BinOp(add) if add.op == ast::Operator::Add &&
         matches!(&*add.left, ast::Expr::StringLiteral(lit) if lit.value.to_str() == "do_"))
 }
@@ -780,12 +783,16 @@ impl SourceGraph {
     pub(crate) fn is_http_handler(&self, class: DefinitionId) -> bool {
         let is_base = |id: DefinitionId| {
             let module = &self.modules[id.module];
-            module.is_bundled("http.server") && matches!(&module.parsed.syntax().body[id.statement],
+            module.is_bundled("http.server")
+                && matches!(&module.parsed.syntax().body[id.statement],
                 ast::Stmt::ClassDef(c) if c.name.as_str() == "BaseHTTPRequestHandler")
         };
-        is_base(class) || has_base(self, class, |module, base| {
-            matches!(self.resolve_type(module, base), Some(Binding::Definition(parent)) if is_base(parent))
-        })
+        is_base(class)
+            || has_base(
+                self,
+                class,
+                |module, base| matches!(self.resolve_type(module, base), Some(Binding::Definition(parent)) if is_base(parent)),
+            )
     }
 }
 

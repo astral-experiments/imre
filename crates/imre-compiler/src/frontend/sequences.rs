@@ -137,7 +137,9 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             return;
         }
         match expr {
-            ast::Expr::BinOp(binary) if self.pack && binary.op == ast::Operator::Mod => self.allow(&binary.right),
+            ast::Expr::BinOp(binary) if self.pack && binary.op == ast::Operator::Mod => {
+                self.allow(&binary.right)
+            }
             ast::Expr::Starred(star) if self.pack && star.ctx == ast::ExprContext::Load => {
                 self.allow(&star.value)
             }

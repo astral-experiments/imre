@@ -931,9 +931,14 @@ impl Checker<'_> {
         if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
-            return self.dispatch_record(class, receiver, attribute, |checker, layout, receiver| {
-                checker.concrete_attribute(attribute, layout, Some(receiver), expected)
-            });
+            return self.dispatch_record(
+                class,
+                receiver,
+                attribute,
+                |checker, layout, receiver| {
+                    checker.concrete_attribute(attribute, layout, Some(receiver), expected)
+                },
+            );
         }
         self.concrete_attribute(attribute, class, receiver, expected)
     }
@@ -952,14 +957,22 @@ impl Checker<'_> {
             Some(ClassValue::Runtime { owner, ordinal }) => {
                 self.class_reads.borrow_mut().insert(decl.definition);
                 let value = self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
-                    error(self.source, attribute, "class value is read before its declaration")
+                    error(
+                        self.source,
+                        attribute,
+                        "class value is read before its declaration",
+                    )
                 })?;
                 return self.data_attribute(class, attribute, receiver, value);
             }
             Some(ClassValue::String(text)) => unpacking::string(text.clone()),
             Some(ClassValue::Strings { owner, ordinal, .. }) => {
                 self.globals.class_value(*owner, *ordinal).ok_or_else(|| {
-                    error(self.source, attribute, "class tuple is read before its declaration")
+                    error(
+                        self.source,
+                        attribute,
+                        "class tuple is read before its declaration",
+                    )
                 })?
             }
             _ => return self.direct_class_attribute(attribute, class, receiver, expected),

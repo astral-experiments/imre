@@ -515,23 +515,51 @@ impl Checker<'_> {
     fn unpacking_value(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Expr, String> {
         if pattern_elements(target).is_some()
             && let ast::Expr::Call(call) = value
-            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) = self.resolve(&call.func)
+            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
+                self.resolve(&call.func)
         {
             self.reject_builtin_keywords(call)?;
             let stamp = match call.arguments.args.as_ref() {
-                [] => Expr { ty: Type::Float, kind: ExprKind::Builtin(Builtin::WallTime, vec![]) },
+                [] => Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
+                },
                 [arg] => {
                     let val = self.expr(arg)?;
                     match val.ty {
                         Type::Float => val,
-                        Type::Int | Type::Bool => Expr { ty: Type::Float, kind: ExprKind::Builtin(Builtin::Float, vec![val]) },
-                        Type::None => self.evaluated_receiver(Some(val), Expr { ty: Type::Float, kind: ExprKind::Builtin(Builtin::WallTime, vec![]) }),
-                        _ => return Err(error(self.source, arg, "a clock timestamp must be an integer or float")),
+                        Type::Int | Type::Bool => Expr {
+                            ty: Type::Float,
+                            kind: ExprKind::Builtin(Builtin::Float, vec![val]),
+                        },
+                        Type::None => self.evaluated_receiver(
+                            Some(val),
+                            Expr {
+                                ty: Type::Float,
+                                kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
+                            },
+                        ),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                arg,
+                                "a clock timestamp must be an integer or float",
+                            ));
+                        }
                     }
                 }
-                _ => return Err(error(self.source, call, "a clock conversion takes at most one timestamp")),
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "a clock conversion takes at most one timestamp",
+                    ));
+                }
             };
-            return Ok(Expr { ty: self.types.tuple(vec![Type::Int; 9]), kind: ExprKind::Builtin(Builtin::ClockParts(utc), vec![stamp]) });
+            return Ok(Expr {
+                ty: self.types.tuple(vec![Type::Int; 9]),
+                kind: ExprKind::Builtin(Builtin::ClockParts(utc), vec![stamp]),
+            });
         }
         if let Some(targets) = pattern_elements(target) {
             let star = targets

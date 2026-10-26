@@ -59,6 +59,7 @@ mod function_caches;
 mod function_text;
 mod functools;
 mod hashlib;
+mod http_server;
 mod import_errors;
 mod inference;
 mod inspect;
@@ -76,6 +77,7 @@ mod logging_formatters;
 mod logging_locks;
 mod logging_records;
 mod mapping_abc;
+mod mapping_choice;
 mod matching;
 mod module_specs;
 mod module_values;
@@ -102,8 +104,6 @@ mod sequences;
 mod shutil;
 mod sign_parameters;
 mod single_dispatch;
-mod http_server;
-mod mapping_choice;
 mod socket;
 mod stdlib;
 mod string_io;
@@ -1193,7 +1193,11 @@ fn lower_body(
     let module = &checker.graph.modules[checker.module];
     let classes = checker.classes;
     let types = checker.types;
-    checker.positional_pack = definition.parameters.vararg.as_deref().map(|p| p.name.to_string());
+    checker.positional_pack = definition
+        .parameters
+        .vararg
+        .as_deref()
+        .map(|p| p.name.to_string());
     checker.consuming_lists = consuming_lists::find(&definition.body);
     checker.joined_lines = joined_lines::find(&definition.body);
     checker.returns = signature.returns;
@@ -2606,12 +2610,16 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
-        if let (Some(source), Some(target)) = (self.types.members(value.ty), self.types.members(expected))
+        if let (Some(source), Some(target)) =
+            (self.types.members(value.ty), self.types.members(expected))
             && source.iter().all(|member| target.contains(member))
         {
             // The closed unions share runtime tags. Widening preserves the
             // original member and its owner rather than converting an IntEnum.
-            return Ok(Expr { ty: expected, kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]) });
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]),
+            });
         }
         if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
@@ -3576,7 +3584,9 @@ impl<'a> Checker<'a> {
                 return self.iteration_value(value, false, expression);
             }
             if self.dict_or_record(receiver.ty).is_some() {
-                return self.dict_or_record_items(receiver, attribute, call).map(Iteration::Prepared);
+                return self
+                    .dict_or_record_items(receiver, attribute, call)
+                    .map(Iteration::Prepared);
             }
             let receiver = if matches!(receiver.ty, Type::Document(_)) {
                 self.document_map(receiver)
@@ -5543,11 +5553,18 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
-        if binary.op == ast::Operator::Mod && left.ty == Type::Str
+        if binary.op == ast::Operator::Mod
+            && left.ty == Type::Str
             && self.types.element(right.ty) == Some(Type::ObjectValue)
-            && binary.right.as_name_expr().is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+            && binary
+                .right
+                .as_name_expr()
+                .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
         {
-            return Ok(Expr { ty: Type::Str, kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]) });
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::PercentFormat, vec![left, right]),
+            });
         }
         if binary.op == ast::Operator::Add
             && (self.types.payload(left.ty) == Some(Type::Int)
@@ -5626,8 +5643,10 @@ impl<'a> Checker<'a> {
         }
         if op == ast::Operator::Mod
             && left.ty == Type::Str
-            && (matches!(right.ty, Type::Int | Type::Str) || self.types.percent_tuple(right.ty)
-                || (matches!(right.ty, Type::Dict(_)) && self.types.mapping(right.ty) == Some((Type::Str, Type::ObjectValue))))
+            && (matches!(right.ty, Type::Int | Type::Str)
+                || self.types.percent_tuple(right.ty)
+                || (matches!(right.ty, Type::Dict(_))
+                    && self.types.mapping(right.ty) == Some((Type::Str, Type::ObjectValue))))
         {
             return Ok(Expr {
                 ty: Type::Str,
@@ -6299,9 +6318,13 @@ impl<'a> Checker<'a> {
             ast::Expr::Compare(compare) => {
                 if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
                     && let [left, right] = compare.operands.as_ref()
-                    && let (Some(left), Some(right)) = (self.class_reference(left), self.class_reference(right))
+                    && let (Some(left), Some(right)) =
+                        (self.class_reference(left), self.class_reference(right))
                 {
-                    return Ok(Expr {ty:Type::Bool, kind:ExprKind::Bool((left == right) == (*op == ast::CmpOp::Is))});
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool((left == right) == (*op == ast::CmpOp::Is)),
+                    });
                 }
                 if compare.ops.len() == 1
                     && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
@@ -8381,11 +8404,18 @@ impl<'a> Checker<'a> {
                     name: "name".into(),
                     ty: Type::Str,
                     kind: ParameterKind::PositionalOrKeyword,
-                    default: Some(Expr { ty: Type::Str, kind: ExprKind::Str(String::new()) }),
+                    default: Some(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(String::new()),
+                    }),
                     sign_only: false,
                 }];
                 let args = self.arguments(call, &params, None)?;
-                return Ok(self.ordered_builtin(Builtin::Socket(ir::SocketOp::GetFqdn), Type::Str, args));
+                return Ok(self.ordered_builtin(
+                    Builtin::Socket(ir::SocketOp::GetFqdn),
+                    Type::Str,
+                    args,
+                ));
             }
             Some(Binding::Intrinsic(Intrinsic::Socket)) => return self.socket_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::CodecGetWriter)) => {
@@ -8775,13 +8805,23 @@ impl<'a> Checker<'a> {
             return self.open(call, gzip);
         }
         if self.unshadowed_builtin(&call.func, "issubclass") {
-            if call.arguments.keywords.is_empty() && let [child, parent] = call.arguments.args.as_slice()
-                && let (Some(child), Some(parent)) = (self.class_reference(child), self.class_reference(parent))
+            if call.arguments.keywords.is_empty()
+                && let [child, parent] = call.arguments.args.as_slice()
+                && let (Some(child), Some(parent)) =
+                    (self.class_reference(child), self.class_reference(parent))
             {
-                let result = child == parent || self.classes.declarations.definitions[child].bases.contains(&parent);
-                return Ok(Expr {ty:Type::Bool, kind:ExprKind::Bool(result)});
+                let result = child == parent
+                    || self.classes.declarations.definitions[child]
+                        .bases
+                        .contains(&parent);
+                return Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(result),
+                });
             }
-            if let Some(answer) = self.mapping_issubclass(call)? { return Ok(answer); }
+            if let Some(answer) = self.mapping_issubclass(call)? {
+                return Ok(answer);
+            }
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);

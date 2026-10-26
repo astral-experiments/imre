@@ -216,7 +216,11 @@ fn fqdn(name: &str) -> Result<String> {
     use std::net::{IpAddr, ToSocketAddrs};
     use std::sync::Mutex;
     unsafe extern "C" {
-        fn gethostbyaddr(addr: *const libc::c_void, len: libc::socklen_t, family: libc::c_int) -> *mut libc::hostent;
+        fn gethostbyaddr(
+            addr: *const libc::c_void,
+            len: libc::socklen_t,
+            family: libc::c_int,
+        ) -> *mut libc::hostent;
     }
     static REVERSE: Mutex<()> = Mutex::new(());
     let mut name = name.trim().to_owned();
@@ -224,16 +228,29 @@ fn fqdn(name: &str) -> Result<String> {
         let mut buffer = [0u8; 256];
         // SAFETY: the buffer is writable; a final zero bounds CStr even on truncation.
         let n = buffer.len() - 1;
-        checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) }).map_err(errno_error)?;
-        name = CStr::from_bytes_until_nul(&buffer).unwrap().to_string_lossy().into_owned();
+        checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) })
+            .map_err(errno_error)?;
+        name = CStr::from_bytes_until_nul(&buffer)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
     }
     if name.as_bytes().contains(&0) {
-        return Err(Error::new(Kind::TypeError, "gethostbyaddr() argument 1 must be encoded string without null bytes"));
+        return Err(Error::new(
+            Kind::TypeError,
+            "gethostbyaddr() argument 1 must be encoded string without null bytes",
+        ));
     }
     let addr = name.parse::<IpAddr>().ok().or_else(|| {
-        (name.as_str(), 0).to_socket_addrs().ok()?.next().map(|address| address.ip())
+        (name.as_str(), 0)
+            .to_socket_addrs()
+            .ok()?
+            .next()
+            .map(|address| address.ip())
     });
-    let Some(addr) = addr else { return Ok(name); };
+    let Some(addr) = addr else {
+        return Ok(name);
+    };
     let _guard = REVERSE.lock().unwrap_or_else(|error| error.into_inner());
     // SAFETY: the address bytes live through gethostbyaddr. Its terminated name
     // and aliases remain valid until another legacy lookup on this thread.
@@ -242,13 +259,21 @@ fn fqdn(name: &str) -> Result<String> {
             IpAddr::V4(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 4, libc::AF_INET),
             IpAddr::V6(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 16, libc::AF_INET6),
         };
-        if host.is_null() || (*host).h_name.is_null() { return Ok(name); }
-        let primary = CStr::from_ptr((*host).h_name).to_string_lossy().into_owned();
-        if primary.contains('.') { return Ok(primary); }
+        if host.is_null() || (*host).h_name.is_null() {
+            return Ok(name);
+        }
+        let primary = CStr::from_ptr((*host).h_name)
+            .to_string_lossy()
+            .into_owned();
+        if primary.contains('.') {
+            return Ok(primary);
+        }
         let mut aliases = (*host).h_aliases;
         while !aliases.is_null() && !(*aliases).is_null() {
             let alias = CStr::from_ptr(*aliases).to_string_lossy();
-            if alias.contains('.') { return Ok(alias.into_owned()); }
+            if alias.contains('.') {
+                return Ok(alias.into_owned());
+            }
             aliases = aliases.add(1);
         }
         Ok(primary)
@@ -257,7 +282,10 @@ fn fqdn(name: &str) -> Result<String> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_getfqdn(name: &Str) -> *const Str {
-    finish(fqdn(name).map(|name| crate::StrOwner::into_raw(crate::StrOwner::new(Str::from(name)))), ptr::null())
+    finish(
+        fqdn(name).map(|name| crate::StrOwner::into_raw(crate::StrOwner::new(Str::from(name)))),
+        ptr::null(),
+    )
 }
 
 fn address(host: &str, port: usize, name: &str) -> Result<libc::sockaddr_in> {

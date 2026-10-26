@@ -445,11 +445,20 @@ impl Checker<'_> {
             // caller's pack. Reuse it when all fixed arguments have been bound.
             if let ast::Expr::Starred(star) = arg
                 && let Some(index) = pack
-                && index == positional && packed.is_empty() && at + 1 == call.arguments.args.len()
-                && star.value.as_name_expr().is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+                && index == positional
+                && packed.is_empty()
+                && at + 1 == call.arguments.args.len()
+                && star
+                    .value
+                    .as_name_expr()
+                    .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
             {
                 let value = self.expr_expected(&star.value, params[index].ty)?;
-                forwarded = Some(if let Some(scope) = scope.as_deref_mut() { scope.hold(self, value) } else { value });
+                forwarded = Some(if let Some(scope) = scope.as_deref_mut() {
+                    scope.hold(self, value)
+                } else {
+                    value
+                });
                 continue;
             }
             let mut bind = |checker: &mut Self,

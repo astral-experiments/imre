@@ -798,24 +798,38 @@ pub extern "C" fn imre_time_sleep(seconds: f64) {
 /// The descriptor has the nine integer slots yielded by a Python struct_time.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_clock_parts(
-    stamp: f64, utc: bool, layout: *const super::records::RecordDescriptor
+    stamp: f64,
+    utc: bool,
+    layout: *const super::records::RecordDescriptor,
 ) -> *mut usize {
     use super::{Int, exceptions::finish, logging::timed, records::imre_record_new};
     let parts = timed::float_seconds(stamp).and_then(|seconds| timed::civil(seconds, utc));
-    finish(parts.map(|tm| {
-        let fields = [i64::from(tm.tm_year) + 1900, i64::from(tm.tm_mon + 1),
-            i64::from(tm.tm_mday), i64::from(tm.tm_hour), i64::from(tm.tm_min),
-            i64::from(tm.tm_sec), i64::from((tm.tm_wday + 6) % 7),
-            i64::from(tm.tm_yday + 1), i64::from(tm.tm_isdst)];
-        // SAFETY: the caller supplied the ordinary nine-int unpacking layout.
-        unsafe {
-            let record = imre_record_new(layout);
-            for (index, value) in fields.into_iter().enumerate() {
-                record.add(index).write(Int::small(value).unwrap().into_raw());
+    finish(
+        parts.map(|tm| {
+            let fields = [
+                i64::from(tm.tm_year) + 1900,
+                i64::from(tm.tm_mon + 1),
+                i64::from(tm.tm_mday),
+                i64::from(tm.tm_hour),
+                i64::from(tm.tm_min),
+                i64::from(tm.tm_sec),
+                i64::from((tm.tm_wday + 6) % 7),
+                i64::from(tm.tm_yday + 1),
+                i64::from(tm.tm_isdst),
+            ];
+            // SAFETY: the caller supplied the ordinary nine-int unpacking layout.
+            unsafe {
+                let record = imre_record_new(layout);
+                for (index, value) in fields.into_iter().enumerate() {
+                    record
+                        .add(index)
+                        .write(Int::small(value).unwrap().into_raw());
+                }
+                record
             }
-            record
-        }
-    }), std::ptr::null_mut())
+        }),
+        std::ptr::null_mut(),
+    )
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

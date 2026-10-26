@@ -4652,7 +4652,9 @@ impl Emitter<'_, '_> {
             Builtin::PercentFormat => {
                 let name = match args[1].value.ty {
                     Type::Dict(_) => "imre_str_percent_dict",
-                    ty if self.module.types.element(ty) == Some(Type::ObjectValue) => "imre_str_percent_pack",
+                    ty if self.module.types.element(ty) == Some(Type::ObjectValue) => {
+                        "imre_str_percent_pack"
+                    }
                     Type::Str => "imre_str_percent_text",
                     Type::Int => "imre_str_percent_int",
                     Type::Tuple(_) => {
@@ -4664,11 +4666,17 @@ impl Emitter<'_, '_> {
                 self.call(name, Type::Str, &[&args[0].value, &args[1].value])
             }
             Builtin::ClockParts(utc) => {
-                let layout = self.output.global_ref(format!("layout_{}", record_name(returns)));
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
                 let stamp = &args[0].value.operand;
-                Value { ty: returns, operand: self.checked_instruction(format!(
-                    "call ptr @imre_clock_parts(double {stamp}, i1 {utc}, ptr @{layout})"
-                )), small_integer: false }
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_clock_parts(double {stamp}, i1 {utc}, ptr @{layout})"
+                    )),
+                    small_integer: false,
+                }
             }
             Builtin::WallTime => self.call("imre_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("imre_json_empty_object", returns, &[]),

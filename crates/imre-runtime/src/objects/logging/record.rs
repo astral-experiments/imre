@@ -453,7 +453,11 @@ fn format_operands(
             // A named conversion replaces the sole positional mapping with
             // the looked-up value. Later named conversions can still use args.
             let _ = positional.next();
-            percent_value_in(rest, &mut std::iter::once(dict_item(mapping, key)?), Some(msg))?
+            percent_value_in(
+                rest,
+                &mut std::iter::once(dict_item(mapping, key)?),
+                Some(msg),
+            )?
         } else {
             percent_value_in(rest, &mut positional, Some(msg))?
         };
@@ -551,17 +555,22 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
 fn unpack_object(value: OwnedWord) -> OwnedWord {
     if value.kind.raw() == 5 && value.word != 0 {
         // SAFETY: a kind-five owner roots this object; clone a boxed field inside the borrow.
-        if let Some(field) = unsafe { object(value.word as *const Object).0.with(|s| match s {
-            Storage::ObjectValue(field) => Some(field.clone()),
-            _ => None,
-        }) } { return field; }
+        if let Some(field) = unsafe {
+            object(value.word as *const Object).0.with(|s| match s {
+                Storage::ObjectValue(field) => Some(field.clone()),
+                _ => None,
+            })
+        } {
+            return field;
+        }
     }
     value
 }
 
 /// Fetch a format operand at the point CPython consumes its width, precision or value.
 fn next_argument(args: &mut impl Iterator<Item = OwnedWord>) -> Result<OwnedWord> {
-    args.next().map(unpack_object)
+    args.next()
+        .map(unpack_object)
         .ok_or_else(|| Error::new(Kind::TypeError, "not enough arguments for format string"))
 }
 
@@ -1115,15 +1124,20 @@ pub unsafe extern "C" fn imre_str_percent_text(fmt: *const Str, text: *const Str
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_percent_pack(fmt: &Str, pack: &Object) -> *const Str {
     // SAFETY: the formatter retains values without mutating the rooted pack.
-    let rendered = unsafe { pack.0.with(|storage| {
-        let sequence = storage.sequence()?;
-        let items = sequence.values.iter().map(|&word| {
-            // SAFETY: every value is rooted by the pack at its declared element kind.
-            sequence.kind.acquire(word)
-        });
-        format_operands(fmt.as_str(), items, None)
-    }) };
-    finish(rendered.and_then(|s| crate::checked_owned_str(Str::from(s))), std::ptr::null())
+    let rendered = unsafe {
+        pack.0.with(|storage| {
+            let sequence = storage.sequence()?;
+            let items = sequence.values.iter().map(|&word| {
+                // SAFETY: every value is rooted by the pack at its declared element kind.
+                sequence.kind.acquire(word)
+            });
+            format_operands(fmt.as_str(), items, None)
+        })
+    };
+    finish(
+        rendered.and_then(|s| crate::checked_owned_str(Str::from(s))),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

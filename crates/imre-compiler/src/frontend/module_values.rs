@@ -196,7 +196,10 @@ impl Checker<'_> {
                     if class_scoped_child(&assign.value)
                         && !(matches!(&*assign.value, ast::Expr::DictComp(_))
                             && !ast::helpers::any_over_expr(&assign.value, |expr| {
-                                expr.as_name_expr().is_some_and(|n| self.class_lexical.contains(n.id.as_str()) || n.id == "__class__")
+                                expr.as_name_expr().is_some_and(|n| {
+                                    self.class_lexical.contains(n.id.as_str())
+                                        || n.id == "__class__"
+                                })
                             }))
                     {
                         return Err(error(
@@ -328,7 +331,8 @@ fn class_data_type(ty: Type, types: &Types) -> bool {
         Type::Set(_) => types
             .set_element(ty)
             .is_some_and(|t| class_data_type(t, types)),
-        Type::Tuple(_) if types.tuple_origin(ty).is_none() => types.fields(ty)
+        Type::Tuple(_) if types.tuple_origin(ty).is_none() => types
+            .fields(ty)
             .is_some_and(|fields| fields.into_iter().all(|t| class_data_type(t, types))),
         Type::Optional(_) => types.payload(ty).is_some_and(|t| class_data_type(t, types)),
         Type::Dict(_) => types

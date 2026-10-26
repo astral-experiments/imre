@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify import HERE, manifests, options, toolchains
 from suite_evidence import roles
 from suite_native import method_bytes

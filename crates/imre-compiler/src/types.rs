@@ -687,10 +687,12 @@ impl Types {
                 }
             }
             [Type::Str, Type::Int] | [Type::Int, Type::Str] => self.string_or_int(),
-            [dict @ Type::Dict(_), record @ Type::Class(id)] | [record @ Type::Class(id), dict @ Type::Dict(_)]
-                if !self.0.borrow().custom_truth.contains(id) => {
-                    Type::Union(self.intern(Shape::Union(vec![*dict, *record])))
-                }
+            [dict @ Type::Dict(_), record @ Type::Class(id)]
+            | [record @ Type::Class(id), dict @ Type::Dict(_)]
+                if !self.0.borrow().custom_truth.contains(id) =>
+            {
+                Type::Union(self.intern(Shape::Union(vec![*dict, *record])))
+            }
 
             choices @ [_, _, ..]
                 if choices.iter().any(|ty| matches!(ty, Type::IntEnum(_)))
@@ -1086,11 +1088,22 @@ impl Types {
 
     /// The percent formatter reads positional operands from an exact tuple's descriptor.
     pub(crate) fn percent_tuple(&self, ty: Type) -> bool {
-        matches!(ty, Type::Tuple(_)) && self.tuple_origin(ty).is_none()
-            && self.fields(ty).is_some_and(|fields| fields.into_iter().all(|field| {
-                matches!(field, Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::StrLiteral(_) | Type::Bytes)
-                    || self.payload(field) == Some(Type::Str)
-            }))
+        matches!(ty, Type::Tuple(_))
+            && self.tuple_origin(ty).is_none()
+            && self.fields(ty).is_some_and(|fields| {
+                fields.into_iter().all(|field| {
+                    matches!(
+                        field,
+                        Type::None
+                            | Type::Bool
+                            | Type::Int
+                            | Type::Float
+                            | Type::Str
+                            | Type::StrLiteral(_)
+                            | Type::Bytes
+                    ) || self.payload(field) == Some(Type::Str)
+                })
+            })
     }
 
     /// Stat results use ten visible integer slots and a separate tail for named attributes.

@@ -948,29 +948,54 @@ impl Checker<'_> {
 
     /// Keep the selected iterator live across the body. A dictionary retains
     /// its mutation checks, while a record's items method supplies its own iterable.
-    pub(super) fn dict_or_record_items(&mut self, receiver: Expr, attr: &ast::ExprAttribute, call: &ast::ExprCall) -> Result<Prepared, String> {
-        if !call.arguments.is_empty() {return Err(error(self.source,call,"dict.items() takes no arguments"));}
+    pub(super) fn dict_or_record_items(
+        &mut self,
+        receiver: Expr,
+        attr: &ast::ExprAttribute,
+        call: &ast::ExprCall,
+    ) -> Result<Prepared, String> {
+        if !call.arguments.is_empty() {
+            return Err(error(self.source, call, "dict.items() takes no arguments"));
+        }
         let (slot, test, dict, record) = self.protocol_alternatives(receiver.ty).unwrap();
-        let Type::Class(class) = record.ty else {unreachable!()};
+        let Type::Class(class) = record.ty else {
+            unreachable!()
+        };
         let items = self.iteration_method_call(call, attr, class, record)?;
-        let mut a=self.prepare_container(dict,true,call,false)?;
-        let mut b=self.prepare_container(items,false,call,false)?;
-        self.expect(self.locals[a.value],self.locals[b.value],call)?;
-        let value=self.hidden(self.locals[a.value]);
-        let ready=self.hidden(Type::Bool);
-        let selected=self.hidden(Type::Bool);
-        for p in [&mut a,&mut b] {
-            p.next.push(Statement::Assign(ready,self.local(p.ready)));
-            p.next.push(Statement::If(self.local(ready),vec![Statement::Assign(value,self.local(p.value)),Statement::Clear(p.value)],vec![]));
+        let mut a = self.prepare_container(dict, true, call, false)?;
+        let mut b = self.prepare_container(items, false, call, false)?;
+        self.expect(self.locals[a.value], self.locals[b.value], call)?;
+        let value = self.hidden(self.locals[a.value]);
+        let ready = self.hidden(Type::Bool);
+        let selected = self.hidden(Type::Bool);
+        for p in [&mut a, &mut b] {
+            p.next.push(Statement::Assign(ready, self.local(p.ready)));
+            p.next.push(Statement::If(
+                self.local(ready),
+                vec![
+                    Statement::Assign(value, self.local(p.value)),
+                    Statement::Clear(p.value),
+                ],
+                vec![],
+            ));
         }
         a.clear.extend(b.clear);
-        a.clear.extend([slot,selected,ready,value]);
+        a.clear.extend([slot, selected, ready, value]);
         a.writes.extend(b.writes);
         Ok(Prepared {
-            evaluate:vec![Statement::Assign(slot,receiver),Statement::Assign(selected,test),Statement::If(self.local(selected),a.evaluate,b.evaluate)],
-            acquire:vec![Statement::If(self.local(selected),a.acquire,b.acquire)],
-            next:vec![Statement::If(self.local(selected),a.next,b.next)],
-            ready,value,elementless:false,eager_list:None,writes:a.writes,clear:a.clear,
+            evaluate: vec![
+                Statement::Assign(slot, receiver),
+                Statement::Assign(selected, test),
+                Statement::If(self.local(selected), a.evaluate, b.evaluate),
+            ],
+            acquire: vec![Statement::If(self.local(selected), a.acquire, b.acquire)],
+            next: vec![Statement::If(self.local(selected), a.next, b.next)],
+            ready,
+            value,
+            elementless: false,
+            eager_list: None,
+            writes: a.writes,
+            clear: a.clear,
         })
     }
 

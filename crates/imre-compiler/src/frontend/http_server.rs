@@ -4,17 +4,29 @@ use super::*;
 impl Checker<'_> {
     /// Look up a bound do_* callable on the actual handler layout. The caller's
     /// Python try/except implements hasattr's AttributeError suppression.
-    pub(super) fn request_method_lookup(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        if !self.unshadowed_builtin(&call.func, "getattr")
-            || !call.arguments.keywords.is_empty()
+    pub(super) fn request_method_lookup(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if !self.unshadowed_builtin(&call.func, "getattr") || !call.arguments.keywords.is_empty() {
+            return Ok(None);
+        }
+        let [owner, key] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        if !crate::modules::http_command_key(key) {
+            return Ok(None);
+        }
+        let receiver = self.expr(owner)?;
+        let Type::Class(base) = receiver.ty else {
+            return Ok(None);
+        };
+        if !self
+            .graph
+            .is_http_handler(self.classes.declarations.definitions[base].definition)
         {
             return Ok(None);
         }
-        let [owner, key] = call.arguments.args.as_ref() else { return Ok(None); };
-        if !crate::modules::http_command_key(key) { return Ok(None); }
-        let receiver = self.expr(owner)?;
-        let Type::Class(base) = receiver.ty else { return Ok(None); };
-        if !self.graph.is_http_handler(self.classes.declarations.definitions[base].definition) { return Ok(None); }
         let mut scope = calls::ArgumentScope::default();
         let receiver = scope.hold(self, receiver);
         let key = self.expr_expected(key, Type::Str)?;

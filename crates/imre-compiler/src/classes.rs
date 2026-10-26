@@ -362,11 +362,19 @@ fn collect_class(
                 (ClassValue::Runtime { .. }, ast::Stmt::Assign(_)) => {}
                 (ClassValue::String(_), ast::Stmt::Assign(assign))
                     if matches!(&*assign.value, ast::Expr::StringLiteral(_)) => {}
-                (ClassValue::String(_) | ClassValue::Runtime { .. }, ast::Stmt::FunctionDef(method))
-                    if method_kind(graph, definition.module, method, &class_bindings)? == MethodKind::Property => {
-                        static_bindings.remove(name);
-                    }
-                _ => return Err(module.error(statement, "overriding a fixed class binding is unsupported")),
+                (
+                    ClassValue::String(_) | ClassValue::Runtime { .. },
+                    ast::Stmt::FunctionDef(method),
+                ) if method_kind(graph, definition.module, method, &class_bindings)?
+                    == MethodKind::Property =>
+                {
+                    static_bindings.remove(name);
+                }
+                _ => {
+                    return Err(
+                        module.error(statement, "overriding a fixed class binding is unsupported")
+                    );
+                }
             }
         }
         match statement {
@@ -500,7 +508,10 @@ fn collect_class(
                     && node.name.as_str() == "PollSelector"
                     && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
-                    && !matches!(name, "__init__" | "__fspath__" | "__getitem__" | "__setitem__")
+                    && !matches!(
+                        name,
+                        "__init__" | "__fspath__" | "__getitem__" | "__setitem__"
+                    )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
                     && !selector_context
@@ -970,7 +981,13 @@ fn class_static_binding(
             }
         }
         (false, Binding::Definition(id))
-            if matches!(graph.modules[id.module].parsed.syntax().body[id.statement], ast::Stmt::ClassDef(_)) => Some(binding),
+            if matches!(
+                graph.modules[id.module].parsed.syntax().body[id.statement],
+                ast::Stmt::ClassDef(_)
+            ) =>
+        {
+            Some(binding)
+        }
         (false, Binding::IntrinsicModule(_)) | (true, Binding::Intrinsic(_)) => Some(binding),
         (true, Binding::Definition(id))
             if matches!(
