@@ -377,6 +377,10 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     AstWalk(std::collections::VecDeque<Id>),
+    FileLines {
+        file: Id,
+        pending: Option<Id>,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -425,6 +429,10 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::FileLines { file, pending } => {
+                visit.push(*file);
+                visit.extend(*pending);
+            }
             Self::Zip {
                 inputs, pending, ..
             } => {

@@ -162,7 +162,16 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
-            Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. } => return Ok(id),
+            Value::Iterator { .. }
+            | Value::AstWalk(_)
+            | Value::Zip { .. }
+            | Value::FileLines { .. } => return Ok(id),
+            Value::File(_) | Value::TextFile(_) => {
+                return Ok(self.alloc(Value::FileLines {
+                    file: id,
+                    pending: None,
+                }));
+            }
             Value::List(_)
             | Value::Tuple(_)
             | Value::Bytes(_)
@@ -178,9 +187,14 @@ impl Context {
                 let result = self.call(method, Vec::new(), Vec::new())?;
                 return if matches!(
                     self.heap.get(result),
-                    Value::Iterator { .. } | Value::AstWalk(_) | Value::Zip { .. }
+                    Value::Iterator { .. }
+                        | Value::AstWalk(_)
+                        | Value::Zip { .. }
+                        | Value::FileLines { .. }
+                        | Value::File(_)
+                        | Value::TextFile(_)
                 ) {
-                    Ok(result)
+                    self.iterator(result)
                 } else {
                     Err(Error::new(
                         "TypeError",
@@ -236,6 +250,18 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::FileLines { file, pending } = self.heap.get(id) {
+            if pending.is_some() {
+                return Ok(true);
+            }
+            let readline = self.lookup_attr(*file, "readline")?;
+            let line = self.call(readline, Vec::new(), Vec::new())?;
+            let more = self.truth(line)?;
+            if more && let Value::FileLines { pending, .. } = self.heap.get_mut(id) {
+                *pending = Some(line);
+            }
+            return Ok(more);
+        }
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
@@ -257,7 +283,8 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
-        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
+        if let Value::Zip { pending, .. } | Value::FileLines { pending, .. } = self.heap.get_mut(id)
+        {
             return Ok(pending.take());
         }
         let item = match self.iterator_remaining(id)? {
@@ -280,7 +307,10 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
-        if matches!(self.heap.get(id), Value::AstWalk(_) | Value::Zip { .. }) {
+        if matches!(
+            self.heap.get(id),
+            Value::AstWalk(_) | Value::Zip { .. } | Value::FileLines { .. }
+        ) {
             let mut items = Vec::new();
             while let Some(item) = self.next_item(id)? {
                 items.push(item);
@@ -325,7 +355,9 @@ impl Context {
             Value::Instance {
                 dictionary: Some(_),
                 ..
-            } => {
+            }
+            | Value::File(_)
+            | Value::TextFile(_) => {
                 let iterator = self.iterator(id)?;
                 self.items(iterator)
             }
