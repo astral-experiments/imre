@@ -35,6 +35,7 @@ mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
+pub(crate) use hashlib::State as HashState;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;

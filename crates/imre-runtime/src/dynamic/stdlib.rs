@@ -10,6 +10,7 @@ use crate::objects::interpreter_stdlib as system;
 
 mod contextvars;
 mod files;
+mod hashlib;
 mod json;
 mod regex;
 
@@ -24,6 +25,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "site"
             | "struct"
             | "json"
+            | "hashlib"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -277,6 +279,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("struct", "calcsize" | "unpack" | "error")
         | ("json", "dumps")
+        | ("hashlib", "sha1")
         | ("re", "match" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
@@ -310,6 +313,9 @@ pub(super) fn call(
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
         "json.dumps" => (1, &["ensure_ascii"]),
+        "hashlib.sha1" => (1, &["data"]),
+        "hash.update" => (2, &[]),
+        "hash.copy" | "hash.digest" | "hash.hexdigest" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
@@ -345,6 +351,10 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
+        "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
+            return hashlib::method(ctx, name, args);
+        }
         "platform.python_implementation" => ctx.text("Imre"),
         "platform.python_version" => ctx.text(full_version(ctx)?),
         "platform.python_version_tuple" => {
