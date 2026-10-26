@@ -190,13 +190,20 @@ def main():
                 reports.append(report)
                 print(f"O{level}: {report['counts']}", flush=True)
     write_reports(args.result, reports, ref)
-    if any(
-        r["counts"].get("native-body-host-fixture", 0) < 4 or r["counts"].get("failed")
-        for r in reports
-    ):
-        raise SystemExit(
-            "expected the original basic_attributes and timezone test_str native bodies"
-        )
+    required = {
+        f"test.datetimetester.{owner}_{variant}.{method}"
+        for owner, method in [
+            ("TestDateOnly", "test_delta_non_days_ignored"),
+            ("TestTimeDelta", "test_basic_attributes"),
+            ("TestTimeZone", "test_str"),
+        ]
+        for variant in ("Pure", "Fast")
+    }
+    for report in reports:
+        observed = {case["id"] for case in report["records"]
+                    if case["classification"] == "native-body-host-fixture"}
+        if required - observed or report["counts"].get("failed"):
+            raise SystemExit(f"O{report['opt_level']} missing required native bodies: {sorted(required - observed)}")
 
 
 if __name__ == "__main__":

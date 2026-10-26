@@ -3485,6 +3485,8 @@ impl<'a> Checker<'a> {
         if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
             && ((self.locals[slot] == documents::ANY
                 && matches!(args[0].ty, documents::LIST | documents::MAP))
+                || (value.ty == Type::Calendar(ir::CalendarType::Date)
+                    && args[0].ty == Type::Calendar(ir::CalendarType::DateTime))
                 || self
                     .types
                     .partial_function(args[0].ty)
