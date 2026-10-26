@@ -976,10 +976,11 @@ pub extern "C" fn imre_print_none() {
 pub unsafe extern "C" fn imre_decimal_int_text(value: usize) -> *const Str {
     // SAFETY: the compiler keeps the integer alive throughout decimal construction.
     let value = unsafe { Int::borrow(value) };
-    let text = Str::from(value.big().to_string());
-    match checked_owned_str(text) {
-        Ok(text) => text,
-        Err(error) => error.returning(std::ptr::null()),
+    let text =
+        integer_text::try_decimal_coefficient(&value).and_then(|text| StrOwner::try_new(text).ok());
+    match text {
+        Some(text) => StrOwner::into_raw(text),
+        None => Error::memory_error().returning(std::ptr::null()),
     }
 }
 

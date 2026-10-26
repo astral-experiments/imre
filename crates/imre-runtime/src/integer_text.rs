@@ -95,6 +95,52 @@ pub(super) fn decimal_string(value: &crate::Int) -> crate::Result<Str> {
     Ok(Str::from(big.to_string()))
 }
 
+/// Format the full integer coefficient, ignoring the limit used by str(int).
+pub(super) fn try_decimal_coefficient(value: &crate::Int) -> Option<Str> {
+    let mut buffer = itoa::Buffer::new();
+    if let Some(value) = value.as_small() {
+        return Some(Str::new(buffer.format(value)));
+    }
+
+    const BASE: u64 = 1_000_000_000;
+    let value = value.big();
+    let mut groups = Vec::<u32>::new();
+    // Each nine-digit group holds more than 29 bits.
+    let capacity = usize::try_from(value.bits().div_ceil(29)).ok()?;
+    groups.try_reserve_exact(capacity).ok()?;
+    for limb in value.iter_u32_digits().rev() {
+        let mut carry = u64::from(limb);
+        for group in &mut groups {
+            let word = (u64::from(*group) << 32) + carry;
+            *group = (word % BASE) as u32;
+            carry = word / BASE;
+        }
+        while carry != 0 {
+            groups.push((carry % BASE) as u32);
+            carry /= BASE;
+        }
+    }
+
+    let mut groups = groups.into_iter().rev();
+    let first = buffer.format(groups.next().unwrap_or(0));
+    let negative = value.sign() == num_bigint::Sign::Minus;
+    let length = groups
+        .len()
+        .checked_mul(9)?
+        .checked_add(first.len() + usize::from(negative))?;
+    let mut text = Str::try_with_capacity(length).ok()?;
+    if negative {
+        text.push('-');
+    }
+    text.push_str(first);
+    for group in groups {
+        let digits = buffer.format(group);
+        text.push_str(&"000000000"[digits.len()..]);
+        text.push_str(digits);
+    }
+    Some(text)
+}
+
 /// Builds Python's base-ten conversion diagnostic from the original literal.
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]
@@ -203,6 +249,25 @@ fn literal_repr_prefix(value: &str) -> Str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decimal_coefficients_preserve_sign_and_zero_padded_groups() {
+        use num_bigint::BigInt;
+
+        for bits in [0, 1, 30, 62, 63, 64, 127, 257, 16384] {
+            let power = BigInt::from(1u8) << bits;
+            for delta in [-1, 0, 1] {
+                let coefficient: BigInt = &power + delta;
+                for value in [coefficient.clone(), -coefficient] {
+                    let expected = value.to_string();
+                    assert_eq!(
+                        try_decimal_coefficient(&crate::Int::new(value)).as_deref(),
+                        Some(expected.as_str())
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn invalid_literal_prefix_preserves_late_quotes_and_partial_escapes() {
