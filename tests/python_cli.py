@@ -98,6 +98,7 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -338,6 +339,7 @@ def report(text):
             "boxed_contextvars.py",
             "boxed_re_ascii.py",
             "boxed_datetime.py",
+            "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_urlsplit.py",
@@ -345,6 +347,7 @@ def report(text):
             "boxed_type_identity.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
+            "boxed_module_globals.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -353,6 +356,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_dict_subclasses.py",
+            "boxed_bytes_separators.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

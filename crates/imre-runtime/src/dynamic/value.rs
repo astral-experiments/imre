@@ -28,13 +28,20 @@ pub(super) struct Location {
     pub line: u32,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct Trace {
+    pub frames: Vec<(Location, Id)>,
+    pub instance: Option<Id>,
+    cached: Option<(usize, Id)>,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
     pub message: String,
     pub args: Option<Vec<Id>>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
-    pub trace: Vec<Location>,
+    pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
 }
 
@@ -45,13 +52,59 @@ impl Error {
             message: message.into(),
             args: None,
             os_args: None,
-            trace: Vec::new(),
+            trace: None,
             exit_status: None,
         }
+    }
+
+    pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.args
+            .iter()
+            .flatten()
+            .copied()
+            .chain(self.trace.iter().flat_map(|trace| {
+                trace
+                    .frames
+                    .iter()
+                    .map(|&(_, frame)| frame)
+                    .chain(trace.instance)
+                    .chain(trace.cached.map(|(_, head)| head))
+            }))
+    }
+
+    pub(super) fn tracing(&mut self) -> &mut Trace {
+        self.trace.get_or_insert_with(Default::default)
     }
 }
 
 impl Context {
+    /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
+    pub(super) fn exception_traceback(&mut self, exception: Id) -> Result<Id> {
+        let Value::Raised(error) = self.heap.get(exception) else {
+            return Err(Error::new("TypeError", "expected exception"));
+        };
+        let Some(trace) = &error.trace else {
+            return Ok(NONE);
+        };
+        let (count, mut head) = trace.cached.unwrap_or((0, NONE));
+        let length = trace.frames.len();
+        if length != count {
+            let missing = trace.frames[count..].to_vec();
+            for (at, frame) in missing {
+                head = self.alloc(Value::Traceback {
+                    frame,
+                    next: head,
+                    lineno: i64::from(at.line),
+                });
+            }
+            let Value::Raised(error) = self.heap.get_mut(exception) else {
+                unreachable!()
+            };
+            error.tracing().cached = Some((length, head));
+        }
+        Ok(head)
+    }
+
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
             Value::None => "NoneType",
@@ -82,6 +135,8 @@ impl Context {
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
+            Value::Traceback { .. } => "traceback",
+            Value::PythonFrame { .. } => "frame",
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {
                 Value::Class { name, .. } | Value::Native(name) => name,
@@ -139,9 +194,11 @@ impl From<crate::Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.trace.is_empty() {
+        if let Some(trace) = &self.trace
+            && !trace.frames.is_empty()
+        {
             writeln!(f, "Traceback (most recent call last):")?;
-            for loc in self.trace.iter().rev() {
+            for (loc, _) in trace.frames.iter().rev() {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
             }
         }
@@ -156,7 +213,8 @@ pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub class_cell: Option<Id>,
     pub first_argument: Option<String>,
-    pub names: HashMap<String, Id>,
+    pub names: indexmap::IndexMap<String, Id>,
+    pub namespace: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
 }
@@ -240,6 +298,15 @@ pub(super) enum Value {
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
     Raised(Error),
+    Traceback {
+        frame: Id,
+        next: Id,
+        lineno: i64,
+    },
+    PythonFrame {
+        scope: Id,
+        lineno: u32,
+    },
     Method {
         callable: Id,
         receiver: Id,
@@ -346,6 +413,7 @@ impl Value {
             Self::Scope(scope) => {
                 visit.extend(scope.class_cell);
                 visit.extend(scope.parent);
+                visit.extend(scope.namespace);
                 visit.extend(scope.names.values());
             }
             Self::ClassCell(class) => visit.extend(class),
@@ -398,7 +466,9 @@ impl Value {
                     visit.push(call.result);
                 }
             }
-            Self::Raised(error) => visit.extend(error.args.iter().flatten()),
+            Self::Raised(error) => visit.extend(error.roots()),
+            Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
+            Self::PythonFrame { scope, .. } => visit.push(*scope),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::None
@@ -444,14 +514,20 @@ struct Frame {
     scope: Id,
     live: Vec<Id>,
     location: Option<Location>,
+    object: Option<Id>,
+    inherited: Id,
+    active: Id,
 }
 
 impl Frame {
-    fn new(scope: Id) -> Self {
+    fn new(scope: Id, inherited: Id) -> Self {
         Self {
             scope,
             live: Vec::new(),
             location: None,
+            object: None,
+            inherited,
+            active: inherited,
         }
     }
 }
@@ -467,7 +543,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
-            frames: vec![Frame::new(NONE)],
+            frames: vec![Frame::new(NONE, NONE)],
             next_collection: 4096,
         }
     }
@@ -496,7 +572,7 @@ impl Heap {
             .expect("live native handle")
     }
     pub fn enter(&mut self, scope: Id) {
-        self.frames.push(Frame::new(scope));
+        self.frames.push(Frame::new(scope, self.active_exception()));
     }
     pub fn leave(&mut self, value: Id) {
         self.frames.pop();
@@ -506,8 +582,27 @@ impl Heap {
         self.frames.last_mut().unwrap().live.push(value);
     }
 
-    pub fn location(&self) -> Option<Location> {
-        self.frames.last()?.location
+    pub fn active_exception(&self) -> Id {
+        self.frames.last().unwrap().active
+    }
+
+    pub fn replace_active(&mut self, exception: Id) -> Id {
+        std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
+    }
+
+    /// Materialize one frame per activation only when an exception unwinds it.
+    pub fn trace_location(&mut self) -> Option<(Location, Id)> {
+        let frame = self.frames.last()?;
+        let location = frame.location?;
+        if let Some(object) = frame.object {
+            return Some((location, object));
+        }
+        let object = self.alloc(Value::PythonFrame {
+            scope: frame.scope,
+            lineno: location.line,
+        });
+        self.frames.last_mut().unwrap().object = Some(object);
+        Some((location, object))
     }
 
     pub fn current_scope(&self) -> Id {
@@ -519,9 +614,20 @@ impl Heap {
         globals: impl Iterator<Item = Id>,
         live: &[Id],
         location: Location,
+        caught: Id,
     ) {
         let frame = self.frames.last_mut().unwrap();
         frame.location = Some(location);
+        frame.active = if caught == NONE {
+            frame.inherited
+        } else {
+            caught
+        };
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize]
+        {
+            *lineno = location.line;
+        }
         frame.live.clear();
         frame.live.extend(live);
         if self.slots.len() < self.next_collection || !self.free.is_empty() {
@@ -530,7 +636,8 @@ impl Heap {
         let mut pending: Vec<_> = globals.collect();
         pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
         for frame in &self.frames {
-            pending.push(frame.scope);
+            pending.extend([frame.scope, frame.active, frame.inherited]);
+            pending.extend(frame.object);
             pending.extend(&frame.live);
         }
         let mut marked = vec![false; self.slots.len()];

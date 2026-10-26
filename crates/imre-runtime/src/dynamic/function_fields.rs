@@ -102,6 +102,9 @@ impl Context {
     }
 
     pub(super) fn set_function_attr(&mut self, fun: Id, name: &str, value: Id) -> Result<()> {
+        if name == "__globals__" {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         let object = self.heap.get(value);
         let invalid = match name {
             "__name__" | "__qualname__" if !matches!(object, Value::Str(_)) => {

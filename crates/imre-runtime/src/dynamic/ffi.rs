@@ -21,12 +21,28 @@ impl Context {
                 self.bind(a, &name, c);
                 Ok(c)
             }
-            "delname" => {
+            "delname" | "clearname" => {
                 let name = self.str_value(b)?.to_owned();
+                if let Some(namespace) = self.scope_data(a).namespace {
+                    if self.scope_name(a, &name).is_some() {
+                        self.delete_item(namespace, b)?;
+                    } else if op == "delname" {
+                        return Err(Error::new(
+                            "NameError",
+                            format!("name '{name}' is not defined"),
+                        ));
+                    }
+                    return Ok(NONE);
+                }
                 let Value::Scope(s) = self.heap.get_mut(a) else {
                     unreachable!()
                 };
-                s.names.remove(&name);
+                if s.names.shift_remove(&name).is_none() && op == "delname" {
+                    return Err(Error::new(
+                        "NameError",
+                        format!("name '{name}' is not defined"),
+                    ));
+                }
                 if let Some(order) = &mut s.class_body {
                     order.retain(|member| member != &name);
                 }
@@ -58,6 +74,10 @@ impl Context {
                 Ok(c)
             }
             "get" => self.get_item(a, b),
+            "delitem" => {
+                self.delete_item(a, b)?;
+                Ok(NONE)
+            }
             "put" | "keyword" => {
                 if op == "keyword" && self.contains(b, a)? {
                     return Err(Error::new(
@@ -146,14 +166,14 @@ impl Context {
             }
             "class" => self.class(a, b, c),
             "annotate" => {
-                if let Some(mapping) = self.scope_data(a).names.get("__annotations__").copied() {
+                if let Some(mapping) = self.scope_name(a, "__annotations__") {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "iter" => self.iterator(a),
-            "more" => Ok(flag(self.peek_item(a)?.is_some())),
+            "more" => Ok(flag(self.iterator_has_item(a)?)),
             "next" => self
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
@@ -219,11 +239,16 @@ impl Context {
                 Ok(self.text(s))
             }
             "take_error" => {
-                let e = self
+                let mut e = self
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
-                Ok(self.alloc(Value::Raised(e)))
+                if let Some(instance) = e.trace.as_mut().and_then(|trace| trace.instance.take()) {
+                    *self.heap.get_mut(instance) = Value::Raised(e);
+                    Ok(instance)
+                } else {
+                    Ok(self.alloc(Value::Raised(e)))
+                }
             }
             "matches" => {
                 if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
@@ -233,17 +258,28 @@ impl Context {
                 }
             }
             "type" => {
-                let Value::Raised(Error { kind, .. }) = self.heap.get(a) else {
+                if !matches!(self.heap.get(a), Value::Raised(_)) {
                     return Err(Error::new("TypeError", "expected exception"));
-                };
-                let kind = kind.clone();
-                Ok(self
-                    .classes
-                    .get(&kind)
-                    .copied()
-                    .unwrap_or_else(|| self.alloc(Value::Native(kind))))
+                }
+                self.exact_type(a)
             }
-            "raise" => {
+            "exit_exception" => {
+                let class = self.exact_type(b)?;
+                let traceback = self.exception_traceback(b)?;
+                let prior = self.heap.replace_active(b);
+                let result = self.call(a, vec![class, b, traceback], Vec::new());
+                self.heap.replace_active(prior);
+                result
+            }
+            "raise" | "reraise" => {
+                let a = if op == "reraise" && a == NONE {
+                    self.heap.active_exception()
+                } else {
+                    a
+                };
+                if op == "reraise" && a == NONE {
+                    return Err(Error::new("RuntimeError", "No active exception to reraise"));
+                }
                 let exception =
                     if matches!(self.heap.get(a), Value::Native(_) | Value::Class { .. }) {
                         self.call(a, Vec::new(), Vec::new())?
@@ -256,7 +292,9 @@ impl Context {
                         "exceptions must derive from BaseException",
                     ));
                 };
-                Err(e.clone())
+                let mut error = e.clone();
+                error.tracing().instance = Some(exception);
+                Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => self.binary(op, a, b),
@@ -367,10 +405,8 @@ fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
             id
         }
         Err(mut error) => {
-            if let Some(loc) = ctx.heap.location()
-                && error.trace.last() != Some(&loc)
-            {
-                error.trace.push(loc);
+            if let Some(loc) = ctx.heap.trace_location() {
+                error.tracing().frames.push(loc);
             }
             ctx.pending = Some(error);
             NONE
@@ -421,7 +457,12 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
     if ctx.pending.is_some() && op != "take_error" {
         return NONE;
     }
+    let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let result = ctx.op(op, a, b, c);
+    if reraise && let Err(error) = result {
+        ctx.pending = Some(error);
+        return NONE;
+    }
     finish(ctx, result)
 }
 
@@ -492,6 +533,19 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
     file: *const c_char,
     line: u32,
 ) {
+    // SAFETY: older emitters supplied the same live roots and static file name.
+    unsafe { imre_dyn_statement_with_exception(ctx, live, len, file, line, NONE) };
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    file: *const c_char,
+    line: u32,
+    caught: Id,
+) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let ctx = unsafe { &mut *ctx };
     let live = if len == 0 {
@@ -510,15 +564,10 @@ pub(super) unsafe extern "C" fn imre_dyn_statement(
             .chain(ctx.codec_entries.roots())
             .copied()
             .chain(ctx.contexts.iter().copied())
-            .chain(
-                ctx.pending
-                    .iter()
-                    .filter_map(|e| e.args.as_ref())
-                    .flatten()
-                    .copied(),
-            )
+            .chain(ctx.pending.iter().flat_map(Error::roots))
             .chain([ctx.argv, ctx.sys_path, ctx.token_missing]),
         live,
         value::Location { file, line },
+        caught,
     );
 }

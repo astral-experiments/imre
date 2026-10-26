@@ -92,3 +92,17 @@ def exercise(path):
             print("extended slice length mismatch")
         target[::-2] = b""
         print(repr(target), repr(bytearray(b"'")), io.DEFAULT_BUFFER_SIZE)
+
+    target = bytearray(b"ab")
+    visited = []
+    for item in target:
+        visited.append(item)
+        if len(visited) == 1:
+            target[1:] = b"XY"
+    print(visited, bytes(target))
+
+    def truncate(item):
+        target[1:] = b""
+        return item
+
+    print([truncate(item) for item in target], bytes(target))

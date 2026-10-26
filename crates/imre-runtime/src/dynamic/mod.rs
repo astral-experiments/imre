@@ -21,6 +21,21 @@ struct SourceModule {
     code: Code,
 }
 
+enum IteratorSlice<'a> {
+    Values(&'a [Id]),
+    Bytes(&'a [u8]),
+}
+
+impl IteratorSlice<'_> {
+    /// Counts positions without allocating boxed integers for bytes.
+    fn len(&self) -> usize {
+        match self {
+            Self::Values(values) => values.len(),
+            Self::Bytes(bytes) => bytes.len(),
+        }
+    }
+}
+
 pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
@@ -90,6 +105,18 @@ impl Context {
             Err(Error::new("TypeError", "expected str"))
         }
     }
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.heap.get(id) {
+            Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            _ => Err(Error::new(
+                "TypeError",
+                format!(
+                    "a bytes-like object is required, not '{}'",
+                    self.type_name(id)
+                ),
+            )),
+        }
+    }
     fn as_int(&self, id: Id) -> Result<crate::Int> {
         match self.heap.get(id) {
             Value::Int(n) => Ok(n.clone()),
@@ -111,7 +138,7 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         let sequence = match self.heap.get(id) {
             Value::Iterator { .. } | Value::AstWalk(_) => return Ok(id),
-            Value::List(_) | Value::Tuple(_) => id,
+            Value::List(_) | Value::Tuple(_) | Value::Bytes(_) | Value::ByteArray(_) => id,
             Value::Instance {
                 dictionary: Some(_),
                 ..
@@ -147,31 +174,34 @@ impl Context {
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
-    fn iterator_remaining(&self, id: Id) -> Result<&[Id]> {
+    fn iterator_remaining(&self, id: Id) -> Result<IteratorSlice<'_>> {
         let Value::Iterator { sequence, offset } = self.heap.get(id) else {
             return Err(Error::new("TypeError", "expected iterator"));
         };
         let Some(sequence) = sequence else {
-            return Ok(&[]);
+            return Ok(IteratorSlice::Values(&[]));
         };
-        let (Value::List(values) | Value::Tuple(values)) = self.heap.get(*sequence) else {
-            unreachable!("iterator sequence")
-        };
-        Ok(values.get(*offset..).unwrap_or_default())
+        Ok(match self.heap.get(*sequence) {
+            Value::List(values) | Value::Tuple(values) => {
+                IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
+            }
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => {
+                IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
+            }
+            _ => unreachable!("iterator sequence"),
+        })
     }
 
     /// Reads the current position and permanently detaches the source on exhaustion.
-    fn peek_item(&mut self, id: Id) -> Result<Option<Id>> {
+    fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
         if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(queue.front().copied());
+            return Ok(!queue.is_empty());
         }
-        let item = self.iterator_remaining(id)?.first().copied();
-        if item.is_none()
-            && let Value::Iterator { sequence, .. } = self.heap.get_mut(id)
-        {
+        let more = self.iterator_remaining(id)?.len() != 0;
+        if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
         }
-        Ok(item)
+        Ok(more)
     }
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
@@ -179,13 +209,17 @@ impl Context {
         if matches!(self.heap.get(id), Value::AstWalk(_)) {
             return stdlib::ast::advance(self, id);
         }
-        let item = self.peek_item(id)?;
-        if item.is_some()
-            && let Value::Iterator { offset, .. } = self.heap.get_mut(id)
-        {
+        if !self.iterator_has_item(id)? {
+            return Ok(None);
+        }
+        let item = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => values[0],
+            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+        };
+        if let Value::Iterator { offset, .. } = self.heap.get_mut(id) {
             *offset += 1;
         }
-        Ok(item)
+        Ok(Some(item))
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
@@ -212,7 +246,16 @@ impl Context {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
             }
             Value::Iterator { .. } => {
-                let values = self.iterator_remaining(id)?.to_vec();
+                let values = match self.iterator_remaining(id)? {
+                    IteratorSlice::Values(values) => values.to_vec(),
+                    IteratorSlice::Bytes(bytes) => {
+                        let mut values = Vec::with_capacity(bytes.len());
+                        while let Some(byte) = self.next_item(id)? {
+                            values.push(byte);
+                        }
+                        return Ok(values);
+                    }
+                };
                 if let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
                     *sequence = None;
                 }
@@ -244,7 +287,8 @@ impl Context {
             class_body: None,
             class_cell: None,
             first_argument: None,
-            names: HashMap::new(),
+            names: Default::default(),
+            namespace: None,
             parent,
             module: module.to_owned(),
         }))
@@ -255,7 +299,50 @@ impl Context {
         };
         s
     }
+    fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
+        let scope = self.scope_data(scope);
+        if let Some(namespace) = scope.namespace {
+            return self
+                .dict_entries(namespace)?
+                .iter()
+                .find_map(|&(key, value)| {
+                    matches!(self.heap.get(key), Value::Str(key) if key == name).then_some(value)
+                });
+        }
+        scope.names.get(name).copied()
+    }
+
+    /// Materialize once and keep that exact dict as the module's binding storage.
+    fn module_globals(&mut self, mut scope: Id) -> Id {
+        while let Some(parent) = self.scope_data(scope).parent {
+            scope = parent;
+        }
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!("compiled scope handle")
+        };
+        if let Some(dict) = frame.namespace {
+            return dict;
+        }
+        let names = std::mem::take(&mut frame.names);
+        let entries = names
+            .into_iter()
+            .map(|(name, v)| (self.text(name), v))
+            .collect();
+        let dict = self.dict(entries);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        dict
+    }
+
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
+        if let Some(namespace) = self.scope_data(scope).namespace {
+            let key = self.text(name);
+            self.put_item(namespace, key, value)
+                .expect("string key in module dictionary");
+            return;
+        }
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
@@ -269,8 +356,8 @@ impl Context {
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
             let s = self.scope_data(scope);
-            if let Some(id) = s.names.get(name) {
-                return Ok(*id);
+            if let Some(id) = self.scope_name(scope, name) {
+                return Ok(id);
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -296,7 +383,7 @@ impl Context {
         }
         Err(Error::new(
             "NameError",
-            format!("name {name:?} is not defined"),
+            format!("name '{name}' is not defined"),
         ))
     }
     fn builtin(&mut self, name: &str) -> Id {
@@ -347,8 +434,8 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), m.code))
         } else if stdlib::is_module(name) {
-            if name == "urllib" {
-                locations.push(PathBuf::from("<imre stdlib>/urllib"));
+            if matches!(name, "email" | "urllib") {
+                locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             }
             None
         } else {
@@ -415,6 +502,9 @@ impl Context {
         let scope = self.scope(name, None);
         let name_id = self.text(name);
         self.bind(scope, "__name__", name_id);
+        if source.is_some() {
+            self.bind(scope, "__doc__", NONE);
+        }
         if !locations.is_empty() {
             let dirs = locations
                 .iter()
@@ -443,7 +533,6 @@ impl Context {
             _ => {}
         }
         if let Some((path, code)) = source {
-            self.bind(scope, "__doc__", NONE);
             if locations.contains(&path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {

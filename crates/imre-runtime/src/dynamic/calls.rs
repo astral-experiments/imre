@@ -230,6 +230,8 @@ impl Context {
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
+            | Value::Traceback { .. }
+            | Value::PythonFrame { .. }
             | Value::Module { .. } => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Property(_) => "property",
@@ -253,6 +255,8 @@ impl Context {
                             | "builtin_function_or_method"
                             | "getset_descriptor"
                             | "operator.attrgetter"
+                            | "traceback"
+                            | "frame"
                     )
                 {
                     "type"
@@ -447,6 +451,25 @@ impl Context {
             return self.exact_type(obj);
         }
         match self.heap.get(obj).clone() {
+            Value::Raised(_) if name == "__traceback__" => return self.exception_traceback(obj),
+            Value::Traceback {
+                frame,
+                next,
+                lineno,
+            } => match name {
+                "tb_frame" => return Ok(frame),
+                "tb_next" => return Ok(next),
+                "tb_lineno" => return Ok(self.int(lineno)),
+                _ => {}
+            },
+            Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
+                return Ok(self.int(i64::from(lineno)));
+            }
+            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame") => match name {
+                "__name__" | "__qualname__" => return Ok(self.text(class)),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
@@ -455,7 +478,10 @@ impl Context {
             Value::Native(class) if class == "property" && name == "setter" => {
                 return Ok(self.builtin("property.setter"));
             }
-            Value::Function { fields, .. } => {
+            Value::Function { scope, fields, .. } => {
+                if name == "__globals__" {
+                    return Ok(self.module_globals(scope));
+                }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
@@ -589,8 +615,11 @@ impl Context {
                 name: module,
                 scope,
             } => {
-                if let Some(value) = self.scope_data(scope).names.get(name) {
-                    return Ok(*value);
+                if name == "__dict__" {
+                    return Ok(self.module_globals(scope));
+                }
+                if let Some(value) = self.scope_name(scope, name) {
+                    return Ok(value);
                 }
                 if stdlib::is_module(&module) {
                     let value = stdlib::attribute(self, &module, name)?;
@@ -691,6 +720,9 @@ impl Context {
                 name: module,
                 scope,
             } => {
+                if name == "__dict__" {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
                 if module == "sys" && name == "path" {
                     self.sys_path = value;
                 }

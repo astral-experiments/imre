@@ -67,6 +67,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "callable"
                 | "isinstance"
                 | "getattr"
+                | "globals"
                 | "setattr"
                 | "hasattr"
                 | "open"
@@ -138,7 +139,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Property(_) if attr == "setter" => "property",
-        Value::Bytes(_) if matches!(attr, "decode" | "rstrip") => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
@@ -457,6 +458,18 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
+        }
+        "globals" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("globals() takes no keyword arguments"));
+            }
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "globals() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            Ok(ctx.module_globals(ctx.heap.current_scope()))
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
