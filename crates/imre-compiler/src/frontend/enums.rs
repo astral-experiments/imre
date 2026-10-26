@@ -219,19 +219,33 @@ impl Checker<'_> {
         }
     }
 
-    /// Read a present integer enum's value and preserve None, evaluating the bound once.
-    pub(super) fn optional_enum_integer(
+    /// Select the conversion for an operation that observes the enum's scalar value.
+    pub(super) fn enum_conversion(from: Type, to: Type) -> Option<fn(Expr) -> Expr> {
+        match (from, to) {
+            (Type::IntEnum(_), Type::Int) => Some(Self::enum_integer),
+            (Type::StrEnum(_), Type::Str) => Some(Self::enum_text),
+            _ => None,
+        }
+    }
+
+    /// Read a present enum's scalar value and preserve None, evaluating the operand once.
+    pub(super) fn optional_enum_value(
         &mut self,
         value: Expr,
+        scalar: Type,
         node: &ast::Expr,
     ) -> Result<Expr, String> {
-        if !matches!(self.types.payload(value.ty), Some(Type::IntEnum(_))) {
-            return Ok(Self::enum_integer(value));
+        let payload = self.types.payload(value.ty);
+        let Some(convert) = Self::enum_conversion(payload.unwrap_or(value.ty), scalar) else {
+            return Ok(value);
+        };
+        if payload.is_none() {
+            return Ok(convert(value));
         }
         let (slot, is_none, none, member) = self.protocol_alternatives(value.ty).unwrap();
-        let optional = self.types.optional(Type::Int);
+        let optional = self.types.optional(scalar);
         let absent = self.coerce(none, optional, node)?;
-        let present = self.coerce(Self::enum_integer(member), optional, node)?;
+        let present = self.coerce(convert(member), optional, node)?;
         Ok(Expr {
             ty: optional,
             kind: ExprKind::Scope {

@@ -70,7 +70,13 @@ impl Checker<'_> {
             flag("comments", false),
             flag("posix", true),
         ];
-        let args = self.arguments(call, &parameters, None)?;
+        let args = self.arguments_with(call, &parameters, None, |checker, i, arg| {
+            if i == 0 {
+                checker.optional_scalar_argument(arg, parameters[i].ty)
+            } else {
+                checker.expr_expected(arg, parameters[i].ty)
+            }
+        })?;
         let result = self.types.list(Type::Str);
         Ok(self.ordered_builtin(Builtin::Text(TextOperation::ShlexSplit), result, args))
     }
@@ -620,7 +626,7 @@ impl Checker<'_> {
             self.arguments_with(call, &parameters, Some(receiver), |checker, i, arg| {
                 let parameter = &parameters[i];
                 if name == "find" && parameter.name == "start" {
-                    checker.find_start(arg, parameter.ty)
+                    checker.optional_scalar_argument(arg, parameter.ty)
                 } else {
                     checker.direct_argument(arg, parameter.ty, parameter.sign_only)
                 }
@@ -628,18 +634,23 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 
-    /// Check each search bound with the expected integer type, including conditional arms.
-    fn find_start(&mut self, node: &ast::Expr, optional: Type) -> Result<Expr, String> {
+    /// Check each conditional arm in context and extract any matching enum's scalar value.
+    fn optional_scalar_argument(
+        &mut self,
+        node: &ast::Expr,
+        optional: Type,
+    ) -> Result<Expr, String> {
         if let ast::Expr::If(branch) = node {
             let value = self.conditional_with(branch, false, |checker, arm| {
-                checker.find_start(arm, optional)
+                checker.optional_scalar_argument(arm, optional)
             })?;
             return self.coerce(value, optional, node);
         }
+        let scalar = self.types.payload(optional).unwrap();
         let value = self.expr_expected_if(node, optional, |checker, ty| {
-            matches!(checker.types.payload(ty).unwrap_or(ty), Type::IntEnum(_))
+            Self::enum_conversion(checker.types.payload(ty).unwrap_or(ty), scalar).is_some()
         })?;
-        let value = self.optional_enum_integer(value, node)?;
+        let value = self.optional_enum_value(value, scalar, node)?;
         self.coerce(value, optional, node)
     }
 
