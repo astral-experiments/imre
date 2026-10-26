@@ -272,17 +272,40 @@ impl Checker<'_> {
         returns: Type,
     ) -> Result<Expr, String> {
         let args = &call.arguments;
+        let message = if args.keywords.is_empty() {
+            format!(
+                "{name}() takes exactly one argument ({} given)",
+                args.args.len()
+            )
+        } else {
+            format!("{name}() takes no keyword arguments")
+        };
+        self.positional_argument_error(call, &[parameter], returns, message)
+    }
+
+    pub(super) fn positional_argument_error(
+        &mut self,
+        call: &ast::ExprCall,
+        parameters: &[&str],
+        returns: Type,
+        message: String,
+    ) -> Result<Expr, String> {
+        let args = &call.arguments;
         self.graph
             .checked_missing_argument(self.module, call.range());
         for kw in &args.keywords {
-            if kw.arg.as_deref() == Some(parameter) {
+            if kw
+                .arg
+                .as_deref()
+                .is_some_and(|name| parameters.contains(&name))
+            {
                 self.graph
                     .checked_positional_keyword(self.module, kw.range());
             }
         }
         self.graph
             .checked_keywords(self.module, args.keywords.iter().map(Ranged::range));
-        for argument in args.args.iter().skip(1) {
+        for argument in args.args.iter().skip(parameters.len()) {
             self.graph
                 .checked_excess_argument(self.module, argument.range());
         }
@@ -293,14 +316,6 @@ impl Checker<'_> {
         for kw in &args.keywords {
             values.push(self.expr(&kw.value)?);
         }
-        let message = if args.keywords.is_empty() {
-            format!(
-                "{name}() takes exactly one argument ({} given)",
-                args.args.len()
-            )
-        } else {
-            format!("{name}() takes no keyword arguments")
-        };
         Ok(type_error(returns, values, message))
     }
 

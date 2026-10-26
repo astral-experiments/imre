@@ -147,6 +147,7 @@ impl Builtin {
                 match operation {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
+                    | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
                     | TextOperation::Capitalize

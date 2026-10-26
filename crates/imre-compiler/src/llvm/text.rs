@@ -66,6 +66,10 @@ impl Emitter<'_, '_> {
                 "call ptr @imre_str_expandtabs(ptr {source}, i64 {})",
                 args[1].value.operand,
             )),
+            TextOperation::Normalize => self.checked_instruction(format!(
+                "call ptr @imre_unicode_normalize(ptr {source}, ptr {})",
+                args[1].value.operand,
+            )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }

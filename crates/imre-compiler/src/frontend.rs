@@ -8577,6 +8577,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
+                return self.unicode_normalize(call, check);
+            }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
                 let params = [Parameter {
