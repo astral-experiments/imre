@@ -125,7 +125,8 @@ impl Context {
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Range { .. } => "range",
-            Value::Set(_) => "set",
+            Value::Set { frozen: true, .. } => "frozenset",
+            Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
@@ -257,7 +258,10 @@ pub(super) enum Value {
         values: Vec<Id>,
         extras: Vec<(&'static str, Id)>,
     },
-    Set(Vec<Id>),
+    Set {
+        items: Vec<Id>,
+        frozen: bool,
+    },
     Dict(Vec<(Id, Id)>),
     DictView {
         dict: Id,
@@ -372,7 +376,7 @@ pub(super) struct CachedCall {
 impl Value {
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
-            Self::List(v) | Self::Tuple(v) | Self::Set(v) => visit.extend(v),
+            Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);

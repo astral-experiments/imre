@@ -234,7 +234,7 @@ impl Context {
         match self.heap.get(id).clone() {
             Value::List(items)
             | Value::Tuple(items)
-            | Value::Set(items)
+            | Value::Set { items, .. }
             | Value::NamedTuple { values: items, .. } => Ok(items),
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())

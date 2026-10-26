@@ -47,7 +47,7 @@ impl Context {
             self.heap.get(input),
             Value::List(_)
                 | Value::Tuple(_)
-                | Value::Set(_)
+                | Value::Set { .. }
                 | Value::Str(_)
                 | Value::Bytes(_)
                 | Value::Range { .. }
@@ -269,7 +269,7 @@ impl Context {
             | Value::Bytes(_)
             | Value::List(_)
             | Value::Dict(_)
-            | Value::Set(_)
+            | Value::Set { .. }
             | Value::Range { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
@@ -376,7 +376,8 @@ impl Context {
             | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
-            | ("set", Value::Set(_))
+            | ("set", Value::Set { frozen: false, .. })
+            | ("frozenset", Value::Set { frozen: true, .. })
             | ("range", Value::Range { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -854,6 +855,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "set"
+                                | "frozenset"
                                 | "tuple"
                                 | "bytes"
                                 | "bytearray"

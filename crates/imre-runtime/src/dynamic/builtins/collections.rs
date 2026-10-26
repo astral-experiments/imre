@@ -53,12 +53,16 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
 
 /// Python tuples inherit hashability from their elements, including named tuples.
 pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
+    unhashable_part(ctx, value).is_none()
+}
+
+fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     match ctx.heap.get(value) {
         Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
-        | Value::Set(_)
+        | Value::Set { frozen: false, .. }
         | Value::Dict(_)
         | Value::DefaultDict { .. }
         | Value::Instance {
@@ -68,26 +72,45 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
         | Value::DictView {
             kind: DictViewKind::Keys | DictViewKind::Items,
             ..
-        } => false,
+        } => Some(value),
         Value::Tuple(values) | Value::NamedTuple { values, .. } => {
-            values.iter().all(|&x| hashable(ctx, x))
+            values.iter().find_map(|&x| unhashable_part(ctx, x))
         }
-        Value::Instance { class, fields, .. } => ctx
-            .namedtuple_fields(*class)
-            .is_none_or(|names| names.iter().all(|name| hashable(ctx, fields[name]))),
-        _ => true,
+        Value::Instance { class, fields, .. } => ctx.namedtuple_fields(*class).and_then(|names| {
+            names
+                .iter()
+                .find_map(|name| unhashable_part(ctx, fields[name]))
+        }),
+        _ => None,
     }
 }
 
-fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
-    if !hashable(ctx, value) {
-        return Err(type_error("unhashable set element"));
-    }
-    let Value::Set(items) = ctx.heap.get(set) else {
+pub(in super::super) fn set_member(
+    ctx: &Context,
+    set: Id,
+    value: Id,
+    allow_mutable_key: bool,
+) -> Result<bool> {
+    let Value::Set { items, .. } = ctx.heap.get(set) else {
         return Err(type_error("expected set"));
     };
-    if !items.iter().any(|&item| ctx.equal(item, value))
-        && let Value::Set(items) = ctx.heap.get_mut(set)
+    // Membership accepts a mutable set as an equivalent frozen key. Insertion and
+    // issuperset(iterable) require each element itself to be hashable.
+    if !(allow_mutable_key && matches!(ctx.heap.get(value), Value::Set { frozen: false, .. }))
+        && let Some(part) = unhashable_part(ctx, value)
+    {
+        return Err(type_error(format!(
+            "cannot use '{}' as a set element (unhashable type: '{}')",
+            ctx.type_name(value),
+            ctx.type_name(part),
+        )));
+    }
+    Ok(items.iter().any(|&entry| ctx.equal(entry, value)))
+}
+
+pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
+    if !set_member(ctx, set, value, false)?
+        && let Value::Set { items, .. } = ctx.heap.get_mut(set)
     {
         items.push(value);
     }
@@ -100,6 +123,35 @@ pub(super) fn construct(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "set" | "frozenset") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!("{name}() takes no keyword arguments")));
+        }
+        if args.len() > 1 {
+            return Err(type_error(format!(
+                "{name} expected at most 1 argument, got {}",
+                args.len()
+            )));
+        }
+        let frozen = name == "frozenset";
+        if frozen
+            && let [one] = args
+            && matches!(ctx.heap.get(*one), Value::Set { frozen: true, .. })
+        {
+            return Ok(*one);
+        }
+        let set = ctx.alloc(Value::Set {
+            items: Vec::new(),
+            frozen,
+        });
+        if let [source] = args {
+            let iterator = ctx.iterator(*source)?;
+            while let Some(item) = ctx.next_item(iterator)? {
+                set_add(ctx, set, item)?;
+            }
+        }
+        return Ok(set);
+    }
     arity(name, args, 0, 1)?;
     if name == "dict" {
         let dict = ctx.dict(Vec::new());
@@ -121,13 +173,6 @@ pub(super) fn construct(
     match name {
         "list" => Ok(ctx.alloc(Value::List(items))),
         "tuple" => Ok(ctx.alloc(Value::Tuple(items))),
-        "set" => {
-            let set = ctx.alloc(Value::Set(Vec::new()));
-            for item in items {
-                set_add(ctx, set, item)?;
-            }
-            Ok(set)
-        }
         _ => Err(type_error(format!("unknown collection {name}"))),
     }
 }
@@ -167,6 +212,13 @@ pub(super) fn method(
     } else {
         object
     };
+    if matches!(
+        name,
+        "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
+    ) && !kwargs.is_empty()
+    {
+        return Err(type_error(format!("{name}() takes no keyword arguments")));
+    }
     if !matches!(name, "dict.update" | "dict.__init__") {
         positional(name, kwargs)?;
     }
@@ -259,6 +311,29 @@ pub(super) fn method(
             };
             items.insert(index as usize, args[1]);
             Ok(NONE)
+        }
+        "frozenset.__contains__" | "set.__contains__" => {
+            arity(name, args, 1, 1)?;
+            Ok(boolean(set_member(ctx, receiver, args[0], true)?))
+        }
+        "frozenset.copy" => {
+            arity(name, args, 0, 0)?;
+            Ok(receiver)
+        }
+        "set.issuperset" | "frozenset.issuperset" => {
+            let [source] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let iterator = ctx.iterator(*source)?;
+            while let Some(item) = ctx.next_item(iterator)? {
+                if !set_member(ctx, receiver, item, false)? {
+                    return Ok(FALSE);
+                }
+            }
+            Ok(TRUE)
         }
         "set.add" => {
             arity(name, args, 1, 1)?;
