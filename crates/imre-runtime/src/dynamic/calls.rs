@@ -143,6 +143,83 @@ impl Context {
                 .collect(),
         )
     }
+    pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
+        Some(match self.heap.get(obj) {
+            Value::None
+            | Value::Ellipsis
+            | Value::Bool(_)
+            | Value::Float(_)
+            | Value::Int(_)
+            | Value::Str(_)
+            | Value::Bytes(_)
+            | Value::List(_)
+            | Value::Dict(_)
+            | Value::Set(_)
+            | Value::Range { .. }
+            | Value::Tuple(_)
+            | Value::Class { .. }
+            | Value::Function { .. }
+            | Value::Module { .. } => self.type_name(obj),
+            Value::ByteArray(_) => "bytearray",
+            Value::Property(_) => "property",
+            Value::Method { callable, .. } => match self.heap.get(*callable) {
+                Value::Function { .. } => "method",
+                Value::Native(_) => "builtin_function_or_method",
+                _ => return None,
+            },
+            Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
+                if builtins::is_builtin_type(name)
+                    || matches!(
+                        name.as_str(),
+                        "NoneType"
+                            | "ellipsis"
+                            | "float"
+                            | "function"
+                            | "module"
+                            | "method"
+                            | "builtin_function_or_method"
+                            | "operator.attrgetter"
+                    )
+                {
+                    "type"
+                } else if builtins::is_builtin(name) {
+                    "builtin_function_or_method"
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Return the actual class independently of an instance's Python-level __class__ attribute.
+    pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
+        match self.heap.get(obj) {
+            Value::Instance { class, .. } => Ok(*class),
+            Value::Raised(error) => {
+                let name = error.kind.clone();
+                Ok(self
+                    .classes
+                    .get(&name)
+                    .copied()
+                    .unwrap_or_else(|| self.builtin(&name)))
+            }
+            _ => {
+                let name = self.builtin_type_name(obj).ok_or_else(|| {
+                    Error::new(
+                        "NotImplementedError",
+                        "type() is unsupported for this native object",
+                    )
+                })?;
+                if let Some(&class) = self.builtins.get(name) {
+                    return Ok(class);
+                }
+                let name = name.to_owned();
+                Ok(self.builtin(&name))
+            }
+        }
+    }
+
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
@@ -182,7 +259,10 @@ impl Context {
                 })
             }
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
-            _ => false,
+            _ => {
+                matches!(self.heap.get(class), Value::Native(_))
+                    && self.builtin_type_name(value) == Some(name)
+            }
         }
     }
     pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
@@ -259,6 +339,11 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(builtin)
+                if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
+            {
+                return Ok(self.text(builtin.rsplit('.').next().unwrap_or(&builtin)));
             }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);

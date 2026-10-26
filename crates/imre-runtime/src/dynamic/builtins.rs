@@ -49,33 +49,40 @@ pub(super) fn is_exception(name: &str) -> bool {
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
-    is_exception(name)
+    is_builtin_type(name)
         || matches!(
             name,
             "len"
                 | "callable"
-                | "range"
                 | "isinstance"
                 | "getattr"
                 | "setattr"
                 | "hasattr"
                 | "open"
                 | "print"
-                | "dict"
-                | "set"
-                | "bool"
-                | "int"
-                | "str"
-                | "bytes"
-                | "bytearray"
-                | "tuple"
-                | "list"
-                | "property"
                 | "__import__"
                 | "repr"
                 | "format"
-                | "object"
         )
+}
+
+pub(super) fn is_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "bool"
+            | "bytearray"
+            | "bytes"
+            | "dict"
+            | "int"
+            | "list"
+            | "object"
+            | "property"
+            | "range"
+            | "set"
+            | "str"
+            | "tuple"
+            | "type"
+    ) || is_exception(name)
 }
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
@@ -321,6 +328,22 @@ pub(super) fn call(
         };
     }
     match name {
+        "type" => {
+            let [object] = args else {
+                return Err(if args.len() == 3 {
+                    Error::new(
+                        "NotImplementedError",
+                        "dynamic class construction with type() is unsupported",
+                    )
+                } else {
+                    type_error("type() takes 1 or 3 arguments")
+                });
+            };
+            if !kwargs.is_empty() {
+                return Err(type_error("type() takes no keyword arguments"));
+            }
+            ctx.exact_type(*object)
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
