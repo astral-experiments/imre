@@ -387,6 +387,61 @@ fn negative_format_char(prefix: &[u8], ch: char) -> bool {
     !after_quantity && i32::from(ch as u8 as std::ffi::c_char).is_negative()
 }
 
+/// Decimal conversions accept real numbers. Octal and hex require the integer-index protocol.
+fn render_percent_integer(
+    ctx: &mut Context,
+    value: Id,
+    spec: &CFormatSpec,
+    field: &str,
+) -> Result<String> {
+    let conversion = spec.format_char;
+    let decimal = matches!(conversion, 'd' | 'i' | 'u');
+    let mut convert = || {
+        if decimal {
+            if let Ok(integer) = ctx.as_int(value) {
+                return Ok(integer);
+            }
+            if let Value::Float(number) = ctx.heap.get(value) {
+                return Ok(crate::Int::new(crate::floats::float_to_integer(*number)?));
+            }
+            if let Some(method) = ctx.bound_slot(value, "__int__")? {
+                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                return ctx.as_int(result);
+            }
+        }
+        ctx.index_integer(value)
+    };
+    let integer = convert().map_err(|error| {
+        if error.kind == "TypeError" {
+            let required = if decimal {
+                "a real number"
+            } else {
+                "an integer"
+            };
+            type_error(format!(
+                "%{conversion} format: {required} is required, not {}",
+                ctx.type_name(value)
+            ))
+        } else {
+            error
+        }
+    })?;
+    // CPython leaves room for an integer sign and a two-character base prefix.
+    if let Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(precision))) = spec.precision
+        && precision > (i32::MAX - 3) as usize
+    {
+        return Err(Error::new("OverflowError", "precision too large"));
+    }
+    crate::objects::percent_integer_field(field, integer).map_err(|e| {
+        let error = Error::from(e);
+        if error.kind == "MemoryError" {
+            Error::new("MemoryError", "")
+        } else {
+            error
+        }
+    })
+}
+
 /// Format positional octal fields while preserving all literal bytes.
 pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id) -> Result<Id> {
     let mut args = percent_args(ctx, rhs)?;
@@ -459,27 +514,10 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
         let value = args
             .next()
             .ok_or_else(|| type_error("not enough arguments for format string"))?;
-        let integer = ctx.index_integer(value).map_err(|error| {
-            if error.kind == "TypeError" {
-                type_error(format!(
-                    "%o format: an integer is required, not {}",
-                    ctx.type_name(value)
-                ))
-            } else {
-                error
-            }
-        })?;
         let end = input.peek().map_or(format.len(), |&(i, _)| i);
         let field = std::str::from_utf8(&format[start + 1..end])
             .expect("positional octal fields are ASCII");
-        let rendered = crate::objects::percent_integer_field(field, integer).map_err(|e| {
-            let error = Error::from(e);
-            if error.kind == "MemoryError" {
-                Error::new("MemoryError", "")
-            } else {
-                error
-            }
-        })?;
+        let rendered = render_percent_integer(ctx, value, &spec, field)?;
         // Keep space for the unprocessed literal bytes as well as this field.
         output
             .try_reserve(rendered.len().saturating_add(format.len() - end))
@@ -516,14 +554,21 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     );
     let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
-    for (_, part) in parsed.iter() {
+    let mut positions = format.char_indices().enumerate();
+    for (position, part) in parsed.iter() {
         match part {
             CFormatPart::Literal(literal) => output.push_str(literal),
             CFormatPart::Spec(spec) => {
-                if spec.precision.is_some()
+                let decorated = spec.precision.is_some()
                     || spec.min_field_width.is_some()
-                    || !spec.flags.is_empty()
-                {
+                    || !spec.flags.is_empty();
+                let number_field = matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X')
+                    && !matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple))
+                    && !matches!(
+                        spec.precision,
+                        Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
+                    );
+                if decorated && !number_field {
                     return Err(Error::new(
                         "ValueError",
                         "unsupported flags, width or precision for percent interpolation",
@@ -541,6 +586,17 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     args.next()
                         .ok_or_else(|| type_error("not enough arguments for format string"))?
                 };
+                if decorated {
+                    let (_, (start, _)) = positions
+                        .find(|(i, _)| i == position)
+                        .expect("parsed percent fields follow their source character positions");
+                    let rendered = render_percent_integer(ctx, arg, spec, &format[start + 1..])?;
+                    output
+                        .try_reserve(rendered.len())
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    output.push_str(&rendered);
+                    continue;
+                }
                 let rendered = match spec.format_char {
                     's' => ctx.display(arg),
                     'r' => ctx.repr(arg),
