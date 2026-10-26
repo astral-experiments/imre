@@ -92,6 +92,21 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
     ) || is_exception(name)
 }
 
+pub(super) const DICT_METHODS: &[&str] = &[
+    "__init__",
+    "__len__",
+    "__iter__",
+    "__contains__",
+    "__getitem__",
+    "__setitem__",
+    "get",
+    "items",
+    "keys",
+    "setdefault",
+    "update",
+    "values",
+];
+
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Str(_)
@@ -148,14 +163,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
         Value::Set(_) if matches!(attr, "add" | "update") => "set",
-        Value::Dict(_) | Value::DefaultDict { .. }
-            if matches!(
-                attr,
-                "items" | "values" | "keys" | "get" | "setdefault" | "update"
-            ) =>
-        {
-            "dict"
-        }
+        Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
                 attr,

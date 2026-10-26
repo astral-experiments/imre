@@ -97,16 +97,18 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let Value::Dict(items) = self.heap.get(b).clone() else {
-                    return Err(Error::new("TypeError", "expected a mapping"));
-                };
-                for (key, val) in items {
+                let mapping = self.for_each_mapping_item(b, |ctx, key, val| {
                     if op == "keywords" {
-                        self.str_value(key)?;
-                        self.op("keyword", a, key, val)?;
+                        ctx.str_value(key)
+                            .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                        ctx.op("keyword", a, key, val)?;
                     } else {
-                        self.put_item(a, key, val)?;
+                        ctx.put_item(a, key, val)?;
                     }
+                    Ok(())
+                })?;
+                if !mapping {
+                    return Err(Error::new("TypeError", "expected a mapping"));
                 }
                 Ok(a)
             }
