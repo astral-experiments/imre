@@ -116,7 +116,8 @@ impl RecordDescriptor {
 pub struct RecordField {
     pub name: *const u8,
     pub name_len: usize,
-    /// Bit zero includes the field in equality; bit one includes it in repr.
+    /// Bit zero includes the field in equality; bit one includes it in generated
+    /// repr; bit two marks a string containing the complete record repr.
     pub flags: u32,
 }
 

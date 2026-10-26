@@ -352,6 +352,10 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                     name: field.name.clone(),
                     compare: field.compare,
                     repr: field.repr,
+                    repr_text: graph.modules[class.definition.module].bundled
+                        && graph.modules[class.definition.module].name == "unittest.mock"
+                        && class.name == "_Call"
+                        && field.name == "_text",
                 })
                 .collect(),
         })
