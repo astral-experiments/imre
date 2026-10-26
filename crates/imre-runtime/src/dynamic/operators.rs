@@ -779,6 +779,9 @@ impl Context {
             "%" if let Value::Str(text) = self.heap.get(a) => {
                 return builtins::percent(self, &text.clone(), b);
             }
+            "%" if let Value::Bytes(bytes) = self.heap.get(a) => {
+                return builtins::bytes_percent(self, &bytes.clone(), b);
+            }
             "==" | "!=" => {
                 let equal = self.checked_equal(a, b)?
                     && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan());

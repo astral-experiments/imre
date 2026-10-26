@@ -11,7 +11,7 @@ mod collections;
 mod integer;
 mod text;
 pub(super) use collections::{hashable, set_add, set_member, view_items};
-pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
+pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
     use crate::objects::exceptions::Kind;
