@@ -56,6 +56,11 @@ print((raw == BytesIO(b"abcdef"), stream is errors))
 print((isinstance(raw, IOBase), isinstance(raw, BufferedIOBase), isinstance(raw, RawIOBase)))
 print((isinstance(raw, TextIOBase), isinstance(env["wsgi.errors"], TextIOBase)))
 print((repr(raw).startswith("<_io.BytesIO object at 0x"), repr(env["wsgi.errors"]).startswith("<_io.StringIO object at 0x")))
+for boxed in [raw, env["wsgi.errors"]]:
+    try:
+        print(len(boxed))
+    except TypeError as error:
+        print(str(error))
 print(stream.read(2))
 print(input_stream(env).read(1))
 write_error(env, "bad")
