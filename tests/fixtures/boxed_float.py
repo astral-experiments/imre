@@ -42,7 +42,7 @@ def current():
     for kind, value in ((TypeError, None), (TypeError, 1j), (TypeError, BadFloat()),
                         (TypeError, BadIndex()), (ValueError, Raising()), (ValueError, "1_e2"),
                         (ValueError, b"123\xff"), (ValueError, b"'\x00"), (ValueError, b'"'),
-                        (ValueError, bytearray(b"12x")),
+                        (ValueError, bytearray(b"12x")), (ValueError, bytearray(b"'")),
                         (OverflowError, 1 << 2000)):
         try:
             float(value)

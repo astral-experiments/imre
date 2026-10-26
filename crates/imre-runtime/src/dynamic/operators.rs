@@ -395,8 +395,20 @@ impl Context {
                 output
             }
             Value::ByteArray(bytes) => {
-                let mut output = String::from("bytearray(");
-                crate::objects::write_bytes_repr(&mut output, bytes);
+                let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
+                    '"'
+                } else {
+                    '\''
+                };
+                let mut output = format!("bytearray(b{quote}");
+                for &byte in bytes {
+                    if byte == b'"' {
+                        output.push('"');
+                    } else {
+                        output.extend(std::ascii::escape_default(byte).map(char::from));
+                    }
+                }
+                output.push(quote);
                 output.push(')');
                 output
             }
