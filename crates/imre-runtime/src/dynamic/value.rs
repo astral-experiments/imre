@@ -37,6 +37,7 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 pub(super) struct Location {
     pub file: &'static str,
     pub line: u32,
+    pub span: Option<[u32; 3]>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -106,6 +107,7 @@ impl Context {
                     frame,
                     next: head,
                     lineno: i64::from(at.line),
+                    span: at.span,
                 });
             }
             let Value::Raised(error) = self.heap.get_mut(exception) else {
@@ -319,6 +321,7 @@ pub(super) enum Value {
         frame: Id,
         next: Id,
         lineno: i64,
+        span: Option<[u32; 3]>,
     },
     PythonFrame {
         scope: Id,

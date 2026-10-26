@@ -19,6 +19,19 @@ impl Function<'_, '_> {
                 break;
             }
             self.checkpoint(stmt);
+            self.simple_call = match stmt {
+                ast::Stmt::Assign(v)
+                    if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                        && matches!(&*v.value, ast::Expr::Call(_)) =>
+                {
+                    Some(v.value.range())
+                }
+                ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+                    ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+                    _ => None,
+                }),
+                _ => None,
+            };
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {

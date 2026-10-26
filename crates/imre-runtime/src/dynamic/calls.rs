@@ -517,6 +517,7 @@ impl Context {
                 frame,
                 next,
                 lineno,
+                ..
             } => match name {
                 "tb_frame" => return Ok(frame),
                 "tb_next" => return Ok(next),

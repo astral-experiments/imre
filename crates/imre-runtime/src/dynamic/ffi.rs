@@ -396,14 +396,22 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
+    finish_at(ctx, result, None)
+}
+
+fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
     match result {
         Ok(id) => {
             ctx.heap.keep(id);
             id
         }
         Err(mut error) => {
-            if let Some(loc) = ctx.heap.trace_location() {
-                error.tracing().frames.push(loc);
+            if let Some((mut loc, frame)) = ctx.heap.trace_location() {
+                if let Some(&[line, start, split, end]) = span {
+                    loc.line = line;
+                    loc.span = Some([start, split, end]);
+                }
+                error.tracing().frames.push((loc, frame));
             }
             ctx.pending = Some(error);
             NONE
@@ -449,6 +457,19 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
     b: Id,
     c: Id,
 ) -> Id {
+    // SAFETY: legacy call sites pass the same handles, without an instruction position.
+    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_op_at(
+    ctx: *mut Context,
+    opcode: *const c_char,
+    a: Id,
+    b: Id,
+    c: Id,
+    span: *const [u32; 4],
+) -> Id {
     // SAFETY: generated native code owns its context and supplies a static opcode.
     let (ctx, op) = unsafe { (&mut *ctx, cstr(opcode)) };
     if ctx.pending.is_some() && op != "take_error" {
@@ -460,7 +481,8 @@ pub(super) unsafe extern "C" fn imre_dyn_op(
         ctx.pending = Some(error);
         return NONE;
     }
-    finish(ctx, result)
+    // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
+    finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
 /// Preserve the native function ABI used by previously compiled modules.
@@ -499,6 +521,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
     let location = ctx.heap.current_location().unwrap_or(value::Location {
         file: "<native>",
         line: 1,
+        span: None,
     });
     let code = ctx.prelinked_code(code, scope, name, parameters, location);
     ctx.define_function(
@@ -550,6 +573,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
             value::Location {
                 file,
                 line: definition.first_line,
+                span: None,
             },
         );
         ctx.native_code_objects.insert(key, code);
@@ -668,7 +692,11 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
             .chain(ctx.pending.iter().flat_map(Error::roots))
             .chain([ctx.argv, ctx.sys_path, ctx.token_missing]),
         live,
-        value::Location { file, line },
+        value::Location {
+            file,
+            line,
+            span: None,
+        },
         caught,
     );
 }
