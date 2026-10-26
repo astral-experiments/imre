@@ -73,6 +73,8 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "iter"
+                | "next"
                 | "reversed"
                 | "ord"
                 | "callable"
@@ -642,6 +644,31 @@ pub(super) fn call(
                 }
             };
             Ok(ctx.int(i64::from(code)))
+        }
+        "iter" | "next" => {
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            match args {
+                [] => Err(type_error(format!(
+                    "{name} expected at least 1 argument, got 0"
+                ))),
+                [iterable] if name == "iter" => ctx.iterator(*iterable),
+                [iterator] => ctx
+                    .next_result(*iterator)?
+                    .ok_or_else(|| Error::new("StopIteration", "")),
+                [callable, sentinel] if name == "iter" => {
+                    if !ctx.callable(*callable) {
+                        return Err(type_error("iter(v, w): v must be callable"));
+                    }
+                    Ok(ctx.alloc(Value::CallableIterator(Some([*callable, *sentinel]))))
+                }
+                [iterator, default] => Ok(ctx.next_item(*iterator)?.unwrap_or(*default)),
+                _ => Err(type_error(format!(
+                    "{name} expected at most 2 arguments, got {}",
+                    args.len()
+                ))),
+            }
         }
         "reversed" => {
             positional(name, kwargs)?;

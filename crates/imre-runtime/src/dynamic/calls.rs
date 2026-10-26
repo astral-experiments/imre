@@ -20,7 +20,7 @@ impl Context {
         }
     }
     /// Special methods are looked up on the type, even if the instance shadows them.
-    fn slot(&self, object: Id, name: &str) -> Option<Id> {
+    pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
             return None;
         };
