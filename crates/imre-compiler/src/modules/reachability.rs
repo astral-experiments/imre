@@ -21,6 +21,7 @@ pub(super) struct Reachable {
     class_attributes: HashSet<(DefinitionId, String)>,
     instance_attributes: HashSet<String>,
     http_commands: bool,
+    uses_logger: bool,
 }
 
 struct References<'a> {
@@ -261,6 +262,23 @@ impl<'a> Visitor<'a> for References<'_> {
             }
         }
         match self.graph.resolve(self.module, expr) {
+            Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
+                self.found
+                    .definitions
+                    .extend(self.graph.logging_definition("_basic_config"));
+            }
+            Some(Binding::Intrinsic(Intrinsic::LogEmit(_))) => {
+                for name in ["_auto_config", "_deliver"] {
+                    self.found
+                        .definitions
+                        .extend(self.graph.logging_definition(name));
+                }
+            }
+            Some(Binding::Intrinsic(
+                Intrinsic::GetLogger | Intrinsic::Logger | Intrinsic::LogRoot,
+            )) => {
+                self.found.uses_logger = true;
+            }
             Some(Binding::Intrinsic(Intrinsic::DocExecute)) => {
                 if let Some(runner) = self.graph.doctest_runner() {
                     self.found.definitions.insert(runner);
@@ -363,7 +381,21 @@ impl Reachable {
                 found.attributes.len(),
                 found.properties.len(),
                 found.http_commands,
+                found.uses_logger,
+                found.instance_attributes.len(),
             );
+            // Logger methods lower to a bundled function without a Python call site.
+            if found.uses_logger
+                && [
+                    "log", "debug", "info", "warning", "error", "critical", "fatal",
+                ]
+                .iter()
+                .any(|name| found.instance_attributes.contains(*name))
+            {
+                found
+                    .definitions
+                    .extend(graph.logging_definition("_deliver"));
+            }
             for id in found.definitions.iter().copied().collect::<Vec<_>>() {
                 let source = &graph.modules[id.module];
                 let node = &source.parsed.syntax().body[id.statement];
@@ -510,6 +542,8 @@ impl Reachable {
                     found.attributes.len(),
                     found.properties.len(),
                     found.http_commands,
+                    found.uses_logger,
+                    found.instance_attributes.len(),
                 )
             {
                 break;
@@ -862,6 +896,31 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn follows_native_logging_calls() {
+        for source in [
+            "from logging import basicConfig as configure\nconfigure()",
+            "from logging import warning\nwarning('root')",
+            "from logging import getLogger\ngetLogger('child').info('child')",
+        ] {
+            reachable(source).unwrap();
+        }
+
+        // An unrelated info() method must not make its unused handle() reachable.
+        reachable(
+            r#"
+import logging
+class Other:
+    def info(self) -> int:
+        return 42
+    def handle(self):
+        return globals()
+print(Other().info())
+"#,
+        )
+        .unwrap();
     }
 
     #[test]
