@@ -715,7 +715,7 @@ mod tests {
     use crate::objects::exceptions::{Kind, imre_error_set, imre_error_take, imre_exception_new};
     use crate::objects::{imre_object_release, imre_seq_new};
     use crate::shared::Shared;
-    use crate::{Int, List, Str, imre_list_new};
+    use crate::{Int, Str, imre_list_new};
     use num_bigint::BigInt;
     use std::rc::Rc;
 
@@ -867,8 +867,8 @@ mod tests {
         // SAFETY: metadata outlives all allocated records, every word has the
         // declared kind, and the parent/child ownership graph is acyclic.
         unsafe {
-            let list = Rc::<List>::from_raw(imre_list_new());
-            let weak_list = Rc::downgrade(&list);
+            let list = crate::ListOwner::from_raw(imre_list_new());
+            let weak_list = crate::ListOwner::downgrade(&list);
             let object = crate::ObjectOwner::from_raw(imre_seq_new(2));
             let weak_object = crate::ObjectOwner::downgrade(&object);
             let child = imre_record_new(&child_descriptor);
@@ -878,7 +878,7 @@ mod tests {
             replace(record, 1, 1, 1);
             replace(record, 2, Shared::as_ptr(&integer) as usize, 2);
             replace(record, 3, StrOwner::as_ptr(&text) as usize, 3);
-            replace(record, 4, Rc::as_ptr(&list) as usize, 4);
+            replace(record, 4, crate::ListOwner::as_ptr(&list) as usize, 4);
             replace(record, 5, crate::ObjectOwner::as_ptr(&object) as usize, 5);
             replace(record, 6, child as usize, 6);
             // Nullable owning words remain absent; uninitialized regular owning

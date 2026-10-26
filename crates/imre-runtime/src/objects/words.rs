@@ -113,7 +113,7 @@ impl WordKind {
                     }
                 }
                 3 | 11 => StrOwner::increment_strong_count(word as *const Str),
-                4 => Rc::increment_strong_count(word as *const List),
+                4 => crate::ListOwner::increment_strong_count(word as *const List),
                 5 => crate::ObjectOwner::increment_strong_count(word as *const Object),
                 6 | 12 | 13 | 14 => records::imre_record_retain(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
