@@ -25,16 +25,17 @@ Every reference outcome retains its original ID and skip reason.
 
 [Linux native evidence](evidence-linux.json) records all 272 occurrences at
 each of `-O0` and `-O3` using the [v1 contract](../../NATIVE_EVIDENCE.md).
-The local replay of `303e9fb05462f91c53b4a7c7736876024e988cfe` includes logger hierarchy, handler registration,
+The replay of [`4fe0c598`](https://github.com/astral-sh/imre/commit/4fe0c598cbcba2390d715ea8784bb47106e24d37) includes logger hierarchy, handler registration,
 formatters, and ordinary, timed and [size-based rotation](rotation.md).
 Both levels have the same counts:
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 16 |
+| Imre | Imre | Imre | CPython hooks and native child | 17 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| Blocked before execution | | | | 210 |
+| CPython | CPython | Imre | CPython hooks and native child | 1 |
+| Blocked before execution | | | | 208 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -46,6 +47,7 @@ Four additional unchanged rotation bodies check actual files and rollover decisi
 Four bodies verify native stderr with the original
 CPython output helper. The 39 host-driven methods exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
+The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.

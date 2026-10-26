@@ -1,0 +1,65 @@
+{
+  "schema": "logging-whole-suite-startup-v1",
+  "source": "4fe0c598cbcba2390d715ea8784bb47106e24d37",
+  "test_blob": "c1dc06e02d965781df0498a444aa0a333bd28a85",
+  "denominator": 272,
+  "layouts": {
+    "original_module-O0-whole": {
+      "exit": 1,
+      "diagnostic": [
+        "test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+      ],
+      "run": null
+    },
+    "original_module-O0-reachable": {
+      "exit": 1,
+      "diagnostic": [
+        "test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+      ],
+      "run": null
+    },
+    "original_module-O3-whole": {
+      "exit": 1,
+      "diagnostic": [
+        "test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+      ],
+      "run": null
+    },
+    "original_module-O3-reachable": {
+      "exit": 1,
+      "diagnostic": [
+        "test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+      ],
+      "run": null
+    },
+    "unittest_runner-O0-whole": {
+      "exit": 1,
+      "diagnostic": [
+        "runner.py:1:1: Imre: test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+      ],
+      "run": null
+    },
+    "unittest_runner-O0-reachable": {
+      "exit": 1,
+      "diagnostic": [
+        "runner.py:1:1: Imre: test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+      ],
+      "run": null
+    },
+    "unittest_runner-O3-whole": {
+      "exit": 1,
+      "diagnostic": [
+        "runner.py:1:1: Imre: test_logging.py:27:1: Imre: standard-library imports and shadowing are unsupported: \"configparser\""
+      ],
+      "run": null
+    },
+    "unittest_runner-O3-reachable": {
+      "exit": 1,
+      "diagnostic": [
+        "runner.py:1:1: Imre: test_logging.py:32:1: Imre: standard-library imports and shadowing are unsupported: \"pickle\""
+      ],
+      "run": null
+    }
+  },
+  "executed_ids": []
+}
