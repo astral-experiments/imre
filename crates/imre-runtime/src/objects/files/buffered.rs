@@ -6,11 +6,19 @@ use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
+use super::super::codecs::Codec;
 use super::gzip::{GzipError, GzipReader};
 use super::{Bytes, Error, Kind, Result, Str, decode_text, os_error};
-use crate::BinaryOutput;
+use crate::{BinaryOutput, StrOwner};
+
+struct TextEncoder {
+    codec: Codec,
+    errors: Option<StrOwner>,
+    newline: Option<&'static str>,
+}
 
 pub(super) struct Output {
+    encoder: Option<TextEncoder>,
     raw: BinaryOutput<File>,
     text: Option<crate::text_output::PendingText>,
     line_buffering: bool,
@@ -19,6 +27,7 @@ pub(super) struct Output {
 impl Output {
     pub(super) fn new(file: File, capacity: usize, binary: bool) -> Result<Self> {
         Ok(Self {
+            encoder: None,
             line_buffering: !binary && file.is_terminal(),
             raw: BinaryOutput::with_buffer(reserve(capacity)?, file),
             text: (!binary).then(crate::text_output::PendingText::default),
@@ -30,8 +39,67 @@ impl Output {
         Ok(Self {
             raw: BinaryOutput::with_buffer(reserve(capacity)?, file),
             text: None,
+            encoder: None,
             line_buffering,
         })
+    }
+
+    /// Keep a signature pending only when this stream starts at offset zero.
+    pub(super) fn set_encoding(
+        &mut self,
+        mut codec: Codec,
+        errors: Option<StrOwner>,
+        newline: Option<&str>,
+    ) {
+        if matches!(codec, Codec::Utf8 { signature: true })
+            && self
+                .raw
+                .inner
+                .stream_position()
+                .is_ok_and(|position| position != 0)
+        {
+            codec = Codec::Utf8 { signature: false };
+        }
+        // A native str already contains the bytes needed by an untranslated UTF-8 writer.
+        if matches!(codec, Codec::Utf8 { signature: false })
+            && !matches!(newline, Some("\r" | "\r\n"))
+        {
+            self.encoder = None;
+            return;
+        }
+        self.encoder = Some(TextEncoder {
+            codec,
+            errors,
+            newline: match newline {
+                Some("\r") => Some("\r"),
+                Some("\r\n") => Some("\r\n"),
+                _ => None,
+            },
+        });
+    }
+
+    /// Encode the entire input before changing the file or its text buffer.
+    pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+        let Some(encoder) = self.encoder.as_mut() else {
+            return self.write(text.as_bytes()).map_err(os_error);
+        };
+        let translated;
+        let text = if let Some(newline) = encoder.newline {
+            translated = super::path_text::output_newlines(text, newline)?;
+            &translated
+        } else {
+            text
+        };
+        let encoded =
+            encoder
+                .codec
+                .encode(text, encoder.errors.as_deref().map(Str::as_str), || {
+                    super::super::text::try_owned_string(text)
+                })?;
+        if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
+            encoder.codec = Codec::Utf8 { signature: false };
+        }
+        self.write(&encoded).map_err(os_error)
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {

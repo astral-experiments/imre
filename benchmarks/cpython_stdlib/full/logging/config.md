@@ -77,5 +77,26 @@ The [filename report](basic-config-files-linux.json) adds two complete routines:
 Both retain CPython setup, teardown and cleanup. The native child starts at
 the root level observed by the fixture. For `test_encoding`, the report
 records each native operation and the compiler diagnostic at the original
-`assertIsInstance` call. The direct controls add no occurrences. Binary mode
-and non-UTF-8 file encoding remain ordinary implementation failures.
+`assertIsInstance` call. The direct controls add no occurrences. Binary file
+mode remains an ordinary implementation failure.
+
+### File encoding and errors
+
+`FileHandler` opens writable text streams with the selected codec and error
+policy. The handler and its live stream expose their encoding and errors;
+the file stream retains both after close. The [codec control](../../../../tests/fixtures/files/logging_file_codecs.py)
+checks strict failures, append mode without a second UTF-8 signature, delayed
+CP1251 output, newline conversion, and which invalid options truncate an existing file.
+
+The [file configuration report](basic-config-file-codecs-linux.json) includes the
+unchanged `BasicConfigTest.test_encoding_errors` and `test_encoding_errors_default`.
+CPython runs their bodies, file reads, assertions and fixture hooks. Imre configures
+the root, selects the error policy, emits the record and closes the file. The
+separate `test_encoding_errors_none` remains blocked at its original
+`assertIsInstance(handler, logging.FileHandler)`. It also assigns a custom `handleError`.
+
+The [file handle ownership check](file-codec-ownership-linux.json) identifies the
+runtime archive and both production and test MIR for `open_text_output`. If the
+file state or returned `ObjectOwner` cannot be allocated, the FFI returns null
+with `MemoryError` pending. Fault injection at O0 and O3 checked the exception,
+the bytes written on retry, and the open file descriptors.

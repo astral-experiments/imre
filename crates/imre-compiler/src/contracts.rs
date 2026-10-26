@@ -190,6 +190,7 @@ impl Builtin {
                     | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
                     | PathOperation::ReadText
+                    | PathOperation::OpenTextOutput
                     | PathOperation::ReadBytes
                     | PathOperation::Readlink
                     | PathOperation::Link(_)
@@ -1152,6 +1153,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_path_write_text"
                 | "imre_path_read_text_options"
                 | "imre_path_write_text_options"
+                | "imre_path_open_text_output"
                 | "imre_path_write_type_error"
                 | "imre_path_write_bytes_union"
                 | "imre_path_write_text_union"

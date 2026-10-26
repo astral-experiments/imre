@@ -14,7 +14,7 @@ thread_local! {
         let settings = encoding::settings(false, None);
         Names {
             unicode: canonical("utf-8"),
-            filesystem: Codec::lookup(&settings.filesystem_codeset).ok().map(|codec| canonical(codec.name())),
+            filesystem: Codec::lookup(settings.filesystem_codeset()).ok().map(|codec| canonical(codec.name())),
             // Imre's native filesystem runtime uses POSIX path and descriptor APIs.
             errors: canonical("surrogateescape"),
         }
@@ -42,7 +42,7 @@ pub extern "C" fn imre_sys_filesystem_encoding() -> *const Str {
             Kind::LookupError,
             format!(
                 "unknown encoding: {}",
-                encoding::settings(false, None).filesystem_codeset
+                encoding::settings(false, None).filesystem_codeset()
             ),
         )
         .returning(std::ptr::null()),

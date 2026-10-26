@@ -4472,6 +4472,7 @@ impl Emitter<'_, '_> {
                     LockExit => "imre_log_lock_exit",
                     LockReset => "imre_log_lock_reset",
                     HandlerLookup => "imre_log_handler_lookup",
+                    FileEncodingUsesUtf8 => "imre_sys_utf8_mode",
                     PrintActiveException => "imre_log_print_active_exception",
                     Handlers => "imre_log_handlers",
                     AddHandler => "imre_log_add_handler",
@@ -5150,11 +5151,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::TextMetadata { errors } => {
-                let raw = self.instruction(format!(
+                let lookup = format!(
                     "call ptr @imre_text_metadata(ptr {}, i32 {})",
                     args[0].value.operand,
                     u32::from(*errors)
-                ));
+                );
+                let raw = if args[0].value.ty == Type::TextOutput {
+                    // StringIO returns None; codec writers can raise AttributeError.
+                    self.checked_instruction(lookup)
+                } else {
+                    self.instruction(lookup)
+                };
                 Value {
                     ty: returns,
                     operand: if returns == Type::Str {
@@ -8979,6 +8986,7 @@ declare ptr @imre_path_read_bytes(ptr)
 declare ptr @imre_path_read_text(ptr)
 declare i64 @imre_path_write_text(ptr, ptr)
 declare i64 @imre_path_write_text_options(ptr, ptr, i64, i64, i64)
+declare ptr @imre_path_open_text_output(ptr, ptr, i64, i64, i64)
 declare ptr @imre_path_read_text_options(ptr, i64, i64, i64)
 declare i64 @imre_path_write_type_error(ptr)
 declare i64 @imre_path_write_bytes_union(ptr, i64)
@@ -9224,6 +9232,7 @@ declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
+declare i1 @imre_sys_utf8_mode()
 declare void @imre_sys_init_encoding_names()
 declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()

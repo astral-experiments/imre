@@ -347,6 +347,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Readlink => "imre_path_readlink",
                     PathOperation::ReadText if args.len() == 1 => "imre_path_read_text",
                     PathOperation::ReadText => "imre_path_read_text_options",
+                    PathOperation::OpenTextOutput => "imre_path_open_text_output",
                     PathOperation::WriteText => "imre_path_write_text_options",
                     PathOperation::WriteUnion { binary: true } => "imre_path_write_bytes_union",
                     PathOperation::WriteUnion { binary: false } => "imre_path_write_text_union",

@@ -1,10 +1,11 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
 use super::super::codecs::{Codec, option_error};
+use super::super::{Storage, StorageCell};
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
-use crate::StrOwner;
+use crate::{ObjectOwner, StrOwner};
 
-fn output_newlines(text: &str, replacement: &str) -> Result<String> {
+pub(super) fn output_newlines(text: &str, replacement: &str) -> Result<String> {
     let extra = if replacement.len() == 2 {
         text.bytes().filter(|&byte| byte == b'\n').count()
     } else {
@@ -40,13 +41,78 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             "",
         ));
     }
-    Codec::for_stream(encoding)
+    Codec::lookup(crate::sys::file_encoding(encoding))
 }
 
 // An optional native string is an owned pointer word, or zero for None.
 unsafe fn string_option<'a>(word: usize) -> Option<&'a str> {
     // SAFETY: the caller roots each non-null string until its I/O operation returns.
     unsafe { (word as *const Str).as_ref() }.map(Str::as_str)
+}
+
+/// Validate string arguments before opening, then let TextIOWrapper validation
+/// see the actual descriptor. A bad codec can therefore leave a truncated file.
+fn open_text_output(
+    path: &StrOwner,
+    mode: &str,
+    encoding: Option<&str>,
+    errors: Option<StrOwner>,
+    newline: Option<&str>,
+) -> Result<*const Object> {
+    if [encoding, errors.as_deref().map(Str::as_str), newline]
+        .into_iter()
+        .flatten()
+        .any(|option| option.contains('\0'))
+    {
+        return Err(Error::new(Kind::ValueError, "embedded null character"));
+    }
+    let mode = match mode {
+        "w" | "wt" | "tw" => 1,
+        "a" | "at" | "ta" => 2,
+        "x" | "xt" | "tx" => 3,
+        _ => unreachable!("compiler checked the text output mode"),
+    };
+    let spelling = crate::sys::file_encoding(encoding);
+    let policy = errors.as_deref().map_or("strict", Str::as_str);
+    let mut state =
+        super::open_state_with_encoding(path, mode, false, false, Some((spelling, policy)))?;
+    let codec = options(Some(spelling), newline)?;
+    let Some(super::Stream::Write(writer)) = state.stream.as_mut() else {
+        unreachable!()
+    };
+    writer.set_encoding(codec, errors, newline);
+    let state = super::BoxedFile::try_new(state).map_err(|_| Error::allocation())?;
+    ObjectOwner::try_new(Object(StorageCell::new(Storage::File(state))))
+        .map(ObjectOwner::into_raw)
+        .map_err(|_| Error::allocation())
+}
+
+/// # Safety
+/// Root the native path object, literal mode and each nonzero string until open returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_path_open_text_output(
+    path: *const Object,
+    mode: *const Str,
+    encoding: usize,
+    errors: usize,
+    newline: usize,
+) -> *const Object {
+    // SAFETY: the caller roots every operand for this synchronous operation.
+    let (path, mode, encoding, errors, newline) = unsafe {
+        (
+            object(path),
+            &*mode,
+            string_option(encoding),
+            (errors != 0).then(|| StrOwner::acquire_word(errors)),
+            string_option(newline),
+        )
+    };
+    // SAFETY: opening a file cannot re-enter or mutate the rooted path.
+    let result = unsafe {
+        path.0
+            .with(|s| open_text_output(s.path_text(), mode, encoding, errors, newline))
+    };
+    finish(result, std::ptr::null())
 }
 
 pub(super) fn read(
