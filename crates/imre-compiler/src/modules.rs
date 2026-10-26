@@ -19,6 +19,7 @@ pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
 mod namedtuple_fields;
+mod ordered_imports;
 mod os;
 pub(crate) use os::credential_arity;
 mod reachability;
@@ -1082,6 +1083,7 @@ pub(crate) struct SourceGraph {
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
+    ordered_bindings: Option<ordered_imports::Bindings>,
     /// The absolute entry spelling used for Python's `__file__`.
     entry_filename: PathBuf,
     /// Split literal prefixes at imports so allocations and package exports are
@@ -1825,6 +1827,7 @@ struct Loader<'a> {
     by_name: HashMap<String, ModuleId>,
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
+    ordered_imports: bool,
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
@@ -1865,6 +1868,7 @@ impl<'a> Loader<'a> {
             by_name: HashMap::new(),
             by_path: HashMap::new(),
             loading: HashSet::new(),
+            ordered_imports: false,
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
@@ -2032,6 +2036,9 @@ impl<'a> Loader<'a> {
             entry_filename,
             inputs: self.inputs,
             session: self.session,
+            ordered_bindings: self
+                .ordered_imports
+                .then(|| ordered_imports::Bindings::new(&self.modules)),
             modules: self.modules,
             entry,
             initialization: self.initialization,
@@ -2134,25 +2141,35 @@ impl<'a> Loader<'a> {
                     if executable || !self.modules[id].entry_globals.is_empty() {
                         // Emit accepted prefixes before the dependency starts:
                         // a literal can fail to allocate, and a guard can raise.
-                        if id == 0
-                            || !self.modules[id]
-                                .executable
-                                .iter()
-                                .rev()
-                                .take_while(|&&at| at >= segment)
-                                .all(|&at| {
-                                    let stmt = &parsed.syntax().body[at];
-                                    module_name_guard(stmt)
-                                        || (self.modules[id].is_package
-                                            && value_name(stmt).is_some()
-                                            && module_value(stmt).is_some_and(literal_export))
-                                })
-                        {
+                        let module = &self.modules[id];
+                        let prefix = module
+                            .executable
+                            .iter()
+                            .rev()
+                            .take_while(|&&at| at >= segment)
+                            .map(|&at| &parsed.syntax().body[at]);
+                        let simple = prefix.clone().all(|stmt| {
+                            module_name_guard(stmt)
+                                || (module.is_package
+                                    && value_name(stmt).is_some()
+                                    && module_value(stmt).is_some_and(literal_export))
+                        });
+                        let ordered = !module.is_package
+                            && module.name.contains('.')
+                            && !module.bundled
+                            && module.archive.is_none()
+                            && prefix.clone().all(|stmt| {
+                                module_name_guard(stmt)
+                                    || value_name(stmt).is_some() && module_value(stmt).is_some()
+                                    || matches!(stmt, ast::Stmt::Expr(_))
+                            });
+                        if id == 0 || !simple && !ordered {
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
                             ));
                         }
+                        self.ordered_imports |= !simple;
                         self.initialization.push((id, segment..index));
                         segment = index;
                         executable = false;

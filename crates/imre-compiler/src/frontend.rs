@@ -933,9 +933,10 @@ pub(crate) fn lower_with_caller_cache(
         let LoweredBody {
             function,
             calls,
-            class_reads: reads,
+            class_reads: mut reads,
             ..
         } = body;
+        graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
             helpers.finish(
