@@ -215,7 +215,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
-            "str" => builtins::STR_DESCRIPTORS,
+            "str" => builtins::STR_METHODS,
             _ => &[],
         };
         for method in methods {

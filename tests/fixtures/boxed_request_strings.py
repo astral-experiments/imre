@@ -7,15 +7,21 @@ class DescriptorOwner:
     partition = str.partition
 
 
+class Text(str):
+    pass
+
+
 def current():
     text = "é🦊:東:🦊"
     print(str.find(text, ":"), str.partition(text, ":"), str.rpartition(text, ":"))
     print(str.partition is str.partition)
+    parent = super(Text, Text)
+    print(parent.replace is str.replace, parent.replace("<m>", "m", "&amp;"))
     try:
         DescriptorOwner().partition(":")
     except TypeError as error:
         print(error)
-    for method in (str.find, str.partition, str.rpartition):
+    for method in (str.find, str.partition, str.rpartition, str.replace):
         try:
             method(None, ":")
         except TypeError as error:

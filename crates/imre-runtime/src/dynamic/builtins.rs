@@ -111,34 +111,31 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "values",
 ];
 
-pub(super) const STR_DESCRIPTORS: &[&str] = &["find", "partition", "rpartition"];
+pub(super) const STR_METHODS: &[&str] = &[
+    "encode",
+    "endswith",
+    "find",
+    "format",
+    "join",
+    "lower",
+    "lstrip",
+    "partition",
+    "removeprefix",
+    "removesuffix",
+    "replace",
+    "rpartition",
+    "rsplit",
+    "rstrip",
+    "split",
+    "splitlines",
+    "startswith",
+    "strip",
+    "upper",
+];
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
-        Value::Str(_) if STR_DESCRIPTORS.contains(&attr) => "str",
-        Value::Str(_)
-            if matches!(
-                attr,
-                "format"
-                    | "split"
-                    | "rsplit"
-                    | "splitlines"
-                    | "strip"
-                    | "lstrip"
-                    | "rstrip"
-                    | "startswith"
-                    | "endswith"
-                    | "replace"
-                    | "join"
-                    | "lower"
-                    | "upper"
-                    | "removeprefix"
-                    | "removesuffix"
-                    | "encode"
-            ) =>
-        {
-            "str"
-        }
+        Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Bytes(_) if attr == "decode" => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {

@@ -113,7 +113,7 @@ impl Context {
                         || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
-                            .is_some_and(|method| builtins::STR_DESCRIPTORS.contains(&method))
+                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
                 }
                 _ => false,
             };
@@ -481,7 +481,7 @@ impl Context {
             }
             Value::Native(class)
                 if class == "dict"
-                    || (class == "str" && builtins::STR_DESCRIPTORS.contains(&name)) =>
+                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);

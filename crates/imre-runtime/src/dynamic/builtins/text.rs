@@ -490,13 +490,13 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let (&receiver, args) = args.split_first().ok_or_else(|| {
-        if STR_DESCRIPTORS.contains(&name) {
+        if STR_METHODS.contains(&name) {
             type_error(format!("unbound method str.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
     })?;
-    if STR_DESCRIPTORS.contains(&name) && ctx.str_value(receiver).is_err() {
+    if STR_METHODS.contains(&name) && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
             "descriptor '{name}' for 'str' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
