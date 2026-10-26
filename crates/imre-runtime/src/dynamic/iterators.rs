@@ -138,11 +138,13 @@ impl Context {
             unreachable!()
         };
         *running = true;
-        let result = self.execute(code, scope).map(|id| match self.heap.get(id) {
-            Value::None => None,
-            Value::Yielded(item) => Some(*item),
-            _ => unreachable!("compiled generator step result"),
-        });
+        let result =
+            self.execute(self.code_object(code).entry, scope)
+                .map(|id| match self.heap.get(id) {
+                    Value::None => None,
+                    Value::Yielded(item) => Some(*item),
+                    _ => unreachable!("compiled generator step result"),
+                });
         let Value::Generator {
             running,
             buffered,

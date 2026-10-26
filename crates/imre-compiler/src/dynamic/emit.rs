@@ -16,7 +16,7 @@ declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
-declare i64 @imre_dyn_def_with_metadata(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
+declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -94,6 +94,12 @@ struct SourceMap<'a> {
     newlines: Vec<usize>,
 }
 
+impl SourceMap<'_> {
+    fn line(&self, offset: ruff_text_size::TextSize) -> usize {
+        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
+    }
+}
+
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
@@ -104,6 +110,26 @@ struct Output {
 }
 
 impl Output {
+    /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
+    fn definition(
+        &mut self,
+        source: &SourceMap<'_>,
+        prefix: String,
+        body: Body<'_>,
+        start: ruff_text_size::TextSize,
+    ) -> String {
+        let site = format!("@code_site{}", self.count);
+        let code = self.code(source, prefix, body);
+        writeln!(
+            self.constants,
+            "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
+            source.file,
+            source.line(start)
+        )
+        .unwrap();
+        site
+    }
+
     fn data(&mut self, bytes: &[u8]) -> String {
         let count = self.strings.len() as u32;
         let index = *self.strings.entry(bytes.to_vec()).or_insert(count);
@@ -346,12 +372,7 @@ impl Function<'_, '_> {
             self.line(&format!("store i64 {value}, ptr {ptr}"));
         }
         let ptr = if count == 0 { "null" } else { "%live" };
-        let offset = usize::from(node.start());
-        let line = self
-            .source
-            .newlines
-            .partition_point(|&newline| newline < offset)
-            + 1;
+        let line = self.source.line(node.start());
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)

@@ -44,7 +44,7 @@ pub(super) fn update_wrapper(
         let name = ctx.str_value(key)?.to_owned();
         match ctx.lookup_attr(wrapped, &name) {
             Ok(value) => ctx.set_attr(wrapper, &name, value)?,
-            Err(error) if error.kind == "AttributeError" => {}
+            Err(error) if ctx.is_attribute_error(&error) => {}
             Err(error) => return Err(error),
         }
     }
@@ -54,7 +54,7 @@ pub(super) fn update_wrapper(
         let update = ctx.lookup_attr(target, "update")?;
         let source = match ctx.lookup_attr(wrapped, &name) {
             Ok(value) => value,
-            Err(error) if error.kind == "AttributeError" => ctx.dict(Vec::new()),
+            Err(error) if ctx.is_attribute_error(&error) => ctx.dict(Vec::new()),
             Err(error) => return Err(error),
         };
         ctx.call(update, vec![source], Vec::new())?;

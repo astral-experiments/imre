@@ -10,7 +10,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod text;
-pub(super) use collections::{hashable, view_items};
+pub(super) use collections::{hashable, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
 pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
@@ -98,6 +98,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "bytearray"
             | "bytes"
             | "dict"
+            | "frozenset"
             | "int"
             | "list"
             | "object"
@@ -193,7 +194,16 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
-        Value::Set(_) if matches!(attr, "add" | "update") => "set",
+        Value::Set { frozen: false, .. }
+            if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
+        {
+            "set"
+        }
+        Value::Set { frozen: true, .. }
+            if matches!(attr, "copy" | "issuperset" | "__contains__") =>
+        {
+            "frozenset"
+        }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
@@ -226,7 +236,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
+        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch") => "pattern",
         Value::RegexMatch { .. } if attr == "group" => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
@@ -432,7 +442,7 @@ pub(super) fn call(
                 target.extend(data);
                 Ok(NONE)
             }
-            "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -507,8 +517,8 @@ pub(super) fn call(
             let attr = attribute_name(ctx, args[1])?;
             match ctx.lookup_attr(args[0], &attr) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
-                Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),
-                Err(e) if e.kind == "AttributeError" && args.len() == 3 => Ok(args[2]),
+                Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
+                Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),
                 result => result,
             }
         }
@@ -550,7 +560,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let size = match ctx.heap.get(args[0]) {
-                Value::List(v) | Value::Tuple(v) | Value::Set(v) => v.len(),
+                Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
@@ -588,7 +598,9 @@ pub(super) fn call(
             range_len(start, stop, step)?;
             Ok(ctx.alloc(Value::Range { start, stop, step }))
         }
-        "dict" | "list" | "tuple" | "set" => collections::construct(ctx, name, args, kwargs),
+        "dict" | "list" | "tuple" | "set" | "frozenset" => {
+            collections::construct(ctx, name, args, kwargs)
+        }
         "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" => {
             text::construct(ctx, name, args, kwargs)
         }

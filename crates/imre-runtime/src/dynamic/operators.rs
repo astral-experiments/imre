@@ -101,7 +101,7 @@ impl Context {
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::List(v)
             | Value::Tuple(v)
-            | Value::Set(v)
+            | Value::Set { items: v, .. }
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
             Value::DictView { dict, .. } => !self
@@ -207,7 +207,7 @@ impl Context {
                             })
                         }))
             }
-            (Value::Set(x), Value::Set(y)) => {
+            (Value::Set { items: x, .. }, Value::Set { items: y, .. }) => {
                 x.len() == y.len() && x.iter().all(|&k| y.iter().any(|&j| equal(k, j)))
             }
             _ => match (self.sequence(a), self.sequence(b)) {
@@ -338,7 +338,7 @@ impl Context {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Value::List(v) | Value::Tuple(v) | Value::Set(v) => {
+            Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => {
                 let body = v
                     .iter()
                     .map(|&v| self.repr(v))
@@ -346,8 +346,10 @@ impl Context {
                     .join(", ");
                 match self.heap.get(id) {
                     Value::List(_) => format!("[{body}]"),
-                    Value::Set(_) if v.is_empty() => "set()".into(),
-                    Value::Set(_) => format!("{{{body}}}"),
+                    Value::Set { frozen: true, .. } if v.is_empty() => "frozenset()".into(),
+                    Value::Set { frozen: true, .. } => format!("frozenset({{{body}}})"),
+                    Value::Set { .. } if v.is_empty() => "set()".into(),
+                    Value::Set { .. } => format!("{{{body}}}"),
                     _ if v.len() == 1 => format!("({body},)"),
                     _ => format!("({body})"),
                 }
@@ -417,7 +419,13 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
-        if matches!(self.heap.get(obj), Value::DictView { .. } | Value::Set(_)) {
+        if matches!(self.heap.get(obj), Value::Set { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not subscriptable", self.type_name(obj)),
+            ));
+        }
+        if matches!(self.heap.get(obj), Value::DictView { .. }) {
             return Err(Error::new("TypeError", "object is not subscriptable"));
         }
         let i = self.as_integer(key)?;
@@ -500,9 +508,12 @@ impl Context {
             }
             return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
         }
+        if matches!(self.heap.get(container), Value::Set { .. }) {
+            return builtins::set_member(self, container, item, true);
+        }
         if matches!(
             self.heap.get(container),
-            Value::Dict(_) | Value::DefaultDict { .. } | Value::Set(_)
+            Value::Dict(_) | Value::DefaultDict { .. }
         ) && !builtins::hashable(self, item)
         {
             return Err(Error::new("TypeError", "unhashable key"));

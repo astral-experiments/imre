@@ -1,6 +1,6 @@
 //! Python system modules available to native functions with runtime-selected imports.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
     Context,
@@ -26,7 +26,7 @@ mod marshal;
 mod operator;
 mod pickle;
 pub(super) mod readiness;
-mod regex;
+pub(super) mod regex;
 mod socket;
 pub(super) mod urllib;
 
@@ -62,6 +62,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib.machinery"
             | "functools"
             | "collections"
+            | "_collections_abc"
             | "enum"
             | "errno"
             | "typing"
@@ -141,6 +142,14 @@ fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
     system::InterpreterLayout::new(&ctx.executable, language_version(ctx)?).map_err(os_error)
 }
 
+/// Resolve a native package's search directory relative to this executable's installation.
+pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
+    let stdlib = layout(ctx)?
+        .path("posix_prefix", "stdlib", true)
+        .expect("the default scheme defines the standard library path");
+    Ok(Path::new(&stdlib).join(name))
+}
+
 fn full_version(ctx: &Context) -> Result<String> {
     let (major, minor) = language_version(ctx)?;
     Ok(format!("{major}.{minor}.0"))
@@ -195,8 +204,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("re", "ASCII") => ctx.int(regex::ASCII),
+        ("re", "UNICODE") => ctx.int(regex::UNICODE),
+        ("re", "A" | "U") => {
+            let module = ctx.module("re")?;
+            ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
+        }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "CodeType") => ctx.builtin("code"),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "struct_time") => {
             ctx.builtin(&format!("time.{name}"))
@@ -346,7 +362,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "compile")
+        | ("re", "match" | "fullmatch" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "IntEnum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
@@ -460,6 +476,9 @@ pub(super) fn call(
             keywords,
         }));
     }
+    if name.starts_with("re.") {
+        return regex::module_call(ctx, name, args, kwargs);
+    }
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
@@ -479,8 +498,8 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "re.match" | "pattern.match" | "pattern.findall" | "file.read"
-        | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
+        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "sys.exit"
@@ -491,7 +510,6 @@ pub(super) fn call(
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
-        | "re.compile"
         | "collections.defaultdict"
         | "functools.lru_cache"
         | "functools._cached"
@@ -789,10 +807,7 @@ pub(super) fn call(
         {
             return files::call(ctx, name, args, kwargs);
         }
-        name if name.starts_with("re.")
-            || name.starts_with("pattern.")
-            || name == "match.group" =>
-        {
+        name if name.starts_with("pattern.") || name == "match.group" => {
             return regex::call(ctx, name, args);
         }
         _ => {

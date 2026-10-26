@@ -1,4 +1,5 @@
 use ruff_python_ast as ast;
+use ruff_text_size::Ranged;
 
 use super::{Body, Function};
 
@@ -104,6 +105,7 @@ impl Function<'_, '_> {
                 self.op("call", &[&callable, &args, &kwargs])
             }
             ast::Expr::Lambda(v) => self.define(
+                v.start(),
                 "<lambda>",
                 v.parameters.as_deref(),
                 None,
@@ -129,7 +131,13 @@ impl Function<'_, '_> {
                 }
                 let iterable = self.expr(&generator.iter);
                 let iter = self.op("iter", &[&iterable]);
-                let step = self.define("<genexpr>", None, None, Body::Generator(generator, &v.elt));
+                let step = self.define(
+                    v.start(),
+                    "<genexpr>",
+                    None,
+                    None,
+                    Body::Generator(generator, &v.elt),
+                );
                 self.op("generator", &[&step, &iter])
             }
             ast::Expr::ListComp(v) => {
