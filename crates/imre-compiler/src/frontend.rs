@@ -131,6 +131,7 @@ mod unittest_setup;
 mod unpacking;
 mod urlsplit;
 mod warnings;
+mod weakref;
 mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
@@ -257,6 +258,16 @@ impl ClassInfo {
                                     &field.annotation,
                                     "imre.struct fields must be float or bool",
                                 ));
+                            }
+                            if field.weak_proxy {
+                                let Type::Class(id) = ty else {
+                                    return Err(error(
+                                        &graph.modules[field.module].source,
+                                        &field.annotation,
+                                        "a weak proxy field requires a record annotation",
+                                    ));
+                                };
+                                return Ok(Type::WeakProxy(id));
                             }
                             records::field_default(
                                 field,
@@ -484,6 +495,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "NameError" => return Some(39),
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
+        "ReferenceError" => return Some(53),
         "BlockingIOError" => return Some(44),
         "ConnectionError" => return Some(45),
         "BrokenPipeError" => return Some(46),
@@ -3109,7 +3121,7 @@ impl<'a> Checker<'a> {
                     let value = self.class_attribute(attribute, class, None, Some(concrete))?;
                     return self.coerce(value, expected, expression);
                 }
-                let receiver = self.expr(&attribute.value)?;
+                let receiver = Self::weak_target(self.expr(&attribute.value)?);
                 if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
                     return self.coerce(wrapped, expected, expression);
                 }
@@ -4545,7 +4557,7 @@ impl<'a> Checker<'a> {
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
-                    let receiver = self.expr(&target.value)?;
+                    let receiver = Self::weak_target(self.expr(&target.value)?);
                     if let Some(class) = self.writable_property(receiver.ty, target) {
                         let slot = self.hidden(receiver.ty);
                         let old =
@@ -6658,6 +6670,9 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
+                if values.iter().any(|v| matches!(v.ty, Type::WeakProxy(_))) {
+                    return self.weak_proxy_comparison(values, &compare.ops, expression);
+                }
                 if values
                     .iter()
                     .any(|value| matches!(value.ty, Type::Class(id) if self.decimal_class(id)))
@@ -7392,6 +7407,16 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::WeakProxy(class) = receiver.ty
+                    && attribute.attr.as_str() == "__class__"
+                {
+                    return self.dispatch_record(
+                        class,
+                        Self::weak_target(receiver),
+                        attribute,
+                        |checker, layout, _| Ok(checker.record_class_object(layout)),
+                    );
+                }
                 if let Some(layout) = self.types.dispatcher(receiver.ty)
                     && let Some(value) =
                         self.dispatch_attribute(&receiver, layout, attribute.attr.as_str())
@@ -7581,7 +7606,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Self::exception_record(receiver)
                 };
-                let receiver = self.checked_record_receiver(receiver, attribute);
+                let receiver = self.checked_record_receiver(Self::weak_target(receiver), attribute);
                 if let Type::IntEnum(class) | Type::StrEnum(class) | Type::Enum(class) = receiver.ty
                 {
                     match attribute.attr.as_str() {
@@ -8609,6 +8634,9 @@ impl<'a> Checker<'a> {
                 check_string(target, self.source)?;
                 return self.typed_expr(value);
             }
+            Some(Binding::Intrinsic(Intrinsic::WeakProxy)) => {
+                return self.weak_proxy(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
             }
@@ -9228,7 +9256,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             let receiver = Self::exception_record(receiver);
-            let receiver = self.checked_record_receiver(receiver, attribute);
+            let receiver = self.checked_record_receiver(Self::weak_target(receiver), attribute);
             if attribute.attr.as_str() == "get" && self.dict_or_record(receiver.ty).is_some() {
                 return self.dict_or_record_get(receiver, attribute, call);
             }
@@ -9240,6 +9268,23 @@ impl<'a> Checker<'a> {
                     return self
                         .exception_alias_call(call, attribute, class, Some(receiver))
                         .map(Option::unwrap);
+                }
+                if let Some(field) = self.classes.declarations.definitions[class]
+                    .fields
+                    .iter()
+                    .position(|field| field.name == attribute.attr.as_str())
+                    && let ty @ (Type::Class(target) | Type::WeakProxy(target)) =
+                        self.classes.fields[class][field]
+                    && (matches!(ty, Type::WeakProxy(_))
+                        || self.classes.methods[target].contains_key("__call__"))
+                {
+                    return self.invoke(
+                        call,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Field(Box::new(receiver), field),
+                        },
+                    );
                 }
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
@@ -9902,6 +9947,12 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [proxy] = args.as_slice()
+            && matches!(proxy.ty, Type::WeakProxy(_))
+            && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())
+        {
+            return Ok(value);
+        }
         if name.id == "tuple"
             && self.unshadowed_builtin(&call.func, "tuple")
             && let [value] = args.as_slice()

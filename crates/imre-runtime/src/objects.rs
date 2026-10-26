@@ -121,6 +121,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    WeakProxy(records::weak::WeakRecord, bool),
     FunctoolsPlaceholder {
         class: bool,
     },

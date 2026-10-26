@@ -614,6 +614,8 @@ impl Builtin {
             | Self::GzipOpen
             | Self::BytesIo
             | Self::StringIo(_)
+            | Self::WeakProxyNew
+            | Self::WeakProxyTarget
             | Self::ContextVar(_)
             | Self::BinarySeek
             | Self::BinaryTell
@@ -718,6 +720,7 @@ impl Builtin {
             | Self::DictIter(_)
             | Self::GlobalSet(_)
             | Self::ExactRecord(_)
+            | Self::WeakProxyCallable
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
@@ -999,7 +1002,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || name.starts_with("fn_")
         || matches!(
             name,
-            "imre_mktime"
+            "imre_weak_proxy_new"
+                | "imre_weak_proxy_target"
+                | "imre_mktime"
                 | "imre_mktime_indexed"
                 | "imre_mktime_offset"
                 | "imre_time_sequence_length"
