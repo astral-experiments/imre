@@ -15,6 +15,30 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unready_partial_function": ({
+        "main.py": "import pkg.parent\n",
+        "pkg/__init__.py": "",
+        "pkg/parent.py": "def ready() -> int:\n    return 1\nfrom . import child\ndef later() -> int:\n    return 42\n",
+        "pkg/child.py": "from .parent import later\nprint(later())\n",
+    }, "has no static binding \"later\""),
+    "partial_child_custom_getattr": ({
+        "main.py": "import pkg.http\n",
+        "pkg/__init__.py": "def __getattr__(name: str) -> str:\n    print(name)\n    return \"custom\"\n",
+        "pkg/http.py": "import pkg.child as child\n",
+        "pkg/child.py": "from . import http as partial\nprint(\"child finished\")\n",
+    }, "cyclic import through \"pkg.http\""),
+    "decorated_partial_function": ({
+        "main.py": "import pkg.parent\n",
+        "pkg/__init__.py": "",
+        "pkg/parent.py": "from functools import cache\n@cache\ndef earlier() -> int:\n    return 42\nfrom . import child\n",
+        "pkg/child.py": "from .parent import earlier\nprint(earlier())\n",
+    }, "cyclic import through \"pkg.parent\""),
+    "partial_source_value": ({
+        "main.py": "import pkg.parent\n",
+        "pkg/__init__.py": "",
+        "pkg/parent.py": "answer = 42\nfrom . import child\n",
+        "pkg/child.py": "from .parent import answer\nprint(answer)\n",
+    }, "cyclic import through \"pkg.parent\""),
     "private_textwrap_module": ({"main.py": "import __imre_textwrap_wrapper__\n"}, "private textwrap implementation"),
     "private_textwrap_helper": ({"main.py": "from textwrap import _chunk_text\n"}, "unsupported sealed standard-library export textwrap._chunk_text"),
     "unsupported_stdlib": ({"main.py": "import turtle\n"}, 'standard-library imports and shadowing are unsupported: "turtle"'),
@@ -69,6 +93,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "ready_function_in_cycle": {
+        "main.py": "from pkg.parent import observed\nprint(observed)\n",
+        "pkg/__init__.py": "",
+        "pkg/parent.py": "def increment(n: int) -> int:\n    return n + 1\nfrom . import child\nobserved = child.result\n",
+        "pkg/child.py": "from .parent import increment\nresult = increment(41)\n",
+    },
+    "partial_child_shared_storage": {
+        "main.py": "import pkg.parent\n",
+        "pkg/__init__.py": "",
+        "pkg/parent.py": "shared = [1]\nfrom . import child\nprint(shared[-1])\n",
+        "pkg/child.py": "from . import parent as first\nfrom . import parent as second\nfirst.shared.append(42)\nprint(second.shared[-1])\n",
+    },
     "cast_mutable": {"main.py": 'from typing import cast as view\ndef fresh() -> list[int]:\n    print("create")\n    return [1]\nvalues = view("list[int]", fresh())\nview("list[int]", values).append(7)\nprint(values[1])\n'},
     "type_aliases": {
         "types_used.py": (
