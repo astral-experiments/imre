@@ -1,5 +1,7 @@
 """Native tab stops, identity, integer conversion and CPython's evaluation order."""
 
+from http import HTTPStatus
+
 class Width:
     def __init__(self, value: int):
         self.value = value
@@ -90,6 +92,8 @@ for s in ["", "abc", "世界", "\t", "\t\t", "a\r\nb\tc", "🙂\t\r\t", "e\u0301
 
 print(repr("\t\t".expandtabs(True)))
 print(repr("x\t".expandtabs(False)))
+print(len("x\t".expandtabs(HTTPStatus.OK)))
+print("plain".expandtabs(tabsize=HTTPStatus.NOT_FOUND))
 for n in [2147483647, -2147483648, 2147483648, -2147483649, 1 << 100, -(1 << 100)]:
     try: show("no tabs", n)
     except OverflowError as e: print(e)
