@@ -56,6 +56,7 @@ pub(crate) use json::{
 };
 mod linecache;
 mod logging;
+pub(crate) use logging::record::percent_integer_field;
 mod mappings;
 mod module_specs;
 mod namespaces;
