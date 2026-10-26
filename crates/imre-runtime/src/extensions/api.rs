@@ -79,7 +79,7 @@ extern "C" fn imre_py_long_from_long(value: c_long) -> Py {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, size: isize) -> Py {
     let Ok(size) = usize::try_from(size) else {
-        return extensions_error(
+        return Error::return_static_message(
             Kind::SystemError,
             "Negative size passed to PyBytes_FromStringAndSize",
             Py::NULL,
@@ -87,7 +87,11 @@ unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, siz
     };
     // CPython's bytes object also needs its variable header, cached hash and trailing NUL.
     if size > isize::MAX as usize - (4 * size_of::<usize>() + 1) {
-        return extensions_error(Kind::OverflowError, "byte string is too large", Py::NULL);
+        return Error::return_static_message(
+            Kind::OverflowError,
+            "byte string is too large",
+            Py::NULL,
+        );
     }
     let mut bytes = Vec::new();
     if bytes.try_reserve_exact(size).is_err() {

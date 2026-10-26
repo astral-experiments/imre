@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Python's runtime type name for exact values that cannot implement a call.
+pub(super) fn noncallable_type(ty: Type) -> Option<&'static str> {
+    Some(match ty {
+        Type::None => "NoneType",
+        Type::Bool => "bool",
+        Type::Int => "int",
+        Type::Float => "float",
+        Type::Str | Type::StrLiteral(_) => "str",
+        Type::Bytes => "bytes",
+        Type::ListInt | Type::List(_) => "list",
+        Type::Tuple(_) => "tuple",
+        Type::Dict(_) => "dict",
+        Type::Set(_) => "set",
+        _ => return None,
+    })
+}
+
 pub(super) fn wrapper_attributes(fields: ir::WrapperAttributes, types: &Types) -> Expr {
     Expr {
         ty: types.tuple(vec![Type::Str; fields.names().len()]),
@@ -247,25 +264,10 @@ impl Checker<'_> {
                     Statement::Assign(result, checker.coerce(value, accumulator, function)?)
                 } else {
                     // Exact noncallable values are valid until a step actually calls one.
-                    let name = match checker.locals[callback_slot] {
-                        Type::None => "NoneType",
-                        Type::Bool => "bool",
-                        Type::Int => "int",
-                        Type::Float => "float",
-                        Type::Str | Type::StrLiteral(_) => "str",
-                        Type::Bytes => "bytes",
-                        Type::ListInt | Type::List(_) => "list",
-                        Type::Tuple(_) => "tuple",
-                        Type::Dict(_) => "dict",
-                        Type::Set(_) => "set",
-                        _ => {
-                            return Err(error(
-                                checker.source,
-                                function,
-                                "unsupported reduce callback type",
-                            ));
-                        }
-                    };
+                    let name =
+                        noncallable_type(checker.locals[callback_slot]).ok_or_else(|| {
+                            error(checker.source, function, "unsupported reduce callback type")
+                        })?;
                     type_error(&format!("'{name}' object is not callable"))
                 };
                 Ok(vec![if let Some(slot) = missing {

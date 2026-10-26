@@ -39,8 +39,8 @@ pub struct RecordDescriptor {
     pub semantics: *const RecordSemantics,
 }
 
-/// Kinds are zero for a class, one for a tuple, and two for a Python function
-/// that owns a wrapper link. Flags select generated equality and representation.
+/// Kinds are zero for a class, one for a tuple, two for a ModuleSpec, and three
+/// for a Python function with a wrapper link. Flags select generated equality and representation.
 /// All strings are immutable UTF-8 byte slices.
 #[repr(C)]
 pub struct RecordSemantics {
@@ -78,9 +78,15 @@ impl RecordDescriptor {
         }
     }
 
+    // Bit 3 is local to each semantic kind: classes can use inline value storage;
+    // stat tuples instead own extra numeric fields after their visible elements.
     pub(super) fn is_value_struct(&self) -> bool {
         // SAFETY: the compiler emits immutable metadata for the lifetime of the program.
-        unsafe { self.semantics.as_ref().is_some_and(|s| s.flags & 8 != 0) }
+        unsafe {
+            self.semantics
+                .as_ref()
+                .is_some_and(|s| s.kind == 0 && s.flags & 8 != 0)
+        }
     }
 
     /// Only records with a pure TOML hash reserve an extra untraced cache word.
@@ -93,7 +99,9 @@ impl RecordDescriptor {
         // These struct-sequence attributes contain only raw numbers. They are
         // neither Python tuple elements nor owners to be visited during release.
         // SAFETY: a non-null semantics pointer refers to the descriptor's permanent metadata.
-        let stat_words = if unsafe { self.semantics.as_ref() }.is_some_and(|s| s.flags & 8 != 0) {
+        let stat_words = if unsafe { self.semantics.as_ref() }
+            .is_some_and(|s| s.kind == 1 && s.flags & 8 != 0)
+        {
             super::os::stat_result::EXTRA_WORDS
         } else {
             0
@@ -728,6 +736,32 @@ mod tests {
             }
             kind.release(old);
         }
+    }
+
+    #[test]
+    fn class_inline_storage_and_stat_tail_use_their_own_semantic_kind() {
+        fn layout(kind: u32) -> (bool, usize) {
+            let semantics = RecordSemantics {
+                kind,
+                flags: 8,
+                name: std::ptr::null(),
+                name_len: 0,
+                qualified_name: std::ptr::null(),
+                qualified_name_len: 0,
+                fields: std::ptr::null(),
+            };
+            let descriptor = RecordDescriptor {
+                length: 10,
+                kinds: std::ptr::null(),
+                semantics: &semantics,
+            };
+            (descriptor.is_value_struct(), descriptor.allocated_words())
+        }
+        assert_eq!(layout(0), (true, 10));
+        assert_eq!(
+            layout(1),
+            (false, 10 + super::super::os::stat_result::EXTRA_WORDS)
+        );
     }
 
     #[test]

@@ -170,6 +170,21 @@ impl Checker<'_> {
     /// Class arguments are static builtin/nominal classes or tuples of them;
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
+        use InstanceType::{Deque, Exact, List, Tuple};
+        match self.collection_class_name(expression) {
+            Some("collections.deque") => return Ok(vec![Deque]),
+            Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
+            Some("collections.abc.Sequence") => {
+                return Ok(vec![
+                    List,
+                    Deque,
+                    Tuple,
+                    Exact(Type::Str),
+                    Exact(Type::Bytes),
+                ]);
+            }
+            _ => {}
+        }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
@@ -309,14 +324,32 @@ impl Checker<'_> {
         let classes = match self.instance_types(classes) {
             Ok(classes) => classes,
             Err(diagnostic) => {
-                if let Ok(target) = self.expr(classes)
-                    && matches!(target.ty, Type::ForwardRef(_))
-                {
-                    return Ok(Self::class_check_error(
-                        value,
-                        target,
-                        "isinstance() arg 2 must be a type, a tuple of types, or a union",
-                    ));
+                if let Ok(target) = self.expr(classes) {
+                    match target.ty {
+                        Type::Placeholder(ir::PlaceholderKind::Class) => {
+                            // Looking up either operand can run Python code.
+                            let mut scope = calls::ArgumentScope::default();
+                            let value = scope.hold(self, value);
+                            scope.hold(self, target);
+                            let class =
+                                InstanceType::Exact(Type::Placeholder(ir::PlaceholderKind::Value));
+                            return Ok(scope.finish(Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Builtin(
+                                    Builtin::IsInstance(vec![class]),
+                                    vec![value],
+                                ),
+                            }));
+                        }
+                        Type::ForwardRef(_) | Type::Placeholder(ir::PlaceholderKind::Value) => {
+                            return Ok(Self::class_check_error(
+                                value,
+                                target,
+                                "isinstance() arg 2 must be a type, a tuple of types, or a union",
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
                 return Err(diagnostic);
             }

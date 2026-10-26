@@ -1,4 +1,4 @@
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 
 
 def visit(key: int, events: list[int]) -> int:
@@ -28,6 +28,20 @@ def counter_keywords(owner: Counter[str]) -> dict[int, int]:
 
 
 def main() -> None:
+    ordered = OrderedDict(seed=1)
+    keys_arg = [4, 5]
+    order: list[int] = []
+    from_positional = ordered.fromkeys(before(keys_arg, order), value=argument(keys_arg, order))
+    print(list(from_positional))
+    print(from_positional[4])
+    print(order)
+    order.clear()
+    from_keywords = ordered.fromkeys(value=argument(keys_arg, order), iterable=before(keys_arg, order))
+    print(list(from_keywords))
+    print(from_keywords[4])
+    print(order)
+    print(list(ordered.fromkeys(iterable=["b", "a", "b"])))
+
     print(dict.fromkeys("éaé"))
     print(dict.fromkeys((4, 5), 0))
     print(dict.fromkeys(range(6), 0))

@@ -42,6 +42,7 @@ type WeakObject = shared::Weak<objects::Object>;
 use string_owner::{StrOwner, WeakStr};
 mod integer_power;
 mod integer_text;
+mod nominal_classes;
 mod objects;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
@@ -553,10 +554,10 @@ impl<W: Write> Write for Output<W> {
 
 impl<W: Write> BinaryOutput<W> {
     /// Buffer writes to a file or pipe up to its configured binary capacity.
-    fn with_capacity(capacity: usize, inner: W) -> Self {
+    fn with_buffer(buffer: Vec<u8>, inner: W) -> Self {
         Self {
             inner,
-            buffer: Vec::with_capacity(capacity),
+            buffer,
             written: 0,
         }
     }
@@ -1790,7 +1791,7 @@ mod tests {
     #[test]
     fn output_works_with_and_without_a_reserved_buffer() {
         for capacity in [0, 8] {
-            let mut output = BinaryOutput::with_capacity(capacity, Vec::new());
+            let mut output = BinaryOutput::with_buffer(Vec::with_capacity(capacity), Vec::new());
             output.write_all(b"abc").unwrap();
             assert_eq!(output.inner.is_empty(), capacity != 0);
             output.write_all(b"0123456789").unwrap();
@@ -1841,7 +1842,7 @@ mod tests {
             }
         }
 
-        let mut output = BinaryOutput::with_capacity(16, Sink::default());
+        let mut output = BinaryOutput::with_buffer(Vec::with_capacity(16), Sink::default());
         output.write_all(b"partial").unwrap();
         assert_eq!(
             output.flush().unwrap_err().kind(),
@@ -1876,7 +1877,7 @@ mod tests {
         ] {
             let mut pipe = [0; 2];
             let mut restored = [0; 4];
-            let mut output = BinaryOutput::with_capacity(4, Pipe(&mut pipe));
+            let mut output = BinaryOutput::with_buffer(Vec::with_capacity(4), Pipe(&mut pipe));
             output.write_all(prefix.as_bytes()).unwrap();
             let result = output.write_all(next.as_bytes()).map_err(|e| e.kind());
             assert_eq!(

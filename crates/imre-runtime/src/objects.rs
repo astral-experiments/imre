@@ -17,6 +17,7 @@ mod bytes;
 mod cache_paths;
 mod calendar;
 mod chainmap;
+mod charmaps;
 mod codecs;
 pub(crate) use codecs::Codec;
 mod contexts;
@@ -31,6 +32,7 @@ pub(crate) mod exceptions;
 mod files;
 mod fnmatch;
 mod format_cursors;
+mod functools;
 mod hashlib;
 mod inspect;
 mod itertools;
@@ -102,6 +104,9 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    FunctoolsPlaceholder {
+        class: bool,
+    },
     Context(Rc<contextvars::State>),
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),
@@ -137,6 +142,8 @@ enum Storage {
     ModuleMember(errno::Member),
     CsvReader(Box<csv::Reader>),
     CodecInfo(codecs::Codec),
+    CodecWriterClass(codecs::writer::WriterClass),
+    CodecWriter(allocator_api2::boxed::Box<codecs::writer::Writer>),
     Exception(exceptions::Exception),
     ObjectValue(OwnedWord),
     File(Box<files::FileState>),

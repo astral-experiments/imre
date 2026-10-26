@@ -119,7 +119,7 @@ def blocked_write(command: list[str], free: int, mode: str) -> subprocess.Comple
         os.close(writer)
 
 
-def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
+def visible_output(fd: int, expected: bytes, timeout: float, label: str = "interactive output") -> bytes:
     """Wait for a protocol message, without assuming a buffer size or write count."""
     output = bytearray()
     deadline = time.monotonic() + timeout
@@ -128,7 +128,7 @@ def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
         while len(output) < len(expected):
             remaining = deadline - time.monotonic()
             assert remaining > 0 and selector.select(remaining), (
-                "output was not visible before the next program action",
+                f"{label} was not visible within {timeout:g} seconds",
                 bytes(output),
                 expected,
             )
@@ -138,9 +138,9 @@ def visible_output(fd: int, expected: bytes, timeout: float) -> bytes:
                 if error.errno != errno.EIO:
                     raise
                 part = b""  # Linux PTYs report EIO when their last slave closes.
-            assert part, ("child closed its output before the message", bytes(output))
+            assert part, (f"child closed its output before {label}", bytes(output))
             output.extend(part)
-    same_output(bytes(output), expected, "interactive message")
+    same_output(bytes(output), expected, label)
     return bytes(output)
 
 
@@ -249,15 +249,17 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     return 7
 
 
-def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
+def check_run_command(directory: Path, compiler: str, flags: list[str], timeout: float) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
     require_success(help_text, "imre run --help")
     assert b"imre run SOURCE.py" in help_text.stdout
     script_dir = directory / "scripts"
     script_dir.mkdir()
     source = script_dir / "show args.py"
+    started = "imre run entered the script\n"
     source.write_text(
-        "import os\nfrom pathlib import Path\nfrom sys import argv\n"
+        "import os\nfrom pathlib import Path\nfrom sys import argv, stderr\n"
+        f"stderr.write({started!r})\nstderr.flush()\n"
         "for arg in argv:\n    print(arg)\n"
         "print(Path('message').read_text(encoding='utf-8'))\n"
         "print(os.environ.copy()['IMRE_RUN_TEST'])\nprint(input())\n",
@@ -277,11 +279,14 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         ) as process:
             try:
-                visible_output(process.stdout.fileno(), ready, 60)
+                # imre run compiles and links before any Python statement executes.
+                visible_output(process.stderr.fileno(), started.encode(), 180, "native script startup")
+                visible_output(process.stdout.fileno(), ready, timeout, "stdout before stdin")
+                assert process.poll() is None, "child exited before receiving input"
                 assert not list(scratch.iterdir()), "run left temporary files while the child waited for input"
                 if interrupt:
                     os.killpg(process.pid, signal.SIGKILL)
-                out, error = process.communicate(None if interrupt else b"from stdin\n", timeout=60)
+                out, error = process.communicate(None if interrupt else b"from stdin\n", timeout=timeout)
             finally:
                 if process.returncode is None:
                     with suppress(ProcessLookupError):
@@ -351,7 +356,7 @@ def main() -> None:
         if args.sanitize:
             flags.append("--sanitize")
         passed += check_link_options(temporary, compiler, runtime)
-        passed += check_run_command(temporary, compiler, flags)
+        passed += check_run_command(temporary, compiler, flags, args.timeout)
         sources = {}
         for name, source in PROGRAMS.items():
             path = temporary / f"{name}.py"

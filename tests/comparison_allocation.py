@@ -9,7 +9,7 @@ def check(args, directory):
     source = fixtures / "comparison.py"
     wrapper = directory / "refuse.o"
     subprocess.run([args.clang, "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
-    symbols = ("malloc", "realloc", "imre_record_equal", "imre_system_exit_code_equal")
+    symbols = ("malloc", "realloc", "imre_record_equal", "imre_sequence_equal", "imre_system_exit_code_equal")
     link = ["-C", f"link-arg={wrapper}"]
     for name in symbols:
         link += ["-C", f"link-arg=-Wl,--wrap={name}"]
@@ -17,11 +17,11 @@ def check(args, directory):
         link += ["--lto-linker", args.lto_linker.resolve()]
     clean = os.environ.copy()
     clean.pop("IMRE_REFUSE_COMPARISON", None)
-    modes = ("direct", "boxed", "scalar")
+    modes = ("direct", "boxed", "ordered", "plain", "scalar")
     expected = {mode: subprocess.check_output([args.python, "-I", source, mode, "3"])
                 for mode in modes}
     oom = {mode: subprocess.check_output([args.python, "-I", fixtures / "oracle.py", mode])
-           for mode in ("direct", "boxed")}
+           for mode in modes if mode != "scalar"}
     passed = 0
     for level in args.opt_levels:
         exe = directory / f"comparison-O{level}"

@@ -24,6 +24,7 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
     def __init__(self, value, *rest):
@@ -104,6 +105,37 @@ print(repr(error.strerror))
 print(repr(error.filename))
 print(repr(error.filename2))
 print(repr(error.characters_written))
+""",
+    "builtin_exception_forwarding_formats": """
+class Item(KeyError):
+    def __init__(self, tag, *args):
+        self.tag = tag
+        super().__init__(*args)
+
+class Root(ValueError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class Mixed(Root, KeyError):
+    pass
+
+class One(OSError):
+    def __init__(self, value, *rest):
+        self.tag = value
+        super().__init__(value, *rest)
+
+class OrdinaryOS(One, KeyError):
+    pass
+
+print(str(Item("marker")))
+print(str(Item("marker", "missing")))
+print(str(Item("marker", 17)))
+print(str(Item("marker", "x", "y")))
+print(repr(Item("marker", "missing").args))
+print(str(Mixed("through the MRO")))
+print(str(One("ordinary message")))
+print(str(OrdinaryOS("OSError takes precedence")))
 """,
     "classvar_exception_constructor": """
 from typing import ClassVar
@@ -1026,6 +1058,24 @@ Problem("before", "after")
         for name in fields
     },
 
+    "unsupported_forwarding_OSError": """
+class Problem(OSError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem(2, "missing", "path")
+print(repr(e.args))
+print(str(e))
+""",
+    "unsupported_forwarding_UnicodeEncodeError": """
+class Problem(UnicodeEncodeError):
+    def __init__(self, leading, *rest):
+        self.tag = leading
+        super().__init__(leading, *rest)
+e = Problem("ascii", "ø", 0, 1, "invalid")
+print(repr(e.args))
+print(str(e))
+""",
     **{
         f"forwarding_exception_descriptor_{name}": f"""
 class Problem(Exception):
@@ -1126,7 +1176,6 @@ print(Report("message"))
         print(Problem("shadow"))
     """,
     "import_error_unsupported_argument": "ImportError([1, 2])",
-    "import_error_expanded_keywords": "ImportError(**{'name': 'pkg'})",
     "import_error_unnarrowed_field": "def f(e: Exception) -> None:\n    print(e.name)\n",
     "handler_uninitialized": """
 try:
@@ -1190,14 +1239,14 @@ try:
     value = None
     raise ValueError()
 except ValueError:
-    print(value + 1)
+    number: int = value
 """,
     "finally_optional_fact": """
 value: int | None = 1
 try:
     value = None
 finally:
-    print(value + 1)
+    number: int = value
 """,
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',

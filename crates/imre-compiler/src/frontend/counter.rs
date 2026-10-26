@@ -226,7 +226,7 @@ impl Checker<'_> {
         self.counter_counts(&bound, Some(receiver), None, operation)
     }
 
-    fn counter_input(
+    pub(super) fn counter_input(
         &mut self,
         source: &ast::Expr,
         hint: Option<Type>,

@@ -17,21 +17,21 @@ pub(super) struct Output {
 }
 
 impl Output {
-    pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
-        Self {
+    pub(super) fn new(file: File, capacity: usize, binary: bool) -> Result<Self> {
+        Ok(Self {
             line_buffering: !binary && file.is_terminal(),
-            raw: BinaryOutput::with_capacity(capacity, file),
+            raw: BinaryOutput::with_buffer(reserve(capacity)?, file),
             text: (!binary).then(crate::text_output::PendingText::default),
-        }
+        })
     }
 
-    pub(super) fn pipe(file: File, capacity: usize, line_buffering: bool) -> Self {
+    pub(super) fn pipe(file: File, capacity: usize, line_buffering: bool) -> Result<Self> {
         // Popen creates TextIOWrapper(write_through=True) around the binary pipe.
-        Self {
-            raw: BinaryOutput::with_capacity(capacity, file),
+        Ok(Self {
+            raw: BinaryOutput::with_buffer(reserve(capacity)?, file),
             text: None,
             line_buffering,
-        }
+        })
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
@@ -91,8 +91,112 @@ impl Read for Source {
     }
 }
 
+fn reserve(capacity: usize) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    data.try_reserve_exact(capacity)
+        .map_err(|_| Error::memory_error())?;
+    Ok(data)
+}
+
+// Standard BufReader cannot adopt a fallibly reserved buffer. Keep regular
+// files on their existing reader and let a subprocess pipe own its reservation.
+enum ReadBuffer {
+    File(BufReader<io::Take<Source>>),
+    Pipe {
+        source: io::Take<Source>,
+        bytes: Vec<u8>,
+        start: usize,
+        window: usize,
+    },
+}
+
+impl ReadBuffer {
+    fn into_inner(self) -> io::Take<Source> {
+        match self {
+            Self::File(r) => r.into_inner(),
+            Self::Pipe { source, .. } => source,
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut io::Take<Source> {
+        match self {
+            Self::File(r) => r.get_mut(),
+            Self::Pipe { source, .. } => source,
+        }
+    }
+    fn buffer(&self) -> &[u8] {
+        match self {
+            Self::File(r) => r.buffer(),
+            Self::Pipe { bytes, start, .. } => &bytes[*start..],
+        }
+    }
+    fn capacity(&self) -> usize {
+        match self {
+            Self::File(r) => r.capacity(),
+            Self::Pipe { window, .. } => *window,
+        }
+    }
+}
+
+impl BufRead for ReadBuffer {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match self {
+            Self::File(reader) => reader.fill_buf(),
+            Self::Pipe {
+                source,
+                bytes,
+                start,
+                window,
+            } => {
+                if *start == bytes.len() {
+                    bytes.clear();
+                    *start = 0;
+                    let available = source.limit().min(*window as u64) as usize;
+                    if available != 0 {
+                        // A short binary buffer (including unbuffered text) only
+                        // needs the larger decoding window when a read occurs.
+                        bytes
+                            .try_reserve_exact(available)
+                            .map_err(|_| io::ErrorKind::OutOfMemory)?;
+                        let n = source
+                            .get_mut()
+                            .read_uninit(&mut bytes.spare_capacity_mut()[..available])?;
+                        // SAFETY: read_uninit initialized exactly the first n reserved bytes.
+                        unsafe { bytes.set_len(n) };
+                        source.set_limit(source.limit() - n as u64);
+                    }
+                }
+                Ok(&bytes[*start..])
+            }
+        }
+    }
+    fn consume(&mut self, count: usize) {
+        match self {
+            Self::File(reader) => reader.consume(count),
+            Self::Pipe { bytes, start, .. } => *start += count.min(bytes.len() - *start),
+        }
+    }
+}
+
+impl Read for ReadBuffer {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if let Self::File(reader) = self {
+            return reader.read(out);
+        }
+        if out.is_empty() {
+            return Ok(0);
+        }
+        if self.buffer().is_empty() && out.len() >= self.capacity() {
+            return self.get_mut().read(out);
+        }
+        let count = self.fill_buf()?.read(out)?;
+        self.consume(count);
+        Ok(count)
+    }
+}
+
 pub(super) struct Input {
-    raw: BufReader<io::Take<Source>>,
+    raw: ReadBuffer,
     text: TextBuffer,
     unbuffered: bool,
 }
@@ -107,24 +211,27 @@ impl Input {
         // TextIOWrapper reads 8192 bytes per decode. CPython 3.14's binary
         // BufferedReader reads 128 KiB ahead, exposing errors in that chunk.
         Self {
-            raw: BufReader::with_capacity(
+            raw: ReadBuffer::File(BufReader::with_capacity(
                 if binary { 128 * 1024 } else { 8192 },
                 source.take(u64::MAX),
-            ),
+            )),
             text: TextBuffer::default(),
             unbuffered: false,
         }
     }
 
-    pub(super) fn pipe(file: File, binary: bool, capacity: usize) -> Self {
-        Self {
-            raw: BufReader::with_capacity(
-                if binary { capacity.max(1) } else { 8192 },
-                Source::Plain(file).take(u64::MAX),
-            ),
+    pub(super) fn pipe(file: File, binary: bool, capacity: usize) -> Result<Self> {
+        let window = if binary { capacity.max(1) } else { 8192 };
+        Ok(Self {
+            raw: ReadBuffer::Pipe {
+                source: Source::Plain(file).take(u64::MAX),
+                bytes: reserve(capacity)?,
+                start: 0,
+                window,
+            },
             text: TextBuffer::default(),
             unbuffered: binary && capacity == 0,
-        }
+        })
     }
 
     pub(super) fn into_file(self) -> File {

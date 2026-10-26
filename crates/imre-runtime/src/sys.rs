@@ -1,4 +1,5 @@
 //! Process text streams and their native encoding and buffering.
+mod recursion;
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
 mod intern;
 use crate::StrOwner;

@@ -62,6 +62,7 @@ pub(crate) enum IntrinsicModule {
     Importlib,
     ImportlibMachinery,
     ImportlibUtil,
+    Array,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -109,6 +110,7 @@ pub(crate) enum IntrinsicModule {
     Urllib,
     UrllibParse,
     Collections,
+    CollectionsNative,
     CollectionsAbc,
     Copy,
     Itertools,
@@ -145,6 +147,7 @@ pub(crate) enum Intrinsic {
     CopyContext,
     ModuleSpec,
     CachePath { reverse: bool },
+    NominalClass(&'static str),
     GetAnnotations,
     Overload,
     GetOverloads,
@@ -156,6 +159,7 @@ pub(crate) enum Intrinsic {
     AnnotationFormat(i64),
     Declaration(&'static str),
     BuiltinsLast,
+    BuiltinsLen,
     BuiltinsAscii,
     SysDisplayHook,
     ArgumentParser,
@@ -214,6 +218,7 @@ pub(crate) enum Intrinsic {
     Partial,
     Placeholder,
     Reduce,
+    CmpToKey,
     TomlDumps,
     TomliLoads,
     TomliLoad,
@@ -252,6 +257,9 @@ pub(crate) enum Intrinsic {
     SysEncoding(&'static str),
     SysIntern { query: bool },
     SysException,
+    SysGetFrameModuleName,
+    SysGetRecursionLimit,
+    SysSetRecursionLimit,
     SysJitPredicate(&'static str),
     Stdin,
     OsName,
@@ -300,6 +308,7 @@ pub(crate) enum Intrinsic {
     Sha256,
     CodecInfoClass,
     CodecLookup,
+    CodecGetWriter,
     CodecBom(&'static [u8]),
     HashNew,
     SimpleNamespace,
@@ -329,6 +338,7 @@ pub(crate) enum Intrinsic {
     OrderedDict,
     NamedTuple,
     Counter,
+    CountElements,
     Deque,
     Repeat,
     LengthHint,
@@ -420,11 +430,15 @@ impl IntrinsicModule {
     /// Ty resolves these builtin names solely against its bundled stdlib. Only
     /// the exact import proved by the closed checker needs an import diagnostic.
     pub(crate) fn lacks_builtin_stub(self) -> bool {
-        matches!(self, Self::Opcode | Self::StringFormatting)
+        matches!(
+            self,
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+        )
     }
 
     fn named(name: &str) -> Option<Self> {
         match name {
+            "array" => Some(Self::Array),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -472,6 +486,7 @@ impl IntrinsicModule {
             "importlib.machinery" => Some(Self::ImportlibMachinery),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
+            "_collections" => Some(Self::CollectionsNative),
             "collections.abc" => Some(Self::CollectionsAbc),
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
@@ -544,6 +559,16 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::ImreToml));
         }
         let symbol = match (self, name) {
+            (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::CollectionsAbc, "Sequence") => {
+                Intrinsic::NominalClass("collections.abc.Sequence")
+            }
+            (Self::CollectionsAbc, "MutableSequence") => {
+                Intrinsic::NominalClass("collections.abc.MutableSequence")
+            }
+            (Self::CollectionsAbc, "MutableMapping") => {
+                Intrinsic::NominalClass("collections.abc.MutableMapping")
+            }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
@@ -660,6 +685,7 @@ impl IntrinsicModule {
             (Self::Functools, "partial") => Intrinsic::Partial,
             (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
             (Self::Functools, "reduce") => Intrinsic::Reduce,
+            (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
             (Self::Tomli, "load") => Intrinsic::TomliLoad,
@@ -676,6 +702,9 @@ impl IntrinsicModule {
             (Self::Sys, "stdout" | "__stdout__") => Intrinsic::Stdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
             (Self::Sys, "exception") => Intrinsic::SysException,
+            (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
+            (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
+            (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
@@ -709,6 +738,7 @@ impl IntrinsicModule {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
+            (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
@@ -756,7 +786,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::Sequence,
             (Self::Typing | Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping {
                 typing_alias: self == Self::Typing,
             },
@@ -793,6 +823,7 @@ impl IntrinsicModule {
 
                 _ => return None,
             }),
+            (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Base64, "urlsafe_b64encode") => Intrinsic::UrlsafeB64encode,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
@@ -822,9 +853,12 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
-            (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "_count_elements") => {
+                Intrinsic::CountElements
+            }
+            (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
+            (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
-            (Self::Collections, "deque") => Intrinsic::Deque,
             (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
@@ -981,6 +1015,7 @@ pub(crate) struct SourceGraph {
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
+    pub(crate) mutable_builtin_len: bool,
     reachable: Option<reachability::Reachable>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
@@ -1078,6 +1113,49 @@ impl SourceGraph {
             scan.found
         })
     }
+    /// A write affects bare len calls in every module, including earlier definitions.
+    fn writes_builtin_len(&self) -> bool {
+        use ruff_python_ast::visitor::{Visitor, walk_expr};
+        struct Scan<'a> {
+            graph: &'a SourceGraph,
+            module: ModuleId,
+            writes: bool,
+        }
+        impl<'a> Visitor<'a> for Scan<'_> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if let ast::Expr::Attribute(attr) = expr
+                    && attr.ctx != ast::ExprContext::Load
+                    && self.graph.resolve(self.module, expr)
+                        == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen))
+                {
+                    self.writes = true;
+                }
+                if !self.writes {
+                    walk_expr(self, expr);
+                }
+            }
+        }
+        if !self.modules.iter().any(|source| {
+            source
+                .bindings
+                .values()
+                .any(|binding| *binding == Binding::IntrinsicModule(IntrinsicModule::Builtins))
+        }) {
+            return false;
+        }
+        self.modules.iter().enumerate().any(|(module, source)| {
+            let mut scan = Scan {
+                graph: self,
+                module,
+                writes: false,
+            };
+            for stmt in &source.parsed.syntax().body {
+                scan.visit_stmt(stmt);
+            }
+            scan.writes
+        })
+    }
+
     /// Ordinary file builds keep assertions at every native optimizer level.
     pub(crate) fn python_optimization(&self) -> i32 {
         self.command_startup
@@ -1127,6 +1205,11 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// Native evaluation of this exact call raises for a known noncallable object.
+    pub(crate) fn checked_noncallable(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::NonCallable(call));
+    }
+
     /// A checked runtime overload can legally stand alone: calling the dummy raises.
     pub(crate) fn runtime_overload(&self, module: ModuleId, name: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
@@ -1155,6 +1238,12 @@ impl SourceGraph {
     pub(crate) fn checked_positional_keyword(&self, module: ModuleId, keyword: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
+    }
+
+    /// Lowering checked this exact operand against the native integer protocol.
+    pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::ArgumentType(argument));
     }
 
     pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
@@ -1193,11 +1282,22 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::BuiltinImport(alias));
     }
 
+    /// A sealed module exports this exact member even when typeshed omits it.
+    pub(crate) fn checked_builtin_attribute(&self, module: ModuleId, name: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::BuiltinAttribute(name));
+    }
+
     /// Record an integer access with a proved native indexing implementation.
     /// Other diagnostics at this index or inside the receiver remain visible.
     pub(crate) fn checked_index_read(&self, module: ModuleId, read: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::CheckedIndexRead(read));
+    }
+
+    /// The accelerated result of cmp_to_key remains callable after binding an object.
+    pub(crate) fn checked_callable_key(&self, module: ModuleId, call: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::CallableKey(call));
     }
 
     /// The native table is an actual dict, including errno.errorcode (a Mapping in typeshed).
@@ -1782,6 +1882,7 @@ impl<'a> Loader<'a> {
                 .transpose()?
                 .unwrap_or_default(),
             mutable_documents: false,
+            mutable_builtin_len: false,
             reachable: None,
             entry_filename,
             inputs: self.inputs,
@@ -1794,6 +1895,7 @@ impl<'a> Loader<'a> {
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.mutable_documents = graph.uses_mutable_documents();
+        graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }
 
@@ -2146,8 +2248,16 @@ impl<'a> Loader<'a> {
                         if binding == Binding::Intrinsic(Intrinsic::BuiltinsLast) {
                             return Err("from builtins import _ needs an import-time snapshot; use a qualified lookup".into());
                         }
+                        if binding == Binding::Intrinsic(Intrinsic::BuiltinsLen) {
+                            return Err("from builtins import len needs an import-time snapshot; use a qualified lookup".into());
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        if module == IntrinsicModule::Collections
+                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
+                        {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
                     if module.lacks_builtin_stub()

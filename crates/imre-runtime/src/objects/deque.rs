@@ -13,6 +13,8 @@ pub(super) struct Deque {
     state: usize,
 }
 
+const INDEX_OVERFLOW: &str = "cannot fit 'int' into an index-sized integer";
+
 impl Deque {
     /// Detach the old elements so their owners are released outside the storage borrow.
     fn take_items(&mut self) -> VecDeque<OwnedWord> {
@@ -24,12 +26,8 @@ impl Deque {
 
     /// Convert an exact integer before normalizing negative positions against this ring.
     fn position(&self, at: &Int) -> Result<usize, Error> {
-        let raw = crate::decode_index(at).map_err(|_| {
-            Error::new(
-                Kind::IndexError,
-                "cannot fit 'int' into an index-sized integer",
-            )
-        })?;
+        let raw =
+            crate::signed_index(at).ok_or_else(|| Error::new(Kind::IndexError, INDEX_OVERFLOW))?;
         crate::index(raw, self.items.len())
             .map_err(|_| Error::new(Kind::IndexError, "deque index out of range"))
     }
@@ -231,6 +229,19 @@ pub unsafe extern "C" fn imre_deque_pop(value: *const Object, left: u32) -> usiz
         || Error::new(Kind::IndexError, "pop from an empty deque").returning(0),
         OwnedWord::into_word,
     )
+}
+
+/// Explicit deque slot wrappers report integer conversion overflow before the bounds check.
+///
+/// # Safety
+/// The caller roots the tagged integer throughout the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_check_method_index(at: usize) {
+    // SAFETY: the caller roots the tagged index.
+    let at = unsafe { Int::borrow(at) };
+    if crate::signed_index(&at).is_none() {
+        Error::new(Kind::OverflowError, INDEX_OVERFLOW).returning(());
+    }
 }
 
 /// # Safety

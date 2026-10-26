@@ -148,7 +148,18 @@ impl ReprView {
                 write!(out, "<_contextvars.Context object at {owner:p}>").unwrap()
             }
             Self::Var(owner, var) => {
-                if !REPR.with_borrow_mut(|seen| seen.insert(owner as usize)) {
+                let key = owner as usize;
+                let inserted = REPR.with_borrow_mut(|seen| {
+                    if seen.contains(&key) {
+                        return Ok(false);
+                    }
+                    seen.try_reserve(1).map(|()| seen.insert(key))
+                });
+                let Ok(inserted) = inserted else {
+                    Error::allocation().raise();
+                    return;
+                };
+                if !inserted {
                     out.push_str("...");
                     return;
                 }

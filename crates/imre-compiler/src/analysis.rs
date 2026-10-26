@@ -559,6 +559,7 @@ pub(crate) enum CheckedDiagnostic {
     RuntimeOverload(TextRange),
     OptionalLockContext(TextRange),
     Call(TextRange),
+    NonCallable(TextRange),
     InertReturn(TextRange),
     DictDeletion(TextRange),
     DeferredName(TextRange),
@@ -566,10 +567,13 @@ pub(crate) enum CheckedDiagnostic {
     CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
     BuiltinImport(TextRange),
+    BuiltinAttribute(TextRange),
     ExcessArgument(TextRange),
     PositionalKeyword(TextRange),
+    ArgumentType(TextRange),
     RepeatedKeyword(TextRange),
     NonIterableSpread(TextRange),
+    CallableKey(TextRange),
 }
 
 impl CheckedDiagnostic {
@@ -579,29 +583,36 @@ impl CheckedDiagnostic {
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
             Self::Call(range) => (range, 1),
+            Self::NonCallable(range) => (range, 12),
             Self::Keyword(range) => (range, 2),
             Self::CheckedIndexRead(range) => (range, 3),
             Self::RepeatedKeyword(range) => (range, 11),
             Self::DictDeletion(range) => (range, 8),
             Self::MissingArgument(range) => (range, 4),
             Self::BuiltinImport(range) => (range, 5),
+            Self::BuiltinAttribute(range) => (range, 14),
             Self::ExcessArgument(range) => (range, 6),
             Self::InertReturn(range) => (range, 13),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
             Self::RuntimeOverload(range) => (range, 12),
+            Self::CallableKey(range) => (range, 16),
+            Self::ArgumentType(range) => (range, 15),
         };
         (range.start(), range.end(), kind)
     }
 
     fn covers(self, diagnostic: &str, range: TextRange) -> bool {
         match self {
-            Self::AbstractClassCall(call) => diagnostic == "call-non-callable" && call == range,
+            Self::AbstractClassCall(call) | Self::CallableKey(call) => {
+                diagnostic == "call-non-callable" && call == range
+            }
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)
             }
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
+            Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
@@ -620,6 +631,8 @@ impl CheckedDiagnostic {
             Self::NonIterableSpread(value) => diagnostic == "not-iterable" && value == range,
             Self::MissingArgument(call) => diagnostic == "missing-argument" && call == range,
             Self::BuiltinImport(name) => diagnostic == "unresolved-import" && name == range,
+            Self::ArgumentType(arg) => diagnostic == "invalid-argument-type" && arg == range,
+            Self::BuiltinAttribute(name) => diagnostic == "unresolved-attribute" && name == range,
             Self::ExcessArgument(arg) => {
                 diagnostic == "too-many-positional-arguments" && arg == range
             }

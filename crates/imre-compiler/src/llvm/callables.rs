@@ -35,7 +35,10 @@ pub(super) fn adapters(
                     .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_)));
                 int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
-            invoked |= matches!(value.kind, ExprKind::Invoke { .. });
+            invoked |= matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::BuiltinsLen, _)
+            );
         });
     }
     if targets.is_empty() && !invoked {
@@ -44,8 +47,8 @@ pub(super) fn adapters(
     output.common().push_str("%callable = type { ptr, ptr }\n");
     if function_links {
         // Keep the ordinary adapter/context ABI. The optional third field owns
-        // __wrapped__; kind 2 identifies this link when reclaiming a cycle.
-        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 2, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
+        // __wrapped__; kind 3 identifies this link when reclaiming a cycle.
+        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
         output
             .global(
                 output.entry,

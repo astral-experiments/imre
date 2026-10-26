@@ -158,7 +158,11 @@ impl Checker<'_> {
             .get(name)
             .ok_or_else(|| error(self.source, at, "missing record primitive"))?
             .clone();
-        if method.params.len() != arguments.len() + 1 {
+        if method.params.len() != arguments.len() + 1
+            || (matches!(name, "get" | "__setitem__")
+                && method.method.unwrap().kind(&self.classes.declarations)
+                    != crate::classes::MethodKind::Instance)
+        {
             return Err(error(
                 self.source,
                 at,

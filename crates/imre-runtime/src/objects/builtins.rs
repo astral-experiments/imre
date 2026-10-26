@@ -1,10 +1,12 @@
 //! The default display hook owns the last displayed object in the builtins namespace.
-use super::{Error, Kind, Object, boxed_values, exceptions};
+use super::words::{OwnedWord, WordKind};
+use super::{Error, Kind, Object, boxed_values, exceptions, records};
 use crate::StrOwner;
 use std::cell::RefCell;
 
 thread_local! {
     static LAST: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
+    static LEN: RefCell<Option<OwnedWord>> = const { RefCell::new(None) };
 }
 
 // Unlike a concrete word kind, this argument already owns its runtime descriptor.
@@ -40,6 +42,68 @@ pub extern "C" fn imre_builtins_del_last() {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_builtins_clear() {
     drop(LAST.take());
+    drop(LEN.take());
+}
+
+/// The bracketed value stays rooted, including mutable containers whose length can change.
+unsafe extern "C" fn original_len(_receiver: *const usize, argument: *const usize) -> usize {
+    // SAFETY: the compiler emits [class, hash diagnostic, key, value] with concrete field types.
+    unsafe {
+        let class = &*argument.cast::<*const crate::Str>().read();
+        let value_kind = WordKind::new(*records::descriptor(argument).kinds.add(3));
+        let value = value_kind.read_record_field(argument.add(3));
+        match class.as_bytes() {
+            b"str" => crate::imre_str_len(value as *const crate::Str),
+            b"bytes" => super::bytes::imre_bytes_len(value as *const super::Bytes),
+            b"tuple" => {
+                crate::Int::from_usize(records::descriptor(value as *const usize).length).into_raw()
+            }
+            b"list" if value_kind.base() == 4 => crate::imre_list_len(value as *const crate::List),
+            b"list" => super::imre_seq_len(value as *const Object),
+            b"dict" => super::mappings::imre_dict_len(value as *const Object),
+            b"set" => super::mappings::imre_set_len(value as *const Object),
+            _ => Error::new(
+                Kind::TypeError,
+                format!("object of type '{class}' has no len()"),
+            )
+            .returning(0),
+        }
+    }
+}
+
+/// Read a retained snapshot of the binding, creating the original callable on first use.
+///
+/// # Safety
+/// The compiler supplies the permanent layout of its ordinary callable records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_builtins_len(
+    layout: *const records::RecordDescriptor,
+) -> *const usize {
+    LEN.with_borrow_mut(|slot| {
+        if slot.is_none() {
+            // SAFETY: a new ordinary callable has initialized null fields and a raw code slot.
+            unsafe {
+                let callable = records::imre_record_try_new(layout);
+                if callable.is_null() {
+                    return std::ptr::null();
+                }
+                callable
+                    .cast::<*const ()>()
+                    .write(original_len as *const ());
+                *slot = Some(OwnedWord::from_owned(callable as usize, WordKind::new(6)));
+            }
+        }
+        slot.as_ref().unwrap().clone().into_word() as *const usize
+    })
+}
+
+/// # Safety
+/// The argument is a rooted native callable with the checked len signature.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_builtins_set_len(callable: *const usize) {
+    // SAFETY: acquire before releasing the previous binding, including on self-assignment.
+    let owner = unsafe { WordKind::new(6).acquire(callable as usize) };
+    drop(LEN.replace(Some(owner)));
 }
 
 /// # Safety

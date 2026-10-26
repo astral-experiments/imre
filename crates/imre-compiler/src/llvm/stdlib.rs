@@ -5,6 +5,32 @@ use super::*;
 impl Emitter<'_, '_> {
     pub(super) fn stdlib_builtin(&mut self, builtin: &Builtin, args: &[Operand]) -> Value {
         match builtin {
+            Builtin::SortByComparator => {
+                let list = &args[0].value;
+                let callable = &args[1].value;
+                let element = self.module.types.element(list.ty).unwrap();
+                let (_, returns) = self.module.types.signature(callable.ty).unwrap();
+                let abi = match element.llvm() {
+                    "i8" => 0,
+                    "i1" => 1,
+                    "i64" => 2,
+                    "ptr" => 3,
+                    "double" => 7,
+                    _ => unreachable!("checked sort element"),
+                };
+                // Resource parameters take an owner, as in transfer_call_operands.
+                let abi = abi | (u32::from(self.resource_types.contains(&element)) << 8);
+                let target = self.instruction(format!("load ptr, ptr {}", callable.operand));
+                let context = self.instruction(format!(
+                    "getelementptr %callable, ptr {}, i32 0, i32 1",
+                    callable.operand
+                ));
+                let context = self.instruction(format!("load ptr, ptr {context}"));
+                let reverse = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                self.checked_line(format!("call void @imre_sort_by_comparator(ptr {}, i32 {}, ptr {target}, ptr {context}, i32 {abi}, i32 {}, i32 {reverse})",
+                    list.operand, representation_kind(element, &self.module.types), representation_kind(returns, &self.module.types)));
+                none()
+            }
             Builtin::SortByKeys => {
                 let element = self.module.types.element(args[0].value.ty).unwrap();
                 let key = self.module.types.element(args[1].value.ty).unwrap();

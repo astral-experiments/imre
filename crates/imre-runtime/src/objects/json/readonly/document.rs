@@ -170,7 +170,7 @@ impl Value {
 
     fn from_json_at(view: &View, index: usize, depth: usize) -> Result<Self, Error> {
         if index == view.index
-            && let Some(root) = view.snapshot_root()
+            && let Some(root) = view.snapshot_root()?
         {
             return Self::from_json_at(&root, root.index, depth);
         }

@@ -21,7 +21,8 @@ sys.path.insert(0, str(HERE.parent))
 from suite_inventory import reference_results
 
 # These are the resource configurations used by the checked-in module ledgers.
-RESOURCES = {"collections": "cpu", "json": "cpu", "logging": "all", "pathlib": "all"}
+RESOURCES = {"collections": "cpu", "json": "cpu", "logging": "all", "pathlib": "all",
+             "socketserver": "network"}
 INSTALLED_ONLY = {f"test.test_subprocess.{cls}.test_executable_without_cwd"
                   for cls in ("ProcessTestCase", "ProcessTestCaseNoPoll")}
 

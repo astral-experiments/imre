@@ -493,6 +493,14 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             write!(output, "<object object at {owner:p}>").unwrap();
                             None
                         }
+                        Storage::FunctoolsPlaceholder { class } => {
+                            output.push_str(if *class {
+                                "<class 'functools._PlaceholderType'>"
+                            } else {
+                                "Placeholder"
+                            });
+                            None
+                        }
                         Storage::StrDescriptor(index) => {
                             write!(
                                 output,
@@ -570,7 +578,10 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                             None
                         }
                         Storage::Dictionary(mapping) => {
-                            format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                            match mapping.repr_entry(output, position) {
+                                Ok(entry) => format_entry(owner, entry, &mut pending),
+                                Err(_) => Some(ReprTask::OutOfMemory),
+                            }
                         }
                         Storage::ChainMap(maps) => {
                             if position == 0 {
@@ -673,6 +684,12 @@ unsafe fn write_repr_with(output: &mut String, word: usize, kind: WordKind, chec
                     output.push_str(": ");
                     None
                 }
+                ReprTask::OutOfMemory => {
+                    if super::exceptions::imre_error_pending() == 0 {
+                        super::exceptions::sequence_allocation_failed();
+                    }
+                    return;
+                }
             }
         };
     }
@@ -686,6 +703,7 @@ enum ReprTask {
     Exception(*const Object),
     Record(*const usize, usize, usize),
     KeySeparator,
+    OutOfMemory,
 }
 
 impl ReprTask {
@@ -697,7 +715,7 @@ impl ReprTask {
                 Some((owner as usize, WordKind::new(5)))
             }
             Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
-            Self::KeySeparator | Self::Stop => None,
+            Self::KeySeparator | Self::Stop | Self::OutOfMemory => None,
         }
     }
 }
@@ -720,6 +738,23 @@ fn format_entry(
         pending.push(ReprTask::KeySeparator);
     }
     Some(ReprTask::Word(entry.key.0, entry.key.1))
+}
+
+/// # Safety
+/// The caller roots the exact integer during formatting.
+pub(super) unsafe fn write_int_repr(output: &mut impl Write, word: usize) -> std::fmt::Result {
+    // SAFETY: the caller roots the integer for this borrow.
+    let value = unsafe { Int::borrow(word) };
+    if let Some(small) = value.as_small() {
+        write!(output, "{small}")
+    } else {
+        let value = value.big();
+        if let Err(error) = crate::integer_text::check_decimal(&value) {
+            error.raise();
+            return Err(std::fmt::Error);
+        }
+        write!(output, "{value}")
+    }
 }
 
 /// # Safety

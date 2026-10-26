@@ -41,7 +41,7 @@ pub unsafe extern "C" fn imre_subprocess_shell_output(
         let command = unsafe { WordKind::new(kind).acquire(args as usize) };
         // SAFETY: the borrowed config points only to the same rooted command.
         let child = unsafe {
-            launch_error::spawn(&command, &config, streams, [-1; 3], false, |_| {
+            launch_error::spawn(&command, &config, streams, Default::default(), true, |_| {
                 Ok(ChildAttributes::default())
             })
         }?;
