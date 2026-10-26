@@ -284,21 +284,7 @@ impl Encoder<'_> {
 
     #[inline]
     fn reserve(&mut self, additional: usize) -> Result<(), Error> {
-        if additional <= self.output.capacity() - self.output.len() {
-            return Ok(());
-        }
-        self.grow(additional)
-    }
-
-    #[cold]
-    fn grow(&mut self, additional: usize) -> Result<(), Error> {
-        // A geometrically larger buffer can exceed the process limit while the
-        // result still fits. Grow in smaller chunks under memory pressure.
-        self.output
-            .try_reserve(additional)
-            .or_else(|_| self.output.try_reserve_exact(additional.max(1 << 20)))
-            .or_else(|_| self.output.try_reserve_exact(additional))
-            .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
+        reserve_output(&mut self.output, additional)
     }
 
     #[inline]
@@ -316,72 +302,8 @@ impl Encoder<'_> {
         }
     }
 
-    /// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
-    /// for non-BMP characters when ensure_ascii is requested.
     fn string(&mut self, value: &str) -> Result<(), Error> {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        if plain_ascii(value.as_bytes()) {
-            self.reserve(value.len().saturating_add(2))?;
-            self.output.push('"');
-            self.output.push_str(value);
-            self.output.push('"');
-            return Ok(());
-        }
-        self.reserve(1)?;
-        self.output.push('"');
-        let mut rest = value;
-        while !rest.is_empty() {
-            // At most six output bytes per input byte. Checking one UTF-8 chunk
-            // at a time bounds spare capacity outside the per-character loop.
-            let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
-            if 6 * chunk.len() > self.output.capacity() - self.output.len() {
-                // A worst-case reservation can fail even when the escaped chunk fits.
-                let needed = chunk
-                    .chars()
-                    .map(|character| match character {
-                        '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
-                        '\0'..='\u{1f}' => 6,
-                        _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                            6 * character.len_utf16()
-                        }
-                        _ => character.len_utf8(),
-                    })
-                    .sum();
-                self.reserve(needed)?;
-            }
-            for character in chunk.chars() {
-                match character {
-                    '"' => self.output.push_str("\\\""),
-                    '\\' => self.output.push_str("\\\\"),
-                    '\u{8}' => self.output.push_str("\\b"),
-                    '\u{c}' => self.output.push_str("\\f"),
-                    '\n' => self.output.push_str("\\n"),
-                    '\r' => self.output.push_str("\\r"),
-                    '\t' => self.output.push_str("\\t"),
-                    '\0'..='\u{1f}' => {
-                        let value = character as usize;
-                        self.output.push_str("\\u00");
-                        self.output.push(char::from(HEX[value >> 4]));
-                        self.output.push(char::from(HEX[value & 15]));
-                    }
-                    _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                        let mut buffer = [0; 2];
-                        for &unit in character.encode_utf16(&mut buffer).iter() {
-                            self.output.push_str("\\u");
-                            for shift in [12, 8, 4, 0] {
-                                self.output
-                                    .push(char::from(HEX[usize::from((unit >> shift) & 15)]));
-                            }
-                        }
-                    }
-                    _ => self.output.push(character),
-                }
-            }
-            rest = tail;
-        }
-        self.reserve(1)?;
-        self.output.push('"');
-        Ok(())
+        write_string(&mut self.output, value, self.ensure_ascii)
     }
 
     fn float(&mut self, value: f64) -> Result<(), Error> {
@@ -1008,6 +930,96 @@ pub unsafe extern "C" fn imre_json_dump(
         })
     };
     finish(result.map(|_| 1), 0)
+}
+
+#[inline]
+fn reserve_output(output: &mut String, additional: usize) -> Result<(), Error> {
+    if additional <= output.capacity() - output.len() {
+        return Ok(());
+    }
+    grow_output(output, additional)
+}
+
+#[cold]
+fn grow_output(output: &mut String, additional: usize) -> Result<(), Error> {
+    // A geometrically larger buffer can exceed the process limit while the
+    // result still fits. Grow in smaller chunks under memory pressure.
+    output
+        .try_reserve(additional)
+        .or_else(|_| output.try_reserve_exact(additional.max(1 << 20)))
+        .or_else(|_| output.try_reserve_exact(additional))
+        .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
+}
+
+/// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
+/// for non-BMP characters when ensure_ascii is requested.
+pub(crate) fn write_string(
+    output: &mut String,
+    value: &str,
+    ensure_ascii: bool,
+) -> Result<(), Error> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    if plain_ascii(value.as_bytes()) {
+        reserve_output(output, value.len().saturating_add(2))?;
+        output.push('"');
+        output.push_str(value);
+        output.push('"');
+        return Ok(());
+    }
+    reserve_output(output, 1)?;
+    output.push('"');
+    let mut rest = value;
+    while !rest.is_empty() {
+        // At most six output bytes per input byte. Checking one UTF-8 chunk
+        // at a time bounds spare capacity outside the per-character loop.
+        let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
+        if 6 * chunk.len() > output.capacity() - output.len() {
+            // A worst-case reservation can fail even when the escaped chunk fits.
+            let needed = chunk
+                .chars()
+                .map(|character| match character {
+                    '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
+                    '\0'..='\u{1f}' => 6,
+                    _ if ensure_ascii && !(' '..='~').contains(&character) => {
+                        6 * character.len_utf16()
+                    }
+                    _ => character.len_utf8(),
+                })
+                .sum();
+            reserve_output(output, needed)?;
+        }
+        for character in chunk.chars() {
+            match character {
+                '"' => output.push_str("\\\""),
+                '\\' => output.push_str("\\\\"),
+                '\u{8}' => output.push_str("\\b"),
+                '\u{c}' => output.push_str("\\f"),
+                '\n' => output.push_str("\\n"),
+                '\r' => output.push_str("\\r"),
+                '\t' => output.push_str("\\t"),
+                '\0'..='\u{1f}' => {
+                    let value = character as usize;
+                    output.push_str("\\u00");
+                    output.push(char::from(HEX[value >> 4]));
+                    output.push(char::from(HEX[value & 15]));
+                }
+                _ if ensure_ascii && !(' '..='~').contains(&character) => {
+                    let mut buffer = [0; 2];
+                    for &unit in character.encode_utf16(&mut buffer).iter() {
+                        output.push_str("\\u");
+                        for shift in [12, 8, 4, 0] {
+                            output.push(char::from(HEX[usize::from((unit >> shift) & 15)]));
+                        }
+                    }
+                }
+                _ => output.push(character),
+            }
+        }
+        rest = tail;
+    }
+    reserve_output(output, 1)?;
+    output.push('"');
+    Ok(())
 }
 
 #[cfg(test)]

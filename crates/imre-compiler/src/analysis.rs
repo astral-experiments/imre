@@ -973,7 +973,7 @@ impl<'a> Visitor<'a> for SuiteLimits<'_> {
 
 /// Ruff indexes the AST recursively as soon as the database parses a module.
 /// Bound the depth before that happens, including chains with no parentheses.
-fn check_source_complexity(source: &str) -> Result<(), &'static str> {
+pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     const LIMIT: usize = 96;
     if source.len() < LIMIT {
         return Ok(());
@@ -1086,7 +1086,7 @@ fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
 }
 
 /// Rejects ambiguous indentation while preserving whitespace inside string tokens.
-fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
+pub(crate) fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
     let mut offset = 0;
     for (line_number, line) in source.split_inclusive('\n').enumerate() {
         for (index, character) in line.char_indices() {

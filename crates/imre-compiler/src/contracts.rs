@@ -470,6 +470,7 @@ impl Builtin {
             | Self::ExceptionCause
             // A fresh exception retains its cause without replacing any existing owner.
             | Self::ExceptionWithCause
+            | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
             | Self::FloatFormat { .. }
             | Self::HexFormat { .. }
