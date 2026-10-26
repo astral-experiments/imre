@@ -2557,7 +2557,7 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
-        if self.types.cache_signature(value.ty) == Some(expected) {
+        if self.types.wrapped_signature(value.ty) == Some(expected) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -3338,9 +3338,10 @@ impl<'a> Checker<'a> {
             ExprKind::Present(value) => value.as_ref(),
             _ => value,
         };
-        if self.locals[slot] == documents::ANY
-            && let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
-            && matches!(args[0].ty, documents::LIST | documents::MAP)
+        if let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
+            && ((self.locals[slot] == documents::ANY
+                && matches!(args[0].ty, documents::LIST | documents::MAP))
+                || self.types.index_callable_signature(args[0].ty) == Some(self.locals[slot]))
         {
             self.narrowed.insert_mut(slot, args[0].ty);
         }
@@ -5338,6 +5339,8 @@ impl<'a> Checker<'a> {
             && self.types.payload(nullable) == Some(value.ty)
         {
             self.coerce(value, nullable, target)?
+        } else if let Some(signature) = self.types.index_callable_signature(value.ty) {
+            self.coerce(value, signature, target)?
         } else {
             value
         };

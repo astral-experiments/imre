@@ -2020,6 +2020,7 @@ impl Checker<'_> {
         };
         let callback_input = checked
             .as_ref()
+            .filter(|value| self.types.index_callable_signature(value.ty).is_none())
             .and_then(|value| self.types.signature(value.ty))
             .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
             .or_else(|| {
@@ -2200,6 +2201,8 @@ impl Checker<'_> {
                 ));
             }
             self.pack_len_value(item, call)?
+        } else if self.types.index_callable_signature(callback.ty).is_some() {
+            self.index_value(item, call)?
         } else {
             self.coerce(item, *parameter, call)?
         };
