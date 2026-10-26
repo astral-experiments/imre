@@ -1,3 +1,4 @@
+use super::super::calls::MappingOperation;
 use super::super::value::DictViewKind;
 use super::*;
 
@@ -24,7 +25,9 @@ pub(in super::super) fn view_items(
 
 fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some(input) = input
-        && !ctx.for_each_mapping_item(input, |ctx, key, value| ctx.put_item(dict, key, value))?
+        && !ctx.for_each_mapping_item(input, MappingOperation::Update, |ctx, key, value| {
+            ctx.put_item(dict, key, value)
+        })?
     {
         let iterator = ctx.iterator(input)?;
         for index in 0.. {

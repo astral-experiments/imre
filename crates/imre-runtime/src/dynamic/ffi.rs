@@ -117,16 +117,20 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let mapping = self.for_each_mapping_item(b, |ctx, key, val| {
-                    if op == "keywords" {
-                        ctx.str_value(key)
-                            .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
-                        ctx.op("keyword", a, key, val)?;
-                    } else {
-                        ctx.put_item(a, key, val)?;
-                    }
-                    Ok(())
-                })?;
+                let mapping = self.for_each_mapping_item(
+                    b,
+                    super::calls::MappingOperation::Unpack,
+                    |ctx, key, val| {
+                        if op == "keywords" {
+                            ctx.str_value(key)
+                                .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                            ctx.op("keyword", a, key, val)?;
+                        } else {
+                            ctx.put_item(a, key, val)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 if !mapping {
                     return Err(Error::new("TypeError", "expected a mapping"));
                 }

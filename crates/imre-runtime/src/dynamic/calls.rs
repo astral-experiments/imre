@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) enum MappingOperation {
+    Update,
+    Unpack,
+}
+
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
@@ -32,8 +37,21 @@ impl Context {
     pub(super) fn for_each_mapping_item(
         &mut self,
         input: Id,
+        operation: MappingOperation,
         mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
     ) -> Result<bool> {
+        // dict.update probes for keys before choosing a merge or a sequence of pairs.
+        // A later mapping lookup may return a different method or raise.
+        if matches!(operation, MappingOperation::Update)
+            && !matches!(self.heap.get(input), Value::Dict(_))
+            && let Err(error) = self.lookup_attr(input, "keys")
+        {
+            return if error.kind == "AttributeError" {
+                Ok(false)
+            } else {
+                Err(error)
+            };
+        }
         if self.slot(input, "__iter__").is_none_or(
             |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
         ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
@@ -57,7 +75,12 @@ impl Context {
         }
         let keys = match self.lookup_attr(input, "keys") {
             Ok(keys) => keys,
-            Err(error) if error.kind == "AttributeError" => return Ok(false),
+            Err(error)
+                if error.kind == "AttributeError"
+                    && matches!(operation, MappingOperation::Unpack) =>
+            {
+                return Ok(false);
+            }
             Err(error) => return Err(error),
         };
         let result = self.call(keys, Vec::new(), Vec::new())?;

@@ -107,6 +107,33 @@ def current():
     except ValueError:
         print(copied, list(pairs))
 
+    class Probed:
+        def __init__(self, fail=False):
+            self.lookups = 0
+            self.fail = fail
+
+        @property
+        def keys(self):
+            self.lookups += 1
+            if self.lookups == 1:
+                return lambda: ["first"]
+            if self.fail:
+                raise ValueError("second lookup")
+            return lambda: ["second"]
+
+        def __getitem__(self, key):
+            return key
+
+    probed = Probed()
+    print(dict(probed), probed.lookups)
+    probed = Probed()
+    print({**probed}, probed.lookups)
+    try:
+        received = {"kept": 1}
+        received.update(Probed(True))
+    except ValueError as error:
+        print(error.args, received)
+
     class FailsLater(Filtered):
         def keys(self):
             return ("visits", "absent")
