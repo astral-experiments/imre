@@ -48,7 +48,7 @@ The [handler scan probe](emit_werkzeug_handler_scan.py) copies `_has_level_handl
 
 ### Werkzeug access logging
 
-The [access-log fixture](werkzeug_access_log_consumer.py) calls the original Werkzeug `_log` twice. It checks logger identity, the INFO level, one cached StreamHandler, its stream identity and both lines written to stderr. The [driver](werkzeug_access_log.py) imports the complete, hash-checked `werkzeug/_internal.py` under a neutral name. This isolates logging from earlier imports in `werkzeug.__init__`. Run it with the same seven-wheel directory and compiler/runtime pair as the TCP gate.
+The comparison imports the locked wheel’s complete `werkzeug/_internal.py` under a neutral module name. Its fixture calls the original `_log` twice and checks the registered logger, its INFO level, the identity of its one cached StreamHandler and its `sys.stderr` stream, and the exact bytes written. It runs against the same seven wheels and native compiler/runtime pair as the TCP gate. [Fixture](werkzeug_access_log_consumer.py) · [Driver](werkzeug_access_log.py)
 
 ```sh
 python3.14 benchmarks/flask/werkzeug_access_log.py --compiler /path/to/imre \

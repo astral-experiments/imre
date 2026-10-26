@@ -1,4 +1,5 @@
 import logging
+import sys
 
 
 class Stream:
@@ -15,6 +16,7 @@ class Stream:
 
 
 def current():
+    assert logging.StreamHandler().stream is sys.stderr
     stream = Stream()
     child = logging.getLogger("access.child")
     parent = logging.getLogger("access")
