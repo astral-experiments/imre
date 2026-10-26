@@ -14,6 +14,20 @@ class ReportsString:
 
 
 def current():
+    marker, other = object(), object()
+    retained = {marker: 1, other: 2}
+    print(type(marker) is object, marker.__class__ is object, isinstance(marker, object))
+    print(marker is other, marker == other, retained[marker], retained[other])
+    print(bool(marker), hasattr(marker, "__dict__"))
+    try:
+        marker.value = 1
+    except AttributeError as error:
+        print(str(error))
+    for args, kwargs in (((None,), {}), ((), {"value": 1})):
+        try:
+            object(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
     identifier = uuid.UUID("12345678-1234-5678-9ABC-DEF001234567")
     print(type(identifier) is uuid.UUID, isinstance(1, uuid.UUID), str(identifier), identifier.hex)
     value = ReportsString()
@@ -39,3 +53,29 @@ def current():
         type(1, label=True)
     except TypeError as error:
         print(str(error))
+
+    class Missing(KeyError):
+        pass
+
+    print(issubclass(Missing, Missing), issubclass(Missing, LookupError), issubclass(KeyError, Missing))
+    print(issubclass(bool, int), issubclass(SystemExit, BaseException), issubclass(SystemExit, Exception))
+    print(issubclass(EOFError, Exception), issubclass(IsADirectoryError, OSError))
+    for child, parent in ((Missing, (str, (LookupError, 7))), (7, ()), (Missing, (str, 7)), (7, Missing)):
+        try:
+            print(issubclass(child, parent))
+        except TypeError as error:
+            print(str(error))
+
+    class MissingAttribute(AttributeError):
+        pass
+
+    class DetailMissing(MissingAttribute):
+        pass
+
+    details = [7]
+    error = DetailMissing(details)
+    details.append(8)
+    try:
+        raise error
+    except AttributeError as caught:
+        print(isinstance(caught, DetailMissing), caught.args, caught.args[0] is details)

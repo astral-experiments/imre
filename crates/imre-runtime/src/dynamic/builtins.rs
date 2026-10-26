@@ -10,52 +10,61 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod text;
-pub(super) use collections::{hashable, view_items};
+pub(super) use collections::{hashable, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, format_value, percent, zeroed_bytes};
 
-pub(super) fn is_exception(name: &str) -> bool {
-    matches!(
-        name,
-        "BaseException"
-            | "Exception"
-            | "RuntimeError"
-            | "RecursionError"
-            | "NotImplementedError"
-            | "TypeError"
-            | "ValueError"
-            | "EOFError"
-            | "UnicodeError"
-            | "UnicodeDecodeError"
-            | "UnicodeEncodeError"
-            | "ArithmeticError"
-            | "OverflowError"
-            | "ZeroDivisionError"
-            | "LookupError"
-            | "IndexError"
-            | "KeyError"
-            | "NameError"
-            | "AttributeError"
-            | "ImportError"
-            | "ModuleNotFoundError"
-            | "OSError"
-            | "ConnectionError"
-            | "ConnectionRefusedError"
-            | "ConnectionResetError"
-            | "ConnectionAbortedError"
-            | "BrokenPipeError"
-            | "BlockingIOError"
-            | "TimeoutError"
-            | "FileNotFoundError"
-            | "IsADirectoryError"
-            | "NotADirectoryError"
-            | "PermissionError"
-            | "AssertionError"
-            | "MemoryError"
-            | "SystemExit"
-            | "StopIteration"
-            | "Warning"
-            | "RuntimeWarning"
+pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+    use crate::objects::exceptions::Kind;
+    macro_rules! kinds {
+        ($($kind:ident),* $(,)?) => {
+            match name { $(stringify!($kind) => Some(Kind::$kind),)* _ => None }
+        };
+    }
+    kinds!(
+        BaseException,
+        Exception,
+        RuntimeError,
+        RecursionError,
+        NotImplementedError,
+        TypeError,
+        ValueError,
+        EOFError,
+        UnicodeError,
+        UnicodeDecodeError,
+        UnicodeEncodeError,
+        ArithmeticError,
+        OverflowError,
+        ZeroDivisionError,
+        LookupError,
+        IndexError,
+        KeyError,
+        NameError,
+        AttributeError,
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        ConnectionError,
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        BlockingIOError,
+        TimeoutError,
+        FileNotFoundError,
+        IsADirectoryError,
+        NotADirectoryError,
+        PermissionError,
+        AssertionError,
+        MemoryError,
+        SystemExit,
+        StopIteration,
+        Warning,
+        RuntimeWarning,
     )
+}
+
+pub(super) fn is_exception(name: &str) -> bool {
+    exception_kind(name).is_some()
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
@@ -63,9 +72,11 @@ pub(super) fn is_builtin(name: &str) -> bool {
         || matches!(
             name,
             "len"
+                | "reversed"
                 | "ord"
                 | "callable"
                 | "isinstance"
+                | "issubclass"
                 | "getattr"
                 | "globals"
                 | "setattr"
@@ -85,6 +96,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "bytearray"
             | "bytes"
             | "dict"
+            | "frozenset"
             | "int"
             | "list"
             | "object"
@@ -182,8 +194,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert") => "list",
-        Value::Set(_) if matches!(attr, "add" | "update") => "set",
+        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop") => "list",
+        Value::Set { frozen: false, .. }
+            if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
+        {
+            "set"
+        }
+        Value::Set { frozen: true, .. }
+            if matches!(attr, "copy" | "issuperset" | "__contains__") =>
+        {
+            "frozenset"
+        }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
@@ -216,7 +237,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
+        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+            "pattern"
+        }
         Value::RegexMatch { .. } if attr == "group" => "match",
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
@@ -281,6 +304,43 @@ pub(super) fn bind<const N: usize>(
         if values[index].replace(*argument).is_some() {
             return Err(type_error(format!(
                 "{name} got multiple values for argument {key:?}"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+/// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+pub(super) fn bind_method_arguments<const N: usize>(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+) -> Result<[Option<Id>; N]> {
+    let count = args.len() + kwargs.len();
+    if count > N {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(type_error(format!(
+            "{name}() takes at most {N} {kind}arguments ({count} given)"
+        )));
+    }
+    let mut values = [None; N];
+    for (slot, &arg) in values.iter_mut().zip(args) {
+        *slot = Some(arg);
+    }
+    for (key, value) in kwargs {
+        let index = names
+            .iter()
+            .position(|param| *param == key)
+            .ok_or_else(|| {
+                type_error(format!(
+                    "{name}() got an unexpected keyword argument '{key}'"
+                ))
+            })?;
+        if values[index].replace(*value).is_some() {
+            return Err(type_error(format!(
+                "argument for {name}() given by name ('{key}') and position ({})",
+                index + 1
             )));
         }
     }
@@ -422,7 +482,7 @@ pub(super) fn call(
                 target.extend(data);
                 Ok(NONE)
             }
-            "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -445,6 +505,13 @@ pub(super) fn call(
         };
     }
     match name {
+        "object" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(type_error("object() takes no arguments"));
+            }
+            let class = ctx.builtin("object");
+            Ok(ctx.instance(class, None))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -490,10 +557,15 @@ pub(super) fn call(
             let attr = attribute_name(ctx, args[1])?;
             match ctx.lookup_attr(args[0], &attr) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
-                Err(e) if e.kind == "AttributeError" && name == "hasattr" => Ok(FALSE),
-                Err(e) if e.kind == "AttributeError" && args.len() == 3 => Ok(args[2]),
+                Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
+                Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),
                 result => result,
             }
+        }
+        "issubclass" => {
+            positional(name, kwargs)?;
+            arity(name, args, 2, 2)?;
+            Ok(boolean(ctx.python_subclass_check(args[0], args[1])?))
         }
         "isinstance" => {
             positional(name, kwargs)?;
@@ -524,11 +596,32 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
+        "reversed" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let object = args[0];
+            if let Value::List(items) = ctx.heap.get(object) {
+                return Ok(ctx.alloc(Value::Iterator {
+                    sequence: Some(object),
+                    offset: items.len(),
+                    reverse: true,
+                }));
+            }
+            if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
+                && hook != NONE
+            {
+                return ctx.call(hook, Vec::new(), Vec::new());
+            }
+            Err(type_error(format!(
+                "'{}' object is not reversible",
+                ctx.type_name(object)
+            )))
+        }
         "len" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let size = match ctx.heap.get(args[0]) {
-                Value::List(v) | Value::Tuple(v) | Value::Set(v) => v.len(),
+                Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
@@ -566,7 +659,9 @@ pub(super) fn call(
             range_len(start, stop, step)?;
             Ok(ctx.alloc(Value::Range { start, stop, step }))
         }
-        "dict" | "list" | "tuple" | "set" => collections::construct(ctx, name, args, kwargs),
+        "dict" | "list" | "tuple" | "set" | "frozenset" => {
+            collections::construct(ctx, name, args, kwargs)
+        }
         "int" | "bool" | "str" | "bytes" | "bytearray" | "repr" => {
             text::construct(ctx, name, args, kwargs)
         }
