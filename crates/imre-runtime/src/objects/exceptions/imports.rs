@@ -100,7 +100,7 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     ))))
 }
 
-/// Test identity against the None singleton or a list with a stable native owner.
+/// Test identity against the None singleton, a list, or a stream with a stable native owner.
 ///
 /// # Safety
 /// Both the retained view and the compiler-checked comparison operand are rooted.

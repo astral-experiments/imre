@@ -564,6 +564,17 @@ ERRORS = {
 }
 
 REJECTED = {
+    "boxed_external_binary": """
+        from typing import BinaryIO
+        def install(stream: BinaryIO) -> dict[str, object]:
+            return {"stream": stream}
+    """,
+    "unchecked_memory_stream_cast": """
+        from io import BytesIO
+        from typing import cast
+        def read(objects: dict[str, object]) -> bytes:
+            return cast(BytesIO, objects["stream"]).read()
+    """,
     "dynamic_mode": 'mode = "r"\nopen("input.txt", mode, encoding="utf-8")',
     "binary_mode": 'open("input.txt", "rb", encoding="utf-8")',
     "append_mode": 'open("input.txt", "a", encoding="utf-8")',

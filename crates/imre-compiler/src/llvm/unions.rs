@@ -215,6 +215,8 @@ impl Emitter<'_, '_> {
                 (7, Type::Float),
                 (8, Type::Bytes),
                 (12, Type::Set(0)),
+                (19, Type::BytesIO),
+                (20, Type::StringIO),
             ]
             .iter()
             .filter(|(_, ty)| {
@@ -323,6 +325,17 @@ impl Emitter<'_, '_> {
                     }
                     matched.unwrap_or_else(|| "false".to_owned())
                 }
+            } else if matches!(
+                (value.ty, class),
+                (Type::BinaryIO, InstanceType::Exact(Type::BytesIO))
+                    | (Type::TextIO, InstanceType::Exact(Type::StringIO))
+            ) {
+                let text = value.ty == Type::TextIO;
+                let matched = self.instruction(format!(
+                    "call ptr @imre_memory_stream_payload(ptr {}, i1 false, i1 {text})",
+                    value.operand
+                ));
+                self.instruction(format!("icmp ne ptr {matched}, null"))
             } else if let InstanceType::IoBase(base) = class
                 && base.matches(value.ty).is_none()
             {

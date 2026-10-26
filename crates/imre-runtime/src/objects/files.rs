@@ -176,6 +176,15 @@ impl FileState {
             .ok_or_else(|| Error::new(Kind::ValueError, "I/O operation on closed file."))
     }
 
+    /// Erased memory-stream views retain the exact class even after close.
+    pub(super) fn memory_class(&self) -> Option<(&'static str, u32)> {
+        match self.kind {
+            FileKind::Memory => Some(("_io.BytesIO", 19)),
+            FileKind::TextMemory => Some(("_io.StringIO", 20)),
+            _ => None,
+        }
+    }
+
     /// A codec writer forwards missing attributes to the actual binary stream.
     pub(super) fn binary_type_name(&self) -> &'static str {
         match self.kind {

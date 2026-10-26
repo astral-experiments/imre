@@ -1607,6 +1607,7 @@ pub unsafe extern "C" fn imre_system_exit_code_kind(value: *const Object) -> u32
                 Storage::Sequence(_) => 4,
                 Storage::Dictionary(_) => 5,
                 Storage::Set(_) => 12,
+                Storage::File(file) => file.memory_class().map_or(15, |(_, kind)| kind),
                 _ => 15,
             });
         }
@@ -1644,7 +1645,7 @@ pub unsafe extern "C" fn imre_system_exit_code_text(value: *const Object) -> *co
 /// # Safety
 /// `value` is a rooted code view. `word` is rooted with kind 0 (None), 1
 /// (bool), 2 (int), 3 (str), 5 (another object view), 6 (tuple), 8 (bytes), or
-/// 17 (a concrete integer-to-string dictionary).
+/// 17 (a concrete dictionary or memory stream), or 18 (a typed list).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code_equal(
     value: *const Object,
@@ -1652,7 +1653,7 @@ pub unsafe extern "C" fn imre_system_exit_code_equal(
     word: usize,
 ) -> u32 {
     // The compiler uses 5 for a second boxed view and 17 for a concrete
-    // dict[int, str]. Other representation tags are scalar/tuple word kinds.
+    // native object. Other representation tags identify scalar and tuple words.
     // SAFETY: both inputs stay rooted while we compare their borrowed fields.
     unsafe {
         // 18 is a concrete generic list. Its ordinary storage kind (5) is also

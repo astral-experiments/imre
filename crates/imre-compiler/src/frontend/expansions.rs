@@ -573,7 +573,11 @@ impl Checker<'_> {
             Iteration::Container { iterable, .. }
                 if matches!(
                     iterable.ty,
-                    Type::TextIO | Type::StringIO | Type::BinaryIO | Type::CsvReader
+                    Type::TextIO
+                        | Type::StringIO
+                        | Type::BinaryIO
+                        | Type::BytesIO
+                        | Type::CsvReader
                 ) =>
             {
                 vec![reserve]

@@ -378,10 +378,10 @@ impl Checker<'_> {
             });
         }
         let identity = match (left.ty, right.ty) {
-            (Type::ObjectValue, Type::ListInt | Type::List(_)) => {
+            (Type::ObjectValue, Type::ListInt | Type::List(_) | Type::BytesIO | Type::StringIO) => {
                 Some(Builtin::ExceptionFieldIdentity { reversed: false })
             }
-            (Type::ListInt | Type::List(_), Type::ObjectValue) => {
+            (Type::ListInt | Type::List(_) | Type::BytesIO | Type::StringIO, Type::ObjectValue) => {
                 Some(Builtin::ExceptionFieldIdentity { reversed: true })
             }
             (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
@@ -728,7 +728,9 @@ impl Checker<'_> {
                     Type::TextOutput | Type::CodecWriter | Type::TextIO | Type::StringIO
                 )
             })
-            || types == [Type::BinaryIO; 2]
+            || types
+                .iter()
+                .all(|ty| matches!(ty, Type::BytesIO | Type::StringIO | Type::BinaryIO))
             || types == [Type::Hash; 2])
         {
             return Err(error(
