@@ -3,7 +3,7 @@ import sys
 
 
 def serve(case: NativeCase) -> None:
-    logger = case.logger
+    logger = checked_logger(case)
     manager = logger.manager
     while True:
         op = input()
@@ -22,7 +22,7 @@ def serve(case: NativeCase) -> None:
             logger.disabled = input() == "True"
             print("ok")
         elif op == "enabled":
-            print(logger.isEnabledFor(int(input())))
+            print(checked_enabled(case, int(input())))
         else:
             raise ValueError("unknown logger operation")
         sys.stdout.flush()

@@ -38,11 +38,11 @@ CPython also accepts assignment to `logger.manager`. Imre rejects that assignmen
 
 | Body | Assertions | Logging operations | Fixture | Occurrences |
 | --- | --- | --- | --- | ---: |
-| Imre | Imre | Imre | CPython hooks and native child | 23 |
+| Imre | Imre | Imre | CPython hooks and native child | 25 |
 | Imre | CPython output check | Imre | CPython hooks and native child | 4 |
 | CPython | CPython | Imre | CPython | 39 |
-| CPython | CPython | Imre | CPython hooks and native child | 7 |
-| Blocked before execution | | | | 196 |
+| CPython | CPython | Imre | CPython hooks and native child | 12 |
+| Blocked before execution | | | | 189 |
 | Unchanged reference skip | | | | 3 |
 
 No occurrence has a fully native fixture. Native assertions check root logger
@@ -59,9 +59,10 @@ Two more [filename configuration methods](config.md#filename-configuration) chec
 Two [ASCII file configuration methods](config.md#file-encoding-and-errors) check explicit and default error handling. Their bodies and assertions run in CPython, and their file handlers emit in Imre.
 FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
 Four bodies verify native stderr with the original
-CPython output helper. The 46 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
+CPython output helper. The 51 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).
 The two [makeRecord methods](records.md#loggermakerecord-and-extra) check insertion and all 23 protected names. For insertion, the body and assertion run in Imre; for collisions, the original CPython loop and assertions drive a native child.
+The [adapter methods](adapters.md#event-delivery) check inherited event routing, context precedence, handler changes and the manager cleanup under their original fixtures.
 Setup and registered cleanup stay with their test. The report keeps original method locations, individual
 compiler or adapter blockers, and the three pinned skip conditions. It
 does not treat a compiled source or a passing CPython reference as a native pass.
