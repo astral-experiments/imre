@@ -61,6 +61,12 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
+            if let Value::Instance { class, .. } = *ctx.heap.get(args[0])
+                && ctx.enum_values(class).is_some()
+                && let Some(repr) = ctx.bound_slot(args[0], "__repr__")?
+            {
+                return ctx.call(repr, Vec::new(), Vec::new());
+            }
             Ok(ctx.text(ctx.repr(args[0])))
         }
         "int" => {

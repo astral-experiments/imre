@@ -81,6 +81,7 @@ impl Context {
         matches!(
             self.heap.get(value),
             Value::Class { .. }
+                | Value::GenericAlias(_)
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
                 | Value::StaticMethod { .. }
@@ -229,7 +230,12 @@ impl Context {
                     parent as u32,
                 );
             }
-            return child == "bool" && parent == "int";
+            return matches!(
+                (child.as_str(), parent.as_str()),
+                ("bool", "int")
+                    | ("enum.IntEnum", "int" | "enum.Enum")
+                    | ("enum.StrEnum", "str" | "enum.Enum")
+            );
         }
         false
     }
@@ -274,6 +280,8 @@ impl Context {
             | Value::Dict(_)
             | Value::Set { .. }
             | Value::Range { .. }
+            | Value::Iterator { .. }
+            | Value::Generator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
             | Value::Function { .. }
@@ -284,6 +292,8 @@ impl Context {
             Value::ByteArray(_) => "bytearray",
             Value::Zip { .. } => "zip",
             Value::StaticMethod { .. } => "staticmethod",
+            Value::TypeVar(_) => "typing.TypeVar",
+            Value::GenericAlias(alias) => alias.kind.class(),
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -293,6 +303,12 @@ impl Context {
                 _ => return None,
             },
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
+                if name == "typing.Any" {
+                    return Some("typing._AnyMeta");
+                }
+                if name == "typing.Callable" {
+                    return Some("typing._CallableType");
+                }
                 if builtins::is_builtin_type(name)
                     || matches!(
                         name.as_str(),
@@ -304,10 +320,23 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "generator"
+                            | "list_iterator"
+                            | "tuple_iterator"
+                            | "bytes_iterator"
+                            | "bytearray_iterator"
+                            | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
                             | "traceback"
                             | "frame"
+                            | "typing.TypeVar"
+                            | "typing._GenericAlias"
+                            | "typing._CallableGenericAlias"
+                            | "typing._CallableType"
+                            | "typing._AnyMeta"
+                            | "types.GenericAlias"
+                            | "collections.abc._CallableGenericAlias"
                     )
                 {
                     "type"
@@ -358,6 +387,9 @@ impl Context {
     }
 
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
+        if self.classes.get("collections.abc.Callable") == Some(&class) {
+            return self.callable(value);
+        }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
@@ -516,10 +548,18 @@ impl Context {
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+            if matches!(name, "name" | "value")
+                && let Some((_, member_name, value)) = self.enum_member(obj)
+            {
+                return Ok(if name == "name" { member_name } else { value });
+            }
             return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
         }
         if name == "__class__" {
             return self.exact_type(obj);
+        }
+        if let Some(value) = super::typing::attribute(self, obj, name) {
+            return value;
         }
         match self.heap.get(obj).clone() {
             Value::Raised(error)
@@ -635,6 +675,14 @@ impl Context {
             },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
+            }
+            Value::MappingProxy(dict)
+                if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
+            {
+                return self.lookup_attr(dict, name);
+            }
+            Value::Native(class) if class == "int" && name == "__new__" => {
+                return Ok(self.builtin("int.__new__"));
             }
             Value::Super {
                 start,
@@ -1084,7 +1132,7 @@ impl Context {
             dictionary,
             text_memory: None,
             fields: HashMap::new(),
-            text: None,
+            scalar: None,
         })
     }
 
@@ -1120,7 +1168,7 @@ impl Context {
             class,
             fields: HashMap::new(),
             dictionary: None,
-            text: Some(text),
+            scalar: Some(text),
             text_memory: None,
         }))
     }
@@ -1132,6 +1180,18 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
+            Value::GenericAlias(alias) => {
+                let result = self.call(alias.origin, args, kwargs)?;
+                if matches!(self.heap.get(result), Value::Instance { .. })
+                    && let Err(error) = self.set_attr(result, "__orig_class__", callable)
+                    && !alias.kind.is_typing_alias()
+                    && !matches!(error.kind.as_str(), "AttributeError" | "TypeError")
+                {
+                    return Err(error);
+                }
+                Ok(result)
+            }
+            Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || !name.contains('.')
@@ -1230,6 +1290,21 @@ impl Context {
             Value::Class {
                 name, ancestors, ..
             } => {
+                if let Some(values) = self.enum_values(callable) {
+                    return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.classes.get("collections.abc.Callable") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate abstract class Callable without an implementation for abstract method '__call__'",
+                    ));
+                }
+                if self.classes.get("typing.Generic") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "Can't instantiate typing.Generic directly",
+                    ));
+                }
                 if ancestors.iter().any(|&base| {
                     matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
                 }) {
@@ -1259,7 +1334,7 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
-                        text: None,
+                        scalar: None,
                         text_memory: None,
                     }));
                 }
@@ -1425,7 +1500,7 @@ impl Context {
 
     pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
         let name = self.str_value(name)?.to_owned();
-        let bases = self.items(bases)?;
+        let (original, bases) = super::typing::resolve_bases(self, bases)?;
         let Value::Function {
             scope: parent,
             code,
@@ -1448,12 +1523,8 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
-        let ancestors = self.linearized_bases(&bases)?;
-        let class = self.alloc(Value::Class {
-            name: name.clone(),
-            scope,
-            ancestors,
-        });
+        super::typing::class_parameters(self, scope, original, &bases)?;
+        let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
@@ -1488,6 +1559,9 @@ impl Context {
             }
         }
         self.classes.insert(name, class);
+        if self.has_base(class, "enum.Enum") {
+            self.populate_enum(class, None)?;
+        }
         Ok(class)
     }
 }

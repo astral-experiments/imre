@@ -77,6 +77,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "reversed"
                 | "ord"
                 | "callable"
+                | "any"
                 | "isinstance"
                 | "issubclass"
                 | "getattr"
@@ -100,6 +101,9 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
             | "bytes"
             | "dict"
             | "frozenset"
+            | "enum.Enum"
+            | "enum.IntEnum"
+            | "enum.StrEnum"
             | "int"
             | "list"
             | "object"
@@ -622,7 +626,7 @@ pub(super) fn call(
         "isinstance" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
-            Ok(boolean(ctx.instance_of(args[0], args[1])))
+            Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
         "ord" => {
             if !kwargs.is_empty() {
@@ -682,6 +686,7 @@ pub(super) fn call(
                     sequence: Some(object),
                     offset: items.len(),
                     reverse: true,
+                    kind: "list_reverseiterator",
                 }));
             }
             if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
@@ -702,7 +707,15 @@ pub(super) fn call(
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
+                    collections::entries(ctx, *dict)?.len()
+                }
+                Value::Class { .. } => {
+                    let values = ctx
+                        .enum_values(args[0])
+                        .ok_or_else(|| type_error("object has no len()"))?;
+                    collections::entries(ctx, values)?.len()
+                }
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
@@ -847,6 +860,17 @@ pub(super) fn call(
                 return Ok(result);
             }
             ctx.module(name.split('.').next().unwrap())
+        }
+        "any" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            let iter = ctx.iterator(args[0])?;
+            while let Some(item) = ctx.next_item(iter)? {
+                if ctx.truth(item)? {
+                    return Ok(TRUE);
+                }
+            }
+            Ok(FALSE)
         }
         "print" => {
             let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;

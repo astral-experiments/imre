@@ -119,7 +119,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::Instance {
         class,
         dictionary: None,
-        text: None,
+        scalar: None,
         text_memory: None,
         fields: fields
             .iter()
@@ -227,6 +227,17 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("_collections_abc", "Callable") => {
+            super::typing::named_class(ctx, "collections.abc", "Callable")
+        }
+        (
+            "typing",
+            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
+            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+        ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
         ("time", "time" | "gmtime" | "localtime" | "mktime" | "struct_time") => {
@@ -379,7 +390,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "IntEnum")
+        | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
@@ -423,6 +434,24 @@ pub(super) fn call(
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
     }
+    if let Some(operation) = name.strip_prefix("typing.") {
+        return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "types.GenericAlias" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "GenericAlias() takes no keyword arguments",
+            ));
+        }
+        let [origin, parameters] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("GenericAlias expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        return Ok(super::typing::builtin_alias(ctx, *origin, *parameters));
+    }
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
             return operator::attrgetter(ctx, args, kwargs);
@@ -433,6 +462,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
+    }
+    if name == "enum._simple_enum" {
+        return ctx.enum_decorator(args, kwargs);
+    }
+    if name == "enum._convert" {
+        return ctx.decorate_enum(args, kwargs);
     }
     // Reject unsupported options before a host primitive can silently use its default.
     if let Some(function) = name.strip_prefix("email.utils.") {

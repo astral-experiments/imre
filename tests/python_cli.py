@@ -370,6 +370,8 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
+            "boxed_any_generator.py",
+            "boxed_global.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_module_globals.py",
@@ -394,6 +396,8 @@ def report(text):
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
+        compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
@@ -411,6 +415,9 @@ except ImportError:
     print('missing child')
 """)
             compare("-IB", "-c", imports)
+        http = fixtures.parents[1] / "crates/imre-compiler/stdlib/http/__init__.py"
+        plugin.write_bytes(http.read_bytes())
+        compare("-IB", "-c", imports + (fixtures / "boxed_http_enums.py").read_text())
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",
