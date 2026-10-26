@@ -1,3 +1,16 @@
+from http import HTTPStatus
+
+
+def find_status(start: HTTPStatus | None) -> int:
+    return ("x" * 600).find("x", start)
+
+
+print(("x" * 600).find("x", HTTPStatus.NOT_FOUND))
+print(find_status(HTTPStatus.OK))
+print(find_status(None))
+for use_status in [True, False]:
+    print(("x" * 600).find("x", HTTPStatus.CREATED if use_status else None))
+
 sources: list[str] = [
     "", "a", "aaa", "a,b,,c,", "λ,🙂,,終,", "λ🙂a🙂🙂", " a  b c ",
     "\x1c a\u00a0b\u3000", "\t\n\x1f", "a\u200bb", "\0a\0b",

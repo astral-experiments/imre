@@ -2937,6 +2937,16 @@ impl<'a> Checker<'a> {
         expected: Type,
         alternative: Option<Type>,
     ) -> Result<Expr, String> {
+        self.expr_expected_if(expression, expected, |_, ty| alternative == Some(ty))
+    }
+
+    /// Preserve a permitted alternative for a caller that supplies its own conversion.
+    fn expr_expected_if(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: impl Fn(&Self, Type) -> bool,
+    ) -> Result<Expr, String> {
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -2960,7 +2970,7 @@ impl<'a> Checker<'a> {
             let value = self.expr(expression)?;
             // A partial consumes its marker before the target's own argument ABI.
             // Keep the evaluated value so a lookup or callback runs exactly once.
-            return if alternative == Some(value.ty) {
+            return if alternative(self, value.ty) {
                 Ok(value)
             } else {
                 self.coerce_argument_value(value, expected, expression)
@@ -3332,7 +3342,7 @@ impl<'a> Checker<'a> {
             }
             _ => self.typed_expr(expression)?,
         };
-        if alternative == Some(value.ty) {
+        if alternative(self, value.ty) {
             return Ok(value);
         }
         self.coerce(value, expected, expression)

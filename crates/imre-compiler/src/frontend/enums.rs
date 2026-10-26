@@ -219,6 +219,36 @@ impl Checker<'_> {
         }
     }
 
+    /// Read a present integer enum's value and preserve None, evaluating the bound once.
+    pub(super) fn optional_enum_integer(
+        &mut self,
+        value: Expr,
+        node: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if !matches!(self.types.payload(value.ty), Some(Type::IntEnum(_))) {
+            return Ok(Self::enum_integer(value));
+        }
+        let (slot, is_none, none, member) = self.protocol_alternatives(value.ty).unwrap();
+        let optional = self.types.optional(Type::Int);
+        let absent = self.coerce(none, optional, node)?;
+        let present = self.coerce(Self::enum_integer(member), optional, node)?;
+        Ok(Expr {
+            ty: optional,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: optional,
+                    kind: ExprKind::Conditional(
+                        Box::new(is_none),
+                        Box::new(absent),
+                        Box::new(present),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        })
+    }
+
     pub(super) fn enum_text(value: Expr) -> Expr {
         if matches!(value.ty, Type::StrEnum(_)) {
             Expr {
