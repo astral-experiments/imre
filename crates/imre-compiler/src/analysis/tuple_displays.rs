@@ -174,7 +174,7 @@ fn local_widths(function: &ast::StmtFunctionDef, widths: &mut Widths) {
 /// even one initialized from a literal, has no fixed arity in ty.
 fn excessive_inferred_width<'a>(
     body: &'a [Stmt],
-    parameters: &'a ast::Parameters,
+    parameters: Option<&'a ast::Parameters>,
 ) -> Option<&'a ast::ExprStarred> {
     struct Inferred<'a> {
         locals: HashMap<&'a str, usize>,
@@ -253,7 +253,8 @@ fn excessive_inferred_width<'a>(
     }
     let mut inferred = Inferred {
         locals: parameters
-            .iter_non_variadic_params()
+            .into_iter()
+            .flat_map(ast::Parameters::iter_non_variadic_params)
             .filter_map(|p| {
                 let p = &p.parameter;
                 Some((p.name.as_str(), parameter_width(p.annotation.as_deref()?)?))
@@ -270,18 +271,19 @@ fn excessive_inferred_width<'a>(
 #[derive(Default)]
 struct Displays<'a> {
     widths: Widths,
-    function: bool,
+    executable_body: bool,
     function_body: Option<TextSize>,
     error: Option<(&'a ast::ExprStarred, &'static str)>,
 }
 
 impl<'a> Visitor<'a> for Displays<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let previous = (self.function, self.function_body);
+        let previous = (self.executable_body, self.function_body);
         if let Stmt::FunctionDef(function) = stmt {
             local_widths(function, &mut self.widths);
-            self.function = false;
-            if let Some(star) = excessive_inferred_width(&function.body, &function.parameters) {
+            self.executable_body = false;
+            if let Some(star) = excessive_inferred_width(&function.body, Some(&function.parameters))
+            {
                 self.error = Some((
                     star,
                     "starred elements in tuple displays exceed 256 inferred fields",
@@ -290,10 +292,10 @@ impl<'a> Visitor<'a> for Displays<'a> {
             }
             self.function_body = function.body.first().map(Ranged::start);
         } else if matches!(stmt, Stmt::ClassDef(_)) {
-            self.function = false;
+            self.executable_body = false;
         }
         walk_stmt(self, stmt);
-        (self.function, self.function_body) = previous;
+        (self.executable_body, self.function_body) = previous;
     }
 
     fn visit_body(&mut self, body: &'a [Stmt]) {
@@ -301,7 +303,7 @@ impl<'a> Visitor<'a> for Displays<'a> {
             .first()
             .is_some_and(|stmt| Some(stmt.start()) == self.function_body)
         {
-            self.function = true;
+            self.executable_body = true;
         }
         ruff_python_ast::visitor::walk_body(self, body);
     }
@@ -320,10 +322,10 @@ impl<'a> Visitor<'a> for Displays<'a> {
                 .count();
             for element in &tuple.elts {
                 if let Expr::Starred(star) = element {
-                    if !self.function {
+                    if !self.executable_body {
                         self.error = Some((
                             star,
-                            "starred elements in tuple displays require a function body",
+                            "starred elements in tuple displays require a module or function body",
                         ));
                         return;
                     }
@@ -356,7 +358,16 @@ pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'stati
     }) {
         return Ok(Widths::new());
     }
-    let mut displays = Displays::default();
+    if let Some(star) = excessive_inferred_width(body, None) {
+        return Err((
+            star,
+            "starred elements in tuple displays exceed 256 inferred fields",
+        ));
+    }
+    let mut displays = Displays {
+        executable_body: true,
+        ..Displays::default()
+    };
     displays.visit_body(body);
     displays.error.map_or(Ok(displays.widths), Err)
 }
