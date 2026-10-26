@@ -180,10 +180,7 @@ pub unsafe extern "C" fn imre_str_encode_options(
 ) -> *const Bytes {
     // SAFETY: the typed compiler passes three live, immutable strings.
     let (encoding, errors) = unsafe { (&*encoding, &*errors) };
-    if encoding.contains('\0') || errors.contains('\0') {
-        return Error::new(Kind::ValueError, "embedded null character").returning(std::ptr::null());
-    }
-    let result = Codec::lookup(encoding).and_then(|codec| {
+    let result = Codec::for_encode(encoding, errors).and_then(|codec| {
         // SAFETY: the caller roots the original string through conversion and error construction.
         unsafe {
             codec.encode(&*text, Some(errors), || {
@@ -244,6 +241,26 @@ impl Codec {
 
     pub(crate) fn lookup(value: &str) -> Result<Self> {
         Self::by_key(&normalize(value)?, value)
+    }
+
+    fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
+        if encoding.contains('\0') || errors.contains('\0') {
+            return Err(Error::new(Kind::ValueError, "embedded null character"));
+        }
+        Self::lookup(encoding)
+    }
+
+    /// Boxed strings retain a native copy of the input only when the encoder raises.
+    pub(crate) fn encode_str(text: &str, encoding: &str, errors: &str) -> Result<Vec<u8>> {
+        let codec = Self::for_encode(encoding, errors)?;
+        match codec.encode(text, Some(errors), || super::text::try_owned_string(text))? {
+            Cow::Owned(bytes) => Ok(bytes),
+            Cow::Borrowed(bytes) => {
+                let mut output = super::bytes::allocate(bytes.len())?;
+                output.extend_from_slice(bytes);
+                Ok(output)
+            }
+        }
     }
 
     fn by_key(key: &str, value: &str) -> Result<Self> {
