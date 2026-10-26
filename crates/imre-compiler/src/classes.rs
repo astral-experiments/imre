@@ -248,19 +248,8 @@ fn collect_class(
                 graph.resolve(definition.module, arg) == Some(Binding::Intrinsic(Intrinsic::Abc))
             })
         });
-    if node.type_params.is_some()
-        || !is_enum
-            && base.is_none()
-            && !abc
-            && node
-                .arguments
-                .as_ref()
-                .is_some_and(|args| !args.args.is_empty() || !args.keywords.is_empty())
-    {
-        return Err(module.error(
-            node,
-            "class inheritance, metaclasses, and type parameters are unsupported",
-        ));
+    if node.type_params.is_some() {
+        return Err(module.error(node, "class type parameters are unsupported"));
     }
     if is_enum && http.is_none() && !node.decorator_list.is_empty() {
         return Err(module.error(node, "decorated StrEnum declarations are unsupported"));

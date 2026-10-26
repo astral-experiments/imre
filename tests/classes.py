@@ -53,7 +53,15 @@ FORMAT_INIT = '''class Formatted:
 '''
 
 
+INVALID_OBJECT_BASES = {
+    "non_type_object": 'object = 7\nclass Child(object): pass\nprint("done")\n',
+    "duplicate_object": 'class Child(object, object): pass\nprint("done")\n',
+    "inconsistent_object_mro": 'class Base: pass\nclass Child(object, Base): pass\nprint("done")\n',
+}
+
+
 REJECTED = {
+    **INVALID_OBJECT_BASES,
     "inferred_field_reads_itself": FORMAT_INIT.replace("v=1", "v=self.path"),
     "inferred_field_invalid_format_arg": FORMAT_INIT.replace("v=1", "v=[1]"),
     "inferred_field_type_is_shadowed": "class str: pass\n" + FORMAT_INIT,
@@ -274,7 +282,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)
@@ -302,6 +310,12 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode > 0 and result.stderr, (name, result.stdout, result.stderr)
             assert "panicked" not in result.stderr and "AddressSanitizer" not in result.stderr, (name, result.stderr)
+            if name in INVALID_OBJECT_BASES:
+                reference = run([python, "-I", str(case / "main.py")], temporary)
+                assert reference.returncode and not reference.stdout and "TypeError:" in reference.stderr, name
+                reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
+                for rejection in (result, reachable):
+                    assert rejection.returncode and "the base must be a known fixed-layout class" in rejection.stderr, (name, rejection.stderr)
             if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
                 reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
                 assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)

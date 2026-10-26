@@ -799,10 +799,20 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
         .any(|d| !known_decorator(graph, module, &d.expression))
         || class.arguments.as_ref().is_some_and(|args| {
             !args.keywords.is_empty()
-                || args
-                    .args
-                    .iter()
-                    .any(|e| !matches!(e, ast::Expr::Name(_) | ast::Expr::Attribute(_)))
+                || args.args.iter().enumerate().any(|(i, base)| {
+                    if !base.as_name_expr().is_some_and(|name| name.id == "object") {
+                        return !matches!(base, ast::Expr::Name(_) | ast::Expr::Attribute(_));
+                    }
+                    // Putting the universal root before another base always fails MRO construction.
+                    if graph.session.builtin_object_base(module, base) {
+                        return i + 1 < args.args.len();
+                    }
+                    // Keep a possibly invalid binding even if the class itself is unused.
+                    !matches!(graph.resolve(module, base), Some(Binding::Definition(id))
+                        if args.args.len() == 1 && matches!(
+                            &graph.modules[id.module].parsed.syntax().body[id.statement],
+                            ast::Stmt::ClassDef(parent) if id.module != module || parent.start() < class.start()))
+                })
         })
         || class.body.iter().any(|s| match s {
             ast::Stmt::Pass(_) => false,
