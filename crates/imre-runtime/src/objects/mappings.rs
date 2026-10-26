@@ -823,6 +823,13 @@ impl<T: ReleaseEntries + 'static> TableOwner<T> {
     pub(super) fn new(table: T) -> Self {
         Self(Some(Box::new(table)))
     }
+
+    fn try_new(table: T) -> Result<Self, Error> {
+        let table = allocator_api2::boxed::Box::try_new(table).map_err(|_| Error::allocation())?;
+        let table = allocator_api2::boxed::Box::into_raw(table);
+        // SAFETY: both box types use the global allocator and the same layout for T.
+        Ok(Self(Some(unsafe { Box::from_raw(table) })))
+    }
 }
 
 impl<T: ReleaseEntries + 'static> std::ops::Deref for TableOwner<T> {
@@ -1335,13 +1342,12 @@ impl Set {
         for key in keys {
             tables.insert(key?, ())?;
         }
-        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(TableOwner::new(
-            Self {
-                tables,
-                frozen: true,
-            },
-        )))))
-        .map_err(|_| Error::allocation())
+        let set = TableOwner::try_new(Self {
+            tables,
+            frozen: true,
+        })?;
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Set(set))))
+            .map_err(|_| Error::allocation())
     }
 
     /// Deep-copy admission proves each set member is unchanged by deepcopy.
