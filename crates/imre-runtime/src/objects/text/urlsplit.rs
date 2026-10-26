@@ -123,11 +123,15 @@ fn check_netloc(netloc: &str) -> Result<()> {
     Ok(())
 }
 
-fn split<'a>(
-    mut url: &'a str,
-    default_scheme: &'a str,
-    fragments: bool,
-) -> Result<[Cow<'a, str>; 5]> {
+struct Parts<'a> {
+    scheme: Cow<'a, str>,
+    netloc: Option<&'a str>,
+    path: &'a str,
+    query: Option<&'a str>,
+    fragment: Option<&'a str>,
+}
+
+fn split<'a>(mut url: &'a str, default_scheme: &'a str, fragments: bool) -> Result<Parts<'a>> {
     let mut scheme = Cow::Borrowed(default_scheme);
     if let Some((prefix, rest)) = url.split_once(':')
         && prefix
@@ -146,23 +150,26 @@ fn split<'a>(
             rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
         url = remainder;
         check_netloc(authority)?;
-        authority
+        Some(authority)
     } else {
-        ""
+        None
     };
     let (url, fragment) = if fragments {
-        url.split_once('#').unwrap_or((url, ""))
+        url.split_once('#')
+            .map_or((url, None), |(u, f)| (u, Some(f)))
     } else {
-        (url, "")
+        (url, None)
     };
-    let (path, query) = url.split_once('?').unwrap_or((url, ""));
-    Ok([
+    let (path, query) = url
+        .split_once('?')
+        .map_or((url, None), |(p, q)| (p, Some(q)));
+    Ok(Parts {
         scheme,
-        netloc.into(),
-        path.into(),
-        query.into(),
-        fragment.into(),
-    ])
+        netloc,
+        path,
+        query,
+        fragment,
+    })
 }
 
 /// # Safety
@@ -197,12 +204,17 @@ pub unsafe extern "C" fn imre_url_split(
             }
             // SAFETY: The scheme remains rooted until the fields have been copied.
             let scheme = clean(unsafe { decoded(scheme, scheme_bytes)? }, true);
-            for (i, field) in split(&url, &scheme, fragments != 0)?
-                .into_iter()
-                .enumerate()
-            {
+            let parts = split(&url, &scheme, fragments != 0)?;
+            let fields = [
+                parts.scheme.as_ref(),
+                parts.netloc.unwrap_or_default(),
+                parts.path,
+                parts.query.unwrap_or_default(),
+                parts.fragment.unwrap_or_default(),
+            ];
+            for (i, field) in fields.into_iter().enumerate() {
                 // SAFETY: split returns exactly five fields, each written once to the zeroed record.
-                unsafe { out.add(i).write(owned(&field, is_bytes)?) };
+                unsafe { out.add(i).write(owned(field, is_bytes)?) };
             }
             Ok(())
         })(),
@@ -390,6 +402,53 @@ fn uses_netloc(scheme: &str) -> bool {
     )
 }
 
+fn unsplit(
+    scheme: &str,
+    netloc: Option<&str>,
+    path: &str,
+    query: Option<&str>,
+    fragment: Option<&str>,
+) -> Result<String> {
+    let mut text = String::new();
+    let size = [
+        scheme,
+        netloc.unwrap_or_default(),
+        path,
+        query.unwrap_or_default(),
+        fragment.unwrap_or_default(),
+    ]
+    .iter()
+    .try_fold(6usize, |sum, field| sum.checked_add(field.len()))
+    .ok_or_else(Error::allocation)?;
+    text.try_reserve_exact(size)
+        .map_err(|_| Error::allocation())?;
+    if !scheme.is_empty() {
+        text.push_str(scheme);
+        text.push(':');
+    }
+    if let Some(netloc) = netloc {
+        text.push_str("//");
+        text.push_str(netloc);
+        if !path.is_empty() && !path.starts_with('/') {
+            text.push('/');
+        }
+    } else if path.starts_with("//") {
+        text.push_str("//");
+    }
+    text.push_str(path);
+    if let Some(query) = query {
+        text.push('?');
+        text.push_str(query);
+    }
+    if let Some(fragment) = fragment {
+        text.push('#');
+        text.push_str(fragment);
+    }
+    Ok(text)
+}
+
+mod join;
+
 /// # Safety
 /// The rooted record has five fields of the same string/bytes layout.
 #[unsafe(no_mangle)]
@@ -406,31 +465,16 @@ pub unsafe extern "C" fn imre_url_geturl(
                 *field = unsafe { decoded(*result.add(i), is_bytes)? };
             }
             let [scheme, netloc, path, query, fragment] = fields;
-            let mut text = String::new();
-            if !scheme.is_empty() {
-                text.push_str(scheme);
-                text.push(':');
-            }
-            if !netloc.is_empty()
-                || (uses_netloc(scheme) && (path.is_empty() || path.starts_with('/')))
-            {
-                text.push_str("//");
-                text.push_str(netloc);
-                if !path.is_empty() && !path.starts_with('/') {
-                    text.push('/');
-                }
-            } else if path.starts_with("//") {
-                text.push_str("//");
-            }
-            text.push_str(path);
-            if !query.is_empty() {
-                text.push('?');
-                text.push_str(query);
-            }
-            if !fragment.is_empty() {
-                text.push('#');
-                text.push_str(fragment);
-            }
+            let netloc = (!netloc.is_empty()
+                || (uses_netloc(scheme) && (path.is_empty() || path.starts_with('/'))))
+            .then_some(netloc);
+            let text = unsplit(
+                scheme,
+                netloc,
+                path,
+                (!query.is_empty()).then_some(query),
+                (!fragment.is_empty()).then_some(fragment),
+            )?;
             Ok(owned(&text, is_bytes)? as *const c_void)
         })(),
         std::ptr::null(),

@@ -1667,6 +1667,8 @@ pub(crate) enum TextOperation {
     UrlQuotePlus,
     UrlUnquote,
     UrlSplit,
+    UrlJoin,
+    ParseQsl,
     UrlProperty(UrlProperty),
     UrlGetUrl,
     UrlTranscode {

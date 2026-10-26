@@ -1,4 +1,5 @@
 //! Bind URL splitting, result methods, and quoting with normal argument evaluation.
+mod resolution;
 mod urlencode;
 
 use super::*;
