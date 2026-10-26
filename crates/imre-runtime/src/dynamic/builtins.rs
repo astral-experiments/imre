@@ -1,7 +1,6 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use std::cell::RefCell;
-use std::fs::File;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -760,14 +759,7 @@ pub(super) fn call(
                     "unsupported mode for dynamic files",
                 ));
             }
-            let file = File::open(path).map_err(|e| {
-                let kind = match e.kind() {
-                    io::ErrorKind::NotFound => "FileNotFoundError",
-                    io::ErrorKind::PermissionDenied => "PermissionError",
-                    _ => "OSError",
-                };
-                Error::new(kind, format!("{path}: {e}"))
-            })?;
+            let (file, _) = crate::objects::open_file(path, 0)?;
             Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
                 io::BufReader::new(super::stdlib::ReadSource::File(file)),
             ))))))
