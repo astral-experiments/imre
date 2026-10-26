@@ -1,6 +1,6 @@
 # Flask over TCP
 
-The same unchanged Flask application and Werkzeug server run under CPython and Imre. All five requests target one process on an ephemeral loopback port:
+This gate checks whether a standalone Imre executable can serve the unchanged Flask application and Werkzeug wheels. CPython supplies the expected responses. A native pass requires all five requests to reach the compiled server on one ephemeral loopback port.
 
 | Request | Expected response |
 | --- | --- |
