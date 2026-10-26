@@ -305,10 +305,13 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
-        if name == "dict" {
-            for method in builtins::DICT_METHODS {
-                self.builtin(&format!("dict.{method}"));
-            }
+        let methods = match name {
+            "dict" => builtins::DICT_METHODS,
+            "str" => builtins::STR_METHODS,
+            _ => &[],
+        };
+        for method in methods {
+            self.builtin(&format!("{name}.{method}"));
         }
         value
     }
