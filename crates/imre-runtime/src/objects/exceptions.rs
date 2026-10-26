@@ -349,6 +349,7 @@ pub(super) struct Exception {
 #[derive(Clone, Default)]
 struct ExceptionDetails {
     cause: Option<crate::ObjectOwner>,
+    display_context: Option<(crate::ObjectOwner, bool)>,
     origins: Vec<(StrOwner, u64)>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
@@ -443,7 +444,7 @@ impl GroupMember {
                     return child;
                 }
                 let mut value = entry.value.clone();
-                value.details_mut().cause = Some(owner.clone());
+                value.set_explicit_cause(Some(owner.clone()));
                 let child =
                     crate::ObjectOwner::new(Object(StorageCell::new(Storage::Exception(value))));
                 *entry.live.borrow_mut() = crate::ObjectOwner::downgrade(&child);
@@ -509,6 +510,7 @@ impl Exception {
         if let Some(previous) = self.details.as_deref() {
             let fresh = crate::Shared::get_mut(&mut details).unwrap();
             fresh.cause.clone_from(&previous.cause);
+            fresh.display_context.clone_from(&previous.display_context);
             fresh.origins.clone_from(&previous.origins);
             fresh.named = previous.named;
             fresh.layout.clone_from(&previous.layout);
@@ -543,9 +545,25 @@ impl Exception {
         self.details.as_deref()?.cause.as_ref()
     }
 
+    fn display_context(&self) -> Option<&(crate::ObjectOwner, bool)> {
+        self.details.as_deref()?.display_context.as_ref()
+    }
+
+    fn set_explicit_cause(&mut self, cause: Option<crate::ObjectOwner>) {
+        if cause.is_some() || self.cause().is_some() || self.display_context().is_some() {
+            let details = self.details_mut();
+            details.cause = cause;
+            details.display_context = None;
+        }
+        self.suppress_context = true;
+    }
+
     fn take_cause(&mut self) -> Option<crate::ObjectOwner> {
         // A shared snapshot retains its own metadata and keeps the cause rooted.
-        crate::Shared::try_unwrap(self.details.take()?).ok()?.cause
+        let details = crate::Shared::try_unwrap(self.details.take()?).ok()?;
+        details
+            .cause
+            .or_else(|| details.display_context.map(|(parent, _)| parent))
     }
 
     /// KeyError uses repr for one key unless an earlier builtin in the MRO overrides str.
@@ -819,12 +837,13 @@ impl Error {
 
     /// Installs a constant diagnostic, preserving a catchable error if either owner cannot grow.
     pub(crate) fn return_static_message<T>(kind: Kind, message: &'static str, sentinel: T) -> T {
-        let error = StrOwner::try_new(Str::const_new(message))
-            .and_then(|message| {
-                crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
-            })
-            .unwrap_or_else(|_| Self::memory_error().into_object());
-        replace_pending(Some(error));
+        let error = StrOwner::try_new(Str::const_new(message)).and_then(|message| {
+            crate::ObjectOwner::try_new(exception_object(kind, Payload::Message(message), None))
+        });
+        match error {
+            Ok(error) => publish_raised(error),
+            Err(_) => Self::memory_error().raise(),
+        }
         sentinel
     }
 
@@ -910,7 +929,12 @@ impl Error {
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        replace_pending(Some(self.into_object()));
+        // Allocation failures use reserved exception owners and cannot retain a handler.
+        if self.kind == Kind::MemoryError {
+            replace_pending(Some(self.into_object()));
+        } else {
+            publish_raised(self.into_object());
+        }
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -1216,10 +1240,7 @@ pub unsafe extern "C" fn imre_async_member_cause(
         let child: crate::ObjectOwner = crate::ObjectOwner::acquire_word(child as usize);
         let group: crate::ObjectOwner = crate::ObjectOwner::acquire_word(group as usize);
         let mut snapshot = child.0.with(|storage| storage.exception().clone());
-        if snapshot.cause().is_some() {
-            snapshot.details_mut().cause = None;
-        }
-        snapshot.suppress_context = true;
+        snapshot.set_explicit_cause(None);
         let entry = Rc::new(CausedMember {
             live: RefCell::new(crate::ObjectOwner::downgrade(&child)),
             value: snapshot,
@@ -1242,8 +1263,7 @@ pub unsafe extern "C" fn imre_async_member_cause(
             let Storage::Exception(value) = storage else {
                 unreachable!()
             };
-            value.details_mut().cause = Some(group);
-            value.suppress_context = true;
+            value.set_explicit_cause(Some(group));
         });
         crate::ObjectOwner::into_raw(child)
     }
@@ -1252,19 +1272,225 @@ pub unsafe extern "C" fn imre_async_member_cause(
 /// Publishes a completed child's rich failure after all input storage borrows end.
 #[cold]
 pub(super) fn raise_process(error: super::processes::ProcessError) {
-    replace_pending(Some(new_exception(
+    publish_raised(new_exception(
         Kind::CalledProcessError,
         Payload::Process(Box::new(error)),
-    )));
+    ));
 }
 
 /// Publishes the immutable deadline snapshot after the child has been reaped.
 #[cold]
 pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
-    replace_pending(Some(new_exception(
+    publish_raised(new_exception(
         Kind::TimeoutExpired,
         Payload::Timeout(Box::new(error)),
-    )));
+    ));
+}
+
+/// Return the visible parent and whether it was installed as an explicit cause.
+fn display_parent(owner: &crate::ObjectOwner) -> Option<(crate::ObjectOwner, bool)> {
+    // SAFETY: the owner roots the exception and this borrow cannot call Python.
+    unsafe {
+        owner.0.with(|s| {
+            let e = s.exception();
+            e.cause().cloned().map(|cause| (cause, true)).or_else(|| {
+                if e.suppress_context {
+                    None
+                } else {
+                    e.details.as_deref()?.display_context.clone()
+                }
+            })
+        })
+    }
+}
+
+/// A cause or TaskGroup member can already own the escaping exception. Preserve
+/// the visible prefix without forming a strong reference cycle through it.
+fn detached_display_prefix(
+    active: &crate::ObjectOwner,
+    escaping: &crate::ObjectOwner,
+) -> Result<crate::ObjectOwner> {
+    let mut prefix = Vec::new();
+    let mut cursor = Some(active.clone());
+    while let Some(node) = cursor {
+        if crate::ObjectOwner::ptr_eq(&node, escaping) {
+            break;
+        }
+        let parent = display_parent(&node);
+        let explicit = parent.as_ref().is_some_and(|(_, explicit)| *explicit);
+        prefix.try_reserve(1).map_err(|_| Error::allocation())?;
+        prefix.push((node, explicit));
+        cursor = parent.map(|(next, _)| next);
+    }
+    let mut tail = None;
+    for (owner, explicit) in prefix.into_iter().rev() {
+        // SAFETY: the rooted source stays live while its display payload is copied.
+        let mut copy = unsafe {
+            owner.0.with(|s| {
+                let mut copy = s.exception().display_snapshot()?;
+                if matches!(copy.payload, Payload::Group(_)) {
+                    // The built-in group message uses its count and does not format children.
+                    copy.payload =
+                        Payload::Message(s.exception_message().map_err(|_| Error::allocation())?);
+                }
+                Ok::<_, Error>(copy)
+            })
+        }?;
+        let metadata = copy.details.take();
+        let named = metadata.as_deref().and_then(|d| d.named);
+        let layout = metadata.as_deref().and_then(|d| d.layout.clone());
+        let mut origins = Vec::new();
+        if let Some(original) = metadata.as_deref() {
+            origins
+                .try_reserve_exact(original.origins.len())
+                .map_err(|_| Error::allocation())?;
+            origins.extend_from_slice(&original.origins);
+        }
+        if named.is_some() || layout.is_some() || !origins.is_empty() || tail.is_some() {
+            copy.details = Some(
+                crate::Shared::try_new(ExceptionDetails {
+                    named,
+                    layout,
+                    origins,
+                    display_context: tail.map(|parent| (parent, explicit)),
+                    ..Default::default()
+                })
+                .map_err(|_| Error::allocation())?,
+            );
+        }
+        copy.suppress_context = false;
+        tail = Some(
+            crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Exception(copy))))
+                .map_err(|_| Error::allocation())?,
+        );
+    }
+    Ok(tail.expect("active and escaping are distinct"))
+}
+
+/// A group can retain an escaping exception through a nested member or a member's cause.
+fn group_owns_exception(group: &crate::ObjectOwner, target: &crate::ObjectOwner) -> Result<bool> {
+    let mut pending = Vec::new();
+    // SAFETY: the owner roots all members until the temporary owners are acquired.
+    unsafe {
+        group.0.with(|storage| {
+            if let Payload::Group(members) = &storage.exception().payload {
+                pending
+                    .try_reserve_exact(members.len())
+                    .map_err(|_| Error::allocation())?;
+                pending.extend_from_slice(members);
+            }
+            Ok::<_, Error>(())
+        })
+    }?;
+    if pending.is_empty() {
+        return Ok(false);
+    }
+    let mut visited = std::collections::HashSet::new();
+    while let Some(member) = pending.pop() {
+        let address = match &member {
+            GroupMember::Strong(owner) => {
+                if crate::ObjectOwner::ptr_eq(owner, target) {
+                    return Ok(true);
+                }
+                crate::ObjectOwner::as_ptr(owner) as usize
+            }
+            GroupMember::Caused(entry) => Rc::as_ptr(entry) as usize,
+        };
+        if visited.contains(&address) {
+            continue;
+        }
+        visited.try_reserve(1).map_err(|_| Error::allocation())?;
+        visited.insert(address);
+        let mut enqueue = |e: &Exception| -> Result<()> {
+            let children = match &e.payload {
+                Payload::Group(children) => &children[..],
+                _ => &[],
+            };
+            let context = e.display_context().map(|(owner, _)| owner);
+            let parents = [e.cause(), context];
+            pending
+                .try_reserve(children.len() + parents.iter().flatten().count())
+                .map_err(|_| Error::allocation())?;
+            pending.extend_from_slice(children);
+            pending.extend(
+                parents
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .map(GroupMember::Strong),
+            );
+            Ok(())
+        };
+        match member {
+            // SAFETY: the owner roots the member while its outgoing edges are copied.
+            GroupMember::Strong(owner) => unsafe { owner.0.with(|s| enqueue(s.exception())) }?,
+            GroupMember::Caused(entry) => enqueue(&entry.value)?,
+        }
+    }
+    Ok(false)
+}
+
+fn attach_display_context(value: &crate::ObjectOwner, active: crate::ObjectOwner) -> Result<()> {
+    // SAFETY: the caller roots the escaping exception.
+    if crate::ObjectOwner::ptr_eq(value, &active)
+        || unsafe { value.0.with(|s| s.exception().suppress_context) }
+    {
+        return Ok(());
+    }
+    let mut node = active.clone();
+    let mut detach = false;
+    loop {
+        if !detach {
+            detach = group_owns_exception(&node, value)?;
+        }
+        let Some((next, explicit)) = display_parent(&node) else {
+            break;
+        };
+        if crate::ObjectOwner::ptr_eq(&next, value) {
+            if explicit {
+                detach = true;
+            } else {
+                // CPython cuts the preceding implicit edge before reversing this chain.
+                // SAFETY: the node is rooted and no other borrow is active.
+                unsafe {
+                    node.0.with_mut(|s| {
+                        let Storage::Exception(e) = s else {
+                            unreachable!("exception context")
+                        };
+                        e.try_details_mut()?.display_context = None;
+                        Ok::<_, Error>(())
+                    })
+                }?;
+            }
+            break;
+        }
+        node = next;
+    }
+    let parent = if detach {
+        detached_display_prefix(&active, value)?
+    } else {
+        active
+    };
+    // SAFETY: both owners remain rooted while the new edge is installed.
+    unsafe {
+        value.0.with_mut(|s| {
+            let Storage::Exception(e) = s else {
+                unreachable!("exception context")
+            };
+            e.try_details_mut()?.display_context = Some((parent, false));
+            Ok(())
+        })
+    }
+}
+
+fn publish_raised(value: crate::ObjectOwner) {
+    if let Some(active) = active_exception()
+        && let Err(error) = attach_display_context(&value, active)
+    {
+        error.raise();
+        return;
+    }
+    replace_pending(Some(value));
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
@@ -2243,10 +2469,7 @@ pub unsafe extern "C" fn imre_exception_with_cause(
                 fail("SystemError", "expected an exception object");
             };
             debug_assert!(exception.cause().is_none() && !exception.suppress_context);
-            if let Some(cause) = cause {
-                exception.details_mut().cause = Some(cause);
-            }
-            exception.suppress_context = true;
+            exception.set_explicit_cause(cause);
         });
         imre_exception_retain(value);
     }
@@ -2315,7 +2538,7 @@ pub unsafe extern "C" fn imre_exception_raise(value: *const Object) {
         fail("SystemError", "cannot raise a null exception");
     }
     // SAFETY: the caller supplies a rooted exception.
-    unsafe { imre_error_set(value) };
+    publish_raised(unsafe { acquire_exception(value) }.unwrap());
 }
 
 /// Bare raise observes the dynamically active handler, including across calls.
@@ -2449,16 +2672,17 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
     let mut current = Some(exception.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
-        let (name, cause, origins) = unsafe {
+        let (name, origins) = unsafe {
             exception.0.with(|storage| {
                 let e = storage.exception();
                 (
                     e.name().to_owned(),
-                    e.cause().cloned(),
                     e.details.as_deref().map(|details| details.origins.clone()),
                 )
             })
         };
+        let parent = display_parent(&exception);
+        let explicit = parent.as_ref().is_some_and(|(_, explicit)| *explicit);
         // SAFETY: the local owner outlives custom formatting and any resulting error.
         let message = unsafe { display(crate::ObjectOwner::as_ptr(&exception), false) };
         let message = if message.is_null() {
@@ -2479,17 +2703,21 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
                     _ => None,
                 })
         };
-        chain.push((name, message, suggestion, origins));
-        current = cause;
+        chain.push((name, message, suggestion, origins, explicit));
+        current = parent.map(|(parent, _)| parent);
     }
     drop(exception);
     let mut diagnostic = crate::sys::stderr_writer();
-    for (index, (name, message, suggestion, origins)) in chain.into_iter().rev().enumerate() {
+    for (index, (name, message, suggestion, origins, explicit)) in
+        chain.into_iter().rev().enumerate()
+    {
         if index != 0 {
-            let _ = writeln!(
-                diagnostic,
-                "\nThe above exception was the direct cause of the following exception:\n"
-            );
+            let separator = if explicit {
+                "The above exception was the direct cause of the following exception:"
+            } else {
+                "During handling of the above exception, another exception occurred:"
+            };
+            let _ = writeln!(diagnostic, "\n{separator}\n");
         }
         if let Some(origins) = origins.filter(|frames| !frames.is_empty()) {
             let _ = writeln!(diagnostic, "Traceback (most recent call last):");
@@ -2559,6 +2787,41 @@ mod tests {
         imre_list_get_index, imre_list_new, imre_list_pop, imre_list_repeat,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn implicit_context_releases_indirectly_owned_group_members() {
+        let group = |child| {
+            new_exception(
+                Kind::ExceptionGroup,
+                Payload::Group(vec![GroupMember::Strong(child)].into_boxed_slice()),
+            )
+        };
+        let released = [false, true].map(|through_cause| {
+            let leaf = new_exception(Kind::ValueError, Payload::Empty);
+            let weak = crate::ObjectOwner::downgrade(&leaf);
+            let child = if through_cause {
+                let child = new_exception(Kind::RuntimeError, Payload::Empty);
+                // SAFETY: the fresh child cannot be reached from the leaf.
+                unsafe {
+                    child.0.with_mut(|storage| {
+                        let Storage::Exception(e) = storage else {
+                            unreachable!()
+                        };
+                        e.details_mut().cause = Some(leaf.clone());
+                        e.suppress_context = true;
+                    })
+                };
+                child
+            } else {
+                group(leaf.clone())
+            };
+            assert!(attach_display_context(&leaf, group(child)).is_ok());
+            assert!(display_parent(&leaf).is_some_and(|(_, explicit)| !explicit));
+            drop(leaf);
+            weak.upgrade().is_none()
+        });
+        assert_eq!(released, [true, true]);
+    }
 
     #[test]
     fn cached_memory_errors_keep_separate_directory_owners() {
