@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import date, datetime, timedelta, timezone
 
 
 def classify():
@@ -25,6 +26,12 @@ def current():
     print(type(set()) is set, type(range(2)) is range, type(None).__name__)
     print(type(classify).__name__, type(value.__class__).__name__, type(len).__name__)
     print(isinstance(str, type), isinstance(classify, type(classify)), isinstance(value, type))
+    print(
+        type(date(2024, 1, 2)) is date,
+        type(datetime(2024, 1, 2, 3, 4)) is datetime,
+        type(timedelta(days=1)) is timedelta,
+        type(timezone(timedelta())) is timezone,
+    )
     for _ in range(1000):
         type([])
     print(type(None) is type(None), type(classify) is type(lambda: None))

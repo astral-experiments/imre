@@ -286,6 +286,10 @@ impl Context {
                     .copied()
                     .unwrap_or_else(|| self.builtin(&name)))
             }
+            Value::Calendar { value, .. } => {
+                let class = format!("datetime.{}", value.class());
+                Ok(self.builtin(&class))
+            }
             _ => {
                 let name = self.builtin_type_name(obj).ok_or_else(|| {
                     Error::new(
