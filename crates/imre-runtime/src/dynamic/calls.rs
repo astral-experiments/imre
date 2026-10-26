@@ -274,9 +274,6 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Instance { class, .. } => Ok(*class),
-            Value::Calendar { value, .. } => {
-                Ok(self.builtin(&format!("datetime.{}", value.class())))
-            }
             Value::NamedTuple {
                 class: Some("time.struct_time"),
                 ..
