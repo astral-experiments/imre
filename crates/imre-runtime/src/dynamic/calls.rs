@@ -833,6 +833,7 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
+            text_memory: None,
             fields: HashMap::new(),
         })
     }
@@ -973,6 +974,7 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
+                        text_memory: None,
                     }));
                 }
                 let dictionary = self

@@ -17,6 +17,32 @@ impl TextFile {
         Ok(Self(unsafe { crate::ObjectOwner::from_raw(file) }))
     }
 
+    pub(crate) fn string_io(initial: Option<&str>, newline: Option<&str>) -> Result<Self> {
+        files::FileState::string_io(initial, newline).map(Self)
+    }
+
+    pub(crate) fn getvalue(&self) -> Result<crate::Str> {
+        // SAFETY: the snapshot owns its text and the memory stream cannot reenter Python.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|storage| storage.file_mut().string_io_value())
+        }
+    }
+
+    pub(crate) fn read_memory(&self, size: Option<&crate::Int>) -> Result<crate::Str> {
+        let size = size
+            .map(super::bytes::native_size)
+            .transpose()?
+            .and_then(|n| usize::try_from(n).ok());
+        // SAFETY: the stream remains owned and reading characters runs no Python callbacks.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|storage| storage.file_mut().read_string_io(size))
+        }
+    }
+
     pub(crate) fn closed(&self) -> bool {
         // SAFETY: this nonreentrant access only copies the file's closed flag.
         unsafe { self.0.0.with(|storage| storage.file().closed()) }

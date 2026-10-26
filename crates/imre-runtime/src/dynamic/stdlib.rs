@@ -113,6 +113,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
     ctx.alloc(Value::Instance {
         class,
         dictionary: None,
+        text_memory: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
