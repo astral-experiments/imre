@@ -348,8 +348,7 @@ impl Input {
         let mut bytes = Vec::new();
         if let Some(limit) = size {
             // A positive buffered read reserves its requested bytes object.
-            // The 64-bit CPython bytes header and terminator require 33 bytes.
-            if limit > isize::MAX as usize - 33 {
+            if limit > crate::MAX_BYTES_LEN {
                 return Err(Error::new(Kind::OverflowError, "byte string is too large"));
             }
             bytes

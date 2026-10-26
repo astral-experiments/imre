@@ -29,6 +29,7 @@ mod pickle;
 pub(super) mod readiness;
 pub(super) mod regex;
 mod socket;
+mod structure;
 mod traceback;
 pub(super) mod urllib;
 
@@ -212,9 +213,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
-        ("re", "A" | "U") => {
+        ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
+        ("re", "A" | "U" | "X") => {
             let module = ctx.module("re")?;
-            ctx.lookup_attr(module, if name == "A" { "ASCII" } else { "UNICODE" })?
+            let flag = match name {
+                "A" => "ASCII",
+                "U" => "UNICODE",
+                _ => "VERBOSE",
+            };
+            ctx.lookup_attr(module, flag)?
         }
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
@@ -358,7 +365,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "python_version_tuple"
             | "python_implementation",
         )
-        | ("struct", "calcsize" | "unpack" | "error")
+        | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
         | ("codecs", "lookup")
@@ -398,6 +405,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "struct.Struct" {
+        return structure::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("struct.Struct.") {
+        return structure::method(ctx, method, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
     }
@@ -518,6 +531,7 @@ pub(super) fn call(
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
         | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
@@ -731,11 +745,7 @@ pub(super) fn call(
             };
             let values =
                 system::struct_unpack(format, bytes).map_err(|e| Error::new("struct.error", e))?;
-            let items = values
-                .into_iter()
-                .map(|n| ctx.alloc(Value::Int(crate::Int::from_usize(n as usize))))
-                .collect();
-            ctx.alloc(Value::Tuple(items))
+            structure::unsigned_tuple(ctx, values)
         }
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
@@ -825,6 +835,13 @@ pub(super) fn call(
             || name == "subprocess.run" =>
         {
             return files::call(ctx, name, args, kwargs);
+        }
+        "match.groups" => {
+            return regex::match_groups(
+                ctx,
+                argument(args, 0)?,
+                option(args, 1, kwargs, "default")?.unwrap_or(NONE),
+            );
         }
         name if name.starts_with("pattern.") || name == "match.group" => {
             return regex::call(ctx, name, args);

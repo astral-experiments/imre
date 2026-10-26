@@ -36,6 +36,15 @@ class ReadCount(RawIOBase):
 
 
 def exercise(path):
+    for invalid in ("./missing-binary-input/file", path + "/child", "."):
+        try:
+            open(invalid, "rb")
+        except OSError as error:
+            print(type(error).__name__, error.errno, error.strerror, error.filename, error.args)
+    try:
+        open("nul\x00path", "rb")
+    except ValueError as error:
+        print(str(error))
     with open(path, "rb") as stream:
         reader = ChunkReader(stream)
         with reader as entered:
@@ -117,4 +126,4 @@ def exercise(path):
                 break
             print(stream.readline(), [line for line in stream], stream.readline())
         with open(lines, mode) as stream:
-            print(list(zip(stream, stream)))
+            print(iter(stream) is stream, list(zip(stream, stream)), next(stream, "done"))

@@ -13,14 +13,14 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "str") => {
+            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str") => {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
         }
     }
     /// Special methods are looked up on the type, even if the instance shadows them.
-    fn slot(&self, object: Id, name: &str) -> Option<Id> {
+    pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
             return None;
         };
@@ -131,8 +131,9 @@ impl Context {
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
-                    ) || name == "list.pop"
-                        || name.starts_with("dict.")
+                            | "int.to_bytes"
+                            | "list.pop"
+                    ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -377,6 +378,7 @@ impl Context {
             | ("float", Value::Float(_))
             | ("str", Value::Str(_))
             | ("bytes", Value::Bytes(_))
+            | ("struct.Struct", Value::Struct { .. })
             | ("hmac.HMAC", Value::Hmac(_))
             | ("socket.socket", Value::Socket(_))
             | ("list", Value::List(_))
@@ -473,10 +475,15 @@ impl Context {
 
     /// Match an attribute lookup failure using the ordinary exception hierarchy.
     pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
-        error.kind == "AttributeError"
+        self.is_builtin_error(error, "AttributeError")
+    }
+
+    /// Includes runtime-loaded subclasses of the named builtin exception.
+    pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
+        error.kind == kind
             || self
                 .builtins
-                .get("AttributeError")
+                .get(kind)
                 .is_some_and(|&base| self.error_matches(&error.kind, base))
     }
 
@@ -607,8 +614,11 @@ impl Context {
                 _ => {}
             },
             Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
+            Value::RegexPattern(pattern) if name == "groups" => {
+                return Ok(self.int(pattern.group_count() as i64));
+            }
             Value::RegexPattern(pattern) if name == "pattern" => {
-                return Ok(self.text(&pattern.source));
+                return Ok(pattern.source);
             }
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
@@ -691,6 +701,11 @@ impl Context {
                 });
                 return Ok(self.alloc(Value::Tuple(args)));
             }
+            Value::Struct { format, layout } => match name {
+                "format" => return Ok(self.text(format)),
+                "size" => return Ok(self.int(layout.size as i64)),
+                _ => {}
+            },
             Value::Hash(hash) => match name {
                 "name" => return Ok(self.text(hash.borrow().name())),
                 "digest_size" => return Ok(self.int(hash.borrow().digest_size() as i64)),
@@ -724,11 +739,16 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class) if class == "bool" && name == "to_bytes" => {
+                return Ok(self.builtin("int.to_bytes"));
+            }
             Value::Native(class) if class == "list" && name == "pop" => {
                 return Ok(self.builtin("list.pop"));
             }
             Value::Native(class)
-                if class == "dict" || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
+                if class == "dict"
+                    || (class == "int" && name == "to_bytes")
+                    || (class == "str" && builtins::STR_METHODS.contains(&name)) =>
             {
                 if let Some(method) = self.own_class_attr(obj, name) {
                     return Ok(method);
@@ -1122,6 +1142,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "set"
+                                | "int"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"
