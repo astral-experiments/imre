@@ -91,8 +91,15 @@ impl Context {
         ) || self.slot(value, "__call__").is_some()
     }
 
+    fn native_data_descriptor(&self, descriptor: Id) -> bool {
+        matches!(
+            self.heap.get(descriptor),
+            Value::Property(_) | Value::ReadOnlyDescriptor { .. }
+        )
+    }
+
     fn data_descriptor(&self, descriptor: Id) -> bool {
-        matches!(self.heap.get(descriptor), Value::Property(_))
+        self.native_data_descriptor(descriptor)
             || self.slot(descriptor, "__set__").is_some()
             || self.slot(descriptor, "__delete__").is_some()
     }
@@ -103,7 +110,10 @@ impl Context {
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
-                Value::Property(get) => return self.call(*get, vec![receiver], Vec::new()),
+                Value::Property(property) => return property.read(self, receiver),
+                Value::ReadOnlyDescriptor { get, .. } => {
+                    return self.call(*get, vec![receiver], Vec::new());
+                }
                 Value::Function { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
@@ -136,7 +146,7 @@ impl Context {
             (Some(member), _)
                 if self.data_descriptor(member)
                     && (self.slot(member, "__get__").is_some()
-                        || matches!(self.heap.get(member), Value::Property(_))) =>
+                        || self.native_data_descriptor(member)) =>
             {
                 self.bind_attribute(member, object, class)
             }
@@ -222,6 +232,7 @@ impl Context {
             Value::ByteArray(_) => "bytearray",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
                 Value::Native(_) => "builtin_function_or_method",
@@ -238,6 +249,7 @@ impl Context {
                             | "module"
                             | "method"
                             | "builtin_function_or_method"
+                            | "getset_descriptor"
                             | "operator.attrgetter"
                     )
                 {
@@ -381,6 +393,14 @@ impl Context {
     }
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         match self.heap.get(obj).clone() {
+            Value::Property(property) => {
+                if let Some(attribute) = property.attribute(self, name)? {
+                    return Ok(attribute);
+                }
+            }
+            Value::Native(class) if class == "property" && name == "setter" => {
+                return Ok(self.builtin("property.setter"));
+            }
             Value::Calendar { value, tzinfo } => {
                 return stdlib::datetime::attribute(self, obj, &value, tzinfo, name);
             }
@@ -556,6 +576,15 @@ impl Context {
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
+            if let Value::Property(property) = *self.heap.get(descriptor) {
+                return property.write(self, obj, value);
+            }
+            if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("attribute '{name}' of '{owner}' objects is not writable"),
+                ));
+            }
             if let Some(setter) = self.slot(descriptor, "__set__") {
                 self.call(setter, vec![descriptor, obj, value], Vec::new())?;
                 return Ok(());
@@ -573,6 +602,11 @@ impl Context {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
         match self.heap.get_mut(obj) {
+            Value::Property(property) if name == "__name__" => property.name = Some(value),
+            Value::Property(property) if name == "__doc__" => property.doc = value,
+            Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
             Value::Module {
                 name: module,
                 scope,
@@ -628,6 +662,7 @@ impl Context {
                                 | "range"
                                 | "function"
                                 | "object"
+                                | "property"
                         )
                     ) =>
             {
@@ -903,6 +938,9 @@ impl Context {
         };
         body_scope.class_body = Some(Vec::new());
         body_scope.class_cell = Some(cell);
+        if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
+            self.bind(scope, "__qualname__", qualname);
+        }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
@@ -934,7 +972,13 @@ impl Context {
             self.heap.keep(value);
         }
         for (value, name) in members {
-            if let Some(set_name) = self.slot(value, "__set_name__") {
+            if matches!(self.heap.get(value), Value::Property(_)) {
+                let name = self.text(name);
+                let Value::Property(property) = self.heap.get_mut(value) else {
+                    unreachable!()
+                };
+                property.name = Some(name);
+            } else if let Some(set_name) = self.slot(value, "__set_name__") {
                 let name = self.text(name);
                 self.call(set_name, vec![value, class, name], Vec::new())?;
             }

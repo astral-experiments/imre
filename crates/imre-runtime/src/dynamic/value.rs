@@ -78,6 +78,8 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::Partial { .. } => "partial",
+            Value::Property(_) => "property",
+            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Module { .. } => "module",
             Value::Instance { class, .. } => match self.heap.get(*class) {
@@ -235,7 +237,12 @@ pub(super) enum Value {
         callable: Id,
         receiver: Id,
     },
-    Property(Id),
+    Property(super::property::Property),
+    ReadOnlyDescriptor {
+        get: Id,
+        owner: &'static str,
+        name: &'static str,
+    },
     Partial {
         function: Id,
         args: Id,
@@ -364,7 +371,8 @@ impl Value {
                 visit.extend(fields.values());
             }
             Self::Method { callable, receiver } => visit.extend([*callable, *receiver]),
-            Self::Property(val) => visit.push(*val),
+            Self::Property(property) => property.children(visit),
+            Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
             Self::Partial {
                 function,
                 args,

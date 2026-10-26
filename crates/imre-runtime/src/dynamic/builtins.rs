@@ -135,6 +135,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "str"
         }
+        Value::Property(_) if attr == "setter" => "property",
         Value::Bytes(_) if attr == "decode" => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
@@ -391,6 +392,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" => collections::method(ctx, name, args, kwargs),
+            "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -506,9 +508,8 @@ pub(super) fn call(
             Ok(ctx.text(value))
         }
         "property" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::Property(args[0])))
+            let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
+            super::property::construct(ctx, fields)
         }
         "open" => {
             let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
