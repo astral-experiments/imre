@@ -106,6 +106,34 @@ pub(crate) struct Field {
 }
 
 impl Classes {
+    pub(crate) fn subclass(&self, graph: &SourceGraph, child: usize, parent: usize) -> bool {
+        let bases = &self.definitions[child].bases;
+        if child == parent || bases.contains(&parent) {
+            return true;
+        }
+        graph.is_abstract_context_manager(self.definitions[parent].definition)
+            && ["__enter__", "__exit__"].iter().all(|&name| {
+                std::iter::once(&child).chain(bases).find_map(|&id| {
+                    self.definitions[id]
+                        .node
+                        .body
+                        .iter()
+                        .rev()
+                        .find_map(|stmt| match stmt {
+                            ast::Stmt::FunctionDef(f) if f.name.as_str() == name => Some(true),
+                            ast::Stmt::Assign(a)
+                                if a.targets.iter().any(|target| {
+                                    target.as_name_expr().is_some_and(|n| n.id.as_str() == name)
+                                }) =>
+                            {
+                                Some(!matches!(&*a.value, ast::Expr::NoneLiteral(_)))
+                            }
+                            _ => None,
+                        })
+                }) == Some(true)
+            })
+    }
+
     /// The entry module may need to execute class bodies even without module globals.
     pub(crate) fn has_class_values(&self, module: usize) -> bool {
         self.definitions.iter().any(|class| {
@@ -466,14 +494,17 @@ fn collect_class(
                         || matches!(stmt, ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_) | ast::Expr::EllipsisLiteral(_)))) {
                         return Err(module.error(method, "an abstract record method must be a declaration on an ABC"));
                     }
-                    if !names.insert(name.to_owned()) {
-                        return Err(module.error(method, "duplicate abstract method"));
-                    }
                     abstract_methods.insert(name.to_owned());
-                    class_bindings.insert(name.to_owned());
-                    continue;
+                    if !graph.is_abstract_context_manager(definition) {
+                        if !names.insert(name.to_owned()) {
+                            return Err(module.error(method, "duplicate abstract method"));
+                        }
+                        class_bindings.insert(name.to_owned());
+                        continue;
+                    }
+                } else {
+                    abstract_methods.remove(name);
                 }
-                abstract_methods.remove(name);
                 if name == "__hash__" {
                     if hash.is_some() || !dataclass.is_some_and(|d| d.frozen && d.eq) {
                         return Err(module
@@ -494,8 +525,6 @@ fn collect_class(
                     name,
                     "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
                 ) || (mapping && name == "__len__");
-                let close_context = module.closes_context(node.name.as_str())
-                    && matches!(name, "__enter__" | "__exit__");
                 if name.starts_with("__")
                     && !matches!(
                         name,
@@ -503,18 +532,19 @@ fn collect_class(
                     )
                     && !(name == "__getattr__" && graph.is_http_handler(definition))
                     && !unary_protocol
-                    && !close_context
+                    && !matches!(name, "__enter__" | "__exit__")
                     && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
-                    && !(module.is_bundled("socketserver")
-                        && node.name.as_str() == "TCPServer"
-                        && matches!(name, "__enter__" | "__exit__"))
                 {
                     return Err(
                         module.error(method, "unsupported special method on a fixed-layout class")
                     );
                 }
-                let kind = method_kind(graph, definition.module, method, &class_bindings)?;
+                let kind = if abstract_method {
+                    MethodKind::Instance
+                } else {
+                    method_kind(graph, definition.module, method, &class_bindings)?
+                };
                 if name == "__call__" && kind != MethodKind::Instance {
                     return Err(module.error(
                         method,

@@ -44,7 +44,16 @@ pub(super) fn resolve(
                 {
                     continue;
                 }
-                match graph.resolve(definition.module, argument) {
+                let origin = match argument {
+                    ast::Expr::Subscript(subscript)
+                        if matches!(graph.resolve(definition.module, &subscript.value),
+                        Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) =>
+                    {
+                        &*subscript.value
+                    }
+                    other => other,
+                };
+                match graph.resolve(definition.module, origin) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}

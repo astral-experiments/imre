@@ -1896,6 +1896,9 @@ fn annotation_with_aliases(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
+            nested(&value.value)
+        }
         ast::Expr::Subscript(value)
             if matches!(&*value.value, ast::Expr::Name(name) if name.id.as_str() == "type")
                 && graph.resolve_type(module, &value.value).is_none() =>
@@ -9124,10 +9127,10 @@ impl<'a> Checker<'a> {
                 && let (Some(child), Some(parent)) =
                     (self.class_reference(child), self.class_reference(parent))
             {
-                let result = child == parent
-                    || self.classes.declarations.definitions[child]
-                        .bases
-                        .contains(&parent);
+                let result = self
+                    .classes
+                    .declarations
+                    .subclass(self.graph, child, parent);
                 return Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Bool(result),

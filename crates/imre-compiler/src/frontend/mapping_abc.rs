@@ -30,8 +30,8 @@ impl Checker<'_> {
         )
     }
 
-    /// A statically known abstract Mapping still fails when the call executes.
-    pub(super) fn abstract_mapping_call(
+    /// Calling an abstract class evaluates its arguments before reporting the missing methods.
+    pub(super) fn abstract_class_call(
         &mut self,
         class: usize,
         call: &ast::ExprCall,

@@ -1187,6 +1187,12 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn is_abstract_context_manager(&self, definition: DefinitionId) -> bool {
+        let source = &self.modules[definition.module];
+        source.is_bundled(CONTEXTLIB_ABSTRACT)
+            && source.export("AbstractContextManager") == Some(Binding::Definition(definition))
+    }
+
     /// Resolve a bundled logging definition called implicitly by native lowering.
     pub(crate) fn logging_definition(&self, name: &str) -> Option<DefinitionId> {
         let module = self
@@ -1881,6 +1887,7 @@ fn resolve_binding(
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
+pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -1907,6 +1914,7 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
     }
     module.symbol(name).or_else(|| {
         let implementation = match module {
+            IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
             IntrinsicModule::Inspect if name == "cleandoc" => INSPECT_FUNCTIONS,
             IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
             IntrinsicModule::Logging if !name.starts_with('_') => LOGGING_CLASSES,
@@ -1921,7 +1929,8 @@ fn stdlib_symbol(modules: &[SourceModule], module: IntrinsicModule, name: &str) 
         source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
+                    (IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    | (IntrinsicModule::Inspect, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::LoggingHandlers, ast::Stmt::ClassDef(_))
@@ -2671,6 +2680,13 @@ impl<'a> Loader<'a> {
         };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
+            (module == Some(IntrinsicModule::Contextlib)
+                && imports.is_none_or(|names| {
+                    names
+                        .iter()
+                        .any(|a| a.name.as_str() == "AbstractContextManager")
+                }))
+            .then_some((CONTEXTLIB_ABSTRACT, include_str!("../stdlib/contextlib.py"))),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {
                     names
