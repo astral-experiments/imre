@@ -173,6 +173,14 @@
       "status": "upstream-skip",
       "reason": "requires FS encoding to match locale"
     },
+    "test.test_sys.SysModuleTest.test_module_names": {
+      "status": "pass",
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "0f75871bf270a07022d0128057feba227c9345257f0496fd45922758dea29279"
+    },
     "test.test_sys.SysModuleTest.test_orig_argv": {
       "status": "pass",
       "execution": "host-driven-native",
@@ -266,14 +274,6 @@
           "launch": "compile the original -c source directly"
         }
       ]
-    },
-    "test.test_sys.SysModuleTest.test_module_names": {
-      "status": "pass",
-      "execution": "native-body",
-      "body": "Imre",
-      "assertions": "Imre",
-      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
-      "method_sha256": "0f75871bf270a07022d0128057feba227c9345257f0496fd45922758dea29279"
     }
   }
 }
