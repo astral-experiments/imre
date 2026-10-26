@@ -46,7 +46,8 @@ for date in (datetime(2001, 1, 7), datetime(2001, 1, 7, tzinfo=timezone(timedelt
         print(format_datetime(date, usegmt=True))
     except ValueError as error:
         print(str(error))
-for ts in (-0.0000005, -1.9999995, 0.0, 0.9999995, 1000000000.5, 1609459199.9999998,
+for ts in (-5.000000000000001e-7, -5e-7, -4.999999999999999e-7,
+           -1.9999995, 0.0, 0.9999995, 1000000000.5, 1609459199.9999998,
            1710053999.0, 1710054000.0, 1730613599.0, 1730613600.0,
            -62135596801.0, 253402300800.0, float("nan"), float("inf")):
     stamp(ts)

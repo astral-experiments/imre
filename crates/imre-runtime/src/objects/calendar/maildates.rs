@@ -219,15 +219,13 @@ pub unsafe extern "C" fn imre_email_format_datetime(dt: *const Object, usegmt: b
     )
 }
 
-// datetime.fromtimestamp rounds the fractional microsecond to nearest, ties even,
-// before asking for the civil day. Include a possible carry across a whole second.
+// datetime.fromtimestamp rounds the signed fraction before normalizing whole seconds.
 fn timestamp(value: f64) -> Result<i64, Error> {
-    let seconds = timed::float_seconds(value)?;
-    if ((value - value.floor()) * 1_000_000.0).round_ties_even() >= 1_000_000.0 {
-        seconds.checked_add(1).ok_or_else(timed::overflow)
-    } else {
-        Ok(seconds)
-    }
+    let seconds = timed::float_seconds(value.trunc())?;
+    let micros = (value.fract() * 1_000_000.0).round_ties_even() as i64;
+    seconds
+        .checked_add(micros.div_euclid(1_000_000))
+        .ok_or_else(timed::overflow)
 }
 
 /// # Safety
