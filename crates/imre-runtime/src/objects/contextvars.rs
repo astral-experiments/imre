@@ -165,8 +165,8 @@ impl ReprView {
                     out.write_str("...")?;
                     return Ok(None);
                 }
-                // SAFETY: this view was obtained from the rooted, exact ContextVar.
                 let tail = ReprEnd {
+                    // SAFETY: this view was obtained from the rooted, exact ContextVar.
                     owner: unsafe { crate::ObjectOwner::acquire_word(owner as usize) },
                     key: Some(key),
                 };
@@ -184,8 +184,8 @@ impl ReprView {
                 } else {
                     "<Token var="
                 })?;
-                // SAFETY: this view was obtained from the rooted, exact Token.
                 let tail = ReprEnd {
+                    // SAFETY: this view was obtained from the rooted, exact Token.
                     owner: unsafe { crate::ObjectOwner::acquire_word(owner as usize) },
                     key: None,
                 };
