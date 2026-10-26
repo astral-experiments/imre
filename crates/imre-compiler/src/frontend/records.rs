@@ -1138,6 +1138,13 @@ impl Checker<'_> {
                 attribute.attr.as_str() == "assertIsNot",
             );
         }
+        if !self.classes.methods[class].contains_key(attribute.attr.as_str())
+            && let Some(receiver) = &receiver
+            && let Some(result) =
+                self.adapter_event(class, receiver, attribute.attr.as_str(), call)?
+        {
+            return Ok(result);
+        }
         if matches!(attribute.attr.as_str(), "assertEqual" | "assertListEqual")
             && let Some(receiver) = &receiver
             && let Some(checked) =
