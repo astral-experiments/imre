@@ -7587,6 +7587,19 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
+                if receiver.ty == Type::TextOutput && attribute.attr.as_str() == "closed" {
+                    let file = Expr {
+                        ty: Type::TextIO,
+                        kind: ExprKind::Builtin(
+                            Builtin::Logging(ir::LogOperation::StreamFile),
+                            vec![receiver],
+                        ),
+                    };
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::TextClosed, vec![file]),
+                    });
+                }
                 if matches!(receiver.ty, Type::TextIO | Type::StringIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {

@@ -1854,6 +1854,7 @@ pub(crate) enum LogOperation {
     RemoveHandler,
     WriteStream,
     FlushStream,
+    StreamFile,
     HandlerRename,
     LockNew,
     LockAcquire,

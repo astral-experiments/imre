@@ -45,6 +45,24 @@ pub unsafe extern "C" fn imre_text_output_flush(stream: *const Object) {
     finish(result, ());
 }
 
+/// Return the underlying file for close, closed and descriptor operations.
+/// A codec writer delegates these attributes to its wrapped binary stream.
+///
+/// # Safety
+/// The caller roots a writable stream and receives its own reference to the file.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_text_output_file(stream: *const Object) -> *const Object {
+    // SAFETY: both alternatives retain a live file without calling back into the stream.
+    let file = unsafe {
+        object(stream).0.with(|s| match s {
+            Storage::CodecWriter(writer) => writer.stream.clone(),
+            Storage::File(_) => ObjectOwner::acquire_word(stream as usize),
+            _ => unreachable!("checked text output stream"),
+        })
+    };
+    ObjectOwner::into_raw(file)
+}
+
 /// # Safety
 /// The caller roots the exact logger during the list read.
 unsafe fn handler_list(logger: *const Object) -> ObjectOwner {
