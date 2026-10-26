@@ -58,9 +58,9 @@
       "bytes": 11066,
       "lines": 249,
       "original_child": {
-        "stdout_hex": "c2a20a",
+        "stdout_hex": "4a25",
         "status": 0,
-        "outcome": "failed"
+        "outcome": "pass"
       }
     },
     "3": {
@@ -68,9 +68,9 @@
       "bytes": 11066,
       "lines": 249,
       "original_child": {
-        "stdout_hex": "c2a20a",
+        "stdout_hex": "4a25",
         "status": 0,
-        "outcome": "failed"
+        "outcome": "pass"
       }
     }
   }

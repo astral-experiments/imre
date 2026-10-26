@@ -401,14 +401,29 @@ impl Codec {
                     while let Some((i, _)) = chars.next_if(|(_, c)| encoded(*c).is_none()) {
                         end = i;
                     }
-                    return Err(encoding_error(codec, reason, error_input()?, start, end, ch));
+                    return Err(encoding_error(
+                        codec,
+                        reason,
+                        error_input()?,
+                        start,
+                        end,
+                        ch,
+                    ));
                 }
                 name => return Err(unknown_handler(name)),
             };
-            out.try_reserve(replacement.len()).map_err(|_| Error::allocation())?;
+            out.try_reserve(replacement.len())
+                .map_err(|_| Error::allocation())?;
             for c in replacement.chars() {
                 let Some(byte) = encoded(c) else {
-                    return Err(encoding_error(codec, reason, error_input()?, start, start, ch));
+                    return Err(encoding_error(
+                        codec,
+                        reason,
+                        error_input()?,
+                        start,
+                        start,
+                        ch,
+                    ));
                 };
                 out.push(byte);
             }
@@ -418,13 +433,26 @@ impl Codec {
 }
 
 /// Report the source string and scalar positions that the codec could not represent.
-fn encoding_error(codec: &str, reason: &str, source: StrOwner, start: usize, end: usize, ch: char) -> Error {
+fn encoding_error(
+    codec: &str,
+    reason: &str,
+    source: StrOwner,
+    start: usize,
+    end: usize,
+    ch: char,
+) -> Error {
     let at = if start == end {
         format!("character '{}' in position {start}", escaped(ch))
     } else {
         format!("characters in position {start}-{end}")
     };
-    Error::unicode_encode(codec, source, start..end + 1, reason, format!("'{codec}' codec can't encode {at}: {reason}"))
+    Error::unicode_encode(
+        codec,
+        source,
+        start..end + 1,
+        reason,
+        format!("'{codec}' codec can't encode {at}: {reason}"),
+    )
 }
 
 /// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.

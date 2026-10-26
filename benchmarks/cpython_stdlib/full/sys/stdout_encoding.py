@@ -39,6 +39,14 @@ print(b"ok")
 out.flush()
 """
 
+TEXT_AROUND_CHILD = r"""import subprocess
+import sys
+sys.stdout.write("¢")
+sys.stdout.flush()
+subprocess.check_call(["/bin/sh", "-c", r"printf '\000raw\377'"])
+print("¢")
+"""
+
 
 def original_children(source):
     tree = ast.parse(source.read_bytes())
@@ -74,10 +82,16 @@ def level_report(tools, source):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         for label, code, settings in (
-            ("metadata", META, (None, "", ":", ":ignore", "utf-8", "ascii:", "latin1", "ascii:no-such", "utf-8-sig")),
+            ("metadata", META, (None, "", ":", ":ignore", "utf-8", "ascii:", "latin1", "ascii:no-such", "utf-8-sig",
+                                "cp424", "IBM424:replace")),
             ("writes and failures", WRITES, (None, "ascii:replace", "ascii", "latin1", "ascii:unknown-policy",
-                                              "ascii:backslashreplace", "utf-8-sig")),
+                                              "ascii:backslashreplace", "utf-8-sig", "cp424", "cp424:replace",
+                                              "cp424:backslashreplace", "cp424:namereplace")),
+            ("text surrounding a POSIX child writing raw bytes", TEXT_AROUND_CHILD,
+             ("utf-8", "cp424") if os.name == "posix" else ()),
         ):
+            if not settings:
+                continue
             binary = tools.build(code.encode(), work)
             for setting in settings:
                 env = base if setting is None else dict(base, PYTHONIOENCODING=setting)
@@ -101,7 +115,7 @@ def level_report(tools, source):
             lines = bytes.fromhex(one.pop("stderr")).splitlines()
             observations[name] = one | {"last_stderr_line": lines[-1].decode("ascii", "backslashreplace") if lines else ""}
         equal = observations["cpython"] == observations["imre"]
-        if setting.startswith("ascii") and not equal:
+        if (setting == "cp424" or setting.startswith("ascii")) and not equal:
             raise AssertionError((setting, observations))
         children.append({"setting": setting, "source": code, "source_sha256": hashlib.sha256(code.encode()).hexdigest(),
                          "same_status_stdout_and_last_diagnostic_line": equal, **observations})

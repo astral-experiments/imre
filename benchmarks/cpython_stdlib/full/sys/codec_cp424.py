@@ -119,10 +119,12 @@ def main():
                      "--clang", str(tools.clang.resolve()), "--opt-level", str(level)]
             env = dict(os.environ, PYTHONIOENCODING="cp424", IMRE_ENCODED_FLAGS="\x1f".join(flags))
             native_child = output([tools.imre.resolve(), "-c", original], env)
+            if native_child != observed:
+                raise AssertionError((level, original, observed.hex(), native_child.hex()))
             report["levels"][str(level)] = {"stdout_sha256": hashlib.sha256(actual).hexdigest(),
                                             "bytes": len(actual), "lines": len(actual.splitlines()),
                                             "original_child": {"stdout_hex": native_child.hex(), "status": 0,
-                                                "outcome": "pass" if native_child == observed else "failed"}}
+                                                "outcome": "pass"}}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
 
 
