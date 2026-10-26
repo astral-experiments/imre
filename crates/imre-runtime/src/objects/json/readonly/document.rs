@@ -4,7 +4,6 @@
 use crate::StrOwner;
 use ::toml::de::{DeTable, DeValue};
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use super::{KeyMemo, Node, Nodes, View};
 use crate::objects::mappings::{
@@ -160,7 +159,9 @@ impl Value {
         let mut nodes = Vec::new();
         let index = self.snapshot(&mut nodes, &mut HashMap::new(), 0)?;
         Ok(View {
-            nodes: Nodes::Document(Rc::new(nodes)),
+            nodes: Nodes::Snapshot(
+                crate::shared::Shared::try_new(nodes).map_err(|_| Error::allocation())?,
+            ),
             index,
         })
     }
@@ -533,9 +534,7 @@ mod tests {
         let Ok(view) = value.view() else {
             panic!("shallow shared graph must fit")
         };
-        let Nodes::Document(nodes) = view.nodes else {
-            unreachable!()
-        };
+        let nodes = &*view.nodes;
         assert_eq!(nodes.len(), 23);
         for node in &nodes[1..] {
             assert!(matches!(node, Node::Array(items) if items.len() == 2 && items[0] == items[1]));
