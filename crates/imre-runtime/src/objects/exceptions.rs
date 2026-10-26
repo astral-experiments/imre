@@ -2906,6 +2906,7 @@ mod tests {
         assert!(rendered.ends_with("\\x00'"));
         assert!(rendered.capacity() < 128 * 1024);
     }
+
     #[test]
     fn unhandled_exit_discards_failed_exception_text() {
         unsafe extern "C" fn failed_text(_: *const usize) -> *const Str {
