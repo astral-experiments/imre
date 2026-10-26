@@ -214,7 +214,7 @@ impl Context {
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Reader(_) => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
             },
             Value::TextFile(_) => "_io.TextIOWrapper",

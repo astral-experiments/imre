@@ -9,7 +9,10 @@ use super::{
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
-    Reader(RefCell<Option<ReadSource>>),
+    Reader {
+        slot: RefCell<Option<ReadSource>>,
+        socket: bool,
+    },
     Writer(RefCell<crate::objects::FileState>),
 }
 
@@ -38,7 +41,10 @@ impl BinaryFile {
 
     /// Files and sockets share the same buffered reader methods.
     pub(in crate::dynamic) fn reader(reader: ReadSource) -> Self {
-        Self::Reader(RefCell::new(Some(reader)))
+        Self::Reader {
+            socket: matches!(reader, ReadSource::Socket(_)),
+            slot: RefCell::new(Some(reader)),
+        }
     }
 
     /// A refused handle allocation drops its reader and releases any retained socket.
@@ -51,7 +57,7 @@ impl BinaryFile {
     /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
-            Self::Reader(slot) => slot.borrow().is_none(),
+            Self::Reader { slot, .. } => slot.borrow().is_none(),
             Self::Writer(file) => file.borrow().closed(),
         }
     }
@@ -284,8 +290,8 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
-    let slot = match handle.as_ref() {
-        BinaryFile::Reader(slot) => slot,
+    let (slot, socket) = match handle.as_ref() {
+        BinaryFile::Reader { slot, socket } => (slot, *socket),
         BinaryFile::Writer(file) => {
             // Converting a size can close this same writer.
             match (name, &args[1..]) {
@@ -339,6 +345,36 @@ pub(super) fn call(
     let length = match name {
         "file.read" | "file.readline" => Some(read_length(ctx, args.get(1).copied())?),
         _ => None,
+    };
+    if socket && name == "file.tell" {
+        // SocketIO.tell() calls its unsupported raw seek even after close.
+        return Err(Error::new("UnsupportedOperation", "seek"));
+    }
+    // BufferedReader validates whence before checking the stream or converting the offset.
+    let whence = if name == "file.seek" {
+        let value = option(args, 2, kwargs, "whence")?;
+        let value = match value {
+            None => 0,
+            Some(value) => ctx
+                .index_integer(value)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?,
+        };
+        if !matches!(
+            value,
+            libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
+        ) {
+            return Err(Error::new(
+                "ValueError",
+                format!("whence value {value} unsupported"),
+            ));
+        }
+        value
+    } else {
+        0
     };
     let mut slot = slot.borrow_mut();
     if name == "file.write" {
@@ -401,11 +437,14 @@ pub(super) fn call(
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.seek" => {
-            let offset = ctx.as_integer(argument(args, 1)?)?;
-            let whence = option(args, 2, kwargs, "whence")?
-                .map(|id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(0);
+            let target = argument(args, 1)?;
+            if socket {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+            let offset = ctx.as_integer(target)?;
             let pos = match whence {
                 0 => SeekFrom::Start(
                     u64::try_from(offset)
