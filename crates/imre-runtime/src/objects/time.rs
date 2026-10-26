@@ -4,7 +4,8 @@ use super::{
     Int,
     calendar::c_component,
     exceptions::{Error, Kind, finish},
-    records::descriptor,
+    logging::timed,
+    records::{RecordDescriptor, descriptor, imre_record_try_new},
     words::WordKind,
 };
 use std::ffi::CStr;
@@ -15,10 +16,39 @@ use std::ffi::CStr;
 pub unsafe extern "C" fn imre_clock_parts(
     stamp: f64,
     utc: bool,
-    layout: *const super::records::RecordDescriptor,
+    layout: *const RecordDescriptor,
 ) -> *mut usize {
-    use super::{logging::timed, records::imre_record_try_new};
-    let parts = timed::float_seconds(stamp).and_then(|seconds| timed::civil(seconds, utc));
+    // SAFETY: the caller supplies the struct_time descriptor.
+    unsafe { clock_parts(timed::float_seconds(stamp), utc, layout) }
+}
+
+/// Convert an integer timestamp without rounding it to a floating-point second.
+///
+/// # Safety
+/// The caller roots the tagged integer and supplies the struct_time descriptor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_clock_int_parts(
+    stamp: usize,
+    utc: bool,
+    layout: *const RecordDescriptor,
+) -> *mut usize {
+    // SAFETY: the caller keeps the Python integer and tuple layout live.
+    unsafe {
+        clock_parts(
+            Int::borrow(stamp).to_i64().ok_or_else(timed::overflow),
+            utc,
+            layout,
+        )
+    }
+}
+
+/// Build a struct_time from checked seconds and the caller's nine-field descriptor.
+unsafe fn clock_parts(
+    seconds: Result<i64, Error>,
+    utc: bool,
+    layout: *const RecordDescriptor,
+) -> *mut usize {
+    let parts = seconds.and_then(|value| timed::civil(value, utc));
     finish(
         parts.map(|tm| {
             let fields = [

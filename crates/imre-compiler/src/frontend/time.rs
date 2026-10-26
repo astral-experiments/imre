@@ -15,10 +15,9 @@ impl Checker<'_> {
                 let val = self.expr(arg)?;
                 match val.ty {
                     Type::Float => val,
-                    Type::Int | Type::Bool => Expr {
-                        ty: Type::Float,
-                        kind: ExprKind::Builtin(Builtin::Float, vec![val]),
-                    },
+                    Type::Int | Type::Bool | Type::IntEnum(_) | Type::Class(_) => {
+                        self.index_word(val, arg, false)?
+                    }
                     Type::None => self.evaluated_receiver(
                         Some(val),
                         Expr {

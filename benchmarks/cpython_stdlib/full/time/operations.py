@@ -60,6 +60,13 @@ for stamp in (-2, -1, 0, 1, 1710054000, 1730611800, 1730615400):
     print(timestamp(value))
     print(timestamp(float(stamp)))
     print(gmtime(stamp))
+assert gmtime(HTTPStatus.OK) == gmtime(200)
+assert localtime(Indexed(200)) == localtime(200)
+for stamp in (2**53 + 1, -(2**53) - 1):
+    try:
+        print((gmtime(stamp).tm_sec, localtime(stamp).tm_sec))
+    except (OSError, OverflowError) as exc:
+        print(str(exc))
 for dst in (0, 1, -1):
     for month, day, hour in ((3, 10, 2), (11, 3, 1)):
         civil = (2024, month, day, hour, 30, 0, 6, 1, dst)

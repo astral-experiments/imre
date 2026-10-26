@@ -4767,11 +4767,18 @@ impl Emitter<'_, '_> {
                 let layout = self
                     .output
                     .global_ref(format!("layout_{}", record_name(returns)));
-                let stamp = &args[0].value.operand;
+                let stamp = &args[0].value;
+                let function = if stamp.ty == Type::Int {
+                    "imre_clock_int_parts"
+                } else {
+                    "imre_clock_parts"
+                };
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_clock_parts(double {stamp}, i1 {utc}, ptr @{layout})"
+                        "call ptr @{function}({} {}, i1 {utc}, ptr @{layout})",
+                        stamp.ty.llvm(),
+                        stamp.operand
                     )),
                     small_integer: false,
                 }
@@ -8893,6 +8900,7 @@ declare void @imre_async_loop_signal(ptr, i64, ptr)
 declare void @imre_async_loop_close(ptr)
 declare i32 @imre_async_cancel(ptr)
 declare ptr @imre_clock_parts(double, i1, ptr)
+declare ptr @imre_clock_int_parts(i64, i1, ptr)
 declare double @imre_mktime(ptr, ptr)
 declare double @imre_mktime_indexed(ptr, ptr, i64)
 declare i64 @imre_mktime_offset(ptr, ptr)
