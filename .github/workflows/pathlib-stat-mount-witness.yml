@@ -1,0 +1,61 @@
+name: Pathlib stat fixture witness
+on:
+  push:
+    branches: [codex/pathlib-stat-namespace-witness]
+permissions:
+  contents: read
+jobs:
+  original:
+    runs-on: namespace-profile-ubuntu-24-04-16
+    steps:
+      - &source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - &python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - &oracle
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: python/cpython
+          ref: 5607950ef232dad16d75c0cf53101d9649d89115
+          path: .cpython-stdlib-reference
+          sparse-checkout: Lib/test
+          persist-credentials: false
+      - name: Execute original CPython setup, stat and assertions on both mounts
+        env:
+          PYTHONPATH: .cpython-stdlib-reference/Lib
+        run: |
+          findmnt -T /tmp -o TARGET,SOURCE,FSTYPE,OPTIONS
+          findmnt -T /dev/shm -o TARGET,SOURCE,FSTYPE,OPTIONS
+          python3 .github/scripts/pathlib-stat-mount-oracle.py
+          python3 .github/scripts/pathlib-stat-mount-oracle.py /dev/shm
+  native:
+    runs-on: namespace-profile-ubuntu-24-04-16
+    timeout-minutes: 30
+    steps:
+      - *source
+      - *python
+      - *oracle
+      - run: sudo apt-get update && sudo apt-get install -y clang-18
+      - run: cargo build --release --locked -p imre-compiler -p imre-runtime
+      - name: Compare all three actual paths on both mounts and run the original methods
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.cpython-stdlib-reference/Lib python3 .github/scripts/pathlib-stat-mount-oracle.py
+          PYTHONPATH=.cpython-stdlib-reference/Lib python3 .github/scripts/pathlib-stat-mount-oracle.py /dev/shm
+          suite=benchmarks/cpython_stdlib/full/pathlib
+          args=(--imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
+          # The default-mount oracle can reproduce the original assertion failure. Compare its per-path native calls too.
+          rc=0
+          python3 "$suite/evidence.py" "${args[@]}" --cohort stat --result "$RUNNER_TEMP/default.json" || rc=$?
+          python3 - "$RUNNER_TEMP/default.json" "$rc" <<'PY'
+          import json, sys
+          reports=json.load(open(sys.argv[1]))
+          for report in reports:
+              failed=[r for r in report['records'] if r['outcome'] not in ('pass','not-run')]
+              print('default-mount original failures',[(r['id'], r['reason'].splitlines()[-1]) for r in failed])
+              assert (len(failed)==0 and int(sys.argv[2])==0) or (len(failed)==2 and all(r['id'].endswith('.test_stat') and 'self.assertEqual(statA.st_dev, statC.st_dev)' in r['reason'] for r in failed))
+          PY
+          python3 -X warn_default_encoding "$suite/evidence.py" "${args[@]}" --fixture-dir /dev/shm --cohort components --cohort walk --cohort basics --cohort metadata --cohort stat --cohort segments --cohort samefile --result "$RUNNER_TEMP/same-device.json"
+          for flag in "" --links --stat --segments --samefile; do python3 "$suite/metadata_receipt.py" $flag "$RUNNER_TEMP/same-device.json"; done
