@@ -8,6 +8,7 @@ use super::{
 };
 use crate::objects::interpreter_stdlib as system;
 
+mod contextvars;
 mod files;
 mod json;
 mod regex;
@@ -31,6 +32,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "enum"
             | "typing"
             | "contextlib"
+            | "contextvars"
             | "warnings"
             | "subprocess"
     )
@@ -259,6 +261,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("functools", "lru_cache")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
+        | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")
         | ("warnings", "warn")
         | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
         _ => {
@@ -278,6 +281,9 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     // Reject unsupported options before a host primitive can silently use its default.
+    if let Some(method) = name.strip_prefix("contextvars.") {
+        return contextvars::call(ctx, method, args, kwargs);
+    }
     let (max_args, keywords): (usize, &[&str]) = match name {
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),

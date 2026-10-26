@@ -69,6 +69,9 @@ impl Context {
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set(_))
             | ("range", Value::Range { .. })
+            | ("contextvars.ContextVar", Value::ContextVar { .. })
+            | ("contextvars.Context", Value::Context(_))
+            | ("contextvars.Token", Value::ContextToken { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
@@ -99,6 +102,24 @@ impl Context {
     }
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         match self.heap.get(obj).clone() {
+            Value::Raised(error) if name == "args" => {
+                let args = error.args.unwrap_or_else(|| {
+                    if error.message.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![self.text(error.message)]
+                    }
+                });
+                return Ok(self.alloc(Value::Tuple(args)));
+            }
+            Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
+            Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
+            Value::ContextToken { old, .. } if name == "old_value" => {
+                return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
+                return Ok(self.token_missing);
+            }
             Value::Module {
                 name: module,
                 scope,

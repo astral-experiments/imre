@@ -24,6 +24,9 @@ pub(crate) struct Context {
     executable: PathBuf,
     argv: Id,
     sys_path: Id,
+    // The active stack roots suspended contexts while Context.run executes native code.
+    contexts: Vec<Id>,
+    token_missing: Id,
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
@@ -77,6 +80,7 @@ impl Context {
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
+            Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
             Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
             Value::DictView { dict, kind } => builtins::view_items(self, dict, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),

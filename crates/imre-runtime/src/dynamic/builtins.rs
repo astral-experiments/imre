@@ -117,6 +117,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexPattern(_) if matches!(attr, "findall" | "match") => "pattern",
         Value::RegexMatch { .. } if attr == "group" => "match",
+        Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
+            "contextvars.ContextVar"
+        }
+        Value::Context(_)
+            if matches!(attr, "copy" | "run" | "get" | "keys" | "values" | "items") =>
+        {
+            "contextvars.Context"
+        }
+        Value::ContextToken { .. } if matches!(attr, "__enter__" | "__exit__") => {
+            "contextvars.Token"
+        }
         _ => return None,
     };
     Some(format!("{owner}.{attr}"))
@@ -241,6 +252,7 @@ pub(super) fn call(
             let size = match ctx.heap.get(args[0]) {
                 Value::List(v) | Value::Tuple(v) | Value::Set(v) => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
+                Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
                 Value::Str(v) => v.chars().count(),
