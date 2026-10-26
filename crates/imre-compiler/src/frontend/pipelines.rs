@@ -1181,10 +1181,7 @@ impl Checker<'_> {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self
-            .types
-            .set_element(iterable.ty)
-            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
+        let set_element = self.types.readable_set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);
         if fields.as_ref().is_some_and(Vec::is_empty) {
             let source = self.hidden(iterable.ty);
@@ -2020,6 +2017,7 @@ impl Checker<'_> {
         };
         let callback_input = checked
             .as_ref()
+            .filter(|value| self.types.index_callable_signature(value.ty).is_none())
             .and_then(|value| self.types.signature(value.ty))
             .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
             .or_else(|| {
@@ -2200,6 +2198,8 @@ impl Checker<'_> {
                 ));
             }
             self.pack_len_value(item, call)?
+        } else if self.types.index_callable_signature(callback.ty).is_some() {
+            self.index_value(item, call)?
         } else {
             self.coerce(item, *parameter, call)?
         };

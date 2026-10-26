@@ -1,5 +1,5 @@
-name: Test the rebuilt google-crc32c wheel
-description: Run the unchanged upstream suite against both native builds
+name: Test native wheels built by uv
+description: Build google-crc32c and bitcount for CPython and Imre and run both consumers
 inputs:
   cc:
     description: C compiler for the extension and the application
@@ -27,7 +27,7 @@ runs:
         CC: ${{ inputs.cc }}
         CXX: ${{ inputs.cxx }}
       run: |
-        python3 -m pip install "build==1.3.0" "pytest==8.4.2"
+        python3 -m pip install "pytest==8.4.2" "uv==0.13.5"
         work="$RUNNER_TEMP/google-crc32c"
         export CRC32C_INSTALL_PREFIX="$work/prefix" CRC32C_PURE_PYTHON=0
         cmake -S .upstream-crc32c -B "$work/core-build" -DCMAKE_BUILD_TYPE=Release \
@@ -36,22 +36,11 @@ runs:
           -DCRC32C_BUILD_BENCHMARKS=OFF -DCRC32C_USE_GLOG=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build "$work/core-build" --target install
 
-        cxx_lib=stdc++
-        if [[ "$RUNNER_OS" == macOS ]]; then cxx_lib=c++; fi
-        # Exercise header selection in the isolated backend with CPython's include directory.
-        host_include=$(python3 -c 'import sysconfig; print(sysconfig.get_path("include"))')
-        CFLAGS="-I\"$host_include\" ${CFLAGS:-}" target/release/imre wheel .upstream-python-crc32c \
-          --overlay examples/google_crc32c/overlay --system-library "$cxx_lib" --out-dir "$work/dist"
-        python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-          --implementation im --python-version 3.14 --abi imre1 --target "$work/site" "$work"/dist/*.whl
-        LDFLAGS="-l$cxx_lib" python3 -m pip wheel --no-deps .upstream-python-crc32c --wheel-dir "$work/cpython-dist"
-        python3 -m pip install --no-index --no-deps --no-compile --target "$work/cpython" "$work"/cpython-dist/*.whl
+        python3 tests/uv_native_wheels.py --compiler target/release/imre \
+          --upstream .upstream-python-crc32c --work-dir "$work"
         cmp "$work"/site/google_crc32c-*.dist-info/METADATA "$work"/cpython/google_crc32c-*.dist-info/METADATA
         cmp "$work/site/google_crc32c/licenses/crc32c.txt" .upstream-crc32c/LICENSE
         git -C .upstream-python-crc32c diff --exit-code
-        mkdir -p "$work/consumer"
-        cp examples/google_crc32c/driver.py "$work/consumer/"
-        target/release/imre build "$work/consumer/driver.py" --extension-path "$work/site" --clang "$CC" -o "$work/driver"
         python3 tests/google_crc32c.py cpython --upstream .upstream-python-crc32c --cpython-package "$work/cpython"
-        python3 tests/google_crc32c.py imre --upstream .upstream-python-crc32c --imre-binary "$work/driver"
+        python3 tests/google_crc32c.py imre --upstream .upstream-python-crc32c --imre-binary "$work/consumer/driver"
         python3 tests/google_crc32c.py fallback --upstream .upstream-python-crc32c

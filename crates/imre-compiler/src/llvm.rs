@@ -69,6 +69,7 @@ impl Type {
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
+            | Self::FrozenStrings
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
@@ -163,6 +164,7 @@ impl Type {
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
+            | Self::FrozenStrings
             | Self::StringKeys
             | Self::NativeModule
             | Self::ModuleNamespace
@@ -856,6 +858,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -3569,6 +3572,7 @@ impl Emitter<'_, '_> {
                 | Type::PurePath(_)
                 | Type::List(_)
                 | Type::Dict(_)
+                | Type::FrozenStrings
                 | Type::Set(_)
                 | Type::Deque(_)
                 | Type::SimpleNamespace(_) => {
@@ -5040,6 +5044,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::SysStdlibModuleNames => {
+                self.call("imre_sys_stdlib_module_names", returns, &[])
+            }
             Builtin::SysImplementation => self.tuple(
                 returns,
                 &crate::version::implementation_values(&self.module.types),
@@ -6127,7 +6134,7 @@ impl Emitter<'_, '_> {
                             Type::List(_) => "imre_seq_len_fast",
                             Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
                             Type::Deque(_) => "imre_deque_len",
-                            Type::Set(_) | Type::StringKeys => "imre_set_len",
+                            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
                             _ => unreachable!("len input was checked"),
                         },
                         Type::Int,
@@ -7212,6 +7219,7 @@ impl Emitter<'_, '_> {
                     | Type::ChainMap(_)
                     | Type::Set(_)
                     | Type::Deque(_)
+                    | Type::FrozenStrings
                     | Type::StringKeys
                     | Type::Iterator
                     | Type::Cursor(_)
@@ -7505,6 +7513,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -7613,6 +7622,7 @@ impl Emitter<'_, '_> {
             | Type::ChainMap(_)
             | Type::Set(_)
             | Type::Deque(_)
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::Cursor(_)
@@ -8268,6 +8278,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ChainMap(_)
         | Type::Set(_)
         | Type::Deque(_)
+        | Type::FrozenStrings
         | Type::StringKeys
         | Type::Iterator
         | Type::Cursor(_)
@@ -9234,6 +9245,7 @@ declare void @imre_sys_setrecursionlimit(i64)
 declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
+declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)

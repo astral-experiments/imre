@@ -254,6 +254,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysVersionInfo,
     SysThreadInfo,
+    SysStdlibModuleNames,
     SysVersion,
     SysHexversion,
     SysEncoding(SysEncoding),
@@ -723,6 +724,7 @@ impl IntrinsicModule {
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
             (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
+            (Self::Sys, "stdlib_module_names") => Intrinsic::SysStdlibModuleNames,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
@@ -2569,7 +2571,7 @@ impl<'a> Loader<'a> {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension("imre.a");
+                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.extension_roots.contains(root);
                 if installed && self.fs.is_file(&archive) {
                     if !self.fs.is_file(&stub) {

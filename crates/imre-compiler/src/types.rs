@@ -41,6 +41,7 @@ enum Shape {
     DisplayTuple(Vec<(Type, bool)>),
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
+    IndexCallable(Type),
     RecordConstructor(usize, Vec<Type>),
     DeclaredCache(Type, usize),
     CachedCallable(CachedFunction),
@@ -224,6 +225,7 @@ impl Types {
                 Some(
                     Shape::Callable(..)
                         | Shape::RecordConstructor(..)
+                        | Shape::IndexCallable(_)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -255,6 +257,7 @@ impl Types {
             | Type::Bytes
             | Type::ListInt
             | Type::StringIterable
+            | Type::FrozenStrings
             | Type::StringKeys
             | Type::Iterator
             | Type::ByteOutput
@@ -352,7 +355,9 @@ impl Types {
                 | Shape::PartialFrame(fields)
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
-                Shape::DeclaredCache(callable, _) => vec![*callable],
+                Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                    vec![*callable]
+                }
                 Shape::CachedCallable(c) => vec![c.callable, c.frame, c.table],
                 Shape::DispatchCallable(d) => vec![d.callable, d.frame, d.registry],
                 Shape::Callable(params, returns) => {
@@ -596,9 +601,14 @@ impl Types {
                 .join(left, right)
                 .map(|value| self.directory_context(value));
         }
-        if left == right || self.payload(left) == Some(right) {
+        if left == right
+            || self.payload(left) == Some(right)
+            || self.index_callable_signature(right) == Some(left)
+        {
             Some(left)
-        } else if self.payload(right) == Some(left) {
+        } else if self.payload(right) == Some(left)
+            || self.index_callable_signature(left) == Some(right)
+        {
             Some(right)
         } else if left == Type::None {
             Some(self.optional(right))
@@ -653,8 +663,10 @@ impl Types {
                 }
             }
             [Type::Str, other] | [other, Type::Str]
-                if matches!(other, Type::Bytes | Type::Path | Type::Enum(_))
-                    || self.element(*other) == Some(Type::Str) =>
+                if matches!(
+                    other,
+                    Type::Bytes | Type::Path | Type::FrozenStrings | Type::Enum(_)
+                ) || self.element(*other) == Some(Type::Str) =>
             {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, *other])))
             }
@@ -1193,6 +1205,19 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    /// A subscription method accepts booleans in its first positional integer slot.
+    pub(crate) fn index_callable(&self, callable: Type) -> Type {
+        Type::Callable(self.intern(Shape::IndexCallable(callable)))
+    }
+
+    pub(crate) fn index_callable_signature(&self, ty: Type) -> Option<Type> {
+        let Type::Callable(id) = ty else { return None };
+        match self.0.borrow().shapes.get(id) {
+            Some(Shape::IndexCallable(signature)) => Some(*signature),
+            _ => None,
+        }
+    }
+
     /// A class value can construct an instance but owns no instance or bound receiver.
     pub(crate) fn record_constructor(&self, base: usize, params: Vec<Type>) -> Type {
         Type::Callable(self.intern(Shape::RecordConstructor(base, params)))
@@ -1269,12 +1294,14 @@ impl Types {
     }
 
     /// The public positional ABI of a wrapper, including nested applied caches.
-    pub(crate) fn cache_signature(&self, ty: Type) -> Option<Type> {
+    pub(crate) fn wrapped_signature(&self, ty: Type) -> Option<Type> {
         let shapes = self.0.borrow();
         let mut current = ty;
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
-                Shape::DeclaredCache(underlying, _) => *underlying,
+                Shape::IndexCallable(underlying) | Shape::DeclaredCache(underlying, _) => {
+                    *underlying
+                }
                 Shape::CachedCallable(cache) => cache.callable,
                 Shape::Callable(..) => return (current != ty).then_some(current),
                 _ => return None,
@@ -1331,7 +1358,9 @@ impl Types {
         match &self.0.borrow().shapes[id] {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
-            Shape::DeclaredCache(callable, _) => self.signature(*callable),
+            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                self.signature(*callable)
+            }
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
             _ => unreachable!("callable type identity has a callable shape"),
@@ -1411,6 +1440,14 @@ impl Types {
         match self.0.borrow().shapes[id] {
             Shape::Set(element) => Some(element),
             _ => unreachable!("set type identity has a set shape"),
+        }
+    }
+
+    /// Element type for membership and iteration, including immutable set views.
+    pub(crate) fn readable_set_element(&self, ty: Type) -> Option<Type> {
+        match ty {
+            Type::StringKeys | Type::FrozenStrings => Some(Type::Str),
+            _ => self.set_element(ty),
         }
     }
 
@@ -1697,7 +1734,9 @@ impl TypeDescription<'_> {
             Shape::CallbackArgument(_) => return self.write_str("object"),
             Shape::CallbackPositional => return self.write_str("callback positional arguments"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
-            Shape::DeclaredCache(callable, _) => return self.write_type(*callable),
+            Shape::IndexCallable(callable) | Shape::DeclaredCache(callable, _) => {
+                return self.write_type(*callable);
+            }
             Shape::ContextValue(value) => {
                 self.write_str(if matches!(ty, Type::ContextVar(_)) {
                     "ContextVar["

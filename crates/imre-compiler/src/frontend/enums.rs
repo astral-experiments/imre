@@ -311,7 +311,7 @@ impl Checker<'_> {
         let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
         if matches!((left.ty, right.ty), (Type::Callable(_), Type::Callable(_)))
             && [left.ty, right.ty].iter().all(|&ty| {
-                let signature = self.types.cache_signature(ty).unwrap_or(ty);
+                let signature = self.types.wrapped_signature(ty).unwrap_or(ty);
                 self.types
                     .signature(signature)
                     .is_some_and(|(params, result)| {
@@ -475,6 +475,7 @@ impl Checker<'_> {
                         | Type::Dict(_)
                         | Type::ChainMap(_)
                         | Type::Set(_)
+                        | Type::FrozenStrings
                         | Type::Deque(_)
                         | Type::Class(_)
                         | Type::ModuleSpec(_)

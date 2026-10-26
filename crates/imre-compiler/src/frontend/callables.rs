@@ -100,6 +100,9 @@ pub(super) fn targets(
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, .. } = &value.kind {
                 targets.entry(value.ty).or_default().insert(*function);
+                if let Some(signature) = types.index_callable_signature(value.ty) {
+                    targets.entry(signature).or_default().insert(*function);
+                }
             }
         });
     }
@@ -550,12 +553,20 @@ impl Checker<'_> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let values = call
             .arguments
             .args
             .iter()
             .zip(params)
-            .map(|(argument, ty)| self.expr_expected(argument, ty))
+            .enumerate()
+            .map(|(slot, (argument, ty))| {
+                if slot == 0 && index_callable {
+                    self.integer_index(argument)
+                } else {
+                    self.expr_expected(argument, ty)
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
