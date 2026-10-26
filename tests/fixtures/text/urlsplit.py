@@ -27,6 +27,7 @@ print((urlsplit("http://ÉΣ.example:0042").hostname,))
 inspect_bytes(b"HTTP://a%40b:p@HOST:080/a?x#f")
 inspect_bytes(b"http://[FE80::abc%ZoNE]:42/a")
 inspect_bytes(b"relative")
+print(urlsplit("http://[V1.example]/"))
 parsed = urlsplit("/foo")
 scheme, authority, path, query, fragment = parsed
 print(parsed._fields)
