@@ -761,7 +761,7 @@ pub unsafe extern "C" fn imre_str_repeat(value: *const Str, count: usize) -> *co
 }
 
 /// Repeats UTF-8 text with the native sequence length and allocation checks.
-pub(crate) fn repeat_str(text: &str, count: &Int) -> Result<Str> {
+pub(crate) fn repeat_str(text: &str, count: &Int) -> Result<Str, Error> {
     let count = bytes::native_size(count)?.max(0) as usize;
     if text.is_empty() || count == 0 {
         return Ok(Str::default());
