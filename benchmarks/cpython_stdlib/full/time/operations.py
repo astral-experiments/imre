@@ -1,6 +1,11 @@
 """POSIX mktime, struct_time and local timezone behavior observable by a caller."""
+from enum import StrEnum
 from http import HTTPStatus
 from time import gmtime, localtime, mktime, struct_time
+
+
+class Zone(StrEnum):
+    UTC = "UTC"
 
 
 class Indexed:
@@ -110,6 +115,9 @@ print(extended.tm_zone)
 print(extended.tm_gmtoff)
 print(mktime(extended))
 print(struct_time(extended).tm_zone)
+enum_zone = struct_time((1970, 1, 1, 0, 0, 0, 0, 0, -1, Zone.UTC, 0))
+assert enum_zone.tm_zone is Zone.UTC
+assert mktime(enum_zone) == mktime(struct_time((1970, 1, 1, 0, 0, 0, 0, 0, -1, "UTC", 0)))
 bad_zone = struct_time((1970, 1, 1, 0, 0, 0, 0, 0, -1, 3))
 print(bad_zone.tm_zone)
 try:
