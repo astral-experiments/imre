@@ -2065,7 +2065,7 @@ impl<'a> Loader<'a> {
         });
         let mut executable = false;
         let mut segment = 0;
-        let mut class_data_prefix = false;
+        let mut definition_prefix = false;
         let mut field_separators = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
@@ -2093,6 +2093,7 @@ impl<'a> Loader<'a> {
                     self.modules[id].type_guards.push(index);
                 }
                 ast::Stmt::FunctionDef(function) => {
+                    definition_prefix |= self.partial_source(id);
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -2121,10 +2122,11 @@ impl<'a> Loader<'a> {
                     }
                 }
                 ast::Stmt::ClassDef(class) => {
-                    class_data_prefix |= class
-                        .body
-                        .iter()
-                        .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
+                    definition_prefix |= self.partial_source(id)
+                        || class
+                            .body
+                            .iter()
+                            .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
                     if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
@@ -2177,12 +2179,12 @@ impl<'a> Loader<'a> {
                         self.initialization.push((id, segment..index));
                         segment = index;
                         executable = false;
-                    } else if class_data_prefix {
-                        // A class body can call arbitrary helpers before the imported module starts.
+                    } else if definition_prefix {
+                        // A child can call a definition that already exists in this module.
                         self.initialization.push((id, segment..index));
                         segment = index;
                     }
-                    class_data_prefix = false;
+                    definition_prefix = false;
                     if self.modules[id]
                         .snapshots
                         .keys()
@@ -2458,11 +2460,11 @@ impl<'a> Loader<'a> {
                     }
                     return Ok(());
                 }
-                // A package currently importing its children is a namespace container,
-                // not an import cycle, unless an import reads its incomplete definitions.
+                // Only a from-import may read an explicitly ready binding from a loading module.
                 let target = match self.by_name.get(&name).copied() {
                     Some(target)
-                        if self.loading.contains(&target) && self.modules[target].is_package =>
+                        if self.loading.contains(&target)
+                            && (self.modules[target].is_package || self.partial_source(target)) =>
                     {
                         target
                     }
@@ -2472,13 +2474,25 @@ impl<'a> Loader<'a> {
                     let binding = if let Some(binding) =
                         self.modules[target].export(alias.name.as_str())
                     {
-                        if self.loading.contains(&target)
-                            && matches!(binding, Binding::Definition(_) | Binding::Value(_))
-                            && !matches!(binding, Binding::Value(def)
-                                    if self.initialization.iter().any(|(module, statements)|
-                                        *module == def.module && statements.contains(&def.statement)))
-                        {
-                            return Err(format!("cyclic import through {name:?}"));
+                        if self.loading.contains(&target) {
+                            let package = self.modules[target].is_package;
+                            let available = match binding {
+                                Binding::Definition(def) => {
+                                    let statement = &self.modules[def.module].parsed.syntax().body
+                                        [def.statement];
+                                    let ready = def.module == target
+                                        && self.partial_source(target)
+                                        && self.initialized(def)
+                                        && matches!(statement, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty());
+                                    self.ordered_imports |= ready;
+                                    ready
+                                }
+                                Binding::Value(def) => package && self.initialized(def),
+                                _ => package,
+                            };
+                            if !available {
+                                return Err(format!("cyclic import through {name:?}"));
+                            }
                         }
                         if let Binding::Module(child) = binding
                             && self.loading.contains(&child)
@@ -2490,7 +2504,18 @@ impl<'a> Loader<'a> {
                         }
                         binding
                     } else if self.modules[target].is_package {
-                        Binding::Module(self.load_module(&format!("{name}.{}", alias.name))?)
+                        let child_name = format!("{name}.{}", alias.name);
+                        if let Some(&child) = self.by_name.get(&child_name)
+                            && self.loading.contains(&child)
+                            && self.partial_source(child)
+                            && !self.modules[target].bindings.contains_key("__getattr__")
+                        {
+                            // A fromlist can find the loading child before its parent publishes it.
+                            self.ordered_imports = true;
+                            Binding::Module(child)
+                        } else {
+                            Binding::Module(self.load_module(&child_name)?)
+                        }
                     } else {
                         return Err(format!(
                             "module {name:?} has no static binding {:?}",
@@ -2611,6 +2636,17 @@ impl<'a> Loader<'a> {
             parts.push(suffix);
         }
         Ok(parts.join("."))
+    }
+
+    fn partial_source(&self, id: ModuleId) -> bool {
+        let module = &self.modules[id];
+        id != 0 && !module.bundled && module.archive.is_none()
+    }
+
+    fn initialized(&self, def: DefinitionId) -> bool {
+        self.initialization.iter().any(|(module, statements)| {
+            *module == def.module && statements.contains(&def.statement)
+        })
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
