@@ -25,7 +25,7 @@ REJECTED = {
     "bytes_bool_count": "print(bytes(True))\n",
     "bytes_bool_element": "print(bytes([True]))\n",
     "bytes_string_constructor": 'print(bytes("text"))\n',
-    "bytes_tuple_constructor": "print(bytes((1, 2)))\n",
+    "bytes_tuple_noninteger": 'print(bytes((1, "two")))\n',
     "bytes_keywords": "print(bytes(source=3))\n",
     "bytes_mixed_add": 'print(b"a" + "b")\n',
     "bytes_mixed_compare": 'print(b"a" < "b")\n',
