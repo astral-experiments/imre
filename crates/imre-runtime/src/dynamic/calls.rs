@@ -631,9 +631,16 @@ impl Context {
                 owner,
             } => return self.super_attribute(start, receiver, owner, name),
             Value::Partial {
+                coroutine_marker: Some(mark),
+                ..
+            } if name == "_is_coroutine_marker" => {
+                return Ok(mark);
+            }
+            Value::Partial {
                 function,
                 args,
                 keywords,
+                ..
             } => match name {
                 "func" => return Ok(function),
                 "args" => return Ok(args),
@@ -994,6 +1001,11 @@ impl Context {
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
+            Value::Partial {
+                coroutine_marker, ..
+            } if name == "_is_coroutine_marker" => {
+                *coroutine_marker = Some(value);
+            }
             Value::Property(property) if name == "__name__" => property.name = Some(value),
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Property(_) if matches!(name, "fget" | "fset" | "fdel") => {
@@ -1082,6 +1094,7 @@ impl Context {
                 function,
                 args: bound,
                 keywords,
+                ..
             } => {
                 let mut positional = self.items(bound)?;
                 positional.extend(args);
@@ -1201,6 +1214,7 @@ impl Context {
                 class_cell,
                 code,
                 defaults,
+                ..
             } => {
                 let parameters = self.code_object(code).parameters;
                 let name = self.str_value(fields.qualname)?.to_owned();

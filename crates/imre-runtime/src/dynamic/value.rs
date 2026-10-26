@@ -18,6 +18,7 @@ pub(super) struct CodeObject {
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
+    pub coroutine: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -367,6 +368,7 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
+        coroutine_marker: Option<Id>,
     },
     Cached {
         function: Id,
@@ -510,7 +512,11 @@ impl Value {
                 function,
                 args,
                 keywords,
-            } => visit.extend([*function, *args, *keywords]),
+                coroutine_marker,
+            } => {
+                visit.extend([*function, *args, *keywords]);
+                visit.extend(coroutine_marker);
+            }
             Self::Cached { function, entries } => {
                 visit.push(*function);
                 for call in entries {

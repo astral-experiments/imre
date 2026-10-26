@@ -617,6 +617,7 @@ impl Context {
                 filename,
                 first_line: 1,
                 module_definition: true,
+                coroutine: false,
             }));
             if let Err(error) = self.execute(code, scope) {
                 self.modules.remove(name);

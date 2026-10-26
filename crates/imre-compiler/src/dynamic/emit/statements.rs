@@ -87,9 +87,10 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let generator = is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
-                    } else if is_generator(&v.body) {
+                    } else if generator {
                         Body::Unsupported(stmt, "generator function")
                     } else {
                         Body::Statements(&v.body)
@@ -101,6 +102,11 @@ impl Function<'_, '_> {
                         v.returns.as_deref(),
                         body,
                     );
+                    if v.is_async && !generator {
+                        // Set CO_COROUTINE on the definition before any decorator
+                        // can inspect it. Async generators use a different flag.
+                        self.op("coroutine_function", &[&function]);
+                    }
                     self.decorated(&v.name, &decorators, function);
                 }
                 ast::Stmt::ClassDef(v) => {
