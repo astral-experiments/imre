@@ -333,10 +333,15 @@ impl Context {
                 .get_mut(i as usize)
                 .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))? =
                 val;
+        } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
+            self.call(setter, vec![key, val], Vec::new())?;
         } else {
             return Err(Error::new(
                 "TypeError",
-                "object does not support item assignment",
+                format!(
+                    "'{}' object does not support item assignment",
+                    self.type_name(obj)
+                ),
             ));
         }
         Ok(())
