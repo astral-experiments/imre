@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
+from http import HTTPStatus
 
 trace: list[str] = []
 
@@ -10,6 +11,16 @@ def component(name: str, value: int) -> int:
 
 def earlier(left: datetime, right: datetime) -> bool:
     return left < right
+
+
+print(timedelta(seconds=HTTPStatus.OK))
+print(date(HTTPStatus.OK, 2, 28))
+print(datetime(HTTPStatus.CONTINUE, 2, 28, microsecond=HTTPStatus.OK))
+print(datetime(2024, 2, 28).replace(year=HTTPStatus.CONTINUE))
+try:
+    print(datetime(2024, HTTPStatus.OK, 1))
+except ValueError as exc:
+    print(str(exc))
 
 
 for n in [-3, -2, -1, 0, 1, 2, 3]:
