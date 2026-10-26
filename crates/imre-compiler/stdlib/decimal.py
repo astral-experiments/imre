@@ -86,6 +86,10 @@ class Decimal:
     def __init__(self, value: str = "0") -> None:
         self._text = _canonical(value)
 
+    def __bool__(self) -> bool:
+        mantissa, marker, exponent = self._text.lstrip("-").partition("E")
+        return bool(mantissa.replace("0", "").replace(".", ""))
+
     def __str__(self) -> str:
         return self._text
 

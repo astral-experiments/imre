@@ -1328,6 +1328,11 @@ impl Checker<'_> {
         })
     }
 
+    pub(super) fn decimal_class(&self, class: usize) -> bool {
+        let decl = &self.classes.declarations.definitions[class];
+        decl.name == "Decimal" && self.graph.modules[decl.definition.module].is_bundled("decimal")
+    }
+
     /// Decimal accepts exact scalar values without first converting a Python int through str().
     fn decimal_constructor(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
         let arg = match (
@@ -1390,10 +1395,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
-        let decl = &self.classes.declarations.definitions[class];
-        if decl.name == "Decimal"
-            && self.graph.modules[decl.definition.module].is_bundled("decimal")
-        {
+        if self.decimal_class(class) {
             return self.decimal_constructor(call, class);
         }
         if self.classes.declarations.definitions[class]

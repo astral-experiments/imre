@@ -12,6 +12,7 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "decimal_numeric_comparison": 'from decimal import Decimal\nprint(Decimal("1.00") == Decimal(1))',
     "formatter_unknown_export": "from _string import no_such_export",
     "formatter_unknown_neighbor": "import _string, missing_formatter_neighbor",
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',
