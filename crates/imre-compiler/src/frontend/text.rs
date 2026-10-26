@@ -635,7 +635,7 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 
-    /// Check each conditional arm in context and extract any matching enum's scalar value.
+    /// Check each conditional arm in context and convert it to the requested scalar.
     fn optional_scalar_argument(
         &mut self,
         node: &ast::Expr,
@@ -649,9 +649,9 @@ impl Checker<'_> {
         }
         let scalar = self.types.payload(optional).unwrap();
         let value = self.expr_expected_if(node, optional, |checker, ty| {
-            Self::enum_conversion(checker.types.payload(ty).unwrap_or(ty), scalar).is_some()
+            Self::scalar_conversion(checker.types.payload(ty).unwrap_or(ty), scalar).is_some()
         })?;
-        let value = self.optional_enum_value(value, scalar, node)?;
+        let value = self.optional_scalar_value(value, scalar, node)?;
         self.coerce(value, optional, node)
     }
 

@@ -126,11 +126,8 @@ impl Checker<'_> {
                 ));
             }
             let value = self.expr(argument)?;
-            values.push(if index == 1 && value.ty == Type::Bool {
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-                }
+            values.push(if index == 1 {
+                self.optional_scalar_value(value, Type::Int, argument)?
             } else {
                 value
             });

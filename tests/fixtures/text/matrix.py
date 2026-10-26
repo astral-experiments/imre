@@ -5,6 +5,16 @@ def find_status(start: HTTPStatus | None) -> int:
     return ("x" * 600).find("x", start)
 
 
+def find_flag(start: bool | None) -> int:
+    return "aa".find("a", start)
+
+
+print("aa".find("a", True))
+print(find_flag(True))
+print(find_flag(False))
+print(find_flag(None))
+
+
 print(("x" * 600).find("x", HTTPStatus.NOT_FOUND))
 print(find_status(HTTPStatus.OK))
 print(find_status(None))

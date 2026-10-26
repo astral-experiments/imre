@@ -26,11 +26,22 @@ def nullable_bounds(start: int | None, stop: HTTPStatus | None, step: int | None
     print((next(section), len(list(section)), next(source, -1)))
 
 
+def boolean_bounds(start: bool | None, stop: bool | None, step: bool | None) -> None:
+    source = iter(range(4))
+    try:
+        print((list(islice(source, start, stop, step)), next(source, -1)))
+    except ValueError as error:
+        print((str(error), next(source, -1)))
+
+
 def main() -> None:
     consume(0)
     consume(1)
     nullable_bounds(None, HTTPStatus.OK, 3)
     nullable_bounds(7, None, None)
+    boolean_bounds(True, None, None)
+    boolean_bounds(None, True, True)
+    boolean_bounds(False, None, False)
     source = [1, 2]
     c = cycle(source)
     print(next(c))

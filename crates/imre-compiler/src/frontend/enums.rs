@@ -219,24 +219,28 @@ impl Checker<'_> {
         }
     }
 
-    /// Select the conversion for an operation that observes the enum's scalar value.
-    pub(super) fn enum_conversion(from: Type, to: Type) -> Option<fn(Expr) -> Expr> {
+    /// Select the conversion for an operation that observes a scalar value.
+    pub(super) fn scalar_conversion(from: Type, to: Type) -> Option<fn(Expr) -> Expr> {
         match (from, to) {
+            (Type::Bool, Type::Int) => Some(|value| Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            }),
             (Type::IntEnum(_), Type::Int) => Some(Self::enum_integer),
             (Type::StrEnum(_), Type::Str) => Some(Self::enum_text),
             _ => None,
         }
     }
 
-    /// Read a present enum's scalar value and preserve None, evaluating the operand once.
-    pub(super) fn optional_enum_value(
+    /// Convert a present scalar and preserve None, evaluating the operand once.
+    pub(super) fn optional_scalar_value(
         &mut self,
         value: Expr,
         scalar: Type,
         node: &ast::Expr,
     ) -> Result<Expr, String> {
         let payload = self.types.payload(value.ty);
-        let Some(convert) = Self::enum_conversion(payload.unwrap_or(value.ty), scalar) else {
+        let Some(convert) = Self::scalar_conversion(payload.unwrap_or(value.ty), scalar) else {
             return Ok(value);
         };
         if payload.is_none() {

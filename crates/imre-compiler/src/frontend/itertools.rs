@@ -225,14 +225,10 @@ impl Checker<'_> {
                 let value = match bound {
                     Some(node) => {
                         let value = self.expr(node)?;
-                        let value = self.optional_enum_value(value, Type::Int, node)?;
+                        let value = self.optional_scalar_value(value, Type::Int, node)?;
                         match value.ty {
                             Type::Int | Type::None => value,
                             ty if self.types.payload(ty) == Some(Type::Int) => value,
-                            Type::Bool => Expr {
-                                ty: Type::Int,
-                                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
-                            },
                             Type::Str | Type::Bytes | Type::Float => Expr {
                                 ty: Type::Int,
                                 kind: ExprKind::Scope {
