@@ -5,6 +5,7 @@ mod builtins;
 mod calls;
 mod ffi;
 mod operators;
+mod property;
 mod stdlib;
 mod super_object;
 mod value;
@@ -104,6 +105,18 @@ impl Context {
             )
         })
     }
+    /// Advances a boxed iterator once, leaving its remaining values available to other callers.
+    fn next_item(&mut self, id: Id) -> Result<Option<Id>> {
+        let Value::Iterator { values, offset } = self.heap.get_mut(id) else {
+            return Err(Error::new("TypeError", "expected iterator"));
+        };
+        let Some(&value) = values.get(*offset) else {
+            return Ok(None);
+        };
+        *offset += 1;
+        Ok(Some(value))
+    }
+
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         match self.heap.get(id).clone() {
             Value::List(items)

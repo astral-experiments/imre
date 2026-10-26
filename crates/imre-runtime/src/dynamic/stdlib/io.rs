@@ -46,7 +46,11 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     for &name in methods {
         let method = ctx.alloc(Value::IoMethod { owner, name });
         let attr = if name == "closed" {
-            ctx.alloc(Value::Property(method))
+            ctx.alloc(Value::ReadOnlyDescriptor {
+                get: method,
+                owner: "_io._IOBase",
+                name,
+            })
         } else {
             method
         };
