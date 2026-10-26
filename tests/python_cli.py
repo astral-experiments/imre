@@ -33,6 +33,21 @@ def main():
                 timeout=60,
             )
 
+        entry = root / "serve.py"
+        entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
+        (root / "application.py").write_text(
+            "def make_endpoint(message):\n"
+            "    def endpoint():\n        return message\n"
+            "    return endpoint\n"
+        )
+        reference = run(sys.executable, "-B", entry)
+        assert (reference.returncode, reference.stdout) == (0, b"__main__ ready\n"), reference.stderr
+        opted_in = run(imre, "run", entry, "--runtime-imports", "--quiet")
+        assert (opted_in.returncode, opted_in.stdout) == (0, reference.stdout), opted_in.stderr
+        # A cached object-runtime executable cannot satisfy a subsequent static build.
+        ordinary = run(imre, "run", entry, "--quiet")
+        assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -288,7 +303,12 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
-        for fixture in ("boxed_contextvars.py", "boxed_descriptors.py", "boxed_proxy_truth.py"):
+        for fixture in (
+            "boxed_contextvars.py",
+            "boxed_descriptors.py",
+            "boxed_proxy_truth.py",
+            "boxed_setattr.py",
+        ):
             plugin.write_bytes((Path(__file__).with_name("fixtures") / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]

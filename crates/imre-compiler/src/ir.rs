@@ -1650,6 +1650,7 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    Normalize,
     Lower,
     Upper,
     Capitalize,
@@ -1667,6 +1668,8 @@ pub(crate) enum TextOperation {
     UrlQuotePlus,
     UrlUnquote,
     UrlSplit,
+    UrlJoin,
+    ParseQsl,
     UrlProperty(UrlProperty),
     UrlGetUrl,
     UrlTranscode {

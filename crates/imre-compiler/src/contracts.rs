@@ -147,6 +147,7 @@ impl Builtin {
                 match operation {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
+                    | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
                     | TextOperation::Capitalize
@@ -156,6 +157,8 @@ impl Builtin {
                     | TextOperation::UrlQuote
                     | TextOperation::UrlQuotePlus
                     | TextOperation::UrlUnquote
+                    | TextOperation::UrlJoin
+                    | TextOperation::ParseQsl
                     | TextOperation::UrlSplit
                     | TextOperation::UrlProperty(_)
                     | TextOperation::UrlGetUrl

@@ -57,6 +57,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
                 | "range"
                 | "isinstance"
                 | "getattr"
+                | "setattr"
                 | "hasattr"
                 | "open"
                 | "print"
@@ -202,6 +203,50 @@ fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 
+fn set_attribute(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let base = name == "object.__setattr__";
+    if base && args.is_empty() {
+        return Err(type_error(
+            "descriptor '__setattr__' of 'object' object needs an argument",
+        ));
+    }
+    if base && matches!(ctx.heap.get(args[0]), Value::Class { .. }) {
+        return Err(type_error("can't apply this __setattr__ to type object"));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error(if base {
+            "wrapper __setattr__() takes no keyword arguments"
+        } else {
+            "setattr() takes no keyword arguments"
+        }));
+    }
+    let [obj, attr, value] = args else {
+        return Err(type_error(if base {
+            format!("__setattr__ expected 2 arguments, got {}", args.len() - 1)
+        } else {
+            format!("setattr expected 3 arguments, got {}", args.len())
+        }));
+    };
+    let Value::Str(attr_name) = ctx.heap.get(*attr) else {
+        return Err(type_error(format!(
+            "attribute name must be string, not '{}'",
+            ctx.type_name(*attr)
+        )));
+    };
+    let attr_name = attr_name.clone();
+    if base {
+        ctx.default_set_attr(*obj, &attr_name, *value)?;
+    } else {
+        ctx.set_attr(*obj, &attr_name, *value)?;
+    }
+    Ok(NONE)
+}
+
 /// Compute Python's range length without overflowing at either i64 endpoint.
 pub(super) fn range_len(start: i64, stop: i64, step: i64) -> Result<usize> {
     if step == 0 {
@@ -239,6 +284,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "setattr" | "object.__setattr__") {
+        return set_attribute(ctx, name, args, kwargs);
+    }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "str" | "bytes" => text::method(ctx, method, args, kwargs),
