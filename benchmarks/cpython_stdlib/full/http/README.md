@@ -38,6 +38,8 @@ with HTTPServer(("127.0.0.1", 8080), Health) as server:
 
 The [subclass fixture](server_contract.py) observes delayed binding and request initialization, runs two dynamic command lookups on a Werkzeug-style handler, and checks duplicate headers and an overridden server version on real connections. The [original-method runner](server_cases.py) sends CPython's requests through an independent native listener. It substitutes a wrong status and a wrong date to check that the original assertions detect both errors.
 
+An override of `log_error` currently receives the integer code when `send_error` is called with an `HTTPStatus` member. CPython preserves the member in that variadic argument. The default handler writes the same numeric status to its log.
+
 ## Original Linux tests
 
 The reference uses CPython [`5607950`](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115). The complete four original test modules, the five `http` implementation files and the [PSF license](upstream/LICENSE) are present as unchanged Git blobs. The per-suite manifests pin their identities. The table counts discovered occurrences at each optimization level. A fully native occurrence requires its original body, assertions, operation and fixture to execute on Imre.

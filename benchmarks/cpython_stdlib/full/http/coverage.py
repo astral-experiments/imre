@@ -1,4 +1,4 @@
-"""Measure the four original HTTPStatus methods and keep every companion occurrence."""
+"""Measure HTTPStatus and server methods and retain all original HTTP suite occurrences."""
 import ast
 from dataclasses import replace
 from hashlib import file_digest, sha256
