@@ -121,6 +121,7 @@ impl Checker<'_> {
         value: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        let value = Self::enum_text(value);
         if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
             return Ok(Expr {
                 ty: Type::Str,

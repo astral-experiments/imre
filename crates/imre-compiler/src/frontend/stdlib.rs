@@ -552,10 +552,7 @@ impl Checker<'_> {
         body.extend(self.expand_items(input, call, |checker, value| {
             let value = match style {
                 JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
-                JoinStyle::Shell => {
-                    let value = checker.optional_enum_value(value, Type::Str, source)?;
-                    checker.shlex_quote_value(value, call)?
-                }
+                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
                 JoinStyle::WindowsCommand => {
                     let path = Self::string_value(checker.fspath(value, source)?);
                     Expr {
