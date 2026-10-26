@@ -31,6 +31,8 @@ pub(crate) fn emit(modules: &[(String, PathBuf, String)], config: &str) -> Resul
     for (name, path, source) in modules {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
+        crate::frontend::check_string_tokens(source, parsed.tokens())
+            .map_err(|error| format!("{}:{error}", path.display()))?;
         let package = if path.file_name().is_some_and(|file| file == "__init__.py") {
             name.as_str()
         } else {

@@ -152,8 +152,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
       - name: Check sys at O0 and O3
+        id: sys_evidence
         run: bash "$RUNNER_TEMP/sys-gate.sh"
-      - name: Retain the validated Linux sys reports and tested source
+      - name: Retain the Linux sys reports and tested source
+        if: ${{ !cancelled() && (steps.sys_evidence.outcome == 'success' || steps.sys_evidence.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sys-evidence-linux
@@ -336,8 +338,10 @@ jobs:
             diff -u reference native
           done
       - name: Check sys streams and exits with vendored CPython methods
+        id: sys_evidence
         run: bash benchmarks/cpython_stdlib/full/sys/ci.sh
-      - name: Retain the validated Linux sys reports and tested source
+      - name: Retain the Linux sys reports and tested source
+        if: ${{ !cancelled() && (steps.sys_evidence.outcome == 'success' || steps.sys_evidence.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sys-evidence-linux

@@ -18,7 +18,7 @@ SizeofTest.test_gc_head_size	proposed	The two exact sizes use _testinternalcapi.
 SizeofTest.test_objecttypes	proposed	The assertions enumerate exact C struct sizes for Objects/ types, including pointers, PyLong digits and CPython Unicode caches. Imre uses different layouts; ordinary getsizeof stays open.
 SizeofTest.test_pythontypes	proposed	The _ast.AST, traceback and sys.flags byte sizes are calculated from CPython C pointer layouts and struct-sequence fields; those expressions do not specify Imre object sizes.
 SizeofTest.test_slots	proposed	This test derives subclass sizes from CPython's three additional slot pointers and, when needed, the GC header, including an additional GC header relative to the base object.
-SysModuleTest.test_attributes	blocked	This single routine also reads float_info, int_info, hash_info, prefixes, builtin names and implementation metadata. Hash and digit descriptions need to agree with actual native algorithms.
+SysModuleTest.test_attributes	failed	The compiled child exits 1 importing unittest before the original body can check float_info, int_info, hash_info, prefixes, builtin names or implementation metadata.
 SysModuleTest.test_c_locale_surrogateescape	blocked	The unchanged child calls getattr(sys, name) for each standard stream. Its first LC_ALL=C process stops compiling at the sys operand before any policy is read; see the stock six-child comparison in the occurrence report.
 SysModuleTest.test_call_tracing	blocked	sys.call_tracing must accept a real callable and tuple and reject the non-tuple argument. The native tracing/callable boundary is absent.
 SysModuleTest.test_clear_type_cache	proposed	The sole call is deprecated sys._clear_type_cache(), whose warning refers to CPython's method lookup cache. Imre statically resolves methods; this proposes only this private cache warning.
@@ -51,7 +51,7 @@ SysModuleTest.test_sys_flags	blocked	Read actual launch flags by 18 dynamic attr
 SysModuleTest.test_sys_flags_no_instantiation	blocked	The flags value and its type must exist, and Python-level construction of that type must be rejected.
 SysModuleTest.test_sys_ignores_cleaning_up_user_data	blocked	Storing a user object on sys and finalizing its failing destructor quietly needs mutable module attributes and native shutdown ownership.
 SysModuleTest.test_sys_tracebacklimit	blocked	Real chained native frames must be formatted or suppressed according to mutable sys.tracebacklimit on uncaught errors.
-SysModuleTest.test_sys_version_info_no_instantiation	blocked	Needs a real version-info type object and its construction error, in addition to exposed tuple fields and indexing.
+SysModuleTest.test_sys_version_info_no_instantiation	failed	The compiled child exits 1 importing unittest before the original body can check the version-info type's construction error.
 TestRemoteExec.test_new_namespace_for_each_remote_exec	blocked	Each injected script must run in a new globals dictionary distinct from the target's __main__.__dict__.
 TestRemoteExec.test_remote_exec	blocked	Inject and execute the actual script at a safe point in the waiting target; no native debugger transport exists.
 TestRemoteExec.test_remote_exec_bytes	blocked	The same cross-process operation must accept a bytes path without involving a CPython child.

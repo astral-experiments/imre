@@ -80,7 +80,10 @@ The versioned gate loads the original suite and runs its selected methods
 under their CPython fixtures. For every remaining non-skipped method it either
 tries to compile the complete definition or records the original decorator
 that requires an adapter. An unreviewed exception proposal remains a blocker.
-The unchanged `test_exit` runs under its original CPython fixture and assertions: six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next child contains a lone U+DCFF that Imre cannot compile. Running the final Latin-1 child independently returns status 1, an empty stdout and stderr bytes `68 e9 0a` at both levels. The [stderr encoding probe](STDERR_ENCODING.md) and its [results](stderr-encoding-linux.json) retain the original child hashes and bytes; the complete method remains blocked.
+
+The compiled children for `test_attributes` and `test_sys_version_info_no_instantiation` exit 1 on `import unittest` before either method reaches its assertions. CPython runs the original fixture. Both occurrences record an execution error and give no credit for the body, assertions or sys operation. [Linux run on 3df6330a](https://github.com/viarius-experiments/imre/actions/runs/40279974945/job/121430926066)
+
+The unchanged `test_exit` runs under its original CPython fixture and assertions. Six caught calls and five original child programs complete in Imre, including `2**128` and a pending stderr write. The next child contains a lone U+DCFF. On `3df6330a` it compiled and wrote U+FFFD (`ef bf bd`) to stderr. CPython expected the six ASCII bytes for `\udcff`. The compiler now rejects that unsupported literal before the child runs. The later Latin-1 child, run independently, still returns status 1, empty stdout and stderr bytes `68 e9 0a` at both levels. [Original child probes](stderr-encoding-linux.json)
 
 Pass `--evidence /tmp/sys-evidence-O$opt.json` to the command above for each
 optimization level. Combine and validate the two files with:
@@ -90,6 +93,7 @@ jq -s . /tmp/sys-evidence-O0.json /tmp/sys-evidence-O3.json > /tmp/sys-evidence.
 python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json /tmp/sys-evidence.json
 ```
 
+CI compares the checked-in and measured outcome, classification, reference, fixture variant and execution roles for each test ID, occurrence and optimization level. Both full reports are validated first. Raw diagnostics, including checkout paths and process IDs, remain in the evidence artifact.
 
 A manual run of the CI workflow can verify a prospective merge commit on Linux.
 Publish the commit to this repository, then supply its full SHA as the
