@@ -36,6 +36,7 @@ def current():
     print(str.__new__(str, plain) is plain)
     subtype = Word(plain)
     print(str(subtype) is plain, str(subtype) is str(subtype))
+    print(repr(subtype), [subtype])
     print(type(str(Printable())) is Word, str.__new__(Word, Printable()))
     for args in ((), (int, "text"), (12, "text")):
         try:
