@@ -71,7 +71,10 @@ impl Deferred {
             range: start..start + raw.len(),
             parsed: OnceCell::new(),
             length: OnceCell::new(),
-            keys: source.keys.shared(),
+            keys: source
+                .keys
+                .shared()
+                .map_err(|_| super::allocation_error::<serde_json::Error>(source.refused))?,
         })))
     }
 
