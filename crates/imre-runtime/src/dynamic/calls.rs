@@ -229,7 +229,12 @@ impl Context {
                     parent as u32,
                 );
             }
-            return child == "bool" && parent == "int";
+            return matches!(
+                (child.as_str(), parent.as_str()),
+                ("bool", "int")
+                    | ("enum.IntEnum", "int" | "enum.Enum")
+                    | ("enum.StrEnum", "str" | "enum.Enum")
+            );
         }
         false
     }
@@ -517,6 +522,11 @@ impl Context {
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
+            if matches!(name, "name" | "value")
+                && let Some((_, member_name, value)) = self.enum_member(obj)
+            {
+                return Ok(if name == "name" { member_name } else { value });
+            }
             return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
         }
         if name == "__class__" {
@@ -637,6 +647,14 @@ impl Context {
             },
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
+            }
+            Value::MappingProxy(dict)
+                if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
+            {
+                return self.lookup_attr(dict, name);
+            }
+            Value::Native(class) if class == "int" && name == "__new__" => {
+                return Ok(self.builtin("int.__new__"));
             }
             Value::Super {
                 start,
@@ -1086,7 +1104,7 @@ impl Context {
             dictionary,
             text_memory: None,
             fields: HashMap::new(),
-            text: None,
+            scalar: None,
         })
     }
 
@@ -1122,7 +1140,7 @@ impl Context {
             class,
             fields: HashMap::new(),
             dictionary: None,
-            text: Some(text),
+            scalar: Some(text),
             text_memory: None,
         }))
     }
@@ -1134,6 +1152,7 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
+            Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || !name.contains('.')
@@ -1232,6 +1251,9 @@ impl Context {
             Value::Class {
                 name, ancestors, ..
             } => {
+                if let Some(values) = self.enum_values(callable) {
+                    return self.enum_lookup(callable, values, &args, &kwargs);
+                }
                 if ancestors.iter().any(|&base| {
                     matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
                 }) {
@@ -1261,7 +1283,7 @@ impl Context {
                         class: callable,
                         fields,
                         dictionary: None,
-                        text: None,
+                        scalar: None,
                         text_memory: None,
                     }));
                 }
@@ -1510,6 +1532,9 @@ impl Context {
             }
         }
         self.classes.insert(name, class);
+        if self.has_base(class, "enum.Enum") {
+            self.populate_enum(class, None)?;
+        }
         Ok(class)
     }
 }

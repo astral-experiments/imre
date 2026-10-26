@@ -122,7 +122,9 @@ pub(super) fn is_builtin(name: &str) -> bool {
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(&name) || is_exception(name)
+    TYPES.contains(&name)
+        || is_exception(name)
+        || matches!(name, "enum.Enum" | "enum.IntEnum" | "enum.StrEnum")
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -203,7 +205,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "socket.socket"
         }
         Value::TextFile(_)
-            if matches!(attr, "write" | "flush" | "close" | "__enter__" | "__exit__") =>
+            if matches!(
+                attr,
+                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+            ) =>
         {
             "TextIOWrapper"
         }
@@ -719,7 +724,15 @@ pub(super) fn call(
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
+                    collections::entries(ctx, *dict)?.len()
+                }
+                Value::Class { .. } => {
+                    let values = ctx
+                        .enum_values(args[0])
+                        .ok_or_else(|| type_error("object has no len()"))?;
+                    collections::entries(ctx, values)?.len()
+                }
                 Value::Str(v) => v.chars().count(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
                 Value::Range { start, stop, step } => range_len(*start, *stop, *step)?,
@@ -801,11 +814,35 @@ pub(super) fn call(
             super::property::construct(ctx, fields)
         }
         "open" => {
-            let [path, mode] = bind(name, args, kwargs, ["file", "mode"])?;
+            arity(name, args, 0, 2)?;
+            let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;
             let path = ctx.str_value(path.ok_or_else(|| type_error("open requires a file"))?)?;
             let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if matches!(mode, "w" | "wt" | "tw") {
-                let file = crate::objects::TextFile::create(path)?;
+            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
+                if mode.contains('b') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "binary mode doesn't take an encoding argument",
+                    ));
+                }
+                let encoding = ctx.str_value(encoding)?;
+                if !matches!(
+                    crate::objects::Codec::lookup(encoding)?,
+                    crate::objects::Codec::Utf8 { signature: false }
+                ) {
+                    return Err(Error::new(
+                        "ValueError",
+                        "text files require UTF-8 encoding",
+                    ));
+                }
+            }
+            let text_mode = match mode {
+                "r" | "rt" | "tr" => Some(0),
+                "w" | "wt" | "tw" => Some(1),
+                _ => None,
+            };
+            if let Some(text_mode) = text_mode {
+                let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             if mode != "rb" {

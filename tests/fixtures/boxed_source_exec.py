@@ -31,6 +31,8 @@ def current():
     print(type(module) is type(root.__code__), module is not again, root.__globals__ is namespace)
     print(module.co_name, root.__code__.co_filename, root.__code__.co_firstlineno, root.__module__)
     print(local["alias"] is root, "root" in namespace, "external" in local, "__builtins__" in namespace)
+    builtins = namespace["__builtins__"]
+    print(builtins["dict"] is dict, "enum.Enum" in builtins, "enum.StrEnum" in builtins)
     result = root()
     print(result.gi_code is root.__code__, iter(result) is result, namespace["events"])
     print(next(result), namespace["events"])

@@ -165,8 +165,7 @@ impl Context {
             *exhausted = true;
             return false;
         }
-        let a = self.string_storage(a).unwrap_or(a);
-        let b = self.string_storage(b).unwrap_or(b);
+        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
@@ -223,6 +222,7 @@ impl Context {
         }
     }
     pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let int_float = |integer, float| {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
             Ok((order != 2).then(|| order.cmp(&0)))
@@ -296,6 +296,20 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { scalar, .. } = value
+            && (repr || scalar.is_none())
+            && let Some((class, name, member_value)) = self.enum_member(id)
+        {
+            let name = self.format_value(name, false, active);
+            return if repr {
+                format!(
+                    "<{class}.{name}: {}>",
+                    self.format_value(member_value, true, active)
+                )
+            } else {
+                format!("{class}.{name}")
+            };
+        }
         let recursive = match value {
             Value::List(_) => Some("[...]"),
             Value::Tuple(_) => Some("(...)"),
@@ -355,8 +369,9 @@ impl Context {
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
             Value::Instance {
-                text: Some(text), ..
-            } => self.display(*text),
+                scalar: Some(payload),
+                ..
+            } => self.display(*payload),
             Value::Bytes(bytes) => format!(
                 "b'{}'",
                 bytes
@@ -460,6 +475,16 @@ impl Context {
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
             return self.call(getter, vec![key], Vec::new());
+        }
+        if self.enum_values(obj).is_some() {
+            let names = self
+                .class_attr(obj, "_member_map_")
+                .filter(|&names| matches!(self.heap.get(names), Value::Dict(_)))
+                .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
+            return self.get_item(names, key);
+        }
+        if let Value::MappingProxy(dict) = *self.heap.get(obj) {
+            return self.get_item(dict, key);
         }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;

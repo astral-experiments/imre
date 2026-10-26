@@ -64,6 +64,17 @@ def exercise(path):
               error.filename, error.filename2, error.args)
 
 
+    with open(path, "w", encoding="utf-8") as output:
+        output.write("h\u00e9llo\r\nsecond\rthird\n")
+    with open(path) as reader:
+        alias = reader
+        print(repr(alias.readline()), repr(reader.read()), repr(alias.read()))
+    print(alias.closed)
+    for mode in ("r", "rt"):
+        with open(path, mode, encoding="utf-8") as reader:
+            print(repr(reader.read()), repr(reader.readline()))
+
+
 def full_device():
     output = open("/dev/full", "w")
     print(output.write("x"))
