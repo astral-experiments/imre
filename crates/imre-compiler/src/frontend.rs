@@ -2952,6 +2952,9 @@ impl<'a> Checker<'a> {
                     return self.coerce(value, expected, expression);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                    return self.coerce(wrapped, expected, expression);
+                }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     let value =
                         self.json_load_callable(Some(receiver), Some(concrete), expression)?;

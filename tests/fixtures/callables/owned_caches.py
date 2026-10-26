@@ -1,4 +1,5 @@
 from functools import cache, lru_cache
+from typing import Callable
 
 
 def lookup(key: str, index: int) -> str:
@@ -25,7 +26,7 @@ def exercise() -> None:
     left.cache_clear()
     print(alias.cache_info()[3])
     print(right.cache_info()[3])
-    raw = alias.__wrapped__
+    raw: Callable[[str, int], str] = alias.__wrapped__
     print(raw("x", 2))
     print(alias.__wrapped__("direct", 3))
     print(alias.cache_info()[1])
