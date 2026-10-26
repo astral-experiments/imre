@@ -10,9 +10,11 @@ if [[ -f benchmarks/cpython_stdlib/full/sys/codec_device.py ]]; then
 fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stderr_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stderr_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stderr-encoding.json"
+  cmp benchmarks/cpython_stdlib/full/sys/stderr-encoding-linux.json "$RUNNER_TEMP/sys-stderr-encoding.json"
 fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stdout_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stdout_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdout-encoding.json"
+  cmp benchmarks/cpython_stdlib/full/sys/stdout-encoding-linux.json "$RUNNER_TEMP/sys-stdout-encoding.json"
 fi
 if [[ -f benchmarks/cpython_stdlib/full/sys/stdin_encoding.py ]]; then
   python3 -B benchmarks/cpython_stdlib/full/sys/stdin_encoding.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/sys-stdin-encoding.json"
