@@ -341,6 +341,7 @@ impl Context {
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
+            | Value::Cell { .. }
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
@@ -381,6 +382,7 @@ impl Context {
                             | "ellipsis"
                             | "float"
                             | "code"
+                            | "cell"
                             | "function"
                             | "module"
                             | "method"
@@ -763,11 +765,45 @@ impl Context {
                 "co_name" => return Ok(code.name),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                "co_freevars" => {
+                    if !code.closure_supported && !code.module_definition {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "code lacks closure metadata",
+                        ));
+                    }
+                    let names = code.freevars.iter().map(|name| self.text(name)).collect();
+                    return Ok(self.alloc(Value::Tuple(names)));
+                }
                 _ => {}
             },
+            Value::Cell {
+                scope,
+                name: cell_name,
+            } if name == "cell_contents" => {
+                return self
+                    .scope_name(scope, &cell_name)
+                    .ok_or_else(|| Error::new("ValueError", "Cell is empty"));
+            }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
-            Value::Function { scope, fields, .. } => {
+            Value::Function {
+                scope,
+                fields,
+                closure,
+                code,
+                ..
+            } => {
+                if name == "__closure__" {
+                    let code = self.code_object(code);
+                    if !code.closure_supported && !code.module_definition {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "code lacks closure metadata",
+                        ));
+                    }
+                    return Ok(closure);
+                }
                 if name == "__globals__" {
                     return Ok(self.module_globals(scope));
                 }
@@ -1160,6 +1196,16 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Value::Cell {
+            scope,
+            name: cell_name,
+        } = self.heap.get(obj).clone()
+            && name == "cell_contents"
+        {
+            let key = self.text(&cell_name);
+            self.remove_binding(scope, &cell_name, key)?;
+            return Ok(());
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, None);
         }
@@ -1355,6 +1401,15 @@ impl Context {
                 name,
                 Some(value),
             );
+        }
+        if let Value::Cell {
+            scope,
+            name: cell_name,
+        } = self.heap.get(obj).clone()
+            && name == "cell_contents"
+        {
+            self.bind(scope, &cell_name, value);
+            return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);
@@ -1822,6 +1877,15 @@ impl Context {
                         .filter_map(|n| n.as_str().map(str::to_owned))
                         .collect()
                 };
+                let locals = names("scope_locals");
+                let nonlocals = names("scope_nonlocals");
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.closure.declared.extend(locals);
+                frame.closure.declared_complete =
+                    sig["scope_locals_complete"].as_bool().unwrap_or(false);
+                frame.closure.nonlocals.extend(nonlocals);
                 let posonly = names("posonly");
                 let pos: Vec<_> = posonly.iter().cloned().chain(names("positional")).collect();
                 let kwonly = names("kwonly");

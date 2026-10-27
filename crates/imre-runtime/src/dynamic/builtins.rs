@@ -1123,6 +1123,7 @@ pub(super) fn call(
                 _ => ELLIPSIS,
             })
         }
+        "function" => ctx.construct_function(args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

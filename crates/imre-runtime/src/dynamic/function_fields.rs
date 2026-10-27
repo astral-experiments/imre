@@ -157,7 +157,7 @@ impl Context {
     }
 
     pub(super) fn set_function_attr(&mut self, fun: Id, name: &str, value: Id) -> Result<()> {
-        if name == "__globals__" {
+        if matches!(name, "__globals__" | "__closure__") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         let object = self.heap.get(value);
