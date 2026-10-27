@@ -277,6 +277,7 @@ impl Context {
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
+                | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -347,9 +348,6 @@ impl Context {
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
-        if matches!(self.heap.get(id), Value::Zip { .. }) {
-            return self.zip_has_item(id);
-        }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
@@ -394,7 +392,7 @@ impl Context {
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
-            Value::Iterator { .. } | Value::Zip { .. } => {}
+            Value::Iterator { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
@@ -409,13 +407,7 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { function, input } => {
-                let (function, input) = (*function, *input);
-                let Some(item) = self.next_result(input)? else {
-                    return Ok(None);
-                };
-                return self.call(function, vec![item], Vec::new()).map(Some);
-            }
+            Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
             Value::Generator { code, .. } => {
                 let code = *code;
                 return match self.code_object(code).body {
@@ -448,9 +440,6 @@ impl Context {
         }
         if !self.iterator_has_item(id)? {
             return Ok(None);
-        }
-        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
-            return Ok(pending.take());
         }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],

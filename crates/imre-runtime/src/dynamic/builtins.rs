@@ -306,6 +306,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -602,6 +603,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
+            "map" => ctx.map_method(method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -842,28 +844,7 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(size))
         }
-        "map" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 2)?;
-            let input = ctx.iterator(args[1])?;
-            Ok(ctx.alloc(Value::Map {
-                function: args[0],
-                input,
-            }))
-        }
-        "zip" => {
-            let [strict] = bind(name, &[], kwargs, ["strict"])?;
-            let strict = ctx.truth(strict.unwrap_or(FALSE))?;
-            let inputs = args
-                .iter()
-                .map(|&argument| ctx.iterator(argument))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(ctx.alloc(Value::Zip {
-                inputs: inputs.into(),
-                strict,
-                pending: None,
-            }))
-        }
+        "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;

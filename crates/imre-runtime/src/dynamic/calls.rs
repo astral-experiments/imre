@@ -141,6 +141,8 @@ impl Context {
                             | "object.__init__"
                             | "int.to_bytes"
                             | "list.pop"
+                            | "map.__iter__"
+                            | "map.__next__"
                     ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
@@ -442,6 +444,7 @@ impl Context {
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
+            | ("map", Value::Map { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -702,6 +705,12 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "map" => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("map")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
@@ -1341,6 +1350,7 @@ impl Context {
                             "str"
                                 | "dict"
                                 | "list"
+                                | "map"
                                 | "set"
                                 | "int"
                                 | "frozenset"

@@ -416,6 +416,7 @@ def report(text):
             "boxed_dict_pop.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
+            "boxed_map.py",
             "boxed_python_iterators.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",
