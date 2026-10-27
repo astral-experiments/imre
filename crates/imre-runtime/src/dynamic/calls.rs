@@ -636,6 +636,7 @@ impl Context {
             Value::ClassMethod(_) => "classmethod",
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
+            Value::ReverseSequence { .. } => "reversed",
             Value::Deque(_) => super::deque::CLASS,
             Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
             Value::DequeIterator { .. } => super::deque::ITERATOR,

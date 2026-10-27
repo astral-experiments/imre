@@ -1082,10 +1082,22 @@ pub(super) fn call(
                     context: None,
                 }));
             }
-            if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
-                && hook != NONE
+            if let Some(hook) = ctx.bound_slot(object, "__reversed__")? {
+                if hook != NONE {
+                    return ctx.call(hook, Vec::new(), Vec::new());
+                }
+            } else if matches!(ctx.heap.get(object), Value::Instance { .. })
+                && (ctx.slot(object, "__getitem__").is_some()
+                    || matches!(
+                        ctx.heap.get(ctx.scalar_value(object)),
+                        Value::Str(_) | Value::Bytes(_) | Value::List(_) | Value::Tuple(_)
+                    ))
             {
-                return ctx.call(hook, Vec::new(), Vec::new());
+                let remaining = ctx.reverse_sequence_len(object)?;
+                return Ok(ctx.alloc(Value::ReverseSequence {
+                    source: Some(object),
+                    remaining,
+                }));
             }
             Err(type_error(format!(
                 "'{}' object is not reversible",

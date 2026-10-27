@@ -298,6 +298,15 @@ impl Context {
             Err(error) if error.kind == "TypeError" => {}
             Err(error) => return Err(error),
         }
+        if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
+            let hint = match source {
+                Some(seq) if remaining != 0 && remaining <= self.reverse_sequence_len(seq)? => {
+                    remaining
+                }
+                _ => 0,
+            };
+            return Ok(self.int(hint as i64));
+        }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
             let length = i64::try_from(self.iterator_remaining(value)?.len()).map_err(|_| {
                 Error::new(

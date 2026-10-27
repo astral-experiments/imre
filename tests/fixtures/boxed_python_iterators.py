@@ -67,6 +67,13 @@ def current():
     assert list(filter(None, [False, "x", 0, 1])) == ["x", 1]
     from operator import length_hint
 
+    class Text(str):
+        pass
+    class Data(bytes):
+        pass
+    assert list(reversed(Text("🌓a"))) == ["a", "🌓"]
+    assert list(reversed(Data(bytes([0, 97])))) == [97, 0]
+
     for source, last, rest in (("é中x", "x", ["中", "é"]), (b"\x00\xffA", 65, [255, 0])):
         cursor = reversed(source)
         assert type(cursor) is reversed and iter(cursor) is cursor
