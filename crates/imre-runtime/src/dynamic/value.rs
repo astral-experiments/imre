@@ -256,6 +256,7 @@ impl Context {
             Value::RangeIterator(iter) => iter.kind,
             Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
+            Value::MappingViewIterator { .. } => "generator",
             Value::DictIterator(iter) => match iter.kind {
                 DictViewKind::Keys => "dict_keyiterator",
                 DictViewKind::Values => "dict_valueiterator",
@@ -493,6 +494,12 @@ pub(super) enum Value {
     MappingView {
         mapping: Id,
         kind: DictViewKind,
+    },
+    MappingViewIterator {
+        mapping: Option<Id>,
+        source: Option<Id>,
+        kind: DictViewKind,
+        running: bool,
     },
     DictView {
         dict: Id,
@@ -741,6 +748,13 @@ impl Value {
                 }
             }
             Self::MappingView { mapping, .. } => visit.push(*mapping),
+            Self::MappingViewIterator {
+                mapping, source, ..
+            } => {
+                visit.extend(*mapping);
+                visit.extend(*source);
+            }
+
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
