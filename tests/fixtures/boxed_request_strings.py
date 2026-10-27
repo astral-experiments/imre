@@ -50,6 +50,7 @@ def current():
         except (TypeError, ValueError) as error:
             print(type(error).__name__)
     number = FormatNumber()
+    assert "%x %i %u %o %X %d" % ((number,) * 6) == "-3 5 5 -3 -3 5"
     print("%04x %04i %04u" % (number, number, 2.75))
     for field in ("%02d", "%02x"):
         try:

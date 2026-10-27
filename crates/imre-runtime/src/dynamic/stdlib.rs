@@ -51,6 +51,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "codecs"
             | "types"
             | "_io"
+            | "_weakref"
             | "io"
             | "traceback"
             | "sysconfig"
@@ -277,6 +278,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
+        ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         ("traceback", "print_exc") => ctx.builtin("traceback.print_exc"),
@@ -597,8 +599,14 @@ pub(super) fn call(
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("_thread._local.") {
+        return super::thread_local::method(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("_thread.lock.") {
         return super::thread_lock::method(ctx, method, args, kwargs);
+    }
+    if name.starts_with("_weakref.") || name.starts_with("weakref.") {
+        return super::weakref::call(ctx, name, args, kwargs);
     }
     if name == super::thread_local::CLASS {
         if !args.is_empty() || !kwargs.is_empty() {

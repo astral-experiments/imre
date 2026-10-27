@@ -235,6 +235,7 @@ pub(crate) enum IntrinsicModule {
     Copy,
     Itertools,
     Math,
+    Numbers,
     Operator,
     Textwrap,
     Io,
@@ -274,6 +275,7 @@ pub(crate) enum Intrinsic {
     ModuleSpec,
     CachePath { reverse: bool },
     NominalClass(&'static str),
+    Number,
     GetAnnotations,
     Overload,
     GetOverloads,
@@ -667,6 +669,7 @@ impl IntrinsicModule {
             "copy" => Some(Self::Copy),
             "itertools" => Some(Self::Itertools),
             "math" => Some(Self::Math),
+            "numbers" => Some(Self::Numbers),
             "operator" => Some(Self::Operator),
             "textwrap" => Some(Self::Textwrap),
             "io" => Some(Self::Io),
@@ -756,6 +759,7 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::CollectionsAbc, "Sequence") => {
@@ -3160,6 +3164,9 @@ impl<'a> Loader<'a> {
                     include_str!("../stdlib/pkgutil/iter_modules.py"),
                 ),
             )),
+            "zipimport" if cfg!(unix) => {
+                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
+            }
             "platform" => Some((
                 "platform.py",
                 concat!(

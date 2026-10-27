@@ -1,10 +1,201 @@
 //! One Python attribute dictionary per local object and native thread.
 
+use std::borrow::Cow;
 use std::sync::{Arc, Weak};
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const CLASS: &str = "_thread._local";
+
+pub(super) fn is_method(name: &str) -> bool {
+    matches!(name, "__getattribute__" | "__setattr__" | "__delattr__")
+}
+
+/// Recognize only the three slot descriptors installed by the local type.
+pub(super) fn wrapper_name(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "_thread._local.__getattribute__" => Some("__getattribute__"),
+        "_thread._local.__setattr__" => Some("__setattr__"),
+        "_thread._local.__delattr__" => Some("__delattr__"),
+        _ => None,
+    }
+}
+
+/// Bind the slot to a local instance or return the descriptor on class access.
+pub(super) fn bind_wrapper(
+    ctx: &mut Context,
+    descriptor: Id,
+    slot: &str,
+    receiver: Id,
+) -> Result<Id> {
+    if receiver == NONE {
+        return Ok(descriptor);
+    }
+    if !matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{slot}' for '{CLASS}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    }
+    Ok(ctx.alloc(Value::Method {
+        callable: descriptor,
+        receiver,
+        explicit: false,
+    }))
+}
+
+/// Return attributes shared by an unbound slot and its bound method wrapper.
+pub(super) fn wrapper_attribute(ctx: &mut Context, slot: &str, attr: &str) -> Option<Id> {
+    Some(match attr {
+        "__name__" => ctx.text(slot),
+        "__qualname__" => ctx.text(format!("_local.{slot}")),
+        "__objclass__" => ctx.builtin(CLASS),
+        _ => return None,
+    })
+}
+
+/// Direct slot calls can carry any Python object, including a key in the local dictionary.
+#[derive(Clone, Copy)]
+pub(super) enum Name<'a> {
+    Text(&'a str),
+    Key(Id),
+}
+
+impl<'a> Name<'a> {
+    pub(super) fn from_lookup(text: &'a str, original: Option<Id>) -> Self {
+        original.map_or(Self::Text(text), Self::Key)
+    }
+
+    fn key(self, ctx: &mut Context) -> Id {
+        match self {
+            Self::Text(name) => ctx.text(name),
+            Self::Key(key) => key,
+        }
+    }
+
+    fn text(self, ctx: &Context) -> Result<Cow<'a, str>> {
+        match self {
+            Self::Text(name) => Ok(Cow::Borrowed(name)),
+            Self::Key(key) => builtins::attribute_name(ctx, key).map(Cow::Owned),
+        }
+    }
+
+    fn is_dict(self, ctx: &mut Context) -> Result<bool> {
+        match self {
+            Self::Text(name) => Ok(name == "__dict__"),
+            Self::Key(key) => match ctx.heap.get(key) {
+                Value::Str(name) => Ok(name == "__dict__"),
+                _ => {
+                    let marker = ctx.text("__dict__");
+                    let equal = ctx.binary("==", key, marker)?;
+                    ctx.truth(equal)
+                }
+            },
+        }
+    }
+}
+
+/// Implement the descriptor's explicit __get__ with Python's receiver and owner rules.
+fn descriptor_get(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&descriptor, arguments)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "descriptor '__get__' of 'wrapper_descriptor' object needs an argument",
+        ));
+    };
+    let slot = match ctx.heap.get(descriptor) {
+        Value::Native(symbol) => wrapper_name(symbol),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__get__' requires a 'wrapper_descriptor' object but received a '{}'",
+                ctx.type_name(descriptor)
+            ),
+        )
+    })?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "wrapper __get__() takes no keyword arguments",
+        ));
+    }
+    match *arguments {
+        [] => Err(Error::new(
+            "TypeError",
+            "__get__ expected at least 1 argument, got 0",
+        )),
+        [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
+        [receiver] | [receiver, _] => bind_wrapper(ctx, descriptor, slot, receiver),
+        _ => Err(Error::new(
+            "TypeError",
+            format!(
+                "__get__ expected at most 2 arguments, got {}",
+                arguments.len()
+            ),
+        )),
+    }
+}
+
+/// Apply one of the type's attribute wrappers after validating its receiver and arguments.
+pub(super) fn method(
+    ctx: &mut Context,
+    slot: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if slot == "wrapper_get" {
+        return descriptor_get(ctx, args, kwargs);
+    }
+    let Some((&obj, arguments)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{slot}' of '{CLASS}' object needs an argument"),
+        ));
+    };
+    if !matches!(ctx.heap.get(obj), Value::ThreadLocal(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{slot}' requires a '{CLASS}' object but received a '{}'",
+                ctx.type_name(obj)
+            ),
+        ));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {slot}() takes no keyword arguments"),
+        ));
+    }
+    match (slot, arguments) {
+        ("__getattribute__", [key]) => ctx.local_attribute(obj, Name::Key(*key)),
+        ("__setattr__", [key, value]) => {
+            ctx.update_local_attribute(obj, Name::Key(*key), Some(*value))?;
+            Ok(NONE)
+        }
+        ("__delattr__", [key]) => {
+            ctx.update_local_attribute(obj, Name::Key(*key), None)?;
+            Ok(NONE)
+        }
+        _ => {
+            let prefix = if slot == "__setattr__" {
+                "__setattr__ expected 2 arguments"
+            } else {
+                "expected 1 argument"
+            };
+            Err(Error::new(
+                "TypeError",
+                format!("{prefix}, got {}", arguments.len()),
+            ))
+        }
+    }
+}
 
 thread_local! { static THREAD: Arc<()> = Arc::new(()); }
 
@@ -51,34 +242,16 @@ impl Context {
         dict
     }
 
-    /// A string subclass may compare equal to the special dictionary name or raise.
-    fn is_local_dict_name(&mut self, name: &str, original: Option<Id>) -> Result<bool> {
-        let Some(key) = original.filter(|&key| !matches!(self.heap.get(key), Value::Str(_))) else {
-            return Ok(name == "__dict__");
-        };
-        let dict_name = self.text("__dict__");
-        let equal = self.binary("==", key, dict_name)?;
-        self.truth(equal)
-    }
-
-    pub(super) fn local_attribute(
-        &mut self,
-        obj: Id,
-        name: &str,
-        original: Option<Id>,
-    ) -> Result<Id> {
+    pub(super) fn local_attribute(&mut self, obj: Id, name: Name<'_>) -> Result<Id> {
         let dict = self.local_dict(obj);
-        if self.is_local_dict_name(name, original)? {
+        if name.is_dict(self)? {
             return Ok(dict);
         }
-        let key = original.unwrap_or_else(|| self.text(name));
-        match self.get_item(dict, key) {
-            Err(error) if error.kind == "KeyError" && name == "__class__" => {
-                Ok(self.builtin(CLASS))
-            }
-            Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
-            result => result,
+        let key = name.key(self);
+        if let Some(index) = self.find_dictionary_key(dict, key, None)?.1 {
+            return Ok(self.dict_entries(dict).expect("thread-local dictionary")[index].1);
         }
+        self.default_get_attr(obj, &name.text(self)?)
     }
 
     /// The base object wrappers see the class descriptor, but no instance dictionary.
@@ -110,13 +283,12 @@ impl Context {
     pub(super) fn update_local_attribute(
         &mut self,
         obj: Id,
-        name: &str,
-        original: Option<Id>,
+        name: Name<'_>,
         value: Option<Id>,
     ) -> Result<()> {
         let dict = self.local_dict(obj);
-        if self.is_local_dict_name(name, original)? {
-            let key = original.unwrap_or_else(|| self.text(name));
+        if name.is_dict(self)? {
+            let key = name.key(self);
             let repr = if let Some(hook) = self.bound_slot(key, "__repr__")? {
                 let value = self.call(hook, Vec::new(), Vec::new())?;
                 self.str_value(value)
@@ -138,17 +310,20 @@ impl Context {
                 format!("'_thread._local' object attribute {repr} is read-only"),
             ));
         }
-        if name == "__class__" {
-            return self.update_base_local_attribute(obj, name, value);
+        let text = name.text(self)?;
+        if text == "__class__" {
+            return self.update_base_local_attribute(obj, &text, value);
         }
-        let key = original.unwrap_or_else(|| self.text(name));
-        if let Some(value) = value {
-            self.put_item(dict, key, value)
-        } else {
-            match self.delete_item(dict, key) {
-                Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
-                result => result,
+        let key = name.key(self);
+        let result = match value {
+            Some(value) => self.put_item(dict, key, value),
+            None => self.delete_item(dict, key),
+        };
+        match result {
+            Err(error) if self.is_builtin_error(&error, "KeyError") => {
+                Err(self.missing_attribute(obj, &text))
             }
+            result => result,
         }
     }
 }

@@ -1216,6 +1216,7 @@ pub(crate) enum Builtin {
     BinaryTell,
     ZipOpenFile,
     ZipGetInfo,
+    ZipImportData,
     ZipInfoList,
     ZipMember,
     ZipRead,

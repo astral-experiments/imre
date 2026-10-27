@@ -16,6 +16,14 @@ pub(super) enum Source {
 }
 
 impl Source {
+    /// Open a path-backed archive independently of any cached directory.
+    pub(super) fn open(path: &str) -> Result<Self> {
+        let (file, _) = files::open_file(path, 0)?;
+        crate::Shared::try_new(file)
+            .map(Self::Owned)
+            .map_err(|_| Error::allocation())
+    }
+
     /// Resolve an absolute archive position using the backing stream's seek rules.
     pub(super) fn absolute_offset(&self, offset: i128) -> Result<u64> {
         match self {

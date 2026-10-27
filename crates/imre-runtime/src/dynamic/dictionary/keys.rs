@@ -277,7 +277,13 @@ impl Context {
         }
     }
 
-    fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+    pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+        if let Value::Weak(wr) = *self.heap.get(key) {
+            if wr.kind != super::super::weakref::Kind::Reference {
+                return Err(self.unhashable(key));
+            }
+            return self.weak_reference_hash(key, wr);
+        }
         if let Value::Instance { class, .. } = *self.heap.get(key)
             && let Some(slot) = self.hash_slot(class)
         {
@@ -552,10 +558,14 @@ impl Context {
         let (hash, index) = self.find_dictionary_key(dict, key, known_hash)?;
         let entries = self.stored_entries_mut(dict);
         if let Some(i) = index {
-            if overwrite {
-                entries[i].1 = value;
+            if !overwrite {
+                return Ok(entries[i].1);
             }
-            return Ok(entries[i].1);
+            let previous = std::mem::replace(&mut entries[i].1, value);
+            if previous != value {
+                self.heap.weak_edge_removed(previous);
+            }
+            return Ok(value);
         }
         entries.push((key, value), hash);
         Ok(value)

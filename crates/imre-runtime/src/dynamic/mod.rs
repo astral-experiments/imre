@@ -21,6 +21,7 @@ mod thread_local;
 mod thread_lock;
 mod typing;
 mod value;
+mod weakref;
 mod zip;
 
 use std::collections::HashMap;
@@ -689,7 +690,11 @@ impl Context {
         if let Some(order) = &mut data.class_body {
             order.retain(|member| member != name);
         }
-        Ok(data.names.shift_remove(name).is_some())
+        let previous = data.names.shift_remove(name);
+        if let Some(value) = previous {
+            self.heap.weak_edge_removed(value);
+        }
+        Ok(previous.is_some())
     }
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
@@ -709,7 +714,11 @@ impl Context {
         {
             order.push(name.to_owned());
         }
-        s.names.insert(name.to_owned(), value);
+        if let Some(previous) = s.names.insert(name.to_owned(), value)
+            && previous != value
+        {
+            self.heap.weak_edge_removed(previous);
+        }
     }
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         loop {
@@ -773,6 +782,13 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if builtins::is_exception(name) {
+            self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
+            self.builtin("BaseException.__init__");
+            if name == "StopIteration" {
+                self.builtin("StopIteration.__init__");
+            }
+        }
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
             "int" => &["to_bytes"],
