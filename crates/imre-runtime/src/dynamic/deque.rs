@@ -154,37 +154,136 @@ fn extend(ctx: &mut Context, queue: Id, source: Id) -> Result<()> {
 
 /// Compare through live cursors so a callback can mutate either deque or raise.
 pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
+    use std::collections::HashMap;
+
     if left == right {
         return Ok(op == "==");
     }
-    let (Value::Deque(a), Value::Deque(b)) = (ctx.heap.get(left), ctx.heap.get(right)) else {
-        unreachable!()
-    };
-    if a.items.len() != b.items.len() {
-        return Ok(op == "!=");
+
+    struct Frame {
+        left: Id,
+        right: Id,
+        left_iter: Id,
+        right_iter: Id,
+        equal_op: bool,
+        roots: usize,
+        element_roots: usize,
+        pending: Option<(Id, Id, bool)>,
     }
+
     ctx.check_call_depth(0)?;
     ctx.call_depth += 1;
     let roots = ctx.heap.temporary_mark();
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-        let a = ctx.iterator(left)?;
-        ctx.heap.keep(a);
-        let b = ctx.iterator(right)?;
-        ctx.heap.keep(b);
-        let elements = ctx.heap.temporary_mark();
+        let mut active: HashMap<(Id, Id), usize> = HashMap::new();
+        let mut frames: Vec<Frame> = Vec::new();
+        let mut request = Some((left, right, op == "=="));
+        let mut answer: Option<bool> = None;
         loop {
-            ctx.heap.release_temporaries_since(elements);
-            let x = ctx.next_item(a)?;
-            let y = ctx.next_item(b)?;
+            if let Some((a, b, equal_op)) = request.take() {
+                if a == b {
+                    answer = Some(equal_op);
+                    continue;
+                }
+                let (Value::Deque(x), Value::Deque(y)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
+                    unreachable!()
+                };
+                if x.items.len() != y.items.len() {
+                    answer = Some(!equal_op);
+                    continue;
+                }
+                active
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let repeats = active.get(&(a, b)).copied().unwrap_or(0);
+                if repeats > 0 && frames.len() + ctx.call_depth >= 1000 {
+                    return Err(Error::new(
+                        "RecursionError",
+                        "maximum comparison depth exceeded",
+                    ));
+                }
+                active.insert((a, b), repeats + 1);
+                frames
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                let mark = ctx.heap.temporary_mark();
+                ctx.heap.keep(a);
+                ctx.heap.keep(b);
+                let left_iter = ctx.iterator(a)?;
+                ctx.heap.keep(left_iter);
+                let right_iter = ctx.iterator(b)?;
+                ctx.heap.keep(right_iter);
+                frames.push(Frame {
+                    left: a,
+                    right: b,
+                    left_iter,
+                    right_iter,
+                    equal_op,
+                    roots: mark,
+                    element_roots: ctx.heap.temporary_mark(),
+                    pending: None,
+                });
+                continue;
+            }
+            if let Some(value) = answer.take() {
+                let Some(parent) = frames.last_mut() else {
+                    return Ok(value);
+                };
+                let (x, y, final_pass) = parent.pending.take().expect("waiting parent");
+                if !final_pass && !value {
+                    parent.pending = Some((x, y, true));
+                    request = Some((x, y, parent.equal_op));
+                } else if !final_pass {
+                    ctx.heap.release_temporaries_since(parent.element_roots);
+                } else {
+                    let parent = frames.pop().unwrap();
+                    let count = active.get_mut(&(parent.left, parent.right)).unwrap();
+                    *count -= 1;
+                    if *count == 0 {
+                        active.remove(&(parent.left, parent.right));
+                    }
+                    ctx.heap.release_temporaries_since(parent.roots);
+                    answer = Some(value);
+                }
+                continue;
+            }
+            let frame = frames.last_mut().expect("active comparison");
+            ctx.heap.release_temporaries_since(frame.element_roots);
+            let x = ctx.next_item(frame.left_iter)?;
+            let y = ctx.next_item(frame.right_iter)?;
             let (Some(x), Some(y)) = (x, y) else {
-                return Ok(if op == "==" { x == y } else { x != y });
+                let value = if frame.equal_op { x == y } else { x != y };
+                let frame = frames.pop().unwrap();
+                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                *count -= 1;
+                if *count == 0 {
+                    active.remove(&(frame.left, frame.right));
+                }
+                ctx.heap.release_temporaries_since(frame.roots);
+                answer = Some(value);
+                continue;
             };
             ctx.heap.keep(x);
             ctx.heap.keep(y);
+            if matches!(ctx.heap.get(x), Value::Deque(_))
+                && matches!(ctx.heap.get(y), Value::Deque(_))
+            {
+                frame.pending = Some((x, y, false));
+                request = Some((x, y, true));
+                continue;
+            }
             if !ctx.checked_equal(x, y)? {
-                // The first differing pair answers the originally requested operation.
-                let result = ctx.binary(op, x, y)?;
-                return ctx.truth(result);
+                let operation = if frame.equal_op { "==" } else { "!=" };
+                let value = ctx.binary(operation, x, y)?;
+                let value = ctx.truth(value)?;
+                let frame = frames.pop().unwrap();
+                let count = active.get_mut(&(frame.left, frame.right)).unwrap();
+                *count -= 1;
+                if *count == 0 {
+                    active.remove(&(frame.left, frame.right));
+                }
+                ctx.heap.release_temporaries_since(frame.roots);
+                answer = Some(value);
             }
         }
     });
