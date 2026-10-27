@@ -708,10 +708,8 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get_mut(cell)
-        {
-            return Ok(contents.take().is_some());
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+            return Ok(self.heap.replace_cell(cell, None).is_some());
         }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
@@ -739,10 +737,8 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get_mut(cell)
-        {
-            *contents = Some(value);
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+            self.heap.replace_cell(cell, Some(value));
             return;
         }
         if let Some(namespace) = self.scope_data(scope).namespace {

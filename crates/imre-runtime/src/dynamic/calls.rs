@@ -1729,10 +1729,8 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if name == "cell_contents"
-            && let Value::Cell(contents) = self.heap.get_mut(obj)
-        {
-            *contents = None;
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+            self.heap.replace_cell(obj, None);
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -2046,10 +2044,8 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents"
-            && let Value::Cell(contents) = self.heap.get_mut(obj)
-        {
-            *contents = Some(value);
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+            self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {

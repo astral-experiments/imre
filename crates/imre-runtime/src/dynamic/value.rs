@@ -1139,12 +1139,29 @@ impl Heap {
         })
     }
 
+    pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
+        let Value::Cell(contents) = self.get_mut(cell) else {
+            unreachable!("compiled closure cell")
+        };
+        let previous = std::mem::replace(contents, value);
+        if let Some(old) = previous
+            && Some(old) != value
+        {
+            self.weak_edge_removed(old);
+        }
+        previous
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
-            && (self.weak_edge(value) || matches!(self.get(value), Value::Function { .. }))
+            && (self.weak_edge(value)
+                || matches!(
+                    self.get(value),
+                    Value::Function { .. } | Value::Cell(Some(_))
+                ))
             && !self.bound_in_active_frame(value)
         {
-            // A dropped function may have held the last strong path through its captured scope.
+            // A function or a cell may own the last strong path to a captured value.
             self.weak_edge_removed = true;
         }
     }
