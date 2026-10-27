@@ -30,6 +30,36 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_getter_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "itemgetter_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
+    # The first equal-sized allocation copies the call's positional arguments.
+    for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
+        result = run(imre, "-B", "-c", imports + "fixture.constructor_allocation()", extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), result
+    for kind in ("item", "attr"):
+        source = imports + f"fixture.result_allocation({kind!r})"
+        for ordinal, expected in ((0, b"113 113\n"), (1, b"caught () 0\n113 113\n")):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if ordinal else b"",
+            ), result
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -78,6 +108,29 @@ def check_slice_stack(imre, imports, root, env):
     assert output(imre, boundary, 8) == exhausted
 
 
+def check_argument_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "argument_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    cases = [
+        ((), 0, b"113 113 2\n", b""),
+        ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
+        ((), 2, b"113 113 2\n", b""),
+        (("tail",), 0, b"113 114 2\n", b""),
+        (("tail",), 1, b"caught () 0\n113 114 1\n", b"refused\n"),
+    ]
+    for arguments, ordinal, stdout, stderr in cases:
+        result = run(imre, "-B", fixtures / "boxed_call_arguments.py", *arguments, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -103,7 +156,9 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_argument_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
+            check_getter_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -437,6 +492,22 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
+        (helpers / "decimal_values.py").write_text(
+            "from decimal import Decimal\n"
+            "x = Decimal('1.2300')\n"
+            "print(x, Decimal(value=x) is x, Decimal(True), len(str(Decimal(10 ** 5000))))\n"
+        )
+        compare("-IB", "-c", decimal_import + "import decimal_values")
+        (helpers / "decimal_comparison.py").write_text(
+            "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
+        )
+        unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_comparison")
+        assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+
+        (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
+        compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
+
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
@@ -483,9 +554,14 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        resource_package = installed / "pkgutil_resource"
+        resource_package.mkdir()
+        (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
+        (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
             "boxed_namedtuple_repr.py",
@@ -498,12 +574,16 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_round.py",
+            "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
             "boxed_random.py",
+            "boxed_secrets.py",
+            "boxed_pkgutil.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
@@ -534,6 +614,7 @@ def report(text):
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
+            "boxed_dir.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
@@ -549,6 +630,7 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_posixpath.py",
+            "boxed_stat.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
@@ -558,6 +640,7 @@ def report(text):
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_dict_subclasses.py",
+            "boxed_mapping_abc.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
             "boxed_selector_modify_data.py",
@@ -580,6 +663,8 @@ def report(text):
             "boxed_string_repeat.py",
             "boxed_string_expandtabs.py",
         ):
+            if fixture == "boxed_stat.py" and sys.platform not in ("linux", "darwin"):
+                continue
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
@@ -588,6 +673,22 @@ def report(text):
         if os.name == "posix":
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform == "linux":
+            shim = root / "secrets_entropy.so"
+            subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
+            probe = root / "entropy.py"
+            probe.write_bytes((fixtures / "boxed_secrets.py").read_bytes() + b"\nentropy()\n")
+            injected = {"LD_PRELOAD": str(shim), "PYTHONHASHSEED": "1", "IMRE_SECRETS_TEST_SOURCE": "fail"}
+            oracle = run(sys.executable, "-B", probe, extra=injected)
+            assert oracle.returncode == 0 and oracle.stdout.startswith(b"OSError (5,") and not oracle.stderr, oracle
+            for opt in ("0", "3"):
+                binary = root / f"entropy-O{opt}"
+                build = run(imre, "build", probe, "--runtime-imports", "--opt-level", opt, "-o", binary)
+                assert build.returncode == 0, build.stderr
+                fault = run(binary, extra=injected)
+                assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
+                retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
+                assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
         plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
         compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())

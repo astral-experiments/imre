@@ -1,4 +1,46 @@
 import types
+from _weakref import ref
+
+marker = "module"
+
+
+class Payload:
+    pass
+
+
+def global_lambda(unused):
+    return (lambda: marker), ref(unused)
+
+
+def make_late():
+    def read():
+        return payload, marker
+
+    def write(value):
+        nonlocal payload
+        payload = value
+
+    def factorial(n):
+        if n < 2:
+            return 1
+        return n * factorial(n - 1)
+
+    payload = 17
+    return read, write, factorial
+
+
+def globally_bound_reader():
+    marker = "outer"
+
+    def enclosing():
+        global marker
+
+        def read():
+            return marker
+
+        return read
+
+    return enclosing()
 
 
 def make():
@@ -38,3 +80,24 @@ def current():
     cell.cell_contents = 52
     print(read(), copied())
     print(type(cell).__name__)
+
+    read, write, factorial = make_late()
+    cell = read.__closure__[0]
+    supplied = {"marker": "replacement"}
+    copied = types.FunctionType(read.__code__, supplied, closure=(cell,))
+    print(cell is write.__closure__[0], cell is copied.__closure__[0])
+    print(read.__globals__ is globals(), copied.__globals__ is supplied)
+    print(read(), copied())
+    write(29)
+    print(cell.cell_contents, read(), copied())
+    print(factorial(5), factorial.__closure__[0].cell_contents is factorial)
+
+    reader = globally_bound_reader()
+    print(reader.__code__.co_freevars, reader.__closure__, reader())
+    print(types.FunctionType(reader.__code__, {"marker": "supplied"})())
+
+    reader, unused = global_lambda(Payload())
+    pressure = []
+    for index in range(20000):
+        pressure.append([index])
+    print(reader(), unused() is None)

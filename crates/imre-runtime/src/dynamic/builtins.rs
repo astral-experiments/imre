@@ -4,8 +4,10 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod dir;
 mod exceptions;
 mod float;
+mod round;
 pub(super) use float::from_numeric;
 mod integer;
 mod print;
@@ -39,6 +41,8 @@ exception_kinds!(
     TypeError,
     ValueError,
     EOFError,
+    SyntaxError,
+    IndentationError,
     UnicodeError,
     UnicodeDecodeError,
     UnicodeEncodeError,
@@ -79,10 +83,12 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "dir",
     "sorted",
     "ord",
     "chr",
     "divmod",
+    "round",
     "callable",
     "abs",
     "all",
@@ -140,6 +146,17 @@ pub(super) fn names() -> impl Iterator<Item = &'static str> {
 
 pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
+}
+
+pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
+
+/// Return the initializer inherited from the built-in exception class.
+pub(super) fn exception_initializer(kind: &str) -> &'static str {
+    match kind {
+        "StopIteration" => "StopIteration.__init__",
+        "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
+        _ => "BaseException.__init__",
+    }
 }
 
 /// Return the exception that declares the inherited CPython allocation slot.
@@ -211,6 +228,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "isalnum",
     "isspace",
     "join",
     "lower",
@@ -486,15 +504,20 @@ pub(super) fn bind_method_arguments<const N: usize>(
     Ok(values)
 }
 
-/// Bind the positional or named operands of `pow` before selecting its numeric operation.
-fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let names = ["base", "exp", "mod"];
+/// Bind built-in arguments in the order Argument Clinic reports missing and invalid names.
+fn bind_builtin_arguments<const N: usize>(
+    builtin: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    names: [&str; N],
+    required: usize,
+) -> Result<[Option<Id>; N]> {
     if args.len() + kwargs.len() <= names.len() {
         // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
-        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+        for (index, &name) in names[..required].iter().enumerate().skip(args.len()) {
             if !kwargs.iter().any(|(key, _)| key == name) {
                 return Err(type_error(format!(
-                    "pow() missing required argument '{name}' (pos {})",
+                    "{builtin}() missing required argument '{name}' (pos {})",
                     index + 1
                 )));
             }
@@ -505,11 +528,17 @@ fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> 
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
         {
             return Err(type_error(format!(
-                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+                "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
             )));
         }
     }
-    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    bind_method_arguments(builtin, args, kwargs, names, N)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(base), Some(exp), modulus] =
+        bind_builtin_arguments("pow", args, kwargs, ["base", "exp", "mod"], 2)?
     else {
         unreachable!("required pow operands were checked above")
     };
@@ -692,7 +721,9 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration")) = name.strip_suffix(".__init__") {
+    if let Some(owner @ ("BaseException" | "StopIteration" | "ImportError")) =
+        name.strip_suffix(".__init__")
+    {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     if name == "object.__init__" {
@@ -813,7 +844,7 @@ pub(super) fn call(
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
-            ctx.exec_source(args[0], args[1], args.get(2).copied())
+            ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
         }
         "abs" => {
             if !kwargs.is_empty() {
@@ -831,6 +862,14 @@ pub(super) fn call(
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Complex(number) => {
+                    let magnitude = number.real.hypot(number.imag);
+                    if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite()
+                    {
+                        return Err(Error::new("OverflowError", "absolute value too large"));
+                    }
+                    Ok(ctx.alloc(Value::Float(magnitude)))
+                }
                 Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
                 Value::Int(number) => {
                     let zero = crate::Int::from(0);
@@ -847,6 +886,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "round" => round::call(ctx, args, kwargs),
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -960,6 +1000,7 @@ pub(super) fn call(
             }
         }
         "pow" => power(ctx, args, kwargs),
+        "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
@@ -1034,6 +1075,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
+                Value::MappingView { mapping, .. } => {
+                    let mapping = *mapping;
+                    return call(ctx, "len", &[mapping], &[]);
+                }
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
                 }
@@ -1048,7 +1093,15 @@ pub(super) fn call(
                     ctx.items(args[0])?.len()
                 }
                 Value::Instance { .. } => {
-                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                    if let Some(size) = ctx.instance_len(args[0])? {
+                        size
+                    } else {
+                        let scalar = ctx.scalar_value(args[0]);
+                        if matches!(ctx.heap.get(scalar), Value::Str(_) | Value::Bytes(_)) {
+                            return call(ctx, "len", &[scalar], &[]);
+                        }
+                        return Err(no_length(ctx));
+                    }
                 }
                 _ => return Err(no_length(ctx)),
             };
@@ -1212,6 +1265,11 @@ pub(super) fn call(
             })
         }
         "function" => ctx.construct_function(args, kwargs),
+        "ImportError" | "ModuleNotFoundError" => {
+            let mut error = ctx.exception(name, args);
+            exceptions::initialize_import(&mut error, args, kwargs)?;
+            Ok(ctx.alloc(Value::Raised(error)))
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

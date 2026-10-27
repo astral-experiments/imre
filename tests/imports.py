@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,16 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unused_struct_keeps_return_checks": ({
+        "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
+    }, "expected int, got str"),
+    "serialization_import_preserves_annotation": ({
+        "main.py": "import helper\n",
+        "helper.py": (
+            "import marshal as serializer\nfrom pickle import dumps as encode\n"
+            "def result() -> int:\n    return 'wrong'\nresult()\n"
+        ),
+    }, "expected int, got str"),
     "unready_partial_function": ({
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
@@ -58,6 +69,18 @@ REJECTED = {
     }, "no static binding"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
+    "unused_traceback_import": ({
+        "main.py": "import helper\n",
+        "helper.py": "import traceback as tb\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
+    "unused_traceback_formatter": ({
+        "main.py": "from helper import bad\nprint(bad())\n",
+        "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
+    "live_traceback_and_invalid_return": ({
+        "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
+        "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
+    }, "invalid-return-type"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
@@ -85,7 +108,12 @@ REJECTED = {
     "guard_reads_later_import": ({"main.py": "import helper\n", "helper.py": 'if __name__ == "helper":\n    raise ValueError(message)\nfrom child import message\n', "child.py": 'message = "late"\n'}, "imports must precede"),
     "library_computed_before_import": ({"main.py": "import package\n", "package/__init__.py": "metadata = str(7)\nfrom .child import f\n", "package/child.py": HELPER}, "imports must precede"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
-    "namespace_package": ({"main.py": "import package.child\n", "package/child.py": HELPER}, "namespace-package"),
+    "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
+    "namespace_preserves_annotation": ({
+        "main.py": "import helper\n",
+        "space/child.py": "value = 3\n",
+        "helper.py": "from space.child import value\ndef result() -> int:\n    return 'wrong'\nresult()\n",
+    }, "expected int, got str"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
     "entry_self_import": ({"main.py": "import main\n"}, "entry module"),
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
@@ -102,6 +130,47 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "imported_struct_timestamp": {
+        "main.py": (
+            "from wire import encode, decode\nimport struct\n"
+            "wire = encode(2**64 - 1)\n"
+            "print(struct.calcsize('>Q'), wire, decode(wire), struct.unpack('>Q', wire))\n"
+        ),
+        "wire.py": (
+            "import struct\nfrom struct import Struct as Format\n"
+            "layout = Format('>Q')\nassert Format is struct.Struct\n"
+            "encode = layout.pack\ndecode = layout.unpack\n"
+        ),
+    },
+    "imported_bytecode_header": {
+        "main.py": "from header import magic, decode, encode\nprint(list(magic), decode, encode)\n",
+        "header.py": (
+            "import marshal\nimport pickle\nimport sys\n"
+            "from marshal import loads\nfrom pickle import dumps\n"
+            "version = (sys.version_info[0] << 24) | sys.version_info[1]\n"
+            "magic = b'j2' + pickle.dumps(5, 2) + dumps(version, 2)\n"
+            "decode = loads(b'i\\x03\\x00\\x00\\x00')\n"
+            "encode = pickle.dumps is dumps\n"
+        ),
+    },
+    "namespace_package": {
+        "main.py": "import package.child\nfrom package.nested import sibling\nprint(package.child.f())\nprint(sibling.read())\n",
+        "package/child.py": "def f() -> int:\n    return 41\n",
+        "package/nested/sibling.py": "from ..child import f\ndef read() -> int:\n    return f() + 1\n",
+    },
+    "imported_traceback_handler": {
+        "main.py": "from handler import capture\nprint(capture())\n",
+        "handler.py": (
+            "import traceback as tb\nfrom io import StringIO\n"
+            "class Writer:\n    def __init__(self):\n        self.stream = StringIO()\n"
+            "def capture():\n"
+            "    try:\n        raise ValueError('app factory')\n"
+            "    except ValueError:\n"
+            "        stream = Writer().stream\n"
+            "        tb.print_exc(limit=0, file=stream)\n"
+            "        return stream.getvalue() == tb.format_exc(0), stream.getvalue()\n"
+        ),
+    },
     "native_ast_import": {
         "main.py": (
             "import ast as trees\nfrom ast import parse, walk\n"
@@ -127,6 +196,63 @@ ACCEPTED = {
         "orchard/__init__.py": "print('package init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
+    "boxed_stat_shadow": {
+        "main.py": (
+            "import sys\nsys.path = sys.path\n"
+            "from importlib import import_module\n"
+            "loaded = import_module(''.join(['st', 'at']))\n"
+            "import stat\nfrom stat import S_IRWXU\nassert loaded is stat\n"
+            "print(loaded.S_ISDIR(loaded.S_IFDIR), S_IRWXU)\n"
+        ),
+        "stat.py": "invalid syntax in a shadow of frozen stat!\n",
+        "stat/__init__.py": "invalid shadow package!\n",
+        "stat/S_IRWXU.py": "invalid shadow member!\n",
+    },
+    "zip_source_spec": {
+        "main.py": (
+            "import sys\nimport zipimport\nfrom importlib import import_module\n"
+            "from importlib.util import find_spec\nfrom witness import seen\n"
+            "for name in ('stored', 'deflated'):\n"
+            "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
+            "    assert find_spec(name) is not None and name not in seen\n"
+            "    package = import_module(name)\n    spec = find_spec(name)\n"
+            "    assert package is import_module(name) and package.__spec__ is spec\n"
+            "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
+            "    assert spec.submodule_search_locations is package.__path__\n"
+            "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
+        ),
+        "witness.py": "seen = []\n",
+    },
+    "registered_typevar_frame": {
+        "main.py": "from importlib import import_module\nimport_module('maker')\n",
+        "maker.py": (
+            "from typing import TypeVar\n"
+            "print(TypeVar('Imported').__module__)\n"
+            "first, second = [], []\n"
+            "scope = {'__name__': first, 'second': second, 'T': TypeVar}\n"
+            "exec(\"__name__ = second\\nstable = T('Stable')\\n"
+            "def make():\\n    before = T('Before')\\n    make.__module__ = None\\n"
+            "    return before, T('After')\", scope)\n"
+            "make = scope['make']\nscope['__name__'] = 'rebound'\n"
+            "before, after = make()\n"
+            "print(scope['stable'].__module__ is first, before.__module__ is second, "
+            "after.__module__ is None)\n"
+        ),
+    },
+    "registered_source_spec": {
+        "main.py": (
+            "from importlib.util import find_spec\nfrom importlib import import_module\n"
+            "first = find_spec('orchard.leaf')\nsecond = find_spec('.leaf', 'orchard')\n"
+            "print(first == second, first is second, first.parent, first.loader.is_package(first.name))\n"
+            "leaf = import_module('orchard.leaf')\npackage = import_module('orchard')\n"
+            "print(leaf.marker, find_spec(first.name) is leaf.__spec__, leaf.__spec__.loader is leaf.__loader__)\n"
+            "print(package.__path__ is package.__spec__.submodule_search_locations, "
+            "leaf.__file__ == first.origin, find_spec('orchard.missing') is None)\n"
+            "leaf.__spec__ = 'app spec'\nprint(find_spec('.leaf', 'orchard'))\n"
+        ),
+        "orchard/__init__.py": "print('parent init')\n",
+        "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
     },
     "conditional_function_export": {
         "main.py": (
@@ -264,8 +390,17 @@ def main() -> None:
                 checks += 1
 
         for name, files in ACCEPTED.items():
+            if name == "boxed_stat_shadow" and sys.platform not in ("linux", "darwin"):
+                continue
             case = temporary / name
             write_files(case, files)
+            if name == "zip_source_spec":
+                if os.name != "posix":
+                    continue
+                for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
+                    with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
+                        archive.writestr(f"{pkg}/__init__.py", "from witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
             for level in args.opt_levels:
@@ -325,6 +460,45 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
+
+        # The imported object operation precedes the call that supplies flag's type.
+        for name, function, diagnostic in [
+            ("annotated", "def choose(flag: bool) -> int:\n    return flag\n", "expected int, got bool"),
+            ("inferred", "def choose(flag):\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
+            ("unused_object", "def choose(flag):\n    parsed = ast.parse('1')\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
+            ("live_object", "def choose(flag) -> int:\n    parsed = ast.parse('1')\n    print(parsed)\n    return 'one'\n", "invalid-return-type"),
+        ]:
+            case = temporary / ("object_return_" + name)
+            write_files(case, {
+                "main.py": "import helper\n",
+                "helper.py": "import ast\ntree = ast.parse('1')\n" + function + "choose(True)\n",
+            })
+            command = [compiler, "check", str(case / "main.py")]
+            for flags in ([], ["--reachable-only"]):
+                result = run(command + flags, temporary)
+                assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
+            require_success(run(command + ["--runtime-imports"], temporary))
+            checks += 3
+
+        # A TypeError raised while evaluating a return operand can still be caught.
+        caught = temporary / "object_return_operand"
+        write_files(caught, {
+            "main.py": "from helper import wrapper\ntry:\n    wrapper()\nexcept TypeError:\n    print('caught')\n",
+            "helper.py": "import ast\nast.parse('1')\ndef take(value: int) -> int:\n    return value\n"
+                         "def wrapper() -> int:\n    return take('argument')\n",
+        })
+        for level in args.opt_levels:
+            executable = temporary / f"operand-{level}"
+            for flags in ([], ["--reachable-only"]):
+                command = [compiler, "build", str(caught / "main.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level), *build_flags, *flags]
+                if args.sanitize:
+                    command += ["--sanitize"]
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == "caught\n", result
+                checks += 1
 
         collision = temporary / "collisions"
         write_files(collision, {"main.py": IMPORT, "helper.py": HELPER})

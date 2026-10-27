@@ -22,6 +22,11 @@ REJECTED = {
     "ord_bytearray": 'ord(bytearray(b"x"))',
     "ord_memoryview": 'ord(memoryview(b"x"))',
     "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
+    "quote_from_bytes_unrelated_return": (
+        'from urllib.parse import quote_from_bytes as escape\n'
+        'def fetch() -> int:\n    return "wrong"\n'
+        'print(escape(b"/"), fetch())'
+    ),
     "splitlines_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".splitlines(number("x"))',
     "isspace_nested_argument": 'def number(value: int) -> int:\n    return value\n"x".isspace(number("x"))',
     "splitlines_unproven_unpack": 'def lines(options: list[int]) -> list[str]:\n    return "x".splitlines(*options)',

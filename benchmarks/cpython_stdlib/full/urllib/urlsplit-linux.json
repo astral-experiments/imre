@@ -63,7 +63,10 @@
   ],
   "modes": {
     "normal-O0": {
-      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "fully_native_isolated_methods": [
+        "test_invalid_bracketed_hosts",
+        "test_quote_from_bytes"
+      ],
       "host_methods_using_native_split": [
         "test_urlsplit_scoped_IPv6",
         "test_urlsplit_attributes",
@@ -76,7 +79,10 @@
       "werkzeug_make_environ": 5
     },
     "normal-O3": {
-      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "fully_native_isolated_methods": [
+        "test_invalid_bracketed_hosts",
+        "test_quote_from_bytes"
+      ],
       "host_methods_using_native_split": [
         "test_urlsplit_scoped_IPv6",
         "test_urlsplit_attributes",
@@ -89,7 +95,10 @@
       "werkzeug_make_environ": 5
     },
     "reachable-O0": {
-      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "fully_native_isolated_methods": [
+        "test_invalid_bracketed_hosts",
+        "test_quote_from_bytes"
+      ],
       "host_methods_using_native_split": [
         "test_urlsplit_scoped_IPv6",
         "test_urlsplit_attributes",
@@ -102,7 +111,10 @@
       "werkzeug_make_environ": 5
     },
     "reachable-O3": {
-      "fully_native_isolated_method": "test_invalid_bracketed_hosts",
+      "fully_native_isolated_methods": [
+        "test_invalid_bracketed_hosts",
+        "test_quote_from_bytes"
+      ],
       "host_methods_using_native_split": [
         "test_urlsplit_scoped_IPv6",
         "test_urlsplit_attributes",

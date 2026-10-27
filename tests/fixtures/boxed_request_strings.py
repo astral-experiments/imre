@@ -16,6 +16,11 @@ class Text(str):
     pass
 
 
+class CustomAlnum(str):
+    def isalnum(self):
+        return "override"
+
+
 class FailingFlag:
     def __bool__(self):
         raise ValueError("keepends")
@@ -97,6 +102,14 @@ def current():
     print("Host: localhost".find(":"), "localhost".find(":"))
     for value in ("", " ", "\t\n", "\x1c\x1f", " x", Text("\r")):
         print(value.isspace(), str.isspace(value))
+    for value in ("", "0Ab", "aa b", "²", "𑁦", "𝟜", "🦊", Text("東"), CustomAlnum("!")):
+        print(value.isalnum(), str.isalnum(value))
+    for call in (lambda: str.isalnum(), lambda: str.isalnum(1), lambda: "a".isalnum(1),
+                 lambda: "a".isalnum(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
     for value in ("\0", "A", "é", "東", "🦊", b"\xff", bytearray(b"Z"), "", "é🦊", b"", bytearray(b"ab"), None, 4):
         try:
             print(ord(value))

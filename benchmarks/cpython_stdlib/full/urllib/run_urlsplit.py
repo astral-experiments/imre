@@ -19,6 +19,10 @@ METHODS = ("test_urlsplit_scoped_IPv6", "test_urlsplit_attributes",
            "test_urlsplit_remove_unsafe_bytes", "test_urlsplit_strip_url",
            "test_invalid_bracketed_hosts", "test_splitting_bracketed_hosts",
            "test_urlsplit_normalization")
+NATIVE_METHODS = {
+    "test_invalid_bracketed_hosts": "urlsplit raising ValueError for invalid bracketed hosts",
+    "test_quote_from_bytes": "quote_from_bytes returning escaped octets and rejecting a text operand",
+}
 TARGETS = ("/health", "/caf%C3%A9?q=%2F", "//first/second?x=y",
            "http://Example.com:8080/a%2Fb?x=1#f", "*")
 
@@ -41,11 +45,11 @@ def write_evidence(output, case, reference, report, native_methods):
         normal, reachable = (report["modes"][f"{mode}-O{level}"] for mode in ("normal", "reachable"))
         if normal != reachable:
             raise ValueError(f"ordinary and reachable observations differ at O{level}")
-        observations = {}
+        observations = {(case(name).id(), 1): observation
+                        for name, observation in native_methods[f"normal-O{level}"].items()}
         for name in normal["host_methods_using_native_split"]:
             key = case(name).id(), 1
-            if name == normal["fully_native_isolated_method"]:
-                observations[key] = native_methods[f"normal-O{level}"]
+            if key in observations:
                 continue
             mixed = name == "test_urlsplit_strip_url"
             observations[key] = {
@@ -178,18 +182,20 @@ def main():
         report["distinct_split_calls"] = len(queries)
         calls = directory / "calls.py"
         calls.write_text(native_input(queries))
-        name = "test_invalid_bracketed_hosts"
         source = "Lib/test/test_urlparse.py"
         native_methods = {}
         for mode in ("normal", "reachable"):
             for opt in ("0", "3"):
                 tool = Toolchain(args.compiler, args.runtime, Path(clang), int(opt), mode == "reachable")
-                runner = NativeDefaultMethod(tool, directory, HERE / "upstream" / source, manifest["files"][source],
-                                             ("imre", "urlsplit raising ValueError for invalid bracketed hosts"))
-                observation = runner.run(case(name))
-                if observation["outcome"] != "pass":
-                    raise RuntimeError(observation)
-                native_methods[f"{mode}-O{opt}"] = observation
+                observations = {}
+                for name, operation in NATIVE_METHODS.items():
+                    runner = NativeDefaultMethod(tool, directory, HERE / "upstream" / source,
+                                                 manifest["files"][source], ("imre", operation))
+                    observation = runner.run(case(name))
+                    if observation["outcome"] != "pass":
+                        raise RuntimeError(observation)
+                    observations[name] = observation
+                native_methods[f"{mode}-O{opt}"] = observations
                 binary = directory / "runner"
                 build(args.compiler, args.runtime, calls, binary, mode, opt)
                 rows = subprocess.check_output([binary], text=True).splitlines()
@@ -205,7 +211,7 @@ def main():
                 with patch.object(serving, "urlsplit", replay):
                     assert werkzeug_environ(serving) == expected_env
                 report["modes"][f"{mode}-O{opt}"] = {
-                    "fully_native_isolated_method": name,
+                    "fully_native_isolated_methods": list(observations),
                     "host_methods_using_native_split": list(METHODS),
                     "werkzeug_make_environ": len(TARGETS),
                 }

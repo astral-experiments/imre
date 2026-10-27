@@ -297,31 +297,10 @@ pub unsafe extern "C" fn imre_errno_text(owner: *const Object, name: *const Str)
 }
 
 fn bound(name: &str) -> Option<&'static str> {
-    const METHODS: &[&str] = &[
-        "__new__",
-        "__repr__",
-        "__getattribute__",
-        "__init__",
-        "__dir__",
-        "__hash__",
-        "__str__",
-        "__setattr__",
-        "__delattr__",
-        "__lt__",
-        "__le__",
-        "__eq__",
-        "__ne__",
-        "__gt__",
-        "__ge__",
-        "__reduce_ex__",
-        "__reduce__",
-        "__getstate__",
-        "__subclasshook__",
-        "__init_subclass__",
-        "__format__",
-        "__sizeof__",
-    ];
-    METHODS.iter().copied().find(|method| *method == name)
+    super::OBJECT_METHODS
+        .iter()
+        .copied()
+        .find(|method| *method == name)
 }
 
 /// # Safety

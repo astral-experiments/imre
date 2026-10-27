@@ -146,6 +146,11 @@ pub(super) fn construct(
                 let decoded = decode(ctx, value, encoding, errors)?;
                 return Ok(ctx.text(decoded));
             }
+            let target = ctx.weak_proxy_target(value)?;
+            if target != value {
+                ctx.heap.keep(target);
+            }
+            let value = target;
             if matches!(ctx.heap.get(value), Value::Str(_)) {
                 return Ok(value);
             }
@@ -257,7 +262,7 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         if let Value::Int(number) = ctx.heap.get(value) {
             return Ok(crate::integer_text::decimal_string(number)?.into_string());
         }
-        return Ok(ctx.display(value));
+        return ctx.checked_format(value, false);
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));
@@ -1027,19 +1032,24 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
-    if name == "isspace" {
+    if matches!(name, "isalnum" | "isspace") {
         if !kwargs.is_empty() {
-            return Err(type_error("str.isspace() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "str.{name}() takes no keyword arguments"
+            )));
         }
         if !args.is_empty() {
             return Err(type_error(format!(
-                "str.isspace() takes no arguments ({} given)",
+                "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
         }
-        return Ok(boolean(crate::objects::python_isspace(
-            ctx.str_value(receiver)?,
-        )));
+        let predicate = if name == "isalnum" {
+            crate::objects::python_alnum
+        } else {
+            crate::objects::python_isspace
+        };
+        return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
     if name == "translate" {
         positional(name, kwargs)?;

@@ -7,12 +7,21 @@ pub(super) enum MappingOperation {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        self.find_in_mro(class, |base| self.own_class_attr(base, name))
+    }
+
+    /// Visit the class and its bases in Python's method resolution order.
+    pub(super) fn find_in_mro<T>(
+        &self,
+        class: Id,
+        mut lookup: impl FnMut(Id) -> Option<T>,
+    ) -> Option<T> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return self.own_class_attr(class, name);
+            return lookup(class);
         };
-        std::iter::once(&class)
-            .chain(ancestors)
-            .find_map(|&base| self.own_class_attr(base, name))
+        std::iter::once(class)
+            .chain(ancestors.iter().copied())
+            .find_map(lookup)
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
@@ -23,10 +32,10 @@ impl Context {
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
                     .copied(),
-                "__init__" if kind == "StopIteration" => {
-                    self.builtins.get("StopIteration.__init__").copied()
-                }
-                "__init__" => self.builtins.get("BaseException.__init__").copied(),
+                "__init__" => self
+                    .builtins
+                    .get(builtins::exception_initializer(kind))
+                    .copied(),
                 _ => None,
             },
             Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
@@ -53,12 +62,118 @@ impl Context {
         Some(error)
     }
 
+    /// Lazily allocate the exact dictionary exposed through BaseException.__dict__.
+    fn exception_dictionary(&mut self, obj: Id) -> Id {
+        let Value::Raised(error) = self.heap.get(obj) else {
+            unreachable!()
+        };
+        if let Some(dictionary) = error.trace.as_ref().and_then(|trace| trace.dictionary) {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.tracing().dictionary = Some(dictionary);
+        dictionary
+    }
+
+    /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
+    fn exception_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
+        let Some(dictionary) = dictionary else {
+            return Ok(None);
+        };
+        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        let key = self.text(name);
+        let (_, index) = self.find_dictionary_key(storage, key, None)?;
+        Ok(index.map(|i| self.dict_entries(storage).expect("exception dictionary")[i].1))
+    }
+
+    fn update_exception_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
+        let dictionary = if value.is_some() {
+            self.exception_dictionary(obj)
+        } else {
+            let Value::Raised(error) = self.heap.get(obj) else {
+                unreachable!()
+            };
+            let Some(dictionary) = error.trace.as_ref().and_then(|trace| trace.dictionary) else {
+                return Err(self.missing_attribute(obj, name));
+            };
+            dictionary
+        };
+        let storage = self.dict_storage(dictionary).expect("exception dictionary");
+        if let Some(value) = value {
+            let key = self.text(name);
+            self.put_item(storage, key, value)
+        } else {
+            self.delete_dict_attribute(obj, storage, name)
+        }
+    }
+
+    /// Native member descriptors take precedence over entries in the instance dictionary.
+    fn native_exception_descriptor(&self, error: &Error, name: &str) -> bool {
+        let inherits = |kind| {
+            self.builtins
+                .get(kind)
+                .is_some_and(|class| self.raised_error_matches(error, *class))
+        };
+        match name {
+            "args"
+            | "__class__"
+            | "__context__"
+            | "__cause__"
+            | "__traceback__"
+            | "__suppress_context__" => true,
+            "value" => inherits("StopIteration"),
+            "msg" => inherits("ImportError") || inherits("SyntaxError"),
+            "name" => {
+                inherits("ImportError") || inherits("AttributeError") || inherits("NameError")
+            }
+            "obj" => inherits("AttributeError"),
+            "path" | "name_from" => inherits("ImportError"),
+            "code" => inherits("SystemExit"),
+            "filename" => inherits("OSError") || inherits("SyntaxError"),
+            "errno" | "strerror" | "filename2" | "characters_written" => inherits("OSError"),
+            "lineno"
+            | "offset"
+            | "text"
+            | "end_lineno"
+            | "end_offset"
+            | "print_file_and_line"
+            | "_metadata" => inherits("SyntaxError"),
+            "encoding" | "object" | "start" | "end" | "reason" => {
+                inherits("UnicodeEncodeError")
+                    || inherits("UnicodeDecodeError")
+                    || inherits("UnicodeTranslateError")
+            }
+            "message" | "exceptions" => inherits("BaseExceptionGroup"),
+            _ => false,
+        }
+    }
+
     /// Find a Python-declared member on an exception that retains its original class.
     fn exception_member(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
         self.class_attr(error.class?, name)
+    }
+
+    /// Bind an override only if it precedes the built-in numeric method in the MRO.
+    pub(super) fn bound_numeric_slot(&mut self, value: Id, slot: &str) -> Result<Option<Id>> {
+        let class = match *self.heap.get(value) {
+            Value::Instance { class, .. } => class,
+            Value::Raised(_) => self.exact_type(value)?,
+            _ => return Ok(None),
+        };
+        let method = self.find_in_mro(class, |base| match self.heap.get(base) {
+            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
+            _ => self.own_class_attr(base, slot).map(Some),
+        });
+        method
+            .flatten()
+            .map(|method| self.bind_attribute(method, value, class))
+            .transpose()
     }
 
     /// Special methods are looked up on the type, even if the instance shadows them.
@@ -163,7 +278,7 @@ impl Context {
             Value::Instance { class, .. } => *class,
             Value::Raised(Error {
                 class: Some(class), ..
-            }) if name == "__str__" => *class,
+            }) if matches!(name, "__dir__" | "__str__") => *class,
             _ => return Ok(None),
         };
         self.class_attr(class, name)
@@ -193,7 +308,7 @@ impl Context {
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
-            Value::Property(_) | Value::ReadOnlyDescriptor { .. }
+            Value::Property(_) | Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_)
         )
     }
 
@@ -225,6 +340,7 @@ impl Context {
         if receiver != NONE {
             let method = match self.heap.get(value) {
                 Value::Property(property) => return property.read(self, receiver),
+                Value::WeakrefDescriptor(owner) => return self.weakref_list(*owner, receiver),
                 Value::ReadOnlyDescriptor { get, .. } => {
                     return self.call(*get, vec![receiver], Vec::new());
                 }
@@ -243,6 +359,7 @@ impl Context {
                             | "object.__delattr__"
                             | "object.__init__"
                             | "BaseException.__init__"
+                            | "ImportError.__init__"
                             | "StopIteration.__init__"
                             | "int.to_bytes"
                             | "list.index"
@@ -255,6 +372,7 @@ impl Context {
                             | weakref::REFERENCE_HASH
                     ) || name.starts_with("property.")
                         || name.starts_with("dict.")
+                        || name.starts_with("abc.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -334,6 +452,12 @@ impl Context {
     }
 
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
+        self.direct_subclass(class, target)
+            || super::mapping_abc::registered_subclass(self, class, target)
+    }
+
+    /// Test native or C3 inheritance without traversing the ABC registry.
+    pub(super) fn direct_subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) || self.structural_context_manager(class, target) {
             return true;
         }
@@ -341,7 +465,7 @@ impl Context {
             return ancestors.iter().any(|&base| {
                 self.equal_class(base, target)
                     || (matches!(self.heap.get(base), Value::Native(_))
-                        && self.subclass(base, target))
+                        && self.direct_subclass(base, target))
             });
         }
         if let (Value::Native(child), Value::Native(parent)) =
@@ -408,7 +532,7 @@ impl Context {
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
-            | Value::Cell { .. }
+            | Value::Cell(_)
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
@@ -429,7 +553,7 @@ impl Context {
             Value::Socket(_) => "socket.socket",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
-            Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
+            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -497,7 +621,10 @@ impl Context {
                     || builtins::constructor_owner(name).is_some()
                     || matches!(
                         name.as_str(),
-                        "binascii.a2b_base64" | "binascii.b2a_base64" | "posix.fspath"
+                        "binascii.a2b_base64"
+                            | "binascii.b2a_base64"
+                            | "posix.fspath"
+                            | "posix._path_normpath"
                     )
                     || name.starts_with("_weakref.")
                 {
@@ -551,6 +678,13 @@ impl Context {
         }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
+        }
+        if let Some(actual) = self
+            .builtin_type_name(value)
+            .and_then(|name| self.builtins.get(name))
+            && super::mapping_abc::registered_subclass(self, *actual, class)
+        {
+            return true;
         }
         if let Value::Instance { class: actual, .. } = self.heap.get(value)
             && self.subclass(*actual, class)
@@ -698,11 +832,65 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        (error.class.is_none() && error.kind == kind)
+        (error.class.is_none()
+            && builtins::exception_subclass(&error.kind, kind).unwrap_or(error.kind == kind))
             || self
                 .builtins
                 .get(kind)
                 .is_some_and(|&base| self.raised_error_matches(error, base))
+    }
+
+    /// Materialize native exception arguments before their backing fields can change.
+    fn exception_argument_tuple(&mut self, obj: Id, error: Error) -> Id {
+        if let Some(args) = error.args {
+            return args;
+        }
+        let fields = if let Some(os) = error.os_args {
+            vec![self.int(os.errno), self.text(os.description)]
+        } else if error.message.is_empty() {
+            Vec::new()
+        } else {
+            vec![
+                self.import_error_message(obj, None)
+                    .unwrap_or_else(|| self.text(error.message)),
+            ]
+        };
+        let tuple = self.alloc(Value::Tuple(fields));
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.args = Some(tuple);
+        tuple
+    }
+
+    /// Preserve ImportError's original message when its arguments are replaced.
+    pub(super) fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
+        let Value::Raised(error) = self.heap.get(obj) else {
+            return None;
+        };
+        if !self.is_builtin_error(error, "ImportError") {
+            return None;
+        }
+        let message = if let Some(message) = replacement {
+            if error.args.is_none() {
+                self.exception_argument_tuple(obj, error.clone());
+            }
+            message
+        } else {
+            if let Some(message) = error.trace.as_ref().and_then(|trace| trace.import_message) {
+                return Some(message);
+            }
+            match self.exception_arguments(error) {
+                Some([one]) => *one,
+                Some(_) => NONE,
+                None => self.text(error.message.clone()),
+            }
+        };
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.tracing().import_message = Some(message);
+        Some(message)
     }
 
     fn attribute_hook(
@@ -763,15 +951,20 @@ impl Context {
             }
             return self.instance_attribute(obj, *class, fields.get(name).copied(), name);
         }
-        if let Value::Raised(error) = self.heap.get(obj)
-            && let Some(class) = error.class
-        {
-            let field = error
-                .trace
-                .as_ref()
-                .and_then(|trace| trace.fields.get(name).copied());
-            if field.is_some() || self.class_attr(class, name).is_some() {
+        if let Value::Raised(error) = self.heap.get(obj) {
+            let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
+            if let Some(class) = error.class
+                && let Some(member) = self.class_attr(class, name)
+            {
+                let field = if self.data_descriptor(member) {
+                    None
+                } else {
+                    self.exception_field(dictionary, name)?
+                };
                 return self.instance_attribute(obj, class, field, name);
+            }
+            if name == "__dict__" {
+                return Ok(self.exception_dictionary(obj));
             }
         }
         if name == "value"
@@ -779,8 +972,18 @@ impl Context {
         {
             return Ok(error.stop_value());
         }
+        if matches!(name, "__new__" | "__init__") && matches!(self.heap.get(obj), Value::Raised(_))
+        {
+            let class = self.exact_type(obj)?;
+            return self.instance_attribute(obj, class, None, name);
+        }
         if name == "__class__" {
             return self.exact_type(obj);
+        }
+        if name == "msg"
+            && let Some(message) = self.import_error_message(obj, None)
+        {
+            return Ok(message);
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
@@ -863,17 +1066,40 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::WeakrefDescriptor(owner) => match name {
+                "__objclass__" => return Ok(owner),
+                "__name__" => return Ok(self.text("__weakref__")),
+                "__doc__" => return Ok(self.text("list of weak references to the object")),
+                "__qualname__" => {
+                    let name = self.lookup_attr(owner, "__qualname__")?;
+                    return Ok(self.text(format!("{}.__weakref__", self.str_value(name)?)));
+                }
+                "__get__" | "__set__" | "__delete__" => {
+                    let callable = self.builtin(&format!("weakref.descriptor.{name}"));
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
+                }
+                _ => {}
+            },
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
                     return Ok(attribute);
                 }
             }
-            Value::Native(symbol) if symbol == "posix.fspath" => match name {
-                "__name__" | "__qualname__" => return Ok(self.text("fspath")),
-                "__module__" => return Ok(self.text("posix")),
-                "__self__" => return self.module("posix"),
-                _ => {}
-            },
+            Value::Native(symbol)
+                if matches!(symbol.as_str(), "posix.fspath" | "posix._path_normpath") =>
+            {
+                let (module, function) = symbol.split_once('.').unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(function)),
+                    "__module__" => return Ok(self.text(module)),
+                    "__self__" => return self.module(module),
+                    _ => {}
+                }
+            }
             Value::Native(class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }
@@ -898,13 +1124,8 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell {
-                scope,
-                name: cell_name,
-            } if name == "cell_contents" => {
-                return self
-                    .scope_name(scope, &cell_name)
-                    .ok_or_else(|| Error::new("ValueError", "Cell is empty"));
+            Value::Cell(contents) if name == "cell_contents" => {
+                return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
@@ -1098,13 +1319,9 @@ impl Context {
             Value::Raised(Error {
                 os_args: Some(args),
                 ..
-            }) => match name {
+            }) if name != "args" => match name {
                 "errno" => return Ok(self.int(args.errno)),
                 "strerror" => return Ok(self.text(args.description)),
-                "args" => {
-                    let fields = vec![self.int(args.errno), self.text(args.description)];
-                    return Ok(self.alloc(Value::Tuple(fields)));
-                }
                 "filename" | "filename2" => {
                     if let Some([first, second]) = args.text_paths {
                         let path = if name == "filename" { first } else { second };
@@ -1114,18 +1331,17 @@ impl Context {
                 _ => {}
             },
             Value::Raised(error)
-                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
-                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+                if let Some(index) = builtins::IMPORT_KEYWORDS
+                    .iter()
+                    .position(|&key| key == name)
+                    && self.is_builtin_error(&error, "ImportError") =>
             {
-                if name == "msg" {
-                    return Ok(match error.args.as_deref() {
-                        Some([one]) => *one,
-                        Some(_) => NONE,
-                        None => self.text(error.message),
-                    });
-                }
                 let Some(fields) = error.import else {
-                    return Ok(NONE);
+                    return Ok(error
+                        .trace
+                        .as_ref()
+                        .and_then(|trace| trace.import_names)
+                        .map_or(NONE, |names| names[index]));
                 };
                 let value = match name {
                     "name" => fields.name.as_deref(),
@@ -1135,14 +1351,7 @@ impl Context {
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
             Value::Raised(error) if name == "args" => {
-                let args = error.args.unwrap_or_else(|| {
-                    if error.message.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![self.text(error.message)]
-                    }
-                });
-                return Ok(self.alloc(Value::Tuple(args)));
+                return Ok(self.exception_argument_tuple(obj, error));
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -1222,6 +1431,11 @@ impl Context {
                 if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
             {
                 return Ok(self.text(builtin.rsplit('.').next().unwrap_or(&builtin)));
+            }
+            Value::Native(method)
+                if method.starts_with("abc.abstract.") && name == "__isabstractmethod__" =>
+            {
+                return Ok(TRUE);
             }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
@@ -1338,6 +1552,14 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "register" && super::mapping_abc::is_abc_class(self, obj) {
+                    let callable = self.builtin("abc.register");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
+                }
                 if name == "__new__" && self.has_base(obj, "str") {
                     return Ok(self.builtin("str.__new__"));
                 }
@@ -1367,6 +1589,14 @@ impl Context {
                 }
             }
             _ => {}
+        }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
+            if let Some(field) = self.exception_field(dictionary, name)? {
+                return Ok(field);
+            }
         }
         self.builtin_attribute(obj, name)
     }
@@ -1440,14 +1670,10 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            let key = self.text(&cell_name);
-            self.remove_binding(scope, &cell_name, key)?;
+            *contents = None;
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -1460,6 +1686,7 @@ impl Context {
         {
             match *self.heap.get(descriptor) {
                 Value::Property(property) => return property.remove(self, obj),
+                Value::WeakrefDescriptor(owner) => return Err(self.readonly_weakref(owner)),
                 Value::ReadOnlyDescriptor { owner, name, .. } => {
                     return Err(Error::new(
                         "AttributeError",
@@ -1474,24 +1701,23 @@ impl Context {
             self.call(delete, vec![obj], Vec::new())?;
             return Ok(());
         }
-        if let Value::Raised(error) = self.heap.get_mut(obj) {
-            if error
-                .trace
-                .as_mut()
-                .and_then(|trace| trace.fields.remove(name))
-                .is_some()
-            {
-                return Ok(());
-            }
-            if exception_member.is_some() {
-                return Err(self.missing_attribute(obj, name));
-            }
+        if exception_member.is_some() {
+            return self.update_exception_field(obj, name, None);
+        }
+        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
         if name == "value"
             && let Some(error) = self.stop_iteration_error(obj)
         {
             error.set_stop_value(NONE);
             return Ok(());
+        }
+        if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
+            return Ok(());
+        }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "args may not be deleted"));
         }
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
@@ -1506,6 +1732,12 @@ impl Context {
             }
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            return self.update_exception_field(obj, name, None);
+        }
+        self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -1618,6 +1850,62 @@ impl Context {
         }
     }
 
+    /// A slot-only instance can retain fields declared by any of its Python bases.
+    fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return Ok(());
+        };
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return Ok(());
+        };
+        let allowed = std::iter::once(&class).chain(ancestors).any(|&base| {
+            let Value::Class {
+                scope,
+                name: class_name,
+                ..
+            } = self.heap.get(base)
+            else {
+                return false;
+            };
+            self.scope_data(*scope)
+                .class_namespace
+                .as_deref()
+                .and_then(|namespace| namespace.slot_names.as_deref())
+                .is_none_or(|slots| {
+                    slots.iter().any(|slot| {
+                        if slot == "__dict__" {
+                            return true;
+                        }
+                        if slot == "__weakref__" {
+                            return false;
+                        }
+                        let owner = class_name.trim_start_matches('_');
+                        if slot.starts_with("__") && !slot.ends_with("__") && !owner.is_empty() {
+                            name.strip_prefix('_')
+                                .and_then(|tail| tail.strip_prefix(owner))
+                                == Some(slot.as_str())
+                        } else {
+                            name == slot
+                        }
+                    })
+                })
+        });
+        if allowed {
+            return Ok(());
+        }
+        let attribute = self.text(name);
+        let quoted = self.repr(attribute);
+        let kind = self.type_name(obj);
+        let message = if self.class_attr(class, name).is_some() {
+            format!("'{kind}' object attribute {quoted} is read-only")
+        } else {
+            format!(
+                "'{kind}' object has no attribute {quoted} and no __dict__ for setting new attributes"
+            )
+        };
+        Err(Error::new("AttributeError", message))
+    }
+
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         self.set_named_attr(obj, name, None, value)
     }
@@ -1682,13 +1970,10 @@ impl Context {
                 Some(value),
             );
         }
-        if let Value::Cell {
-            scope,
-            name: cell_name,
-        } = self.heap.get(obj).clone()
-            && name == "cell_contents"
+        if name == "cell_contents"
+            && let Value::Cell(contents) = self.heap.get_mut(obj)
         {
-            self.bind(scope, &cell_name, value);
+            *contents = Some(value);
             return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
@@ -1701,6 +1986,9 @@ impl Context {
         {
             if let Value::Property(property) = *self.heap.get(descriptor) {
                 return property.write(self, obj, value);
+            }
+            if let Value::WeakrefDescriptor(owner) = *self.heap.get(descriptor) {
+                return Err(self.readonly_weakref(owner));
             }
             if let Value::ReadOnlyDescriptor { owner, name, .. } = *self.heap.get(descriptor) {
                 return Err(Error::new(
@@ -1724,10 +2012,23 @@ impl Context {
         {
             return Err(Error::new("AttributeError", "can't set attribute"));
         }
-        if exception_member.is_some()
-            && let Value::Raised(error) = self.heap.get_mut(obj)
-        {
-            error.tracing().fields.insert(name.to_owned(), value);
+        if exception_member.is_some() {
+            return self.update_exception_field(obj, name, Some(value));
+        }
+        if name == "__dict__" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            if self.dict_storage(value).is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__dict__ must be set to a dictionary, not a '{}'",
+                        self.type_name(value)
+                    ),
+                ));
+            }
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.tracing().dictionary = Some(value);
             return Ok(());
         }
         if name == "value"
@@ -1751,6 +2052,35 @@ impl Context {
                 _ => {}
             }
         }
+        if name == "msg" && self.import_error_message(obj, Some(value)).is_some() {
+            return Ok(());
+        }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            let tuple = if matches!(self.heap.get(value), Value::Tuple(_)) {
+                value
+            } else {
+                let iter = self.iterator(value)?;
+                self.heap.keep(iter);
+                let mut items = Vec::new();
+                while let Some(item) = self.next_item(iter)? {
+                    self.heap.keep(item);
+                    items.push(item);
+                }
+                self.alloc(Value::Tuple(items))
+            };
+            let _ = self.import_error_message(obj, None);
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.args = Some(tuple);
+            return Ok(());
+        }
+        if let Value::Raised(error) = self.heap.get(obj)
+            && !self.native_exception_descriptor(error, name)
+        {
+            return self.update_exception_field(obj, name, Some(value));
+        }
+        self.check_instance_field(obj, name)?;
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Code(_) if matches!(name, "co_name" | "co_filename" | "co_firstlineno") => {
@@ -1951,7 +2281,9 @@ impl Context {
                     || builtins::constructor_owner(&name).is_some()
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__" | "StopIteration.__init__"
+                        "BaseException.__init__"
+                            | "ImportError.__init__"
+                            | "StopIteration.__init__"
                     )
                     || !name.contains('.')
                     || matches!(
@@ -2076,6 +2408,29 @@ impl Context {
                 Ok(result)
             }
             Value::Class { name, scope, .. } => {
+                let (mut args, mut kwargs) = (args, kwargs);
+                if name == "Decimal" && self.classes.get("decimal.Decimal") == Some(&callable) {
+                    let value = match (&mut args[..], &mut kwargs[..]) {
+                        ([value], []) => Some(value),
+                        ([], [(key, value)]) if key == "value" => Some(value),
+                        _ => None,
+                    };
+                    if let Some(value) = value {
+                        if matches!(self.heap.get(*value), Value::Instance { class, .. } if *class == callable)
+                        {
+                            return Ok(*value);
+                        }
+                        if matches!(
+                            self.heap.get(self.scalar_value(*value)),
+                            Value::Int(_) | Value::Bool(_)
+                        ) {
+                            let text =
+                                crate::integer_text::try_decimal_coefficient(&self.as_int(*value)?)
+                                    .ok_or_else(crate::Error::memory_error)?;
+                            *value = self.text(text.into_string());
+                        }
+                    }
+                }
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
                 }
@@ -2209,7 +2564,7 @@ impl Context {
                         ));
                     }
                     let globals = self.module_globals(scope);
-                    return self.exec_source(code, globals, None);
+                    return self.exec_source(code, globals, None, Some(callable));
                 }
                 let module = self.scope_data(scope).module.clone();
                 let local = self.scope(&module, Some(scope));
@@ -2239,9 +2594,12 @@ impl Context {
                     self.bind(local, n, v);
                 }
                 if let Some(n) = sig["varargs"].as_str() {
-                    let extra = self.alloc(Value::Tuple(
-                        args.get(pos.len()..).unwrap_or_default().to_vec(),
-                    ));
+                    let extra = if pos.is_empty() {
+                        args
+                    } else {
+                        copy_ids(args.get(pos.len()..).unwrap_or_default())?
+                    };
+                    let extra = self.alloc(Value::Tuple(extra));
                     self.bind(local, n, extra);
                 } else if args.len() > pos.len() {
                     return Err(Error::new(
@@ -2327,8 +2685,9 @@ impl Context {
                 }
                 self.check_call_depth(0)?;
                 self.call_depth += 1;
-                let result =
-                    stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || self.execute(code, local));
+                let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.execute(code, local, FrameOwner::Function(callable))
+                });
                 self.call_depth -= 1;
                 let value = result?;
                 if let Some(expected) = sig["return_type"].as_str() {
@@ -2438,7 +2797,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
-        self.execute(code, scope)?;
+        self.execute(code, scope, FrameOwner::Function(body))?;
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
@@ -2461,6 +2820,7 @@ impl Context {
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
+        self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()

@@ -90,3 +90,29 @@ def current():
         raise Alternate
     except TypeError as caught:
         print("an instance of BaseException" in str(caught), "NoneType" in str(caught))
+
+class NamespaceError(ValueError):
+    declared = "default"
+
+    @property
+    def protected(self):
+        return "descriptor"
+
+
+error = NamespaceError("msg")
+namespace = error.__dict__
+error.extra = [17]
+namespace["protected"] = "stored"
+print(namespace is error.__dict__, namespace["extra"] is error.extra, error.protected)
+replacement = {"declared": "shadow"}
+error.__dict__ = replacement
+print(error.__dict__ is replacement, error.declared, hasattr(error, "extra"))
+del error.declared
+print(error.declared, replacement)
+
+error = ValueError("message")
+error.detail = ["one"]
+dictionary = error.__dict__
+dictionary["alias"] = error.detail
+del error.detail
+print(error.alias is dictionary["alias"], hasattr(error, "detail"), error.args)

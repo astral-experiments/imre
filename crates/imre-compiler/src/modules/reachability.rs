@@ -20,6 +20,7 @@ pub(super) struct Reachable {
     properties: HashSet<String>,
     class_attributes: HashSet<(DefinitionId, String)>,
     instance_attributes: HashSet<String>,
+    pub(super) traceback_objects: bool,
     http_commands: bool,
     uses_logger: bool,
 }
@@ -103,6 +104,13 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && (!call.arguments.args.is_empty() || !call.arguments.keywords.is_empty())
+            && self.graph.resolve(self.module, &call.func)
+                == Some(Binding::Intrinsic(Intrinsic::TracebackPrintExc))
+        {
+            self.found.traceback_objects = true;
+        }
         if let ast::Expr::Call(call) = expr
             && self.graph.resolve(self.module, &call.func).is_none()
             && call.func.as_name_expr().is_some_and(|n| n.id == "getattr")
@@ -265,6 +273,14 @@ impl<'a> Visitor<'a> for References<'_> {
             }
         }
         match self.graph.resolve(self.module, expr) {
+            Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(_))) => {
+                self.found.traceback_objects = true;
+            }
+            Some(Binding::Intrinsic(Intrinsic::TracebackPrintExc))
+                if matches!(expr, ast::Expr::Attribute(_)) =>
+            {
+                self.found.traceback_objects = true;
+            }
             Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
                 self.found
                     .definitions

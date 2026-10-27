@@ -214,6 +214,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
+        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
+            AliasKind::Builtin
+        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
@@ -674,8 +677,7 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.scope_data(ctx.heap.current_scope()).module.clone();
-    let module = ctx.text(module);
+    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
@@ -861,6 +863,36 @@ impl Context {
             })
     }
 
+    fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
+        let Some(slots) = self.scope_name(scope, "__slots__") else {
+            return Ok(None);
+        };
+        if let Ok(name) = self.str_value(slots) {
+            return Ok(Some([name.to_owned()].into()));
+        }
+        let iterator = self.iterator(slots)?;
+        self.heap.keep(iterator);
+        let mut items = Vec::new();
+        while let Some(slot) = self.next_item(iterator)? {
+            self.heap.keep(slot);
+            items.push(slot);
+        }
+        let mut names = Vec::with_capacity(items.len());
+        for slot in items {
+            let name = self.str_value(slot).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__slots__ items must be strings, not '{}'",
+                        self.type_name(slot)
+                    ),
+                )
+            })?;
+            names.push(name.to_owned());
+        }
+        Ok(Some(names.into()))
+    }
+
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(
         &mut self,
@@ -895,6 +927,7 @@ impl Context {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
+        let slot_names = self.declared_slot_names(scope)?;
         let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
         let class = self.alloc(Value::Class {
             namedtuple_fields,
@@ -913,6 +946,7 @@ impl Context {
             fields.names.insert("__hash__".to_owned(), NONE);
         }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
         Ok(class)

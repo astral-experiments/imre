@@ -81,6 +81,15 @@ def current():
     except ReferenceError as error:
         print(str(error))
 
+    target = Item()
+    print(target.__weakref__ is None)
+    observation = ref(target)
+    print(target.__weakref__ is observation)
+    try:
+        target.__weakref__ = None
+    except AttributeError:
+        print('read only')
+
     other = Item()
     observer = proxy(other)
     methods = {"GET"}
@@ -90,7 +99,20 @@ def current():
     methods_proxy |= proxy(additions)
     print(methods_proxy is methods, methods == {"GET", "OPTIONS"})
     print(type(observer) is ProxyType, not callable(observer), ref(other)() is other)
-    for value in (1, None, [], object(), Slots(), TupleChild()):
+    class PlainError(ValueError):
+        pass
+
+    class WeakError(ValueError):
+        __slots__ = ('__weakref__',)
+
+    class ClosedError(ValueError):
+        __slots__ = ()
+
+    for error in (PlainError('plain'), WeakError('slots')):
+        observation = ref(error)
+        print(observation() is error)
+
+    for value in (1, None, [], object(), Slots(), TupleChild(), ValueError(), ClosedError()):
         try:
             ref(value)
         except TypeError as error:
@@ -154,3 +176,39 @@ def current():
     removed = ref(holder.keep)
     del holder.__dict__
     print(removed() is None)
+
+    class Open:
+        pass
+
+    class Closed:
+        __slots__ = ()
+
+    names = ['__weakref__']
+
+    class FromList:
+        __slots__ = names
+
+    class FromMapping:
+        __slots__ = {'__weakref__': 'weak reference support'}
+
+    Open.__slots__ = ()
+    Closed.__slots__ = '__weakref__'
+    names.clear()
+    for target in (Open(), Closed(), FromList(), FromMapping()):
+        try:
+            observer = ref(target)
+        except TypeError:
+            print(False)
+        else:
+            print(observer() is target)
+
+    class Rendered:
+        def __str__(self):
+            return 'weak target'
+
+    rendered = Rendered()
+    print(str(proxy(rendered)))
+    try:
+        str(dead_proxy)
+    except ReferenceError as error:
+        print(type(error).__name__)

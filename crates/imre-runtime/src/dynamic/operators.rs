@@ -4,9 +4,15 @@ use num_traits::ToPrimitive;
 
 use super::*;
 
+enum RenderRoot<'a> {
+    Object(Id),
+    Exception(&'a Error),
+}
+
 enum FormatPart {
     Value(Id, bool),
     Text(&'static str),
+    Closing(usize),
     Sequence(Id, usize),
     Entries(Id, usize, bool),
     SetMembers(Vec<Id>, usize),
@@ -32,7 +38,7 @@ impl FormatPart {
                 let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
                 *self = Self::Sequence(tuple, *index);
             }
-            Self::Text(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
+            Self::Text(_) | Self::Closing(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
         }
     }
 }
@@ -153,6 +159,10 @@ impl Context {
             Value::Set { entries: v, .. }
             | Value::Dict(v)
             | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
+            Value::MappingView { mapping, .. } => {
+                let mapping = *mapping;
+                return self.truth(mapping);
+            }
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
@@ -227,12 +237,15 @@ impl Context {
         self.checked_equal_impl(a, b, true)
     }
 
-    fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
+    pub(super) fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
         use std::collections::HashSet;
 
         enum Children {
             Sequence(usize),
-            Dict(usize),
+            Dict {
+                position: usize,
+                roots: Option<usize>,
+            },
             Context(usize),
         }
         let mut active = HashSet::new();
@@ -277,6 +290,16 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    if left.kind != right.kind || left.origin != right.origin {
+                        return Ok(false);
+                    }
+                    pair = Some((left.args, right.args));
+                    check_special = true;
+                    continue;
+                }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
                     (Value::List(_), right) if !matches!(right, Value::List(_)) => {
                         return Ok(false);
@@ -289,7 +312,10 @@ impl Context {
                         if x.len() != y.len() {
                             return Ok(false);
                         }
-                        Some(Children::Dict(0))
+                        Some(Children::Dict {
+                            position: 0,
+                            roots: None,
+                        })
                     }
                     (Value::Context(x), Value::Context(y)) => {
                         if x.len() != y.len() {
@@ -340,19 +366,19 @@ impl Context {
                             None
                         }
                     }
-                    Children::Dict(index) => {
-                        let x = self.dict_entries(a).expect("dict parent");
-                        let y = self.dict_entries(b).expect("dict parent");
-                        if x.len() != y.len() {
-                            return Ok(false);
-                        }
-                        if let Some(&(key, value)) = x.get(*index) {
-                            *index += 1;
-                            let Some(&(_, right)) = y.iter().find(|&&(k, _)| self.equal(key, k))
-                            else {
+                    Children::Dict { position, roots } => {
+                        // Retain one entry across reentrant key and value comparisons.
+                        let roots = *roots.get_or_insert_with(|| self.heap.temporary_mark());
+                        self.heap.release_temporaries_since(roots);
+                        if let Some((at, key, left, hash)) = self.dictionary_pair(a, *position) {
+                            *position = at + 1;
+                            self.heap.keep(left);
+                            let Some(index) = self.find_dictionary_key(b, key, hash)?.1 else {
                                 return Ok(false);
                             };
-                            Some((value, right))
+                            let right = self.dict_entries(b).expect("dict parent")[index].1;
+                            self.heap.keep(right);
+                            Some((left, right))
                         } else {
                             None
                         }
@@ -523,20 +549,28 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        Self::render_containers(self, id, false, false, |_, _, _, _| Ok(None))
-            .expect("unlimited rendering")
+        Self::render_containers(self, RenderRoot::Object(id), false, false, |_, _, _, _| {
+            Ok(None)
+        })
+        .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        Self::render_containers(self, id, true, false, |_, _, _, _| Ok(None))
-            .expect("unlimited rendering")
+        Self::render_containers(self, RenderRoot::Object(id), true, false, |_, _, _, _| {
+            Ok(None)
+        })
+        .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
-        Self::render_containers(self, root, quoted, true, |ctx, id, work, ancestors| {
-            ctx.element_repr(id, work, ancestors)
-        })
+        Self::render_containers(
+            self,
+            RenderRoot::Object(root),
+            quoted,
+            true,
+            |ctx, id, work, ancestors| ctx.element_repr(id, work, ancestors),
+        )
     }
 
     /// Invoke the special method once and preserve an accepted string subclass.
@@ -587,16 +621,99 @@ impl Context {
         result
     }
 
+    /// Write exception headers and queue their arguments on the same container worklist.
+    fn render_exception<'a>(
+        &'a self,
+        mut error: &'a Error,
+        mut repr: bool,
+        output: &mut String,
+        work: &mut Vec<FormatPart>,
+    ) -> Result<()> {
+        use FormatPart as Part;
+        let mut closing = 0;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            if repr {
+                output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
+            } else if let Some(message) =
+                error.trace.as_ref().and_then(|trace| trace.import_message)
+                && let Value::Str(text) = self.heap.get(message)
+            {
+                output.push_str(text);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            } else if error.os_args.is_some() {
+                output.push_str(&error.message);
+                output.extend(std::iter::repeat_n(')', closing));
+                break;
+            }
+            let args = self.exception_arguments(error);
+            if let Some([arg]) = args {
+                if repr {
+                    output.push('(');
+                    closing += 1;
+                }
+                repr |= self.is_builtin_error(error, "KeyError");
+                if let Value::Raised(next) = self.heap.get(*arg) {
+                    if !seen.insert(*arg) {
+                        let op = if repr { "repr" } else { "str" };
+                        return Err(Error::new(
+                            "RecursionError",
+                            format!(
+                                "maximum recursion depth exceeded while getting the {op} of an object"
+                            ),
+                        ));
+                    }
+                    error = next;
+                    continue;
+                }
+                work.push(Part::Closing(closing));
+                work.push(Part::Value(*arg, repr));
+            } else if let Some(tuple) = error.args {
+                work.push(Part::Closing(closing));
+                if repr || args.is_some_and(|items| !items.is_empty()) {
+                    work.push(Part::Value(tuple, true));
+                }
+            } else {
+                if repr {
+                    output.push('(');
+                    if let Some(os) = &error.os_args {
+                        output.push_str(&format!(
+                            "{}, {}",
+                            os.errno,
+                            crate::objects::exceptions::string_repr(&os.description)
+                        ));
+                    } else if !error.message.is_empty() {
+                        output.push_str(&crate::objects::exceptions::string_repr(&error.message));
+                    }
+                    output.push(')');
+                } else {
+                    output.push_str(&error.message);
+                }
+                output.extend(std::iter::repeat_n(')', closing));
+            }
+            break;
+        }
+
+        Ok(())
+    }
+
     fn render_containers<C: std::ops::Deref<Target = Self>>(
         mut ctx: C,
-        root: Id,
+        root: RenderRoot<'_>,
         quoted: bool,
         checked: bool,
         mut element_repr: impl FnMut(&mut C, Id, &mut [FormatPart], &[Id]) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
         let mut output = String::new();
-        let mut work = vec![Part::Value(root, quoted)];
+        let mut work = Vec::new();
+        match root {
+            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Exception(error) => {
+                ctx.render_exception(error, quoted, &mut output, &mut work)?;
+            }
+        }
         let mut active = Vec::new();
         let mut ancestors: std::collections::HashSet<Id> = if checked {
             ctx.repr_ancestors.iter().copied().collect()
@@ -620,6 +737,7 @@ impl Context {
         let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
+                Part::Closing(count) => output.extend(std::iter::repeat_n(')', count)),
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
                 Part::NamedTupleEnd => {
@@ -710,6 +828,10 @@ impl Context {
                         continue;
                     }
                     match ctx.heap.get(id) {
+                        Value::Raised(error) => {
+                            ctx.render_exception(error, repr, &mut output, &mut work)?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
@@ -842,7 +964,6 @@ impl Context {
         Ok(output)
     }
 
-    /// Renders positional values inside tuples and exception representations.
     fn format_elements(&self, values: &[Id], active: &mut Vec<Id>) -> String {
         values
             .iter()
@@ -851,16 +972,16 @@ impl Context {
             .join(", ")
     }
 
-    /// Formats the current arguments, preserving native diagnostic text when present.
-    pub(super) fn exception_message(&self, error: &Error, active: &mut Vec<Id>) -> String {
-        match error.args.as_deref() {
-            None => error.message.clone(),
-            Some([]) => String::new(),
-            Some([arg]) => {
-                self.format_value(*arg, self.is_builtin_error(error, "KeyError"), active)
-            }
-            Some(args) => format!("({})", self.format_elements(args, active)),
-        }
+    /// Escaping exceptions retain their type and frames if their arguments cannot render.
+    pub(super) fn exception_message(&self, error: &Error) -> String {
+        Self::render_containers(
+            self,
+            RenderRoot::Exception(error),
+            false,
+            false,
+            |_, _, _, _| Ok(None),
+        )
+        .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
     /// Keeps recursive container arguments on the same formatting stack.
@@ -921,15 +1042,22 @@ impl Context {
                 if repr_active.replace(true) {
                     return "...".to_owned();
                 }
-                let default =
-                    default.map_or_else(String::new, |v| format!(" default={}", self.repr(v)));
-                let repr = format!("<ContextVar name={}{default} at {id:#x}>", self.repr(*name));
+                let default = default.map_or_else(String::new, |v| {
+                    format!(" default={}", self.format_value(v, true, active))
+                });
+                let repr = format!(
+                    "<ContextVar name={}{default} at {id:#x}>",
+                    self.format_value(*name, true, active)
+                );
                 repr_active.set(false);
                 repr
             }
             Value::ContextToken { variable, used, .. } => {
                 let state = if *used { " used" } else { "" };
-                format!("<Token{state} var={} at {id:#x}>", self.repr(*variable))
+                format!(
+                    "<Token{state} var={} at {id:#x}>",
+                    self.format_value(*variable, true, active)
+                )
             }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
@@ -1045,24 +1173,21 @@ impl Context {
                     _ => format!("({body})"),
                 }
             }
-            Value::Raised(error) if repr => {
-                let kind = error.kind.rsplit('.').next().unwrap_or(&error.kind);
-                let args = if let Some(os) = &error.os_args {
-                    format!(
-                        "{}, {}",
-                        os.errno,
-                        crate::objects::exceptions::string_repr(&os.description)
-                    )
-                } else if let Some(args) = &error.args {
-                    self.format_elements(args, active)
-                } else if error.message.is_empty() {
-                    String::new()
+            Value::Raised(error) => Self::render_containers(
+                self,
+                RenderRoot::Exception(error),
+                repr,
+                false,
+                |_, _, _, _| Ok(None),
+            )
+            .unwrap_or_else(|_| {
+                if repr {
+                    "<exception repr() failed>"
                 } else {
-                    crate::objects::exceptions::string_repr(&error.message).into_string()
-                };
-                format!("{kind}({args})")
-            }
-            Value::Raised(error) => self.exception_message(error, active),
+                    "<exception str() failed>"
+                }
+                .to_owned()
+            }),
             Value::GenericAlias(alias) => alias.repr(self),
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
@@ -1079,13 +1204,23 @@ impl Context {
                 };
                 format!("{variance}{}", self.display(var.name))
             }
+            Value::WeakrefDescriptor(owner) => format!(
+                "<attribute '__weakref__' of '{}' objects>",
+                self.weakref_descriptor_owner(*owner)
+            ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
-                format!("<staticmethod({})>", self.repr(*callable))
+                format!(
+                    "<staticmethod({})>",
+                    self.format_value(*callable, true, active)
+                )
             }
             Value::Function { fields, .. } => {
-                format!("<function {}>", self.display(fields.qualname))
+                format!(
+                    "<function {}>",
+                    self.format_value(fields.qualname, false, active)
+                )
             }
             Value::AttrGetter(paths) => {
                 let arguments = paths
@@ -1886,6 +2021,15 @@ impl Context {
         let (ac, bc) = (class(a), class(b));
         if ac.is_none() && bc.is_none() {
             return Ok(None);
+        }
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+            && let Some(&decimal) = self.classes.get("decimal.Decimal")
+            && (ac == Some(decimal) || bc == Some(decimal))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native Decimal numeric comparisons are unsupported",
+            ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             ac != bc

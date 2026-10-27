@@ -372,6 +372,7 @@ impl Inference {
             let globals = ModuleValues::default();
             let mut available = HashSet::new();
             let mut errors = Vec::new();
+            let mut conflicting_returns = None;
             for (module, range) in graph.initializers(class_globals) {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
@@ -433,13 +434,17 @@ impl Inference {
                         }
                         let mut ty = returns[0];
                         for &other in &returns[1..] {
-                            ty = types.join(ty, other).or_else(|| classes.parsers.common_namespace(ty, other)).ok_or_else(|| {
-                                error(
-                                    checker.source,
-                                    function,
-                                    "inferred returns require one supported exact or nullable type",
-                                )
-                            })?;
+                            let Some(joined) = types
+                                .join(ty, other)
+                                .or_else(|| classes.parsers.common_namespace(ty, other))
+                            else {
+                                conflicting_returns.get_or_insert_with(|| {
+                                    let message = "inferred returns require one supported exact or nullable type";
+                                    graph.modules[*module].error(function, message)
+                                });
+                                return Ok(());
+                            };
+                            ty = joined;
                         }
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
@@ -474,6 +479,10 @@ impl Inference {
                 errors.push(format!("{}:{diagnostic}", module.path.display()));
             }
             if self.revision.get() == before {
+                if let Some(error) = conflicting_returns {
+                    graph.return_errors.borrow_mut().insert(error.clone());
+                    return Err(error);
+                }
                 if !self.unresolved() {
                     break;
                 }

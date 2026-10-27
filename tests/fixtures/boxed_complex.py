@@ -4,6 +4,14 @@ def current():
     events = []
     saved = complex(1, 2)
 
+    print(abs(3+4j), abs(0j), abs(complex(float("nan"), float("inf"))))
+    try:
+        abs(complex(1.7e308, 1.7e308))
+    except OverflowError as error:
+        print(error.args)
+    else:
+        raise AssertionError("overflowing complex absolute value")
+
     class Number:
         def __complex__(self):
             events.append("complex")

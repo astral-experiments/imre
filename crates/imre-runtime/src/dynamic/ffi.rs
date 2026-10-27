@@ -289,10 +289,10 @@ impl Context {
                 if b != NONE {
                     let conv = self.str_value(b)?;
                     let s = match conv {
-                        "r" => self.repr(a),
-                        "s" => self.display(a),
+                        "r" => self.checked_format(a, true)?,
+                        "s" => self.checked_format(a, false)?,
                         "a" => self
-                            .repr(a)
+                            .checked_format(a, true)?
                             .chars()
                             .flat_map(|c| {
                                 if c.is_ascii() {
@@ -434,6 +434,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
+    crate::integer_text::imre_integer_digits_init(u32::from(
+        config["isolated"].as_bool().unwrap_or(false),
+    ));
     let executable = config["executable"]
         .as_str()
         .map(PathBuf::from)
@@ -452,6 +455,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
+        zip_directories: HashMap::new(),
         codec_entries: Default::default(),
         modules: HashMap::new(),
         classes: HashMap::new(),
@@ -513,8 +517,23 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
                 1
             }
         },
-        Err(e) => {
-            eprintln!("{e}");
+        Err(mut error) => {
+            let current = error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.instance)
+                .and_then(|id| {
+                    if let Value::Raised(saved) = ctx.heap.get(id) {
+                        Some(saved)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(&error);
+            if current.args.is_some() {
+                error.message = ctx.exception_message(current);
+            }
+            eprintln!("{error}");
             1
         }
     }
@@ -769,7 +788,9 @@ impl Context {
                 let mut cursor = Some(scope);
                 while let Some(frame_id) = cursor {
                     let frame = self.scope_data(frame_id);
-                    if frame.parent.is_none() {
+                    if frame.parent.is_none()
+                        || (frame.class_body.is_none() && frame.globals.contains(name))
+                    {
                         break;
                     }
                     if frame.class_body.is_none()
@@ -881,19 +902,20 @@ impl Context {
         };
         let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
-        for name in names {
+        for name in &names {
             let mut cursor = scope;
             loop {
                 let frame = self.scope_data(cursor);
-                if let Some(&cell) = frame.closure.cells.get(&name) {
+                if let Some(&cell) = frame.closure.cells.get(name) {
                     cells.push(cell);
                     break;
                 }
-                if frame.class_body.is_none() && frame.closure.declared.contains(&name) {
-                    let cell = self.alloc(Value::Cell {
-                        scope: cursor,
-                        name: name.clone(),
-                    });
+                if frame.class_body.is_none() && frame.closure.declared.contains(name) {
+                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
+                        unreachable!()
+                    };
+                    let value = frame.names.shift_remove(name);
+                    let cell = self.alloc(Value::Cell(value));
                     self.heap.keep(cell);
                     let Value::Scope(frame) = self.heap.get_mut(cursor) else {
                         unreachable!()
@@ -905,6 +927,15 @@ impl Context {
                 cursor = frame.parent.expect("free variable has enclosing scope");
             }
         }
+        let scope = if !annotation_scope && self.code_object(code).closure_supported {
+            let mut globals = scope;
+            while let Some(parent) = self.scope_data(globals).parent {
+                globals = parent;
+            }
+            self.closure_environment(globals, names, &cells)
+        } else {
+            scope
+        };
         let closure = if cells.is_empty() {
             NONE
         } else {
@@ -997,6 +1028,72 @@ impl Context {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 eprintln!("Exception ignored while calling weakref callback: {error}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::{Rc, Weak};
+
+    #[test]
+    fn surviving_function_and_cell_trace_only_the_captured_binding() {
+        unsafe extern "C" fn read(_: *mut Context, _: Id) -> Id {
+            NONE
+        }
+
+        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<String>]>) {
+            let value: Rc<[Vec<String>]> = Rc::from([]);
+            let probe = Rc::downgrade(&value);
+            (ctx.alloc(Value::AttrGetter(value)), probe)
+        }
+
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the arguments and configuration outlive initialization, which returns an owned context.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        let globals = ctx.scope("example", None);
+        let outer = ctx.scope("example", Some(globals));
+        let Value::Scope(frame) = ctx.heap.get_mut(outer) else {
+            unreachable!()
+        };
+        frame
+            .closure
+            .declared
+            .extend(["kept".into(), "unused".into()]);
+        frame.closure.declared_complete = true;
+        let (kept, kept_probe) = payload(&mut ctx);
+        let (unused, unused_probe) = payload(&mut ctx);
+        ctx.bind(outer, "kept", kept);
+        ctx.bind(outer, "unused", unused);
+        let name = ctx.text("read");
+        let signature = ctx.text(r#"{"scope_complete":true,"scope_reads":["kept"]}"#);
+        let location = value::Location {
+            file: "cells.py".into(),
+            line: 1,
+            span: None,
+        };
+        let code = ctx.prelinked_code(read, outer, name, signature, (name, NONE), location.clone());
+        let defaults = ctx.dict(Vec::new());
+        let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
+        let closure = ctx.lookup_attr(function, "__closure__").unwrap();
+        let Value::Tuple(cells) = ctx.heap.get(closure) else {
+            unreachable!()
+        };
+        let cell = cells[0];
+        for (roots, keeps_value) in [
+            (&[function][..], true),
+            (&[cell][..], true),
+            (&[][..], false),
+        ] {
+            // Force a statement collection even after the previous sweep populated free slots.
+            for _ in 0..16384 {
+                ctx.alloc(Value::None);
+            }
+            ctx.checkpoint(roots, location.clone(), NONE);
+            assert!(unused_probe.upgrade().is_none());
+            assert_eq!(kept_probe.upgrade().is_some(), keeps_value);
         }
     }
 }

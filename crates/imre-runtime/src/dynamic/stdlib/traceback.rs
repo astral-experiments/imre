@@ -1,4 +1,4 @@
-//! Render native exception objects through Python's traceback.print_exception interface.
+//! Format native exception objects and write their tracebacks to Python streams.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -66,54 +66,95 @@ impl FrameLine<'_> {
 }
 
 pub(super) fn print_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    // This is a Python function with three optional positional-or-keyword parameters.
-    let names = ["limit", "file", "chain"];
-    let mut bound = [NONE, NONE, super::super::TRUE];
-    for (slot, arg) in bound.iter_mut().zip(args) {
-        *slot = *arg;
+    call_with_active_exception(
+        ctx,
+        args,
+        kwargs,
+        "print_exc",
+        "print_exception",
+        [
+            ("limit", NONE),
+            ("file", NONE),
+            ("chain", super::super::TRUE),
+        ],
+    )?;
+    Ok(NONE)
+}
+
+pub(super) fn format_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let parts = call_with_active_exception(
+        ctx,
+        args,
+        kwargs,
+        "format_exc",
+        "format_exception",
+        [("limit", NONE), ("chain", super::super::TRUE)],
+    )?;
+    ctx.heap.keep(parts);
+    let empty = ctx.text("");
+    let join = ctx.lookup_attr(empty, "join")?;
+    ctx.call(join, vec![parts], Vec::new())
+}
+
+fn call_with_active_exception<const N: usize>(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    name: &str,
+    target: &str,
+    mut parameters: [(&str, Id); N],
+) -> Result<Id> {
+    for ((_, value), arg) in parameters.iter_mut().zip(args) {
+        *value = *arg;
     }
     for (key, argument) in kwargs {
-        let Some(index) = names.iter().position(|name| name == key) else {
+        let Some(index) = parameters.iter().position(|(param, _)| param == key) else {
             return Err(Error::new(
                 "TypeError",
-                format!("print_exc() got an unexpected keyword argument '{key}'"),
+                format!("{name}() got an unexpected keyword argument '{key}'"),
             ));
         };
         if index < args.len() {
             return Err(Error::new(
                 "TypeError",
-                format!("print_exc() got multiple values for argument '{key}'"),
+                format!("{name}() got multiple values for argument '{key}'"),
             ));
         }
-        bound[index] = *argument;
+        parameters[index].1 = *argument;
     }
-    if args.len() > names.len() {
+    if args.len() > N {
         return Err(Error::new(
             "TypeError",
             format!(
-                "print_exc() takes from 0 to 3 positional arguments but {} were given",
+                "{name}() takes from 0 to {N} positional arguments but {} were given",
                 args.len()
             ),
         ));
     }
     let traceback = ctx.module("traceback")?;
-    let printer = ctx.lookup_attr(traceback, "print_exception")?;
-    // Looking up the current exception can replace the printer and trigger collection.
-    ctx.heap.keep(printer);
+    let function = ctx.lookup_attr(traceback, target)?;
+    // Looking up the current exception can replace the callable and trigger collection.
+    ctx.heap.keep(function);
     let sys = ctx.module("sys")?;
     let current = ctx.lookup_attr(sys, "exception")?;
     let exception = ctx.call(current, Vec::new(), Vec::new())?;
-    let options = names
+    let options = parameters
         .into_iter()
-        .zip(bound)
         .map(|(name, value)| (name.to_owned(), value))
         .collect();
-    ctx.call(printer, vec![exception], options)?;
-    Ok(NONE)
+    ctx.call(function, vec![exception], options)
 }
 
-pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    if let Some(colorize) = option(args, 6, kwargs, "colorize")?
+fn render(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    chain_index: usize,
+) -> Result<Vec<String>> {
+    if let Some(colorize) = kwargs
+        .iter()
+        .find(|(key, _)| key == "colorize")
+        .map(|(_, value)| *value)
         && ctx.truth(colorize)?
     {
         return Err(Error::new(
@@ -155,7 +196,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             }
         }
     };
-    let chain = option(args, 5, kwargs, "chain")?
+    let chain = option(args, chain_index, kwargs, "chain")?
         .map(|v| ctx.truth(v))
         .transpose()?
         .unwrap_or(true);
@@ -200,6 +241,44 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     if !chain {
         sections.truncate(1);
     }
+    Ok(sections.into_iter().rev().flatten().collect())
+}
+
+pub(super) fn format(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    for (name, _) in kwargs {
+        if ["value", "tb", "limit", "chain"]
+            .iter()
+            .take(args.len().saturating_sub(1))
+            .any(|param| param == name)
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("format_exception() got multiple values for argument '{name}'"),
+            ));
+        }
+    }
+    if args.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "format_exception() missing 1 required positional argument: 'exc'",
+        ));
+    }
+    if args.len() > 5 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "format_exception() takes from 1 to 5 positional arguments but {} were given",
+                args.len()
+            ),
+        ));
+    }
+    let lines = render(ctx, args, kwargs, 4)?;
+    let values = lines.into_iter().map(|line| ctx.text(line)).collect();
+    Ok(ctx.alloc(Value::List(values)))
+}
+
+pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let lines = render(ctx, args, kwargs, 5)?;
     let file = match option(args, 4, kwargs, "file")?.filter(|&f| f != NONE) {
         Some(file) => file,
         None => {
@@ -209,7 +288,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     };
     // A write callback can replace sys.stderr and trigger collection before the next line.
     ctx.heap.keep(file);
-    for line in sections.into_iter().rev().flatten() {
+    for line in lines {
         let write = ctx.lookup_attr(file, "write")?;
         let line = ctx.text(line);
         ctx.call(write, vec![line], Vec::new())?;

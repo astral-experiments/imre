@@ -5,42 +5,30 @@ from itertools import count
 from pathlib import Path
 from typing import Iterator
 
-
-class FileFinder:
-    path: str
-
-    def __init__(self, path: str) -> None:
-        self.path = str(Path(path).absolute())
-
-
 ModuleInfo = namedtuple('ModuleInfo', ('module_finder', 'name', 'ispkg'))
 
 
-def _module_name(filename: str) -> str:
-    for suffix in _module_suffixes:
-        if filename.endswith(suffix):
-            return filename[:-len(suffix)]
-    return ''
+def _absolute(directory: str) -> str:
+    return str(Path(directory).absolute())
 
 
-def _filenames(directory: Path) -> list[str]:
+def _join(directory: str, name: str) -> str:
+    return str(Path(directory) / name)
+
+
+def _isdir(directory: str) -> bool:
+    return Path(directory).is_dir()
+
+
+def _filenames(directory: str) -> list[str]:
     names: list[str] = []
     try:
-        for entry in directory.iterdir():
+        for entry in Path(directory).iterdir():
             names.append(entry.name)
     except OSError:
         return []
     names.sort()
     return names
-
-
-def _is_package(directory: Path) -> bool:
-    if not directory.is_dir():
-        return False
-    for filename in _filenames(directory):
-        if _module_name(filename) == '__init__':
-            return True
-    return False
 
 
 def iter_modules(path: list[str] | str | None = None, prefix: str = '') -> Iterator[ModuleInfo]:
@@ -53,29 +41,22 @@ def iter_modules(path: list[str] | str | None = None, prefix: str = '') -> Itera
     seen: set[str] = set()
     root = 0
     finder = FileFinder(paths[root])
-    names = _filenames(Path(finder.path))
+    names = _filenames(finder.path)
     index = 0
     for _ in count():
-        # A consumer can change the next directory between yields.
         if index >= len(names):
             root += 1
             if root >= len(paths):
                 return
             finder = FileFinder(paths[root])
-            names = _filenames(Path(finder.path))
+            names = _filenames(finder.path)
             index = 0
             continue
-        filename = names[index]
+        info = _module_info(finder, names[index], prefix, seen)
         index += 1
-        name = _module_name(filename)
-        ispkg = False
-        if not name and '.' not in filename and _is_package(Path(finder.path) / filename):
-            name = filename
-            ispkg = True
-        if not name or name == '__init__' or '.' in name or name in seen:
+        if info is None:
             continue
-        seen.add(name)
-        yield ModuleInfo(finder, prefix + name, ispkg)
+        yield info
 
 
 def _has_module(directory: Path, stem: str) -> bool:

@@ -312,6 +312,12 @@ impl Context {
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
+        if let Value::GenericAlias(alias) = self.heap.get(key) {
+            let (origin, args) = (alias.origin, alias.args);
+            return Ok(normalized(
+                data_hash(&origin.to_ne_bytes()) ^ self.dictionary_hash(args)?,
+            ));
+        }
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
             return Ok(hash);
         }
@@ -425,6 +431,27 @@ impl Context {
         Ok(normalized(hash))
     }
 
+    /// Look up a Python name in immutable builtin type dictionaries. Type lookup clears errors.
+    pub(in super::super) fn lookup_builtin_type_name(
+        &mut self,
+        key: Id,
+        names: &[&'static str],
+    ) -> Option<&'static str> {
+        if let Value::Str(text) = self.heap.get(key) {
+            return names.iter().copied().find(|&name| name == text);
+        }
+        let hash = self.dictionary_hash(key).ok()?;
+        for &name in names {
+            if normalized(data_hash(name.as_bytes())) == hash {
+                let stored = self.text(name);
+                if self.dictionary_equal(stored, key).ok()? {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
     fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
@@ -462,7 +489,7 @@ impl Context {
             }
             return Ok(true);
         }
-        self.checked_equal(left, right)
+        self.checked_equal_impl(left, right, false)
     }
 
     pub(in super::super) fn dictionary_pair(
