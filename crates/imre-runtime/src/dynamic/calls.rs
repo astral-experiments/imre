@@ -356,7 +356,9 @@ impl Context {
                     )
                 {
                     "type"
-                } else if builtins::is_builtin(name) || builtins::constructor_owner(name).is_some()
+                } else if name == "posix.fspath"
+                    || builtins::is_builtin(name)
+                    || builtins::constructor_owner(name).is_some()
                 {
                     "builtin_function_or_method"
                 } else {
@@ -647,6 +649,12 @@ impl Context {
                     return Ok(attribute);
                 }
             }
+            Value::Native(symbol) if symbol == "posix.fspath" => match name {
+                "__name__" | "__qualname__" => return Ok(self.text("fspath")),
+                "__module__" => return Ok(self.text("posix")),
+                "__self__" => return self.module("posix"),
+                _ => {}
+            },
             Value::Native(class) if class == "staticmethod" && name == "__get__" => {
                 return Ok(self.builtin("staticmethod.__get__"));
             }

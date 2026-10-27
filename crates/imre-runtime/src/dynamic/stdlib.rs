@@ -51,6 +51,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "sysconfig"
             | "ast"
             | "os"
+            | "posix"
             | "posixpath"
             | "_imre_posixpath"
             | "fnmatch"
@@ -355,6 +356,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os", "name") => ctx.text("posix"),
         ("os" | "posixpath", "sep") => ctx.text("/"),
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
@@ -385,7 +387,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_preferred_scheme",
         )
         | ("site", "getsitepackages")
-        | ("os", "confstr" | "fsdecode" | "fspath" | "uname")
+        | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
         | (
             "platform",
@@ -455,7 +457,7 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
     }
-    if matches!(name, "os.fspath" | "os.fsdecode") || name.starts_with("_imre_posixpath.") {
+    if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);
     }
     if name == "fnmatch.filter" {

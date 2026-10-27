@@ -25,15 +25,32 @@ fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
 }
 
 fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<String> {
-    let Value::Bytes(bytes) = ctx.heap.get(id) else {
+    let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(id)) else {
         return Err(type_error("decoding requires bytes"));
     };
-    strict(ctx, errors)?;
     let encoding = encoding_id
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
-    Ok(crate::objects::Codec::lookup(encoding)?.decode(bytes, None)?)
+    let codec = crate::objects::Codec::lookup(encoding)?;
+    if matches!(codec, crate::objects::Codec::Utf8 { signature: false })
+        && errors.is_some_and(|id| {
+            ctx.str_value(id)
+                .is_ok_and(|value| value == "surrogateescape")
+        })
+    {
+        return crate::objects::interpreter_stdlib::fsdecode(bytes)
+            .map(char::from_u32)
+            .collect::<Option<String>>()
+            .ok_or_else(|| {
+                Error::new(
+                    "UnicodeError",
+                    "surrogate-escaped filenames are not representable as Imre strings",
+                )
+            });
+    }
+    strict(ctx, errors)?;
+    Ok(codec.decode(bytes, None)?)
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {

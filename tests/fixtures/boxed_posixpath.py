@@ -1,5 +1,6 @@
 import os
 import os.path
+import posix
 import posixpath
 from os import fspath
 
@@ -39,7 +40,8 @@ class Raises:
 def current():
     assert os.path is posixpath and os.path.__name__ == "posixpath"
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
-    assert fspath is os.fspath
+    assert fspath is os.fspath is posix.fspath
+    assert fspath.__self__ is posix and fspath.__module__ == "posix"
     for value in ("", ".profile", "a.b/.c", "a/.a.b", "/résumé.☃", "r/", b"a.\xff", Text("a.tar.gz"), Raw(b"a.tar.gz")):
         path = Path(value)
         assert fspath(path) is value and fspath(value) is value
@@ -52,5 +54,20 @@ def current():
             fspath(value)
         except (TypeError, RuntimeError) as error:
             print(type(error).__name__, str(error))
+    original = os.fspath
+    calls = []
+    def counted(value):
+        calls.append(value)
+        return original(value)
+    try:
+        os.fspath = counted
+        for _ in range(3):
+            os.path.normcase("werkzeug/serving.py")
+        filename = os.path.basename("werkzeug/serving.py")
+        assert os.path.splitext(filename) == ("serving", ".py")
+    finally:
+        os.fspath = original
+    assert calls == ["werkzeug/serving.py"] * 4 + ["serving.py"]
+
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))

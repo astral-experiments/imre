@@ -1,6 +1,13 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 import os
-from _imre_posixpath import extension_start, isfile
+from _imre_posixpath import extension_start, isfile as _isfile
+
+
+def isfile(path):
+    try:
+        return _isfile(path)
+    except (OSError, ValueError):
+        return False
 
 
 def normcase(s):

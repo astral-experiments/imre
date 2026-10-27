@@ -411,7 +411,7 @@ impl Context {
             Value::Instance {
                 scalar: Some(payload),
                 ..
-            } => self.display(*payload),
+            } => self.format_value(*payload, repr, active),
             Value::Bytes(bytes) => {
                 let mut output = String::new();
                 crate::objects::write_bytes_repr(&mut output, bytes);

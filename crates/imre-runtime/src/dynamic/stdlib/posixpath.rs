@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 fn spelling(ctx: &Context, value: Id) -> bool {
     matches!(
@@ -48,7 +48,9 @@ fn path_arg(ctx: &mut Context, path: Id, stat: bool) -> Result<Id> {
 }
 
 fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
-    if let Some(index) = ctx.index_value(path)? {
+    if !spelling(ctx, path)
+        && let Some(index) = ctx.index_value(path)?
+    {
         let fd = index
             .to_i64()
             .and_then(|n| libc::c_int::try_from(n).ok())
@@ -84,12 +86,13 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "os.fspath" {
+    if name == "posix.fspath" {
         let count = args.len() + kwargs.len();
         if count > 1 {
+            let kind = if args.is_empty() { "keyword " } else { "" };
             return Err(Error::new(
                 "TypeError",
-                format!("fspath() takes at most 1 argument ({count} given)"),
+                format!("fspath() takes at most 1 {kind}argument ({count} given)"),
             ));
         }
         let path = super::option(args, 0, kwargs, "path")?.ok_or_else(|| {
@@ -100,20 +103,10 @@ pub(super) fn call(
         })?;
         return fspath(ctx, path);
     }
-    let argument = if name == "os.fsdecode" {
-        "filename"
-    } else {
-        "path"
+    let [path] = args else {
+        return Err(Error::new("TypeError", "expected one path argument"));
     };
-    let function = name.rsplit('.').next().unwrap();
-    let [path] =
-        super::super::builtins::bind_method_arguments(function, args, kwargs, [argument], 1)?;
-    let path = path.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!("{function}() missing 1 required positional argument: '{argument}'"),
-        )
-    })?;
+    let path = *path;
     match name {
         "_imre_posixpath.extension_start" => {
             let cut = match ctx.heap.get(path) {
@@ -126,43 +119,7 @@ pub(super) fn call(
             };
             Ok(ctx.int(cut as i64))
         }
-        "_imre_posixpath.isfile" => match isfile(ctx, path) {
-            Ok(true) => Ok(TRUE),
-            Ok(false) => Ok(FALSE),
-            Err(error)
-                if ctx.is_builtin_error(&error, "OSError")
-                    || ctx.is_builtin_error(&error, "ValueError") =>
-            {
-                Ok(FALSE)
-            }
-            Err(error) => Err(error),
-        },
-        "os.fsdecode" => {
-            let os = ctx.module("os")?;
-            let convert = ctx.lookup_attr(os, "fspath")?;
-            let path = ctx.call(convert, vec![path], Vec::new())?;
-            if ctx.slot(path, "decode").is_some()
-                && matches!(ctx.heap.get(ctx.scalar_value(path)), Value::Bytes(_))
-            {
-                let decode = ctx.lookup_attr(path, "decode")?;
-                let encoding = ctx.text("utf-8");
-                let errors = ctx.text("surrogateescape");
-                return ctx.call(decode, vec![encoding, errors], Vec::new());
-            }
-            match ctx.heap.get(ctx.scalar_value(path)) {
-                Value::Bytes(bytes) => {
-                    let decoded: Option<String> =
-                        super::system::fsdecode(bytes).map(char::from_u32).collect();
-                    Ok(ctx.text(decoded.ok_or_else(|| {
-                        Error::new(
-                            "UnicodeError",
-                            "surrogate-escaped filenames are not representable as Imre strings",
-                        )
-                    })?))
-                }
-                _ => Ok(path),
-            }
-        }
+        "_imre_posixpath.isfile" => Ok(super::super::builtins::boolean(isfile(ctx, path)?)),
         _ => unreachable!(),
     }
 }
