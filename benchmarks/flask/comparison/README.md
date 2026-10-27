@@ -1,12 +1,12 @@
 # HTTP performance of the unchanged Flask app
 
-The reference serves the checked-in `tiny_flask_app.py` through its existing Werkzeug entry point. Node and Bun run the same JavaScript handlers through their own HTTP APIs. The Rust control uses Hyper, single-thread Tokio, arbitrary-precision JSON and `BigInt`. The cross-language controls implement the three measured routes and error responses. Flask runs Jinja for each greeting. The other controls apply HTML escaping directly.
+A standalone Imre timing requires the unchanged Flask app and its seven pinned wheels to serve all ten HTTP cases from the same Linux ELF. On the timing host, the harness compares response fingerprints against CPython, checks the original view exception and verifies the listener and accepted socket owners with procfs and `strace`. It follows workers and checks for a foreign executable or a mapped `libpython`. Each timing process must match the proven SHA-256 before warmup. [Ten requests and expected responses](../README.md#flask-over-tcp)
 
-The [measured results](RESULTS.md) include per-route throughput, latency percentiles, the CPython-hosted LLVM comparison, the fully native compiler outcome and a serving-thread CPU profile.
+The published eight-client mix ran on one AMD EPYC Milan server vCPU. CPython/Flask served 934 requests/s, Node 3,379, Bun 8,379 and Rust/Hyper 9,029. The original standalone Imre candidate exited before listening and has no throughput or latency measurement. Repeat all four controls with a new Imre candidate on the same host and reserved CPUs. [Measured rates, latency percentiles and individual trials](RESULTS.md#flask-node-bun-and-rust)
 
 ## Workload
 
-Every cycle sends three requests to each route in an interleaved order.
+Every cycle interleaves three requests to each route. CPython runs the checked-in Flask app through Werkzeug and renders its greeting with Jinja. Node and Bun share JavaScript handlers, and the Rust control uses Hyper with single-thread Tokio and arbitrary-precision JSON. Those three controls implement the routes and HTML escaping directly.
 
 | Route | Work performed |
 | --- | --- |
@@ -20,41 +20,53 @@ Each server runs alone on one Linux vCPU. The Go closed-loop client occupies thr
 
 ## Reproduce
 
-Use the seven release wheels and CPython 3.14.5 from the parent gate. Node and Bun must support the JSON reviver's `context.source` to preserve the original integer tokens. The comparison accepts the built Go client and Rust server as arguments, so building or installing them is outside the measurement. Choose disjoint Linux cores available to the benchmark process.
+From the repository root on Linux x86-64, run the ten TCP checks on CPython 3.14.5 using the locked wheels.
 
 ```sh
 bench=benchmarks/flask/comparison
+python3.14 -m pip download --no-deps --require-hashes --dest /tmp/flask-wheels \
+  -r benchmarks/flask/requirements.txt
+python3.14 benchmarks/flask/gate.py --wheelhouse /tmp/flask-wheels \
+  --reference-only --output /tmp/flask-reference.json
+```
+
+For the cross-language comparison, build the release Imre runtime and both native control programs before timing. Node and Bun must support the JSON reviver's `context.source` to preserve the original integer tokens. Set `SERVER_CPU` and `CLIENT_CPUS` to disjoint CPUs available on the timing host. The defaults below reproduce the published core assignment.
+
+```sh
+server_cpu=${SERVER_CPU:-28}
+client_cpus=${CLIENT_CPUS:-29,30,31}
 go build -o /tmp/flask-client "$bench/client.go"
-cargo build --manifest-path "$bench/rust/Cargo.toml" --release --locked
+cargo build --manifest-path "$bench/rust/Cargo.toml" --target-dir "$bench/rust/target" --release --locked
+cargo build --target-dir target --release --workspace --locked
 python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels \
   --client /tmp/flask-client --rust "$bench/rust/target/release/imre-flask-hyper-control" \
   --node "$(command -v node)" --bun "$(command -v bun)" \
   --compiler target/release/imre --runtime target/release/libimre_runtime.a \
-  --server-cpu 28 --client-cpus 29,30,31 --output /tmp/flask-comparison.json
+  --runtime-imports --build-timeout 420 --rounds 8 \
+  --server-cpu "$server_cpu" --client-cpus "$client_cpus" --output /tmp/flask-comparison.json
 python3 "$bench/summary.py" /tmp/flask-comparison.json
 ```
 
-The optional Imre row builds the unchanged `serve.py` at O3 against the staged wheels. Add `--runtime-imports` to use the compiler's native runtime-import mode. To repeat a run with an existing executable, supply `--imre-binary PATH` in place of the compiler and runtime. The receipt records its source path and SHA-256. Supplied binaries must come from the unchanged application and pinned wheels. The receipt distinguishes supplied artifacts from those built by the harness.
+The comparison builds `serve.py` at O3. The example allows 420 seconds for compilation and records the budget and elapsed time in `imre_build`. To reuse a release-linked ELF from this same app and wheel set, replace `--compiler`, `--runtime` and `--runtime-imports` with `--imre-binary /absolute/path/to/server`. Both forms run the native proof before timing. The JSON records the proof under `imre_native_preflight` and saves the raw trace beside it. A failed build or proof leaves Imre out of `trials`, while eligible controls can still run. Use `--rounds 0` to run only the preflights, or `--mixed-only --concurrency 8` for the mixed workload alone.
 
-Use `--build-timeout 420` for an O3 compilation that needs longer than the default 120 seconds. The `imre_build` record includes the time limit, elapsed time and compiler output. When compilation times out, the other servers can still complete their comparison.
-
-Before timing, the harness runs the ten-request Flask gate on the exact ELF. The gate checks the application traceback, escaped Unicode, signed cookie replay, a tampered cookie, and recovery. On Linux, `strace` and procfs verify the executable and socket owners and catch a mapped `libpython` or foreign executable. The JSON records the result under `imre_native_preflight` and keeps the raw trace alongside the receipt. A failed proof leaves Imre out of `trials`. Each timed Imre process runs without the tracer and must have the proven SHA-256 before warmup. The external controls use their existing HTTP preflight and workload.
-
-The negative control supplies the existing Rust HTTP server as the candidate Imre binary. It returns the expected health and big-integer JSON responses, but cannot serve a signed Flask session. This command runs one nine-request smoke round on each eligible control and checks that Imre receives no timing row.
+The negative control supplies the Rust server as the Imre candidate. It serves the health and big-integer JSON responses but fails the signed session check. The command verifies that the control servers receive timing rows and Imre receives none.
 
 ```sh
 python3.14 "$bench/check_native_negative.py" --wheelhouse /tmp/flask-wheels \
   --client /tmp/flask-client --rust "$bench/rust/target/release/imre-flask-hyper-control" \
-  --node "$(command -v node)" --bun "$(command -v bun)" --server-cpu 28 --client-cpus 29,30,31
+  --node "$(command -v node)" --bun "$(command -v bun)" \
+  --server-cpu "$server_cpu" --client-cpus "$client_cpus"
 ```
 
-For a paired WSGI comparison, provide the unmodified Waitress 3.0.2 wheel in the same wheelhouse. The runner checks its SHA-256, extracts it alongside the existing releases and runs the original Flask app with one Waitress application worker. The CPython-hosted LLVM mode accepts a Python launcher whose arguments are the staged wheel directory and the ready file. The launcher imports the compiled views and uses CPython to run the framework and HTTP transport. Include one `--hosted-artifact` per binary or source that the launcher consumes. The WSGI and hosted options can run together and share one contemporaneous CPython/Werkzeug control.
+## CPython WSGI servers
+
+To compare Werkzeug with Waitress on the original Flask app, add the Waitress 3.0.2 wheel. The runner verifies its SHA-256 and pins its single application worker and I/O loop to the server CPU.
 
 ```sh
 python3.14 -m pip download --no-deps --dest /tmp/flask-wheels waitress==3.0.2
 python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels --client /tmp/flask-client \
-  --wsgi-pair --hosted-launcher /path/to/launch.py --hosted-artifact /path/to/_imre_views.so \
-  --rounds 9 --server-cpu 28 --client-cpus 29,30,31 --output /tmp/flask-paired.json
+  --wsgi-pair --rounds 9 --server-cpu "$server_cpu" --client-cpus "$client_cpus" \
+  --output /tmp/flask-paired.json
 ```
 
-Use `--rounds 0` for a correctness run. Use `--mixed-only --concurrency 8` to repeat the equal-weight mix alone. A paired run only needs its own launcher and server dependencies.
+An October 2026 experiment ran LLVM-compiled views inside CPython. Its timings measure a CPython process serving Flask and Werkzeug. [Historical hosted measurements](RESULTS.md#same-flask-app-with-different-execution-and-serving-configurations)

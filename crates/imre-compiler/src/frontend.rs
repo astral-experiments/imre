@@ -9424,6 +9424,21 @@ impl<'a> Checker<'a> {
                 }
                 return self.class_method_call(call, attribute, class, None);
             }
+            if self.resolve(&call.func).is_none()
+                && self.resolve(&attribute.value)
+                    == Some(Binding::IntrinsicModule(
+                        crate::modules::IntrinsicModule::Threading,
+                    ))
+            {
+                return Err(error(
+                    self.source,
+                    attribute,
+                    &format!(
+                        "unsupported sealed standard-library export threading.{}",
+                        attribute.attr
+                    ),
+                ));
+            }
             let receiver = match receiver {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,

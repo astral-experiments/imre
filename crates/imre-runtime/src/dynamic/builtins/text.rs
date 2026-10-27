@@ -1032,7 +1032,13 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
-    if matches!(name, "isalnum" | "isspace") {
+    let predicate: Option<fn(&str) -> bool> = match name {
+        "isalnum" => Some(crate::objects::python_alnum),
+        "isspace" => Some(crate::objects::python_isspace),
+        "isupper" => Some(crate::objects::python_isupper),
+        _ => None,
+    };
+    if let Some(predicate) = predicate {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1044,11 +1050,6 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let predicate = if name == "isalnum" {
-            crate::objects::python_alnum
-        } else {
-            crate::objects::python_isspace
-        };
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
     if name == "translate" {

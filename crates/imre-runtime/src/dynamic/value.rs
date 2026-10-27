@@ -63,6 +63,7 @@ pub(super) struct Trace {
     pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
+    pub source_syntax: Option<[Id; 2]>,
     pub import_names: Option<[Id; 3]>,
     pub dictionary: Option<Id>,
     stop_value: Id,
@@ -149,6 +150,7 @@ impl Error {
                     .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
+                    .chain(trace.source_syntax.into_iter().flatten())
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
@@ -267,6 +269,7 @@ impl Context {
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
+            Value::Union(_) => "Union",
             Value::Class { .. } => "type",
             Value::MappingView { kind, .. } => match kind {
                 DictViewKind::Keys => "KeysView",
@@ -289,8 +292,14 @@ impl Context {
             Value::Raised(error) => &error.kind,
             Value::Traceback { .. } => "traceback",
             Value::PythonFrame { .. } => "frame",
-            Value::Module { .. } => "module",
-            Value::Instance { class, .. } => match self.heap.get(*class) {
+            Value::Module {
+                constructor: None, ..
+            } => "module",
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => match self.heap.get(*class) {
                 Value::Class { name, .. } | Value::Native(name) => name,
                 _ => "object",
             },
@@ -488,6 +497,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Imported modules are resolved separately from independently constructed ones.
+        constructor: Option<Id>,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -515,12 +526,14 @@ pub(super) enum Value {
     },
     TypeVar(super::typing::TypeVariable),
     GenericAlias(super::typing::Alias),
+    Union(super::union::Union),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
+        weak_reference: Option<Box<super::weakref::Reference>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -651,6 +664,14 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    pub(super) fn instance_class(&self) -> Option<Id> {
+        match self {
+            Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
+            _ => None,
+        }
+    }
+
     fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
@@ -754,9 +775,15 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, origin, .. } => {
+            Self::Module {
+                scope,
+                origin,
+                constructor,
+                ..
+            } => {
                 visit.push(*scope);
                 visit.extend(origin);
+                visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
             Self::Function {
@@ -801,16 +828,24 @@ impl Value {
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
+            Self::Union(union) => {
+                visit.extend([union.args, union.members, union.parameters]);
+                visit.extend(union.unhashable);
+            }
             Self::Instance {
                 class,
                 fields,
                 dictionary,
                 scalar,
+                weak_reference,
                 memory_stream,
                 property,
             } => {
                 if let Some(property) = property {
                     property.children(visit);
+                }
+                if let Some(reference) = weak_reference {
+                    visit.push(reference.callback);
                 }
                 if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
                     visit.extend(stream.snapshot.get());
@@ -1044,9 +1079,10 @@ impl Heap {
         target: Id,
         callback: Id,
         kind: super::weakref::Kind,
+        subclass: Option<Id>,
     ) -> Id {
         let references = self.weak_references(target);
-        if callback == NONE
+        if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
                 matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
         {
@@ -1055,19 +1091,31 @@ impl Heap {
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
         let index = references
             .iter()
-            .position(|&id| {
-                let Value::Weak(wr) = self.get(id) else {
-                    unreachable!()
-                };
-                wr.callback != NONE || (callback == NONE && kind == super::weakref::Kind::Reference)
+            .position(|&id| match self.get(id) {
+                Value::Weak(wr) => {
+                    wr.callback != NONE
+                        || (subclass.is_none()
+                            && callback == NONE
+                            && kind == super::weakref::Kind::Reference)
+                }
+                _ => true,
             })
             .unwrap_or(references.len());
-        let id = self.alloc(Value::Weak(super::weakref::Reference {
+        let reference = super::weakref::Reference {
             target: Some(target),
             callback,
             kind,
             hash: None,
-        }));
+        };
+        let id = if let Some(owner) = subclass {
+            let Value::Instance { weak_reference, .. } = self.get_mut(owner) else {
+                unreachable!()
+            };
+            *weak_reference = Some(Box::new(reference));
+            owner
+        } else {
+            self.alloc(Value::Weak(reference))
+        };
         self.weak.entry(target).or_default().insert(index, id);
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
@@ -1077,7 +1125,10 @@ impl Heap {
 
     fn weak_edge(&self, value: Id) -> bool {
         self.weak.contains_key(&value)
-            || matches!(self.get(value), Value::Weak(wr) if wr.target.is_some())
+            || self
+                .get(value)
+                .weak_reference()
+                .is_some_and(|wr| wr.target.is_some())
     }
 
     /// A name in a surviving frame keeps this object alive until that binding changes.
@@ -1265,9 +1316,11 @@ impl Heap {
                 return !refs.is_empty();
             }
             for &id in refs.iter() {
-                let Some(Value::Weak(wr)) = &mut self.slots[id as usize] else {
-                    unreachable!()
-                };
+                let wr = self.slots[id as usize]
+                    .as_mut()
+                    .unwrap()
+                    .weak_reference_mut()
+                    .unwrap();
                 wr.target = None;
                 let callback = std::mem::replace(&mut wr.callback, NONE);
                 if callback != NONE {

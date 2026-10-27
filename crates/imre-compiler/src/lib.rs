@@ -233,9 +233,9 @@ fn object_fallback<T>(
     let checked_file = options.python_startup().is_none() && !options.runtime_imports;
     if options.entry_profile.is_some()
         || (checked_file
-            && graph
-                .as_ref()
-                .is_some_and(|g| g.return_errors.borrow().contains(&error)))
+            && graph.as_ref().is_some_and(|g| {
+                g.return_errors.borrow().contains(&error) || g.imports_struct_decorator()
+            }))
     {
         return Err(error);
     }

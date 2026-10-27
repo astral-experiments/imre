@@ -195,6 +195,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         dictionary: None,
         scalar: None,
         property: None,
+        weak_reference: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -304,6 +305,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("traceback", "format_exc" | "format_exception" | "print_exc" | "print_exception") => {
             ctx.builtin(&format!("traceback.{name}"))
         }
+        ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -317,6 +319,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         (
             "_collections_abc",

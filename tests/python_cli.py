@@ -497,6 +497,9 @@ def report(text):
             "from decimal import Decimal\n"
             "x = Decimal('1.2300')\n"
             "print(x, Decimal(value=x) is x, Decimal(True), len(str(Decimal(10 ** 5000))))\n"
+            "class Text(str):\n"
+            "    def strip(self): raise AssertionError('unexpected strip')\n"
+            "print(Decimal(Text('2.500')), Decimal(value=Text('-0.0')))\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_values")
         (helpers / "decimal_comparison.py").write_text(
@@ -578,6 +581,7 @@ def report(text):
             "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
+            "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
@@ -621,6 +625,8 @@ def report(text):
             "boxed_function_defaults.py",
             "boxed_set_union.py",
             "boxed_weakref.py",
+            "boxed_public_weakref.py",
+            "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -637,6 +643,7 @@ def report(text):
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
+            "boxed_module_type.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_dict_subclasses.py",

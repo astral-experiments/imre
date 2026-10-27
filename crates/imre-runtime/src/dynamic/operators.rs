@@ -200,7 +200,7 @@ impl Context {
         })
     }
     /// Unwrap nested method bindings and retain the identity comparison of their receivers.
-    fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
+    pub(super) fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
         let mut same_receivers = true;
         while a != b {
             let (
@@ -290,6 +290,26 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::Set { .. }, Value::Set { .. })
+                ) {
+                    if !self.dictionary_equal(a, b)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                if let (Value::Union(left), Value::Union(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    let (left, right) = (*left, *right);
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                    if !left.checked_equal(right, self)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
                 if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
                     (self.heap.get(a), self.heap.get(b))
                 {
@@ -463,6 +483,7 @@ impl Context {
                 a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
             }
             (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
+            (Value::Union(a), Value::Union(b)) => a.structural_equal(*b, self, equal),
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
@@ -484,15 +505,156 @@ impl Context {
                             })
                         }))
             }
-            (Value::Set { entries: x, .. }, Value::Set { entries: y, .. }) => {
-                x.len() == y.len() && x.iter().all(|&(k, _)| y.iter().any(|&(j, _)| equal(k, j)))
-            }
+            (Value::Set { .. }, Value::Set { .. }) => self.equal_sets(a, b, remaining, exhausted),
             _ => match (self.sequence(a), self.sequence(b)) {
                 (Some(x), Some(y)) => {
                     x.len() == y.len() && x.iter().zip(y).all(|(&i, j)| equal(i, j))
                 }
                 _ => false,
             },
+        }
+    }
+    // Preserve set candidate order while visiting nested set and tuple pairs iteratively.
+    fn equal_sets(&self, a: Id, b: Id, remaining: usize, exhausted: &mut bool) -> bool {
+        struct Frame {
+            left: Id,
+            right: Id,
+            index: usize,
+            candidate: usize,
+            remaining: usize,
+            tuple: bool,
+        }
+        let mut frames = vec![Frame {
+            left: a,
+            right: b,
+            index: 0,
+            candidate: 0,
+            remaining,
+            tuple: false,
+        }];
+        let mut result = None;
+        loop {
+            let Some(frame) = frames.last_mut() else {
+                return result.unwrap_or(true);
+            };
+            if let Some(equal) = result.take() {
+                if equal {
+                    frame.index += 1;
+                    frame.candidate = 0;
+                } else if frame.tuple {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                } else {
+                    frame.candidate += 1;
+                }
+            }
+            let pair = if frame.tuple {
+                let (Value::Tuple(left), Value::Tuple(right)) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len() {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index], right[frame.index])
+            } else {
+                let (Value::Set { entries: left, .. }, Value::Set { entries: right, .. }) =
+                    (self.heap.get(frame.left), self.heap.get(frame.right))
+                else {
+                    unreachable!()
+                };
+                if left.len() != right.len()
+                    || frame.candidate == right.len() && frame.index < left.len()
+                {
+                    frames.pop();
+                    result = Some(false);
+                    continue;
+                }
+                if frame.index == left.len() {
+                    frames.pop();
+                    result = Some(true);
+                    continue;
+                }
+                (left[frame.index].0, right[frame.candidate].0)
+            };
+            let (mut x, mut y) = pair;
+            let mut depth = frame.remaining - 1;
+            loop {
+                if x == y {
+                    result = Some(true);
+                    break;
+                }
+                if depth == 0 {
+                    *exhausted = true;
+                    result = Some(false);
+                    break;
+                }
+                let (raw_x, raw_y) = (x, y);
+                (x, y) = (self.scalar_value(x), self.scalar_value(y));
+                let tail = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::GenericAlias(a), Value::GenericAlias(b)) => {
+                        if a.kind != b.kind || a.origin != b.origin {
+                            result = Some(false);
+                            break;
+                        }
+                        Some((a.args, b.args))
+                    }
+                    (Value::Weak(a), Value::Weak(b))
+                        if a.kind == weakref::Kind::Reference
+                            && b.kind == weakref::Kind::Reference =>
+                    {
+                        match (a.target, b.target) {
+                            (Some(left), Some(right)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    (Value::Method { .. }, Value::Method { .. }) => {
+                        match self.method_equality_operands(x, y) {
+                            Some((left, right, true)) => Some((left, right)),
+                            _ => {
+                                result = Some(false);
+                                break;
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(pair) = tail {
+                    (x, y) = pair;
+                    depth -= 1;
+                    continue;
+                }
+                let tuple = match (self.heap.get(x), self.heap.get(y)) {
+                    (Value::Set { .. }, Value::Set { .. }) => Some(false),
+                    (Value::Tuple(_), Value::Tuple(_)) => Some(true),
+                    _ => None,
+                };
+                if let Some(tuple) = tuple {
+                    frames.push(Frame {
+                        left: x,
+                        right: y,
+                        index: 0,
+                        candidate: 0,
+                        remaining: depth,
+                        tuple,
+                    });
+                } else {
+                    result = Some(self.equal_inner(raw_x, raw_y, depth, exhausted));
+                }
+                break;
+            }
         }
     }
     pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
@@ -642,7 +804,12 @@ impl Context {
                 output.push_str(text);
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
-            } else if error.os_args.is_some() {
+            } else if error.os_args.is_some()
+                || error
+                    .trace
+                    .as_ref()
+                    .is_some_and(|trace| trace.source_syntax.is_some())
+            {
                 output.push_str(&error.message);
                 output.extend(std::iter::repeat_n(')', closing));
                 break;
@@ -830,6 +997,44 @@ impl Context {
                     match ctx.heap.get(id) {
                         Value::Raised(error) => {
                             ctx.render_exception(error, repr, &mut output, &mut work)?;
+                            continue;
+                        }
+                        Value::Module {
+                            scope,
+                            constructor: Some(_),
+                            ..
+                        } => {
+                            if !ancestors.insert(id) {
+                                if checked {
+                                    return Err(Error::new(
+                                        "RecursionError",
+                                        "maximum recursion depth exceeded",
+                                    ));
+                                }
+                                output.push_str("<module ...>");
+                                continue;
+                            }
+                            active.push(id);
+                            output.push_str("<module ");
+                            work.push(Part::Leave(id, ">"));
+                            if let Some(file) =
+                                ctx.scope_name(*scope, "__file__").filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Value(file, true));
+                                work.push(Part::Text(" from "));
+                            } else if let Some(loader) = ctx
+                                .scope_name(*scope, "__loader__")
+                                .filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Text(")"));
+                                work.push(Part::Value(loader, true));
+                                work.push(Part::Text(" ("));
+                            }
+                            if let Some(name) = ctx.scope_name(*scope, "__name__") {
+                                work.push(Part::Value(name, true));
+                            } else {
+                                work.push(Part::Text("'?'"));
+                            }
                             continue;
                         }
                         Value::Slice(_) => {
@@ -1189,6 +1394,10 @@ impl Context {
                 .to_owned()
             }),
             Value::GenericAlias(alias) => alias.repr(self),
+            Value::Union(union) => super::union::repr(self, *union),
+            Value::Class { .. } if self.classes.get("typing.Union") == Some(&id) => {
+                "<class 'typing.Union'>".to_owned()
+            }
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
@@ -1209,6 +1418,10 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
+            Value::Module {
+                constructor: Some(_),
+                ..
+            } => self.repr(id),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
                 format!(
@@ -1248,6 +1461,9 @@ impl Context {
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        if let Some(value) = super::union::subscribe(self, obj, key) {
+            return value;
+        }
         if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
@@ -1648,6 +1864,11 @@ impl Context {
         };
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if op == "|"
+            && let Some(result) = super::union::binary(self, a, b)
+        {
+            return result;
         }
         if let (Value::Slice(left), Value::Slice(right)) = (self.heap.get(a), self.heap.get(b))
             && matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
