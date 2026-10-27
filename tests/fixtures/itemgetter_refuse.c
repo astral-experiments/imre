@@ -5,25 +5,38 @@
 #include <unistd.h>
 
 void *__real_malloc(size_t size);
+void *__real_realloc(void *ptr, size_t size);
+uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
 uint64_t __real_imre_dyn_op(void *, const char *, uint64_t, uint64_t, uint64_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
 
 static _Thread_local int after_put, refused;
 static _Thread_local unsigned remaining;
+static _Thread_local size_t allocation_size;
 
-void *__wrap_malloc(size_t size) {
-    if (remaining && size == 113 * sizeof(uint64_t) && --remaining == 0) {
+static int refuse(size_t size) {
+    if (remaining && size == allocation_size && --remaining == 0) {
         refused = 1;
         write(STDERR_FILENO, "refused\n", 8);
         errno = ENOMEM;
-        return NULL;
+        return 1;
     }
-    return __real_malloc(size);
+    return 0;
+}
+
+void *__wrap_malloc(size_t size) {
+    return refuse(size) ? NULL : __real_malloc(size);
+}
+
+void *__wrap_realloc(void *ptr, size_t size) {
+    return refuse(size) ? NULL : __real_realloc(ptr, size);
 }
 
 static int enter(const char *op) {
     if (!after_put || refused || strcmp(op, "call") != 0) return 0;
     after_put = 0;
+    const char *size = getenv("IMRE_TEST_CALL_SIZE");
+    allocation_size = size ? (size_t)strtoul(size, NULL, 10) : 113 * sizeof(uint64_t);
     const char *ordinal = getenv("IMRE_TEST_GETTER_ALLOCATION");
     remaining = ordinal ? (unsigned)strtoul(ordinal, NULL, 10) : 0;
     return 1;
@@ -31,7 +44,7 @@ static int enter(const char *op) {
 
 static uint64_t leave(const char *op, int probe, uint64_t result) {
     if (probe) remaining = 0;
-    if (strcmp(op, "put") == 0) after_put = 1;
+    if (strcmp(op, "put") == 0 && !getenv("IMRE_TEST_CALL_SIZE")) after_put = 1;
     return result;
 }
 
@@ -43,4 +56,11 @@ uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b
 uint64_t __wrap_imre_dyn_op(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c) {
     int probe = enter(op);
     return leave(op, probe, __real_imre_dyn_op(ctx, op, a, b, c));
+}
+
+uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
+    static const char marker[] = "start formatter allocation probe 2332";
+    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
+    if (kind == 1 && len == sizeof(marker) - 1 && !memcmp(data, marker, len)) after_put = 1;
+    return result;
 }

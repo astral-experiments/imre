@@ -55,3 +55,42 @@ def current():
 
     group = {Member(), 1}
     print(repr(group), len(group))
+
+
+def allocation():
+    value = [23]
+    for _ in range(18):
+        value = [value]
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        repr(value)
+    except MemoryError as error:
+        print("caught", error.args)
+    print(len(repr(value)))
+
+
+def defaultdict_allocation():
+    from collections import defaultdict
+
+    visits = []
+
+    class Factory:
+        def __call__(self):
+            return None
+
+        def __repr__(self):
+            visits.append(1)
+            return "the factory"
+
+    value = defaultdict(Factory())
+    value["entry"] = "q" * 91
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        text = repr(value)
+    except MemoryError as error:
+        print("caught", error.args, len(visits))
+    else:
+        print("value", len(text), len(visits))
+    print("retry", len(repr(value)), len(visits))
