@@ -333,10 +333,10 @@ fn fromkeys(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         return Err(type_error("dict.fromkeys needs a class"));
     };
     if !kwargs.is_empty() {
-        let name = match ctx.heap.get(class) {
-            Value::Native(name) => name.rsplit('.').next().unwrap_or(name),
-            Value::Class { name, .. } => name,
-            _ => return Err(type_error("dict.fromkeys needs a class")),
+        let name = ctx.class_name(class);
+        let name = match ctx.own_class_attr(class, "__qualname__") {
+            Some(qualname) => ctx.str_value(qualname)?,
+            None => name.rsplit('.').next().unwrap_or(name),
         };
         return Err(type_error(format!(
             "{name}.fromkeys() takes no keyword arguments"
