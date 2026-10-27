@@ -15,6 +15,11 @@ class Override:
         return ('z', 'a', 'a')
 
 
+class ExceptionDirectory(ValueError):
+    def __dir__(self):
+        return ('z', 'a', 'a')
+
+
 class Broken:
     def __dir__(self):
         return 7
@@ -76,6 +81,7 @@ def current():
         print('missing required method argument')
     target = Override()
     target.__dir__ = lambda: ['shadow']
+    print(operation(ExceptionDirectory()))
     result = operation(target)
     print(type(result) is list, result, '__dir__' in operation(Override))
     module = __import__(__name__)

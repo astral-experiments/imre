@@ -189,7 +189,7 @@ impl Context {
             Value::Instance { class, .. } => *class,
             Value::Raised(Error {
                 class: Some(class), ..
-            }) if name == "__str__" => *class,
+            }) if matches!(name, "__dir__" | "__str__") => *class,
             _ => return Ok(None),
         };
         self.class_attr(class, name)
