@@ -100,18 +100,37 @@ fn platform_codec(_name: &str) -> bool {
     false
 }
 
-/// An absent result is a syntax/decode error, as caught by linecache.updatecache.
-/// A registered codec with no native decoder stays distinguishable from bad input.
-pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
+/// The file reader drops malformed source; compile reports the reason to Python.
+pub(crate) enum SourceDecodeError {
+    Null,
+    Invalid(String, Option<SourceRange>),
+    NonText(String),
+    Unsupported(String),
+}
+
+pub(crate) struct SourceRange {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    // The tokenizer constructs its location before compile attaches the filename.
+    pub tokenizer: bool,
+}
+
+fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
     let bom = bytes.starts_with(BOM);
     let bytes = bytes.strip_prefix(BOM).unwrap_or(bytes);
     let mut lines = bytes.split_inclusive(|b| *b == b'\n');
     let first = lines.next().unwrap_or_default();
     let mut checked = first.len();
+    let mut declaration_line = first;
+    let mut lineno = 1;
     let declared = cookie(first).or_else(|| {
         if matches!(trim_space(first).first(), None | Some(b'#' | b'\r' | b'\n')) {
             let second = lines.next().unwrap_or_default();
             checked += second.len();
+            declaration_line = second;
+            lineno = 2;
             cookie(second)
         } else {
             None
@@ -119,7 +138,23 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
     });
     let name = declared.map(normal_name).unwrap_or("utf-8");
     if bom && name != "utf-8" {
-        return Ok(None);
+        return Err(SourceDecodeError::Invalid(
+            format!("encoding problem: {name} with BOM"),
+            Some(SourceRange {
+                line: lineno,
+                start: 0,
+                // CPython includes the line terminator in its second cookie span.
+                end: declaration_line.len()
+                    - usize::from(lineno == 1 && declaration_line.ends_with(b"\n")),
+                text: String::from_utf8_lossy(
+                    declaration_line
+                        .strip_suffix(b"\n")
+                        .unwrap_or(declaration_line),
+                )
+                .into_owned(),
+                tokenizer: true,
+            }),
+        ));
     }
     let normalized;
     let mode = match name {
@@ -133,46 +168,98 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
             {
                 Some((_, kind)) => kind,
                 None if platform_codec(&normalized) => "unsupported",
-                None => return Ok(None),
+                None => {
+                    return Err(SourceDecodeError::Invalid(
+                        format!("unknown encoding: {name}"),
+                        None,
+                    ));
+                }
             }
         }
     };
     if bytes[..checked].contains(&0) {
-        return Ok(None);
+        return Err(SourceDecodeError::Null);
     }
-    Ok(match mode {
-        "utf-8" | "utf-8-sig" => std::str::from_utf8(bytes).ok().map(Cow::Borrowed),
-        "ascii" => bytes
-            .is_ascii()
-            .then(|| Cow::Borrowed(std::str::from_utf8(bytes).unwrap())),
-        "iso8859-1" | "iso-8859-1" => {
-            Some(Cow::Owned(bytes.iter().map(|b| char::from(*b)).collect()))
+    match mode {
+        "utf-8" | "utf-8-sig" => std::str::from_utf8(bytes).map(Cow::Borrowed).map_err(|err| {
+            if name != "utf-8" {
+                let (_, _, message) = super::super::bytes::utf8_error_details(bytes, err);
+                return SourceDecodeError::Invalid(message, None);
+            }
+            let pos = err.valid_up_to();
+            let line = 1 + bytes[..pos].iter().filter(|&&b| b == b'\n').count();
+            let start = bytes[..pos].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+            let offset = 1 + std::str::from_utf8(&bytes[start..pos]).unwrap().chars().count();
+            let raw_line = bytes[start..].split(|&b| b == b'\n').next().unwrap_or_default();
+            SourceDecodeError::Invalid(format!("Non-UTF-8 code starting with '\\x{:02x}' on line {line}, but no encoding declared; see https://peps.python.org/pep-0263/ for details", bytes[pos]), Some(SourceRange { line, start: offset, end: offset, text: String::from_utf8_lossy(raw_line).into_owned(), tokenizer: true }))
+        }),
+        "ascii" => {
+            if let Some(pos) = bytes.iter().position(|b| !b.is_ascii()) {
+                return Err(SourceDecodeError::Invalid(format!("'ascii' codec can't decode byte 0x{:02x} in position {pos}: ordinal not in range(128)", bytes[pos]), None));
+            }
+            Ok(Cow::Borrowed(std::str::from_utf8(bytes).unwrap()))
         }
-        "nontext" => {
-            return Err(Error::new(
-                Kind::LookupError,
-                format!(
-                    "'{name}' is not a text encoding; use codecs.decode() to handle arbitrary codecs"
-                ),
-            ));
-        }
-        "unsupported" => {
-            return Err(Error::new(
-                Kind::NotImplementedError,
-                format!("linecache: native source decoder for '{name}' is unavailable"),
-            ));
-        }
+        "iso8859-1" | "iso-8859-1" => Ok(Cow::Owned(bytes.iter().map(|b| char::from(*b)).collect())),
+        "nontext" => Err(SourceDecodeError::NonText(format!("'{name}' is not a text encoding; use codecs.decode() to handle arbitrary codecs"))),
+        "unsupported" => Err(SourceDecodeError::Unsupported(name.to_owned())),
         index => {
             let table = Charmap::at(index.parse().unwrap());
             let mut text = String::with_capacity(bytes.len());
-            for b in bytes {
-                let Some(ch) = table.decode(*b) else {
-                    return Ok(None);
-                };
+            for (pos, &b) in bytes.iter().enumerate() {
+                let ch = table.decode(b).ok_or_else(|| SourceDecodeError::Invalid(format!("'charmap' codec can't decode byte 0x{b:02x} in position {pos}: character maps to <undefined>"), None))?;
                 text.push(ch);
             }
-            Some(Cow::Owned(text))
+            Ok(Cow::Owned(text))
         }
+    }
+}
+
+pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
+    match decode_source(bytes) {
+        Ok(text) => Ok(Some(text)),
+        Err(SourceDecodeError::Null | SourceDecodeError::Invalid(..)) => Ok(None),
+        Err(SourceDecodeError::NonText(msg)) => Err(Error::new(Kind::LookupError, msg)),
+        Err(SourceDecodeError::Unsupported(name)) => Err(Error::new(
+            Kind::NotImplementedError,
+            format!("linecache: native source decoder for '{name}' is unavailable"),
+        )),
+    }
+}
+
+/// Compile scans physical lines after universal newline translation, before decoding.
+pub(crate) fn decode_compile_source(bytes: &[u8]) -> Result<String, SourceDecodeError> {
+    if bytes.contains(&0) {
+        return Err(SourceDecodeError::Null);
+    }
+    let mut normalized;
+    let input = if bytes.contains(&b'\r') || !bytes.ends_with(b"\n") {
+        normalized = bytes.to_vec();
+        super::super::codecs::normalize_newlines(&mut normalized);
+        if !normalized.ends_with(b"\n") {
+            normalized.push(b'\n');
+        }
+        &normalized
+    } else {
+        bytes
+    };
+    let text = decode_source(input)?;
+    if text.starts_with('\u{feff}') {
+        // Ruff accepts an initial BOM; the Python tokenizer already consumed the signature.
+        return Err(SourceDecodeError::Invalid(
+            "invalid non-printable character U+FEFF".into(),
+            Some(SourceRange {
+                line: 1,
+                start: 1,
+                end: 1,
+                text: text.lines().next().unwrap_or_default().to_owned(),
+                tokenizer: false,
+            }),
+        ));
+    }
+    Ok(if text.contains('\r') {
+        super::super::codecs::universal_newlines(text.into_owned())
+    } else {
+        text.into_owned()
     })
 }
 
