@@ -62,6 +62,7 @@ def current():
     from collections import _count_elements
     from _collections import _count_elements as native_count
 
+    fromkeys_construction()
     counted = {"a": 4}
     print(native_count is _count_elements, native_count(counted, "aba"), counted)
     try:
@@ -462,6 +463,35 @@ def current():
     key = Colliding()
     print({key: 13}[key])
     declined_key_equality()
+
+
+def fromkeys_construction():
+    from collections import Counter, defaultdict
+
+    class Custom(dict):
+        def __setitem__(self, key, value):
+            dict.__setitem__(self, key + 10, value)
+
+    source = Custom()
+    shared = []
+    made = source.fromkeys([2, 1, 2], shared)
+    made[11].append(7)
+    assert type(made) is Custom and list(made) == [12, 11]
+    assert not source and made[12] is shared and shared == [7]
+    fresh = defaultdict(list).fromkeys([1])
+    assert fresh[1] is None
+    try:
+        fresh[2]
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("inherited the original factory")
+    try:
+        Counter.fromkeys([1])
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("Counter.fromkeys accepted keys")
 
 
 def declined_key_equality():

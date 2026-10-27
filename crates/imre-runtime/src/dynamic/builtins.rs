@@ -220,6 +220,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__delitem__",
     "clear",
     "copy",
+    "fromkeys",
     "get",
     "items",
     "keys",
