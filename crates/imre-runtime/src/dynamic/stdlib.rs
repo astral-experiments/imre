@@ -33,6 +33,7 @@ mod math;
 mod metadata;
 mod operator;
 mod ordered_dict;
+mod os;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -452,6 +453,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
         }
+        ("posix", "environ") => os::environment(ctx),
+        ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -488,7 +491,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
-        | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_posixpath", "exists" | "extension_start" | "isfile")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
@@ -790,6 +793,9 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
+    }
+    if matches!(name, "posix.putenv" | "posix.unsetenv") {
+        return os::change_environment(ctx, name, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
@@ -1103,6 +1109,7 @@ pub(super) fn call(
         | "_string.formatter_field_name_split"
         | "collections.defaultdict"
         | "collections.defaultdict.copy"
+        | "collections.defaultdict.__copy__"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
@@ -1354,7 +1361,7 @@ pub(super) fn call(
             factory: args.first().copied().unwrap_or(NONE),
             entries: Default::default(),
         }),
-        "collections.defaultdict.copy" => {
+        "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
             let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
                 return Err(Error::new(

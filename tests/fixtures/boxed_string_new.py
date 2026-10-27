@@ -24,6 +24,12 @@ class Printable:
 
 
 def current():
+    class Text(str):
+        pass
+    class Data(bytes):
+        pass
+    print("é" in Text("éclair"), "x" not in Text("éclair"))
+    print(b"bc" in Data(b"abc"), 97 in Data(b"abc"))
     wrapped = Wrapped("Málaga")
     for i in range(1800):
         str(i)

@@ -832,8 +832,13 @@ pub unsafe extern "C" fn imre_path_exists(path: *const Object) -> u32 {
     unsafe {
         object(path)
             .0
-            .with(|storage| u32::from(fs::metadata(storage.path()).is_ok()))
+            .with(|storage| u32::from(exists(storage.path().as_ref())))
     }
+}
+
+/// Follow symlinks and return false for every failed stat, including permission errors.
+pub(crate) fn exists(path: &std::path::Path) -> bool {
+    fs::metadata(path).is_ok()
 }
 
 /// Test the target of a filesystem spelling, following symlinks and suppressing stat errors.

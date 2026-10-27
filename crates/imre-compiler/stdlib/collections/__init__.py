@@ -199,6 +199,9 @@ class Counter(dict):
     def copy(self):
         return self.__class__(self)
 
+    def __reduce__(self):
+        return self.__class__, (dict(self),)
+
     def __delitem__(self, key):
         dict.pop(self, key, None)
 

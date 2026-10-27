@@ -82,8 +82,13 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     let doseq = ctx.optional_truth(doseq, false)?;
     let safe = safe.unwrap_or_else(|| ctx.text(""));
     let pairs = ctx.iterator(query)?;
+    ctx.heap.reserve_temporaries(1)?;
+    ctx.heap.keep(pairs);
+    let roots = ctx.heap.temporary_mark();
     let mut joined = String::new();
     while let Some(item) = ctx.next_item(pairs)? {
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(item);
         let fields = ctx.items(item)?;
         let [k, v] = fields.as_slice() else {
             let message = if fields.len() < 2 {
@@ -99,6 +104,9 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             };
             return Err(Error::new("ValueError", message));
         };
+        ctx.heap.reserve_temporaries(2)?;
+        ctx.heap.keep(*k);
+        ctx.heap.keep(*v);
         let key = encoded(ctx, *k, safe, encoding, errors, via)?;
         let expanded = if doseq && !matches!(ctx.heap.get(*v), Value::Bytes(_) | Value::Str(_)) {
             let len = ctx.builtin("len");
@@ -110,6 +118,12 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         } else {
             None
         };
+        if let Some(values) = &expanded {
+            ctx.heap.reserve_temporaries(values.len())?;
+            for &value in values {
+                ctx.heap.keep(value);
+            }
+        }
         for value in expanded.as_deref().unwrap_or(std::slice::from_ref(v)) {
             let value = encoded(ctx, *value, safe, encoding, errors, via)?;
             if !joined.is_empty() {
@@ -119,6 +133,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             joined.push('=');
             joined.push_str(&value);
         }
+        ctx.heap.release_temporaries_since(roots);
     }
     Ok(ctx.text(joined))
 }

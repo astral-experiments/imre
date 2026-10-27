@@ -17,11 +17,11 @@ jobs:
     name: ${{ matrix.target }}
     runs-on: >-
       ${{ matrix.target == 'aarch64-apple-darwin' &&
-          (github.repository == 'viarius-experiments/imre' && 'nscloud-macos-tahoe-arm64-6x14' || 'macos-15') ||
+          (github.repository_id == '1423429334' && 'nscloud-macos-tahoe-arm64-6x14' || 'macos-15') ||
           matrix.target == 'aarch64-unknown-linux-gnu' &&
-          (github.repository == 'viarius-experiments/imre' && 'nscloud-ubuntu-24.04-arm64-4x8' ||
+          (github.repository_id == '1423429334' && 'nscloud-ubuntu-24.04-arm64-4x8' ||
            github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm') ||
-          (github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' ||
+          (github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' ||
            github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04') }}
     strategy:
       matrix:
@@ -121,7 +121,7 @@ jobs:
     name: Shell installer
     needs: build
     runs-on: >-
-      ${{ github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' ||
+      ${{ github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' ||
           github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

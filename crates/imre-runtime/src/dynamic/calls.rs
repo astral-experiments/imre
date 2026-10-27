@@ -1680,8 +1680,10 @@ impl Context {
             Value::Native(class) if class == "collections.defaultdict" && name == "clear" => {
                 return Ok(self.builtin("dict.clear"));
             }
-            Value::Native(class) if class == "collections.defaultdict" && name == "copy" => {
-                return Ok(self.builtin("collections.defaultdict.copy"));
+            Value::Native(class)
+                if class == "collections.defaultdict" && matches!(name, "copy" | "__copy__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(class)
                 if name == "fromkeys"

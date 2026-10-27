@@ -1096,7 +1096,7 @@ fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<
     Ok((status, stdout, stderr))
 }
 
-/// Borrows the POSIX environment, which the language runtime never mutates.
+/// Borrows the POSIX environment while no native environment change is in progress.
 fn native_environ() -> *const *const libc::c_char {
     // SAFETY: the OS stores a live null-terminated environment for this process.
     unsafe {
@@ -1109,6 +1109,17 @@ fn native_environ() -> *const *const libc::c_char {
             environ
         }
     }
+}
+
+/// Copy the raw entries used by the POSIX module before its first environment mutation.
+pub(crate) fn initial_environment() -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut seen = std::collections::HashSet::new();
+    // SAFETY: the standalone runtime does not run Python threads. Nothing in this
+    // iteration calls Python or changes the native environment before it is copied.
+    unsafe { environment_entries(native_environ()) }
+        .filter(|(name, _)| seen.insert(*name))
+        .map(|(name, value)| (name.to_vec(), value.to_vec()))
+        .collect()
 }
 
 /// # Safety
@@ -1217,12 +1228,11 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<cr
 }
 
 /// Returns an independent UTF-8 dictionary without exposing undecodable host bytes.
-/// The sealed runtime never changes environ; diagnostics omit inherited values.
+/// Diagnostics omit inherited values.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_environ_copy() -> *const Object {
-    // SAFETY: the OS supplies a terminated environment, and this standalone runtime
-    // has no environment mutation or language threads. Rust vars_os omits empty
-    // names, so the raw POSIX entries are required for Python-compatible copies.
+    // SAFETY: the single-threaded interpreter does not call Python while copying
+    // the OS's terminated environment. Raw POSIX entries preserve empty names.
     let result = unsafe { environment_snapshot(native_environ()) };
     finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }
