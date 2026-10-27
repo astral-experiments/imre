@@ -265,6 +265,28 @@ impl Context {
         }
     }
 
+    /// Keep the Python pathname for a native open error with exactly one filename.
+    pub(super) fn with_open_filename(&mut self, mut error: Error, filename: Id) -> Result<Error> {
+        let Some(Args::Native { source, .. }) = error.os_args.as_deref() else {
+            return Ok(error);
+        };
+        if !matches!(source.text_paths.as_ref(), Some([Some(_), None])) {
+            return Ok(error);
+        }
+        let errno = self.int(source.errno);
+        let mut description = String::new();
+        append(&mut description, &source.description)?;
+        let strerror = self.text(description);
+        error.args = Some(self.alloc(Value::Tuple(copy_ids(&[errno, strerror])?)));
+        error.os_args = Some(Args::new(Args::Python(Fields {
+            errno: Some(errno),
+            strerror: Some(strerror),
+            filename: Some(filename),
+            ..Fields::default()
+        }))?);
+        Ok(error)
+    }
+
     fn native_os_fields(
         &mut self,
         source: &OsErrorArgs,
