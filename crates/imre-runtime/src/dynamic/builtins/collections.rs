@@ -3,28 +3,35 @@ use super::super::value::DictViewKind;
 use super::*;
 use num_traits::Signed;
 
-/// Select the first maximal item, evaluating each key as its candidate arrives.
-pub(super) fn maximum(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Select the first minimum or maximum, evaluating each key as its candidate arrives.
+pub(super) fn extremum(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     let Some(&first) = args.first() else {
-        return Err(type_error("max expected at least 1 argument, got 0"));
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
     };
-    let [key, default] = bind_method_arguments("max", &[], kwargs, ["key", "default"], 0)?;
+    let [key, default] = bind_method_arguments(name, &[], kwargs, ["key", "default"], 0)?;
     let key = key.filter(|&key| key != NONE);
     if args.len() > 1 {
         if default.is_some() {
-            return Err(type_error(
-                "Cannot specify a default for max() with multiple positional arguments",
-            ));
+            return Err(type_error(format!(
+                "Cannot specify a default for {name}() with multiple positional arguments"
+            )));
         }
         let mut values = args.iter().copied();
-        return maximum_by(ctx, key, None, |_| Ok(values.next()));
+        return select_item(ctx, name, key, None, |_| Ok(values.next()));
     }
     if matches!(ctx.heap.get(first), Value::Instance { .. })
         && ctx.slot(first, "__iter__").is_none()
         && ctx.slot(first, "__getitem__").is_some()
     {
         let mut index = 0_i64;
-        return maximum_by(ctx, key, default, |ctx| {
+        return select_item(ctx, name, key, default, |ctx| {
             let position = ctx.int(index);
             match ctx.get_item(first, position) {
                 Ok(value) => {
@@ -45,20 +52,24 @@ pub(super) fn maximum(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         });
     }
     let iterator = ctx.iterator(first)?;
-    maximum_by(ctx, key, default, |ctx| ctx.next_item(iterator))
+    select_item(ctx, name, key, default, |ctx| ctx.next_item(iterator))
 }
 
 /// Keep the winning item and key alive across iterator and comparison callbacks.
-fn maximum_by(
+fn select_item(
     ctx: &mut Context,
+    name: &str,
     key: Option<Id>,
     default: Option<Id>,
     mut next: impl FnMut(&mut Context) -> Result<Option<Id>>,
 ) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     let Some(mut winner) = next(ctx)? else {
-        return default.ok_or_else(|| Error::new("ValueError", "max() iterable argument is empty"));
+        return default.ok_or_else(|| {
+            Error::new("ValueError", format!("{name}() iterable argument is empty"))
+        });
     };
+    let comparison = if name == "min" { "<" } else { ">" };
     let rank = |ctx: &mut Context, item| match key {
         Some(key) => ctx.call(key, vec![item], Vec::new()),
         None => Ok(item),
@@ -74,8 +85,8 @@ fn maximum_by(
         };
         ctx.heap.keep(item);
         let item_key = rank(ctx, item)?;
-        let greater = ctx.binary(">", item_key, winning_key)?;
-        if ctx.truth(greater)? {
+        let better = ctx.binary(comparison, item_key, winning_key)?;
+        if ctx.truth(better)? {
             winner = item;
             winning_key = item_key;
         }
