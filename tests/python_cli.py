@@ -487,6 +487,7 @@ def report(text):
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
             "boxed_selector_modify_data.py",
+            "boxed_structural_hooks.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_map.py",
