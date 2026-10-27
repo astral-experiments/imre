@@ -111,6 +111,25 @@ impl Entries {
         self.values.remove(index)
     }
 
+    pub(super) fn insertion_end(&self) -> usize {
+        self.next
+    }
+
+    /// Return the last live entry whose insertion position is below the cursor.
+    pub(super) fn before(&self, end: usize) -> Option<(usize, Id, Id)> {
+        let index = match &self.positions {
+            Some(positions) => positions.partition_point(|&pos| pos < end),
+            None => end.min(self.values.len()),
+        }
+        .checked_sub(1)?;
+        let position = self
+            .positions
+            .as_ref()
+            .map_or(index, |positions| positions[index]);
+        let (key, value) = self.values[index];
+        Some((position, key, value))
+    }
+
     /// Return the next live entry at or beyond the iterator's insertion position.
     pub(super) fn at(&self, position: usize) -> Option<(usize, Id, Id)> {
         let (index, position) = if let Some(positions) = &self.positions {
