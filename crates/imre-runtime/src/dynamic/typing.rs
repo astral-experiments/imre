@@ -108,7 +108,7 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         let parameters = ctx.alloc(Value::Tuple(Vec::new()));
         ctx.bind(scope, "__parameters__", parameters);
         let abstract_methods = ctx.alloc(Value::Set {
-            items: Vec::new(),
+            entries: Default::default(),
             frozen: true,
         });
         ctx.bind(scope, "__abstractmethods__", abstract_methods);

@@ -10,7 +10,7 @@ mod integer;
 mod print;
 mod text;
 mod translation;
-pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, update_set};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -994,7 +994,8 @@ pub(super) fn call(
                 ))
             };
             let size = match ctx.heap.get(args[0]) {
-                Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
+                Value::List(v) | Value::Tuple(v) => v.len(),
+                Value::Set { entries, .. } => entries.len(),
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings)
                 | Value::Iterator {

@@ -91,7 +91,7 @@ impl Context {
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
             "set" => Ok(self.alloc(Value::Set {
-                items: Vec::new(),
+                entries: Default::default(),
                 frozen: false,
             })),
             "dict" => Ok(self.dict(Vec::new())),

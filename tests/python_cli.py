@@ -472,6 +472,7 @@ def report(text):
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
+            "boxed_set_union.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
