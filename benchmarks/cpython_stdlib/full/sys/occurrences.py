@@ -44,6 +44,20 @@ def reference_skips(reference, level):
     return result
 
 
+def testcase_import_blocker(child, entry, fixture):
+    """Recognize only the child traceback for the generated top-level TestCase import."""
+    if child.returncode != 1 or child.stdout:
+        return None
+    for line, statement in enumerate(fixture.splitlines(), 1):
+        if statement == "import unittest" and child.stderr.splitlines() == [
+            "Traceback (most recent call last):",
+            f'  File "{entry}", line {line}',
+            "ModuleNotFoundError: No module named 'unittest'",
+        ]:
+            return line
+    return None
+
+
 def blocked_methods(toolchain, root, source, reference, selected, module):
     """Compile complete definitions where possible. A plan or proposal cannot earn a pass."""
     upstream = ast.parse(source.read_bytes())
@@ -87,8 +101,10 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
         fixture = preamble + "\n" + testcase_fixture()
         outcome, locations = "blocked", dict(UNOBSERVED)
         proof = {"source": f"Lib/test/test_sys.py:{node.lineno}", "opt_level": toolchain.level}
+        child_errors = []
         try:
-            compiled = native_method(toolchain, folder, source, cls, name, fixture)
+            compiled = native_method(toolchain, folder, source, cls, name, fixture,
+                                     on_child_error=child_errors.append)
         except NativeCompileError as exc:
             proof.update(stage="compile", diagnostic=str(exc).replace(str(folder), "[case]").strip())
             if name == intern_case.CASE:
@@ -111,13 +127,22 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
                     raise AssertionError(f"{name}: newly executable complete method; identify its product operation")
                 if not failures:
                     raise AssertionError((name, "unreconciled fixture skip", skips))
-                outcome = "error"
-                locations = roles(body="unknown", assertions="unknown", operation="unknown", fixture="cpython")
-                # native_method includes the child status, stdout and stderr in its exception.
-                reason = "\n".join(f"{case_id}: {trace.splitlines()[-1]}" for case_id, trace in failures)
-                reason = reason.replace(str(folder), "[case]")
-                proof.update(stage="native execution under original fixture", diagnostic=reason,
-                             method_sha256=hashlib.sha256(method_bytes(source, cls, method)).hexdigest())
+                proof["method_sha256"] = hashlib.sha256(method_bytes(source, cls, method)).hexdigest()
+                line = None
+                if len(failures) == len(child_errors) == 1 and not skips:
+                    line = testcase_import_blocker(child_errors[0], folder.resolve() / "case.py", fixture)
+                if line is not None:
+                    locations["fixture"] = "cpython"
+                    reason = f"Native fixture stopped at case.py:{line} on import unittest before entering the method."
+                    child = child_errors[0]
+                    proof.update(stage="native fixture import", child_status=child.returncode,
+                                 diagnostic=child.stderr.replace(str(folder), "[case]").strip())
+                else:
+                    outcome = "error"
+                    locations = roles(body="unknown", assertions="unknown", operation="unknown", fixture="cpython")
+                    reason = "\n".join(f"{case_id}: {trace.splitlines()[-1]}" for case_id, trace in failures)
+                    reason = reason.replace(str(folder), "[case]")
+                    proof.update(stage="native execution under original fixture", diagnostic=reason)
         if state == "proposed":
             proof["exception_proposal"] = "unreviewed; still in the denominator"
         results[key] = {"outcome": outcome, "roles": locations, "reason": reason, "evidence": proof}

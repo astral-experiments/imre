@@ -209,6 +209,20 @@ impl Calendar {
         parts(delta(&self.0))
     }
 
+    /// Timedeltas, zones and aware datetimes hash as their normalized duration.
+    pub(crate) fn hash_delta_parts(&self) -> Option<(i128, i128, i128)> {
+        with(&self.0, |v| match v {
+            Value::Delta(n) => Some(parts(*n)),
+            Value::Zone { offset, .. } => Some(parts(delta(offset))),
+            Value::Date {
+                local,
+                zone: Some(zone),
+                ..
+            } => Some(parts(local + DAY - offset(zone))),
+            _ => None,
+        })
+    }
+
     pub(crate) fn equal(&self, other: &Self) -> bool {
         with(&self.0, |a| with(&other.0, |b| equal(a, b)))
     }

@@ -42,6 +42,13 @@ def current():
             events.append(("contains", key))
             return dict.__contains__(self, key)
 
+    values = [4, 2]
+    alias = values
+    alias *= 0
+    print(alias is values, values)
+    alias += [7]
+    print(alias is values, values)
+
     events = []
     mapping = Mapping(visits=2)
     print(op.getitem(mapping, "visits"), op.contains(mapping, "absent"), events)

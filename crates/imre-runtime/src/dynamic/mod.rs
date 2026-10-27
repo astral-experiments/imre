@@ -64,6 +64,8 @@ pub(crate) struct Context {
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
     bytearray_exports: Vec<Id>,
+    // Active sorts temporarily detach their list storage while Python callbacks run.
+    sorting_lists: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
@@ -589,6 +591,7 @@ impl Context {
             class_lineage: None,
             first_argument: None,
             names: Default::default(),
+            closure: Default::default(),
             namespace: None,
             globals: Default::default(),
             exec_globals: None,
@@ -604,6 +607,21 @@ impl Context {
         s
     }
     fn binding_scope(&self, mut scope: Id, name: &str) -> Id {
+        if self.scope_data(scope).closure.nonlocals.contains(name) {
+            let mut cursor = self.scope_data(scope).parent;
+            while let Some(parent) = cursor {
+                let frame = self.scope_data(parent);
+                if let Some(&cell) = frame.closure.cells.get(name)
+                    && let Value::Cell { scope, .. } = self.heap.get(cell)
+                {
+                    return *scope;
+                }
+                if frame.closure.declared.contains(name) {
+                    return parent;
+                }
+                cursor = frame.parent;
+            }
+        }
         if self.scope_data(scope).globals.contains(name) {
             while let Some(parent) = self.scope_data(scope).parent {
                 scope = parent;
@@ -697,6 +715,19 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
+            if let Some(&cell) = s.closure.cells.get(name)
+                && let Value::Cell {
+                    scope: owner,
+                    name: cell_name,
+                } = self.heap.get(cell)
+            {
+                return self.scope_name(*owner, cell_name).ok_or_else(|| {
+                    Error::new(
+                        "NameError",
+                        format!("free variable '{name}' is not associated with a value"),
+                    )
+                });
+            }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
@@ -1070,7 +1101,11 @@ impl Context {
                 body: value::Body::Native(entry),
                 parameters: NONE,
                 nested: Vec::new(),
+                freevars: Vec::new(),
+                closure_supported: false,
                 name: name_id,
+                qualname: name_id,
+                doc: NONE,
                 filename,
                 first_line: 1,
                 module_definition: true,

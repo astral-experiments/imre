@@ -15,11 +15,15 @@ pub(super) struct CodeObject {
     pub body: Body,
     pub parameters: Id,
     pub name: Id,
+    pub qualname: Id,
+    pub doc: Id,
     pub filename: Id,
     pub first_line: u32,
     pub module_definition: bool,
     pub coroutine: bool,
     pub nested: Vec<(usize, Id)>,
+    pub freevars: Vec<String>,
+    pub closure_supported: bool,
 }
 
 #[derive(Clone)]
@@ -216,6 +220,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
+            Value::BufferedRandom(_) => "_io.BufferedRandom",
             Value::List(_) => "list",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
@@ -238,6 +243,7 @@ impl Context {
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
             Value::Code(_) => "code",
+            Value::Cell { .. } => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -330,12 +336,21 @@ pub(super) struct Scope {
     pub class_lineage: Option<(Id, Id)>,
     pub first_argument: Option<String>,
     pub names: indexmap::IndexMap<String, Id>,
+    pub closure: Box<ClosureScope>,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
     pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
     pub module: String,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct ClosureScope {
+    pub declared: HashSet<String>,
+    pub declared_complete: bool,
+    pub nonlocals: HashSet<String>,
+    pub cells: HashMap<String, Id>,
 }
 
 #[derive(Clone, Copy)]
@@ -405,6 +420,10 @@ pub(super) enum Value {
         entries: super::dictionary::Entries,
     },
     Scope(Scope),
+    Cell {
+        scope: Id,
+        name: String,
+    },
     ClassCell(Option<Id>),
     Super {
         start: Id,
@@ -419,6 +438,7 @@ pub(super) enum Value {
     },
     Function {
         fields: super::function_fields::FunctionFields,
+        closure: Id,
         code: Id,
         scope: Id,
         class_cell: Option<Id>,
@@ -535,9 +555,10 @@ pub(super) enum Value {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<super::stdlib::BinaryFile>),
+    File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
+    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexMatch {
         groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
@@ -647,6 +668,7 @@ impl Value {
             }
             Self::Selector(selector) => selector.borrow().trace(visit),
             Self::Scope(scope) => {
+                visit.extend(scope.closure.cells.values().copied());
                 visit.extend(scope.class_cell);
                 if let Some((bases, mro)) = scope.class_lineage {
                     visit.extend([bases, mro]);
@@ -669,7 +691,9 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(origin);
             }
+            Self::Cell { scope, .. } => visit.push(*scope),
             Self::Function {
+                closure,
                 scope,
                 class_cell,
                 code,
@@ -678,12 +702,18 @@ impl Value {
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults, *kwdefaults]);
+                visit.extend([*scope, *code, *defaults, *kwdefaults, *closure]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
             Self::Code(code) => {
-                visit.extend([code.name, code.filename, code.parameters]);
+                visit.extend([
+                    code.name,
+                    code.qualname,
+                    code.doc,
+                    code.filename,
+                    code.parameters,
+                ]);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
             Self::Generator {
@@ -773,7 +803,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_) => {}
+            | Self::TextFile(_)
+            | Self::BufferedRandom(_) => {}
         }
     }
 }
@@ -857,6 +888,7 @@ impl DictIterator {
 pub(super) struct Heap {
     slots: Vec<Option<Value>>,
     free: Vec<usize>,
+    pub(super) immutable_hashes: HashMap<Id, i64>,
     frames: Vec<Frame>,
     next_collection: usize,
 }
@@ -896,6 +928,7 @@ impl Heap {
                 Some(Value::NotImplemented),
             ],
             free: Vec::new(),
+            immutable_hashes: HashMap::new(),
             frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
         }
@@ -1007,6 +1040,7 @@ impl Heap {
         }
         for (id, alive) in marked.into_iter().enumerate() {
             if !alive && self.slots[id].take().is_some() {
+                self.immutable_hashes.remove(&(id as Id));
                 self.free.push(id);
             }
         }

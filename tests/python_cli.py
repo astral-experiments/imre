@@ -143,6 +143,11 @@ def main():
                 expected.stderr,
             )
 
+        compare(
+            "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
+            "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
+        )
+
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
@@ -422,15 +427,19 @@ def report(text):
             "boxed_ast.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
+            "boxed_slice_deep_repr.py",
+            "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
+            "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
+            "boxed_temporary_file.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
@@ -447,6 +456,9 @@ def report(text):
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
             "boxed_singleton_subclass.py",
+            "boxed_function_closure_cells.py",
+            "boxed_function_closure_edges.py",
+            "boxed_functiontype.py",
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
@@ -468,6 +480,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_posixpath.py",
             "boxed_itertools_count.py",
+            "boxed_enum_descriptors.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
@@ -476,11 +489,13 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
+            "boxed_selector_modify_data.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",
             "boxed_enumerate_methods.py",
+            "boxed_enumerate_metadata.py",
             "boxed_sorted.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",

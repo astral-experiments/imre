@@ -1,6 +1,19 @@
 from itertools import count
 
 
+class AddOnly:
+    def __init__(self, value):
+        self.value = value
+
+    def __add__(self, other):
+        return Number(self.value + other.value)
+
+
+class Number(AddOnly):
+    def __int__(self):
+        raise AssertionError("count must not coerce numeric objects")
+
+
 def current():
     counter = count()
     alias = iter(counter)
@@ -19,6 +32,18 @@ def current():
     start = 1 << 300
     cursor = count(start, 2)
     print(cursor.__next__() is start)
+
+    for args in ((AddOnly(1),), (0, AddOnly(1))):
+        try:
+            count(*args)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("count accepted an addition-only object")
+    cursor = count(1j, 2j)
+    print(next(cursor), next(cursor))
+    cursor = count(Number(1), Number(2))
+    print(next(cursor).value, next(cursor).value)
 
     for start, step in ((0.5, 1 << 1100), (1 << 1100, 0.5)):
         cursor = count(start, step)

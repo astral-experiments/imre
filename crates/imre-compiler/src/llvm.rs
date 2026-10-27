@@ -5047,6 +5047,8 @@ impl Emitter<'_, '_> {
             Builtin::SortByKeys
             | Builtin::SortByComparator
             | Builtin::SortDetach
+            | Builtin::ListExtendBuffer
+            | Builtin::ListExtendSnapshot
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
             | Builtin::StringJoin
@@ -9726,6 +9728,8 @@ declare ptr @imre_str_list_filter(ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_str_list_sorted_suffix(ptr, i32)
 declare i32 @imre_str_list_nonempty(ptr)
 declare ptr @imre_str_rstrip(ptr, ptr)
+declare ptr @imre_list_extend_buffer(i32)
+declare void @imre_list_extend_snapshot(ptr, i32, ptr)
 declare void @imre_list_extend_unhinted(ptr, i32)
 declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)

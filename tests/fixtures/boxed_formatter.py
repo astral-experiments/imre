@@ -37,3 +37,28 @@ def current():
     print(list(cursor))
     print(Formatter().format("Hello, {} {name}!", "Málaga", name="東京"))
     print(Tagged().vformat("{data[x]}{0!s:>{width}}", ("hi",), {"data": {"x": 42}, "width": 5}))
+    for value in (0, -15, 2**130 + 15, True):
+        print(f"{value:02X}", "{:+#08x}".format(value), format(value, "◇^9X"))
+        print(format(value, "#014_X"), format(value, "+#08b"))
+        for spec in ("02Q", "dX", ".2X", "+c"):
+            try:
+                format(value, spec)
+            except ValueError as error:
+                print(str(error))
+    for value in (-1, 0x110000, 1 << 90):
+        try:
+            format(value, "2c")
+        except OverflowError as error:
+            print(str(error))
+    huge = 1 << 14500
+    for render in (
+        lambda: f"{huge}",
+        lambda: "{}".format(huge),
+        lambda: format(huge, ""),
+        lambda: format(huge, "d"),
+        lambda: format(huge, "x"),
+    ):
+        try:
+            print(len(render()))
+        except ValueError as error:
+            print(str(error))

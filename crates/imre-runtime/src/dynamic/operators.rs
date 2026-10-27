@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 
-use num_traits::{Signed, ToPrimitive, Zero};
-
 use super::*;
 
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
@@ -387,15 +385,21 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.render_containers(id, false)
+        self.render_containers(id, false, false)
+            .expect("unlimited rendering")
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.render_containers(id, true)
+        self.render_containers(id, true, false)
+            .expect("unlimited rendering")
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
-    fn render_containers(&self, root: Id, quoted: bool) -> String {
+    pub(super) fn checked_format(&self, root: Id, quoted: bool) -> Result<String> {
+        self.render_containers(root, quoted, true)
+    }
+
+    fn render_containers(&self, root: Id, quoted: bool, checked: bool) -> Result<String> {
         enum Part<'a> {
             Value(Id, bool),
             Text(&'a str),
@@ -403,15 +407,34 @@ impl Context {
             Mapping(&'a [(Id, Id)], usize),
             Leave(Id, &'static str),
             ContextEnd(Id),
+            SliceEnd,
         }
         let mut output = String::new();
         let mut work = vec![Part::Value(root, quoted)];
         let mut active = Vec::new();
         let mut ancestors = std::collections::HashSet::new();
+        // CPython guards nested slice formatting against the thread's native stack.
+        // The pinned x86-64 Linux reference build uses 624 bytes per slice
+        // and keeps two native-stack margins before raising RecursionError.
+        const SLICE_FRAME_WORDS: usize = 78;
+        const STACK_MARGIN_WORDS: usize = 2048;
+        let slice_budget = if checked {
+            stacker::remaining_stack().map(|bytes| {
+                (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS)
+                    / SLICE_FRAME_WORDS
+            })
+        } else {
+            None
+        };
+        let mut slice_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::SliceEnd => {
+                    slice_depth -= 1;
+                    output.push(')');
+                }
                 Part::Leave(id, end) => {
                     ancestors.remove(&id);
                     let last = active.pop();
@@ -440,6 +463,19 @@ impl Context {
                 }
                 Part::Value(id, repr) => {
                     match self.heap.get(id) {
+                        Value::Slice(items) => {
+                            if slice_budget.is_some_and(|limit| slice_depth >= limit) {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            slice_depth += 1;
+                            output.push_str("slice(");
+                            work.push(Part::SliceEnd);
+                            work.push(Part::Sequence(items, 0));
+                            continue;
+                        }
                         Value::Instance {
                             scalar: None,
                             dictionary: Some(backing),
@@ -514,7 +550,7 @@ impl Context {
                 }
             }
         }
-        output
+        Ok(output)
     }
 
     /// Renders positional values inside tuples and exception representations.
@@ -794,12 +830,13 @@ impl Context {
                 .copied()
                 .ok_or_else(|| self.lookup_error("KeyError", key));
         }
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            if let Some(&(_, v)) = entries.iter().find(|(k, _)| self.equal(*k, key)) {
-                return Ok(v);
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            let (_, index) = self.find_dictionary_key(obj, key, None)?;
+            if let Some(index) = index {
+                return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
             }
             if let Value::DefaultDict { factory, .. } = self.heap.get(obj)
                 && *factory != NONE
@@ -830,21 +867,11 @@ impl Context {
             .ok_or_else(|| Error::new("IndexError", "index out of range"))
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            let index = entries.iter().position(|(k, _)| self.equal(*k, key));
-            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                self.heap.get_mut(obj)
-            else {
-                unreachable!()
-            };
-            if let Some(i) = index {
-                entries[i].1 = val
-            } else {
-                entries.push((key, val));
-            }
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.set_dictionary_key(obj, key, val, None, true)?;
         } else if let Value::ByteArray(data) = self.heap.get(obj) {
             if let Value::Slice(parts) = *self.heap.get(key) {
                 return self.set_slice(obj, parts, Some(val));
@@ -911,9 +938,8 @@ impl Context {
         if matches!(
             self.heap.get(container),
             Value::Dict(_) | Value::DefaultDict { .. }
-        ) && !builtins::hashable(self, item)
-        {
-            return Err(Error::new("TypeError", "unhashable key"));
+        ) {
+            return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
         let iterator = self.iterator(container).map_err(|error| {
             let ty = self.builtin("TypeError");
@@ -1289,37 +1315,30 @@ impl Context {
                 }
             }
         }
+        if op == "**"
+            && [left, right]
+                .into_iter()
+                .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
         }
         let result = if op == "**" {
-            let (x, y) = (x.big(), y.big());
-            if y.is_negative() {
-                if x.is_zero() {
-                    return Err(Error::new(
-                        "ZeroDivisionError",
-                        "0.0 cannot be raised to a negative power",
-                    ));
-                }
-                return Err(Error::new(
-                    "TypeError",
-                    "negative powers require floating-point results",
-                ));
+            if y.cmp(&crate::Int::from(0)).is_lt() {
+                let result = crate::integer_power::negative_power(&x, &y)?;
+                return Ok(self.alloc(Value::Float(result)));
             }
-            if let Some(exp) = y.to_u32() {
-                crate::Int::new(x.pow(exp))
-            } else if x.is_zero() || x.magnitude().bits() == 1 {
-                crate::Int::from(if x.is_zero() {
-                    0
-                } else if x.is_negative() && y.bit(0) {
-                    -1
-                } else {
-                    1
-                })
-            } else {
-                return Err(Error::new("OverflowError", "exponent is too large"));
-            }
+            crate::integer_power::power(&x, &y)?
         } else {
             let code = match op {
                 "+" => 0,
@@ -1390,7 +1409,7 @@ impl Context {
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+    pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
@@ -1442,7 +1461,12 @@ impl Context {
             let Value::List(items) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            *items = values;
+            if values.is_empty() && self.sorting_lists.contains(&a) {
+                // The allocated callback buffer records a mutation until the sort restores it.
+                items.clear();
+            } else {
+                *items = values;
+            }
             return Ok(a);
         }
         self.binary(op, a, b)

@@ -1,5 +1,7 @@
 //! Dictionary views keep reading their owner while callbacks mutate it.
 
+mod keys;
+
 use std::ops::{Deref, DerefMut};
 
 use super::Id;
@@ -9,6 +11,7 @@ pub(super) struct Entries {
     values: Vec<(Id, Id)>,
     // Dense storage keeps one position per live key after a deletion.
     positions: Option<Vec<usize>>,
+    index: Option<keys::Index>,
     next: usize,
     usable: usize,
 }
@@ -24,6 +27,7 @@ impl From<Vec<(Id, Id)>> for Entries {
         Self {
             values,
             positions: None,
+            index: None,
             next,
             usable: usable_slots(next + next.div_ceil(2)),
         }
@@ -69,22 +73,33 @@ impl<'a> IntoIterator for &'a Entries {
 }
 
 impl Entries {
-    pub(super) fn push(&mut self, value: (Id, Id)) {
+    pub(super) fn push(&mut self, value: (Id, Id), hash: i64) {
         // CPython compacts its entries when the index table runs out of usable slots.
         // Existing iterators keep their numerical cursor in the compacted table.
         if self.next == self.usable {
             self.usable = usable_slots(self.values.len() * 3);
             self.next = self.values.len();
             self.positions = None;
+            if let Some(index) = &mut self.index {
+                index.compact((self.usable + 1).next_power_of_two());
+            }
         }
         if let Some(positions) = &mut self.positions {
             positions.push(self.next);
         }
+        self.index
+            .as_mut()
+            .expect("indexed dictionary")
+            .push(hash, self.next);
         self.next += 1;
         self.values.push(value);
     }
 
     pub(super) fn remove(&mut self, index: usize) -> (Id, Id) {
+        let position = self.positions.as_ref().map_or(index, |p| p[index]);
+        if let Some(keys) = &mut self.index {
+            keys.remove(index, position);
+        }
         self.positions
             .get_or_insert_with(|| (0..self.next).collect())
             .remove(index);

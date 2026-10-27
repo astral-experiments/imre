@@ -1,7 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::rc::Rc;
-
 use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
@@ -96,6 +94,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "pow",
     "sum",
     "__import__",
     "repr",
@@ -259,6 +258,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "socket.socket"
+        }
+        Value::BufferedRandom(_) if super::stdlib::tempfile::METHODS.contains(&attr) => {
+            "BufferedRandom"
         }
         Value::TextFile(_)
             if matches!(
@@ -430,6 +432,11 @@ pub(super) fn bind_method_arguments<const N: usize>(
         )));
     }
     if args.len() > max_positional {
+        if max_positional == 0 {
+            return Err(type_error(format!(
+                "{name}() takes no positional arguments"
+            )));
+        }
         return Err(type_error(format!(
             "{name}() takes at most {max_positional} positional {} ({} given)",
             arguments(max_positional),
@@ -454,6 +461,55 @@ pub(super) fn bind_method_arguments<const N: usize>(
         values[index] = Some(*value);
     }
     Ok(values)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["base", "exp", "mod"];
+    if args.len() + kwargs.len() <= names.len() {
+        // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
+        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+            if !kwargs.iter().any(|(key, _)| key == name) {
+                return Err(type_error(format!(
+                    "pow() missing required argument '{name}' (pos {})",
+                    index + 1
+                )));
+            }
+        }
+        if let Some((key, _)) = kwargs
+            .iter()
+            .find(|(key, _)| !names.contains(&key.as_str()))
+            && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+        {
+            return Err(type_error(format!(
+                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+            )));
+        }
+    }
+    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    else {
+        unreachable!("required pow operands were checked above")
+    };
+    let Some(modulus) = modulus.filter(|&id| id != NONE) else {
+        return ctx.binary("**", base, exp);
+    };
+    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
+        if [base, exp, modulus]
+            .into_iter()
+            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
+        {
+            return Err(type_error(
+                "pow() 3rd argument not allowed unless all arguments are integers",
+            ));
+        }
+        return Err(type_error(format!(
+            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
+            ctx.type_name(base),
+            ctx.type_name(exp),
+            ctx.type_name(modulus)
+        )));
+    };
+    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -502,7 +558,7 @@ fn set_attribute(
     if base {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
-        ctx.set_attr(*obj, &attr_name, *value)?;
+        ctx.set_named_attr(*obj, &attr_name, Some(*attr), *value)?;
     }
     Ok(NONE)
 }
@@ -536,11 +592,11 @@ fn delete_attribute(
     if base && ctx.builtin_type_name(*obj) == Some("type") {
         return Err(type_error("can't apply this __delattr__ to type object"));
     }
-    let attr = attribute_name(ctx, *attr)?;
+    let name = attribute_name(ctx, *attr)?;
     if base {
-        ctx.default_delete_attr(*obj, &attr)?;
+        ctx.default_delete_attr(*obj, &name)?;
     } else {
-        ctx.delete_attr(*obj, &attr)?;
+        ctx.delete_named_attr(*obj, &name, Some(*attr))?;
     }
     Ok(NONE)
 }
@@ -781,7 +837,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
             let attr = attribute_name(ctx, args[1])?;
-            match ctx.lookup_attr(args[0], &attr) {
+            match ctx.lookup_named_attr(args[0], &attr, Some(args[1])) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
                 Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),
@@ -872,6 +928,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "pow" => power(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
@@ -1059,7 +1116,7 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             let file = super::stdlib::BinaryFile::open(path, mode)?;
-            Ok(ctx.alloc(Value::File(Rc::new(file))))
+            Ok(ctx.alloc(file.into_value()?))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(
@@ -1120,6 +1177,7 @@ pub(super) fn call(
                 _ => ELLIPSIS,
             })
         }
+        "function" => ctx.construct_function(args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

@@ -24,6 +24,15 @@ class FailingFlag:
 def current():
     for flag in (None, [], [0], 1 << 100):
         print("a\r\nb".splitlines(keepends=flag))
+    for call in (
+        lambda: "x".splitlines(0, 1),
+        lambda: "x".splitlines(1, keepends=False),
+        lambda: "x".splitlines(invalid=1),
+    ):
+        try:
+            call()
+        except TypeError as error:
+            print(error.args)
     try:
         "".splitlines(FailingFlag())
     except ValueError as error:

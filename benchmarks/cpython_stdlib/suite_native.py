@@ -474,8 +474,12 @@ def testcase_fixture(equality=None):
     return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
 
 
-def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None, assertions="imre"):
-    """Build a complete method in its declared native fixture, then run it inside host fixtures."""
+def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None,
+                  assertions="imre", on_child_error=None):
+    """Build a complete method and run it under host fixtures.
+
+    on_child_error observes the raw child result before the runner reports its failure.
+    """
     method = case_id.rsplit(".", 1)[1]
     body = method_bytes(path, owner, method)
     entry = (fixture if fixture is not None else testcase_fixture()).encode() + b"\n" + body
@@ -485,6 +489,8 @@ def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, o
     def execute(case, original):
         result = subprocess.run([binary], capture_output=True, text=True, timeout=60)
         if result.returncode or result.stderr or result.stdout != f"completed {case_id}\n":
+            if on_child_error is not None:
+                on_child_error(result)
             raise AssertionError(f"native exit {result.returncode}: {result.stdout!r} {result.stderr!r}")
         record = {"execution": "native-body", "body": "Imre", "assertions": "Imre",
                   "fixture_execution": "CPython module/class/instance hooks; native instance in child",
