@@ -98,7 +98,27 @@ def private_names():
     print(Owner._Owner__write.__name__, hasattr(Owner, "__member"))
 
 
+def class_patterns():
+    class Record:
+        values: list[int]
+
+    class Other:
+        values: list[int]
+
+    record = Record()
+    record.values = [7]
+    alias = Record
+    match record:
+        case Other(values=_):
+            raise AssertionError("matched an unrelated class")
+        case alias(values=[first]) as whole:
+            assert first == 7 and whole is record
+        case _:
+            raise AssertionError("missed the declared field")
+
+
 def current():
+    class_patterns()
     private_names()
     for obj in (Plain(), Advertised(), Data(), Fallback(), Key(), Guarded()):
         cls = obj.__class__
