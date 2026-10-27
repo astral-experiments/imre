@@ -14,9 +14,9 @@ struct Interned {
 }
 
 impl Interned {
-    fn intern(&mut self, value: &crate::StrOwner) -> crate::StrOwner {
+    fn try_intern(&mut self, value: &crate::StrOwner) -> Option<crate::StrOwner> {
         if let Some(singleton) = crate::objects::short_string(value) {
-            return singleton;
+            return Some(singleton);
         }
         let hash = self.hash.hash_one(value.as_str());
         if let Some(existing) = self
@@ -26,7 +26,7 @@ impl Interned {
             .filter_map(|(_, weak)| weak.upgrade())
             .find(|existing| existing.as_str() == value.as_str())
         {
-            return existing;
+            return Some(existing);
         }
         // Weak owners retain no text after its last caller releases it. Sweep
         // periodically even for a stream of unique spellings; doubling the
@@ -54,11 +54,11 @@ impl Interned {
         // CPython leaves the input unchanged if the interning dictionary
         // cannot grow. The string is valid and remains uninterned.
         if self.strings.try_reserve(1, |entry| entry.0).is_err() {
-            return StrOwner::clone(value);
+            return None;
         }
         self.strings
             .insert_unique(hash, (hash, StrOwner::downgrade(value)), |(key, _)| *key);
-        StrOwner::clone(value)
+        Some(StrOwner::clone(value))
     }
 
     fn contains(&self, value: &Str) -> bool {
@@ -80,7 +80,12 @@ thread_local! {
 
 /// Share a canonical native owner between typed and runtime-loaded Python.
 pub(crate) fn intern_owner(value: &StrOwner) -> StrOwner {
-    INTERNED.with_borrow_mut(|table| table.intern(value))
+    try_intern_owner(value).unwrap_or_else(|| StrOwner::clone(value))
+}
+
+/// Report when the weak table could not register a new spelling.
+pub(crate) fn try_intern_owner(value: &StrOwner) -> Option<StrOwner> {
+    INTERNED.with_borrow_mut(|table| table.try_intern(value))
 }
 
 /// Keep module metadata in the same table as interned literals and sys.intern.
@@ -124,15 +129,23 @@ mod tests {
         let first = StrOwner::new(Str::new("same spelling"));
         let second = StrOwner::new((*first).clone());
         let weak = StrOwner::downgrade(&first);
-        assert!(StrOwner::ptr_eq(&first, &table.intern(&first)));
-        assert!(StrOwner::ptr_eq(&first, &table.intern(&second)));
+        assert!(StrOwner::ptr_eq(&first, &table.try_intern(&first).unwrap()));
+        assert!(StrOwner::ptr_eq(
+            &first,
+            &table.try_intern(&second).unwrap()
+        ));
         assert!(table.contains(&first));
         assert!(!table.contains(&second));
         drop(first);
         assert!(weak.upgrade().is_none());
-        assert!(StrOwner::ptr_eq(&second, &table.intern(&second)));
+        assert!(StrOwner::ptr_eq(
+            &second,
+            &table.try_intern(&second).unwrap()
+        ));
         for i in 0..2048 {
-            table.intern(&StrOwner::new(Str::new(i.to_string())));
+            table
+                .try_intern(&StrOwner::new(Str::new(i.to_string())))
+                .unwrap();
         }
         assert!(table.strings.len() < 70);
         assert!(table.contains(&second));
