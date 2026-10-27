@@ -7,24 +7,27 @@ class chain:
     __slots__ = ("_sources", "_active")
 
     def __init__(self, *iterables):
-        self._sources = iter(iterables)
-        self._active = None
+        import itertools
+        itertools._chain_set(self, False, iter(iterables))
+        itertools._chain_set(self, True, None)
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        while self._sources is not None:
-            if self._active is None:
+        import itertools
+        while itertools._chain_get(self, False) is not None:
+            if itertools._chain_get(self, True) is None:
                 try:
-                    self._active = iter(next(self._sources))
+                    active = iter(next(itertools._chain_get(self, False)))
+                    itertools._chain_set(self, True, active)
                 except BaseException:
-                    self._sources = None
+                    itertools._chain_set(self, False, None)
                     raise
             try:
-                return next(self._active)
+                return next(itertools._chain_get(self, True))
             except StopIteration:
-                self._active = None
+                itertools._chain_set(self, True, None)
         raise StopIteration
 
 
