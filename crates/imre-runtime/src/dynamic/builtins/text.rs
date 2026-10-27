@@ -171,6 +171,31 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
+            if let Value::Raised(error) = ctx.heap.get(value)
+                && let Some(fields) = error
+                    .trace
+                    .as_ref()
+                    .and_then(|trace| trace.source_syntax.as_ref())
+                && ctx.string_storage(fields[1].get()).is_none()
+                && !matches!(ctx.heap.get(fields[2].get()), Value::Int(_))
+            {
+                // Without a location, SyntaxError delegates directly to str(msg), including its identity.
+                let message = fields[0].get();
+                if matches!(ctx.heap.get(message), Value::Str(_)) {
+                    return Ok(message);
+                }
+                let class = match ctx.heap.get(message) {
+                    Value::Instance { class, .. } => Some(*class),
+                    Value::Raised(error) => error.class,
+                    _ => None,
+                };
+                if class.is_some_and(|class| {
+                    ctx.class_attr(class, "__str__").is_some()
+                        || ctx.class_attr(class, "__repr__").is_some()
+                }) {
+                    return super::call(ctx, "str", &[message], &[]);
+                }
+            }
             let text = ctx.checked_format(value, false)?;
             Ok(ctx.text(text))
         }
