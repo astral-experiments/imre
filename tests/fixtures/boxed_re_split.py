@@ -1,7 +1,7 @@
 import re
 
 
-def main():
+def current():
     flag = re.I
     print(flag is re.IGNORECASE is re.RegexFlag(2), type(flag) is re.RegexFlag)
     print(isinstance(flag, int), flag.name, flag.value, str(flag), repr(flag))
@@ -28,6 +28,3 @@ def main():
         pattern.split("value", 1 << 100)
     except OverflowError as error:
         print(type(error).__name__, str(error))
-
-
-main()
