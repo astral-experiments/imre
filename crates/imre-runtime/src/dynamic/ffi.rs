@@ -48,17 +48,10 @@ impl Context {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)
             }
-            "from" | "attr" => {
+            "from" => self.import_from(a, b),
+            "attr" => {
                 let name = self.str_value(b)?.to_owned();
-                match self.lookup_attr(a, &name) {
-                    Err(error) if op == "from" && error.kind == "AttributeError" => {
-                        let Value::Module { name: module, .. } = self.heap.get(a) else {
-                            return Err(error);
-                        };
-                        self.module(&format!("{module}.{name}"))
-                    }
-                    value => value,
-                }
+                self.lookup_attr(a, &name)
             }
             "setattr" => {
                 let name = self.str_value(b)?.to_owned();
