@@ -355,6 +355,8 @@ pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
     pub annotation_thunks: Option<Id>,
+    /// Slot names consumed when the class is created, independent of later namespace mutations.
+    pub slot_names: Option<std::rc::Rc<[String]>>,
 }
 
 #[derive(Clone)]

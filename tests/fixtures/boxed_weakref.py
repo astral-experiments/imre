@@ -154,3 +154,28 @@ def current():
     removed = ref(holder.keep)
     del holder.__dict__
     print(removed() is None)
+
+    class Open:
+        pass
+
+    class Closed:
+        __slots__ = ()
+
+    names = ['__weakref__']
+
+    class FromList:
+        __slots__ = names
+
+    class FromMapping:
+        __slots__ = {'__weakref__': 'weak reference support'}
+
+    Open.__slots__ = ()
+    Closed.__slots__ = '__weakref__'
+    names.clear()
+    for target in (Open(), Closed(), FromList(), FromMapping()):
+        try:
+            observer = ref(target)
+        except TypeError:
+            print(False)
+        else:
+            print(observer() is target)
