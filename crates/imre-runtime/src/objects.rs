@@ -58,6 +58,7 @@ pub(crate) use json::{
     write_string as write_json_string,
 };
 mod linecache;
+pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::percent_integer_field;
 mod mappings;

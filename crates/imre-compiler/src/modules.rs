@@ -955,6 +955,9 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "Lock") | (Self::Thread, "LockType") => {
+                Intrinsic::ObjectRuntimeExport("_thread.lock")
+            }
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }

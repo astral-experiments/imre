@@ -296,7 +296,8 @@ impl Context {
             | Value::Code(_)
             | Value::Generator { .. }
             | Value::Module { .. }
-            | Value::ThreadLocal(_) => self.type_name(obj),
+            | Value::ThreadLocal(_)
+            | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
@@ -345,6 +346,7 @@ impl Context {
                             | "itertools.count"
                             | "itertools.repeat"
                             | super::thread_local::CLASS
+                            | super::thread_lock::CLASS
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -449,6 +451,7 @@ impl Context {
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -702,6 +705,14 @@ impl Context {
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_lock::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("lock")),
+                attr if super::thread_lock::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
                 _ => {}
             },
             Value::Native(class) if class == super::thread_local::CLASS => match name {
