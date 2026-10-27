@@ -960,7 +960,7 @@ impl Context {
             self.sources
                 .get(name)
                 .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), m.code))
+                .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) {
             if matches!(name, "email" | "importlib" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
@@ -974,7 +974,12 @@ impl Context {
                 sources
                     .iter()
                     .find(|source| source.path.starts_with(root))
-                    .map(|source| (source.path.clone(), source.code))
+                    .map(|source| {
+                        (
+                            source.path.clone(),
+                            importlib::SourceBody::Compiled(source.code),
+                        )
+                    })
             })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
@@ -1096,17 +1101,32 @@ impl Context {
             }
             _ => {}
         }
-        if let Some((path, entry)) = source {
-            let result = if let Some(origin) = origin
-                && name != "__main__"
-                && !stdlib::is_module(name)
-                && self.sources.contains_key("importlib")
-                && path.is_absolute()
-            {
-                self.initialize_source(module, scope, name_id, origin)
-            } else {
-                let code = self.module_code(entry, &path);
-                self.execute(code, scope)
+        if let Some((path, body)) = source {
+            let result = match body {
+                importlib::SourceBody::Zip(NONE) => Err(Error::new(
+                    "NotImplementedError",
+                    "ZIP namespace packages are unsupported",
+                )),
+                importlib::SourceBody::Zip(loader) => self.initialize_source(
+                    module,
+                    scope,
+                    name_id,
+                    origin.expect("ZIP source has a filename"),
+                    loader,
+                ),
+                importlib::SourceBody::Compiled(_)
+                    if let Some(origin) = origin
+                        && name != "__main__"
+                        && !stdlib::is_module(name)
+                        && self.sources.contains_key("importlib")
+                        && path.is_absolute() =>
+                {
+                    self.initialize_source(module, scope, name_id, origin, NONE)
+                }
+                importlib::SourceBody::Compiled(entry) => {
+                    let code = self.module_code(entry, &path);
+                    self.execute(code, scope)
+                }
             };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()

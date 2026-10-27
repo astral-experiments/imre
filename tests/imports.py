@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 import shutil
 import subprocess
 import sys
@@ -127,6 +128,21 @@ ACCEPTED = {
         "orchard/__init__.py": "print('package init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
+    "zip_source_spec": {
+        "main.py": (
+            "import sys\nimport zipimport\nfrom importlib import import_module\n"
+            "from importlib.util import find_spec\nfrom witness import seen\n"
+            "for name in ('stored', 'deflated'):\n"
+            "    sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/' + name + '.zip')\n"
+            "    assert find_spec(name) is not None and name not in seen\n"
+            "    package = import_module(name)\n    spec = find_spec(name)\n"
+            "    assert package is import_module(name) and package.__spec__ is spec\n"
+            "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
+            "    assert spec.submodule_search_locations is package.__path__\n"
+            "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
+        ),
+        "witness.py": "seen = []\n",
     },
     "registered_source_spec": {
         "main.py": (
@@ -280,6 +296,13 @@ def main() -> None:
         for name, files in ACCEPTED.items():
             case = temporary / name
             write_files(case, files)
+            if name == "zip_source_spec":
+                if os.name != "posix":
+                    continue
+                for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
+                    with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
+                        archive.writestr(f"{pkg}/__init__.py", "from witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
             for level in args.opt_levels:
