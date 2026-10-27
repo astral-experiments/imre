@@ -2512,7 +2512,9 @@ impl Context {
                         {
                             return Ok(*value);
                         }
-                        if matches!(
+                        if let Some(text) = self.string_storage(*value) {
+                            *value = text;
+                        } else if matches!(
                             self.heap.get(self.scalar_value(*value)),
                             Value::Int(_) | Value::Bool(_)
                         ) {

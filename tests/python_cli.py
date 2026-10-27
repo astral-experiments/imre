@@ -497,6 +497,9 @@ def report(text):
             "from decimal import Decimal\n"
             "x = Decimal('1.2300')\n"
             "print(x, Decimal(value=x) is x, Decimal(True), len(str(Decimal(10 ** 5000))))\n"
+            "class Text(str):\n"
+            "    def strip(self): raise AssertionError('unexpected strip')\n"
+            "print(Decimal(Text('2.500')), Decimal(value=Text('-0.0')))\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_values")
         (helpers / "decimal_comparison.py").write_text(
