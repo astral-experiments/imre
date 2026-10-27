@@ -57,3 +57,22 @@ def current():
     else:
         raise AssertionError("accepted a cyclic node")
     print("native literal values and rejection controls")
+
+    class Key:
+        def __hash__(self):
+            mapping.keys.pop()
+            mapping.values.pop()
+            for _ in range(10000):
+                garbage = []
+            return 2
+
+    mapping = ast.Dict(keys=[ast.Constant(Key()), ast.Constant("next")],
+                       values=[ast.Constant("kept"), ast.Constant("removed")])
+    result = literal_eval(mapping)
+    assert len(result) == 1 and "next" not in result
+    try:
+        literal_eval(ast.Dict(keys=iter([]), values=[]))
+    except TypeError as exc:
+        assert "has no len()" in str(exc)
+    else:
+        raise AssertionError("literal_eval skipped the key length")
