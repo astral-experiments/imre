@@ -1779,15 +1779,8 @@ impl Heap {
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
     pub(super) fn assignment_target(&mut self, live: &[Id], replaced: bool) -> bool {
-        if self.file_writers.is_empty() {
-            return false;
-        }
-        let old = &self.frames.last().unwrap().live;
-        let discarded = replaced
-            || old
-                .iter()
-                .any(|&id| !live.contains(&id) && self.could_own_writer(id, true));
-        if !discarded || !self.has_unbound_writer(NONE) {
+        // The private unpack list still owns all items waiting for a target.
+        if !replaced || !self.has_unbound_writer(NONE) {
             return false;
         }
         let temporaries = &mut self.frames.last_mut().unwrap().live;
