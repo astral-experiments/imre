@@ -502,6 +502,26 @@ try:
 except:
     print("bare")
 """,
+    "context_default_decimal_limit": """
+from contextvars import ContextVar
+
+for number in [10**4299, 10**4300]:
+    key = ContextVar("digits", default=[number])
+    try:
+        repr(key)
+    except ValueError:
+        print("limited")
+    else:
+        print("unlimited")
+    token = key.set([0])
+    key.reset(token)
+    try:
+        key.reset(token)
+    except ValueError:
+        print("limited token")
+    except RuntimeError:
+        print("reused token")
+""",
     "runtime_failures": """
 for turn in range(3):
     try:
