@@ -215,7 +215,7 @@ impl Context {
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
-                Value::File(file) => file.borrow().is_none(),
+                Value::File(file) => file.closed(),
                 Value::TextFile(file) => file.closed(),
                 _ => false,
             };

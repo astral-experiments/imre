@@ -83,24 +83,70 @@ pub(super) fn method(
 }
 
 /// Compare bounds in order using their actual Python comparison methods.
-pub(super) fn compare(ctx: &mut Context, op: &str, left: [Id; 3], right: [Id; 3]) -> Result<Id> {
-    for (a, b) in left.into_iter().zip(right) {
-        if a != b {
-            let equal = ctx.binary("==", a, b)?;
-            if !ctx.truth(equal)? {
-                return match op {
-                    "==" => Ok(FALSE),
-                    "!=" => Ok(TRUE),
-                    _ => ctx.binary(op, a, b),
-                };
+pub(super) fn compare(
+    ctx: &mut Context,
+    op: &str,
+    mut left: [Id; 3],
+    mut right: [Id; 3],
+) -> Result<Id> {
+    let mut pending = smallvec::SmallVec::new();
+    'compare: loop {
+        for (a, b) in left.into_iter().zip(right) {
+            if equal(ctx, a, b, &mut pending)? {
+                continue;
+            }
+            match op {
+                "==" => return Ok(FALSE),
+                "!=" => return Ok(TRUE),
+                _ => match (ctx.heap.get(a), ctx.heap.get(b)) {
+                    (Value::Slice(x), Value::Slice(y)) => {
+                        (left, right) = (*x, *y);
+                        continue 'compare;
+                    }
+                    _ => return ctx.binary(op, a, b),
+                },
             }
         }
+        return Ok(if matches!(op, "==" | "<=" | ">=") {
+            TRUE
+        } else {
+            FALSE
+        });
     }
-    Ok(if matches!(op, "==" | "<=" | ">=") {
-        TRUE
-    } else {
-        FALSE
-    })
+}
+
+/// Visit nested slice fields in tuple comparison order without growing the native stack.
+fn equal(
+    ctx: &mut Context,
+    a: Id,
+    b: Id,
+    pending: &mut smallvec::SmallVec<[(Id, Id); 3]>,
+) -> Result<bool> {
+    let mut pair = Some((a, b));
+    while let Some((a, b)) = pair {
+        if a != b {
+            if let (Value::Slice(left), Value::Slice(right)) = (ctx.heap.get(a), ctx.heap.get(b)) {
+                pending
+                    .try_reserve(3)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                pending.extend(
+                    left.iter()
+                        .copied()
+                        .zip(right.iter().copied())
+                        .rev()
+                        .filter(|(x, y)| x != y),
+                );
+            } else {
+                let equal = ctx.binary("==", a, b)?;
+                if !ctx.truth(equal)? {
+                    pending.clear();
+                    return Ok(false);
+                }
+            }
+        }
+        pair = pending.pop();
+    }
+    Ok(true)
 }
 
 fn components(ctx: &mut Context, [start, stop, step]: [Id; 3]) -> Result<[Option<Int>; 3]> {
