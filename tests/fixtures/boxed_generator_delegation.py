@@ -55,6 +55,11 @@ def visited(trace, label, value):
     return value
 
 
+def byte_chunks():
+    for value in [0, 1]:
+        yield b'a\x00' b'\xff', br'\n', b''
+
+
 def indexed_values(owner, trace):
     for word in ['first', 'second']:
         visited(trace, 'receiver', owner)[visited(trace, 'key', 0)] = visited(trace, 'rhs', word)
@@ -91,6 +96,7 @@ def current():
               for y in visited(pulls, x, range(x)) if y == 0)
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
+    print(list(byte_chunks()))
     assert list(values) == [2] and pulls == ["outer", 1, 2]
 
     saved = -1
