@@ -682,6 +682,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsPathsep
             | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
             | Self::SysOrigArgv
@@ -1064,6 +1065,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_run_timeout_int"
                 | "imre_environ_get"
                 | "imre_getcwd"
+                | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
                 | "imre_subprocess_check"

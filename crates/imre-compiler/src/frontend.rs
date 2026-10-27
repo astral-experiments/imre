@@ -6330,6 +6330,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::WrapperAttributes(fields) => {
                     return Ok(functools::wrapper_attributes(fields, self.types));
                 }
+                Intrinsic::OsPathsep { posix: true } => return Ok(unpacking::string(":")),
                 Intrinsic::OsSeparator { alternate, posix } => {
                     if posix {
                         return Ok(if alternate {
@@ -6391,12 +6392,16 @@ impl<'a> Checker<'a> {
                         env!("CARGO_PKG_VERSION")
                     )));
                 }
-                Intrinsic::SysExecutable | Intrinsic::SysPlatform | Intrinsic::OsName => {
+                Intrinsic::SysExecutable
+                | Intrinsic::SysPlatform
+                | Intrinsic::OsName
+                | Intrinsic::OsPathsep { posix: false } => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
                         Intrinsic::OsName => Builtin::OsName,
+                        Intrinsic::OsPathsep { .. } => Builtin::OsPathsep,
                         _ => Builtin::SysPlatform,
                     };
                     return Ok(Expr {
