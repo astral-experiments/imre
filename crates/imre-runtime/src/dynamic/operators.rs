@@ -4,6 +4,39 @@ use num_traits::ToPrimitive;
 
 use super::*;
 
+enum FormatPart {
+    Value(Id, bool),
+    Text(&'static str),
+    Sequence(Id, usize),
+    Entries(Id, usize, bool),
+    SetMembers(Vec<Id>, usize),
+    Fields(Id, usize),
+    Leave(Id, &'static str),
+    ContextEnd(Id),
+    SliceEnd,
+    NamedTupleEnd,
+}
+
+impl FormatPart {
+    /// Values a suspended renderer will read after a Python callback returns.
+    fn keep_alive(&mut self, heap: &mut Heap) {
+        match self {
+            Self::Value(id, _)
+            | Self::Sequence(id, _)
+            | Self::Entries(id, _, _)
+            | Self::Fields(id, _)
+            | Self::Leave(id, _)
+            | Self::ContextEnd(id) => heap.keep(*id),
+            Self::SetMembers(members, index) => {
+                // One traced owner keeps the snapshot alive across every following callback.
+                let tuple = heap.alloc(Value::Tuple(std::mem::take(members)));
+                *self = Self::Sequence(tuple, *index);
+            }
+            Self::Text(_) | Self::SliceEnd | Self::NamedTupleEnd => {}
+        }
+    }
+}
+
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
     std::iter::successors(Some(start), move |&i| i.checked_add(step))
         .take_while(move |&i| if step > 0 { i < end } else { i > end })
@@ -490,40 +523,86 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.render_containers(id, false, false)
+        Self::render_containers(self, id, false, false, |_, _, _, _| Ok(None))
             .expect("unlimited rendering")
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.render_containers(id, true, false)
+        Self::render_containers(self, id, true, false, |_, _, _, _| Ok(None))
             .expect("unlimited rendering")
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
-    pub(super) fn checked_format(&self, root: Id, quoted: bool) -> Result<String> {
-        self.render_containers(root, quoted, true)
+    pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
+        Self::render_containers(self, root, quoted, true, |ctx, id, work, ancestors| {
+            ctx.element_repr(id, work, ancestors)
+        })
     }
 
-    fn render_containers(&self, root: Id, quoted: bool, checked: bool) -> Result<String> {
-        enum Part<'a> {
-            Value(Id, bool),
-            Text(&'a str),
-            Sequence(&'a [Id], usize),
-            Entries(&'a [(Id, Id)], usize, bool),
-            Fields(
-                &'a [String],
-                &'a std::collections::HashMap<String, Id>,
-                usize,
-            ),
-            Leave(Id, &'static str),
-            ContextEnd(Id),
-            SliceEnd,
-            NamedTupleEnd,
+    /// Invoke the special method once and preserve an accepted string subclass.
+    pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        let Some(hook) = self.bound_slot(id, "__repr__")? else {
+            return Ok(None);
+        };
+        let result = self.call(hook, Vec::new(), Vec::new())?;
+        if self.str_value(result).is_err() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__repr__ returned non-string (type {})",
+                    self.type_name(result)
+                ),
+            ));
         }
+        Ok(Some(result))
+    }
+
+    /// Keep pending children alive while a hook mutates and reenters its container.
+    fn element_repr(
+        &mut self,
+        id: Id,
+        work: &mut [FormatPart],
+        ancestors: &[Id],
+    ) -> Result<Option<String>> {
+        let Value::Instance { class, .. } = self.heap.get(id) else {
+            return Ok(None);
+        };
+        if self.class_attr(*class, "__repr__").is_none() {
+            return Ok(None);
+        }
+        let mark = self.heap.temporary_mark();
+        let depth = self.repr_ancestors.len();
+        self.heap.keep(id);
+        for part in work {
+            part.keep_alive(&mut self.heap);
+        }
+        self.repr_ancestors.extend_from_slice(ancestors);
+        let result = self.repr_override(id).and_then(|value| {
+            value
+                .map(|s| self.str_value(s).map(str::to_owned))
+                .transpose()
+        });
+        self.repr_ancestors.truncate(depth);
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
+    fn render_containers<C: std::ops::Deref<Target = Self>>(
+        mut ctx: C,
+        root: Id,
+        quoted: bool,
+        checked: bool,
+        mut element_repr: impl FnMut(&mut C, Id, &mut [FormatPart], &[Id]) -> Result<Option<String>>,
+    ) -> Result<String> {
+        use FormatPart as Part;
         let mut output = String::new();
         let mut work = vec![Part::Value(root, quoted)];
         let mut active = Vec::new();
-        let mut ancestors = std::collections::HashSet::new();
+        let mut ancestors: std::collections::HashSet<Id> = if checked {
+            ctx.repr_ancestors.iter().copied().collect()
+        } else {
+            Default::default()
+        };
         // CPython guards nested slice formatting against the thread's native stack.
         // The pinned x86-64 Linux reference build uses 624 bytes per slice
         // and keeps two native-stack margins before raising RecursionError.
@@ -557,32 +636,64 @@ impl Context {
                     debug_assert_eq!(last, Some(id));
                     output.push_str(end);
                 }
-                Part::Sequence(items, index) => {
-                    if let Some(&item) = items.get(index) {
+                Part::Sequence(id, index) => {
+                    let item = match ctx.heap.get(id) {
+                        Value::Slice(v) => v.get(index),
+                        Value::List(v) | Value::Tuple(v) => v.get(index),
+                        _ => unreachable!("active sequence"),
+                    };
+                    if let Some(&item) = item {
                         if index != 0 {
                             output.push_str(", ");
                         }
-                        work.push(Part::Sequence(items, index + 1));
+                        work.push(Part::Sequence(id, index + 1));
                         work.push(Part::Value(item, true));
                     }
                 }
-                Part::Fields(names, fields, index) => {
+                Part::Fields(id, index) => {
+                    let Value::Instance { class, fields, .. } = ctx.heap.get(id) else {
+                        unreachable!("active named tuple")
+                    };
+                    let Some(names) = ctx.namedtuple_fields(*class) else {
+                        unreachable!("active named tuple layout")
+                    };
                     if let Some(name) = names.get(index) {
                         if index != 0 {
                             output.push_str(", ");
                         }
                         output.push_str(name);
                         output.push('=');
-                        work.push(Part::Fields(names, fields, index + 1));
-                        work.push(Part::Value(fields[name], true));
+                        work.push(Part::Fields(id, index + 1));
+                        work.push(Part::Value(
+                            *fields
+                                .get(name)
+                                .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
+                            true,
+                        ));
                     }
                 }
-                Part::Entries(items, index, include_values) => {
-                    if let Some(&(key, value)) = items.get(index) {
+                Part::SetMembers(members, index) => {
+                    if let Some(&member) = members.get(index) {
                         if index != 0 {
                             output.push_str(", ");
                         }
-                        work.push(Part::Entries(items, index + 1, include_values));
+                        work.push(Part::SetMembers(members, index + 1));
+                        work.push(Part::Value(member, true));
+                    }
+                }
+                Part::Entries(id, index, include_values) => {
+                    let entry = match ctx.heap.get(id) {
+                        Value::Dict(entries) => entries.at(index),
+                        Value::Set { entries, .. } => {
+                            entries.get(index).map(|&(k, v)| (index, k, v))
+                        }
+                        _ => unreachable!("active dictionary or set"),
+                    };
+                    if let Some((position, key, value)) = entry {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Entries(id, position + 1, include_values));
                         if include_values {
                             work.push(Part::Value(value, true));
                             work.push(Part::Text(": "));
@@ -591,8 +702,15 @@ impl Context {
                     }
                 }
                 Part::Value(id, repr) => {
-                    match self.heap.get(id) {
-                        Value::Slice(items) => {
+                    if checked
+                        && repr
+                        && let Some(text) = element_repr(&mut ctx, id, &mut work, &active)?
+                    {
+                        output.push_str(&text);
+                        continue;
+                    }
+                    match ctx.heap.get(id) {
+                        Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
                                     "RecursionError",
@@ -602,14 +720,14 @@ impl Context {
                             slice_depth += 1;
                             output.push_str("slice(");
                             work.push(Part::SliceEnd);
-                            work.push(Part::Sequence(items, 0));
+                            work.push(Part::Sequence(id, 0));
                             continue;
                         }
                         Value::Instance {
                             scalar: None,
                             dictionary: Some(backing),
                             ..
-                        } if self.enum_member(id).is_none() => {
+                        } if ctx.enum_member(id).is_none() => {
                             work.push(Part::Value(*backing, repr));
                             continue;
                         }
@@ -618,17 +736,17 @@ impl Context {
                                 name,
                                 namedtuple_fields: Some(names),
                                 ..
-                            } = self.heap.get(*class)
+                            } = ctx.heap.get(*class)
                                 && names.iter().all(|field| fields.contains_key(field)) =>
                         {
                             if checked {
-                                self.check_call_depth(namedtuple_depth)?;
+                                ctx.check_call_depth(namedtuple_depth)?;
                             }
                             namedtuple_depth += 1;
                             output.push_str(name);
                             output.push('(');
                             work.push(Part::NamedTupleEnd);
-                            work.push(Part::Fields(names, fields, 0));
+                            work.push(Part::Fields(id, 0));
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
@@ -653,16 +771,15 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, sequence, entries) = match self.heap.get(id) {
-                        Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
+                    let (start, end, placeholder, entries) = match ctx.heap.get(id) {
+                        Value::List(_) => ("[", "]", "[...]", None),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            Some(items.as_slice()),
                             None,
                         ),
-                        Value::Dict(items) => ("{", "}", "{...}", None, Some((&items[..], true))),
+                        Value::Dict(_) => ("{", "}", "{...}", Some(true)),
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -671,13 +788,16 @@ impl Context {
                             (
                                 if *frozen { "frozenset({" } else { "{" },
                                 if *frozen { "})" } else { "}" },
-                                "set(...)",
-                                None,
-                                Some((&entries[..], false)),
+                                if *frozen {
+                                    "frozenset(...)"
+                                } else {
+                                    "set(...)"
+                                },
+                                Some(false),
                             )
                         }
                         _ => {
-                            output.push_str(&self.format_value(id, repr, &mut active));
+                            output.push_str(&ctx.format_value(id, repr, &mut active));
                             continue;
                         }
                     };
@@ -688,11 +808,21 @@ impl Context {
                     active.push(id);
                     output.push_str(start);
                     work.push(Part::Leave(id, end));
-                    if let Some(items) = sequence {
-                        work.push(Part::Sequence(items, 0));
-                    }
-                    if let Some((items, include_values)) = entries {
-                        work.push(Part::Entries(items, 0, include_values));
+                    match entries {
+                        Some(false) if checked => {
+                            // CPython renders a snapshot so a hook can mutate the original set.
+                            let Value::Set { entries, .. } = ctx.heap.get(id) else {
+                                unreachable!()
+                            };
+                            let mut members = Vec::new();
+                            members
+                                .try_reserve_exact(entries.len())
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            members.extend(entries.iter().map(|&(key, _)| key));
+                            work.push(Part::SetMembers(members, 0));
+                        }
+                        Some(include_values) => work.push(Part::Entries(id, 0, include_values)),
+                        None => work.push(Part::Sequence(id, 0)),
                     }
                 }
             }
