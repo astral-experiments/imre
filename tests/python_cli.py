@@ -48,6 +48,16 @@ def check_getter_allocation(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
         ), result
+    for kind in ("item", "attr"):
+        source = imports + f"fixture.result_allocation({kind!r})"
+        for ordinal, expected in ((0, b"113 113\n"), (1, b"caught () 0\n113 113\n")):
+            result = run(imre, "-B", "-c", source, extra={
+                "IMRE_ENCODED_FLAGS": flags,
+                "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+            })
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, expected, b"refused\n" if ordinal else b"",
+            ), result
 
 
 def check_slice_stack(imre, imports, root, env):
