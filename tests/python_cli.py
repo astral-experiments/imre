@@ -427,6 +427,8 @@ def report(text):
             "boxed_ast.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
+            "boxed_slice_deep_repr.py",
+            "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
