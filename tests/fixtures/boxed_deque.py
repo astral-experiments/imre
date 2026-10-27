@@ -59,6 +59,11 @@ def current():
     queue.extend(queue)
     remove(marker)
     assert list(queue) == ["tail", marker, "tail"]
+    bounded = deque([1, 2], maxlen=3)
+    assert deque.extendleft(bounded, [3, 4]) is None
+    assert list(bounded) == [4, 3, 1]
+    bounded.extendleft(bounded)
+    assert list(bounded) == [1, 3, 4]
     class Source:
         def __init__(self):
             self.count = 0
@@ -72,16 +77,18 @@ def current():
                 return marker
             raise ValueError("source")
 
-    for queue in (deque(maxlen=0), deque()):
-        source = Source()
-        try:
-            queue.extend(source)
-        except ValueError as error:
-            assert str(error) == "source"
-        else:
-            raise AssertionError("iterator error")
-        assert source.count == 2
-        if queue.maxlen is None:
-            assert queue.popleft() is marker
-        assert not queue
+    for bound in (0, None):
+        for extend in (deque.extend, deque.extendleft):
+            queue = deque(maxlen=bound)
+            source = Source()
+            try:
+                extend(queue, source)
+            except ValueError as error:
+                assert str(error) == "source"
+            else:
+                raise AssertionError("iterator error")
+            assert source.count == 2
+            if bound is None:
+                assert queue.popleft() is marker
+            assert not queue
     print("deque passed")
