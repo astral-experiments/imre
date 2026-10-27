@@ -119,6 +119,16 @@ print(hook.seen is Based.__orig_bases__, Based.__bases__ == (dict,))
 
 import collections.abc as cabc
 
+
+class PlainCallable(t.Callable):
+    pass
+
+
+print(PlainCallable.__orig_bases__ == (t.Callable,))
+print(PlainCallable.__bases__ == (cabc.Callable, t.Generic))
+print(PlainCallable.__mro__ == (PlainCallable, cabc.Callable, t.Generic, object))
+print(t.Callable.__mro_entries__((t.Callable,)) == (cabc.Callable, t.Generic))
+
 bound = t.TypeVar("F", bound=cabc.Callable[..., t.Any])
 print(bound.__bound__.__origin__ is cabc.Callable, type(bound.__bound__).__module__)
 print(t.get_origin(t.Callable) is cabc.Callable, type(t.Callable[..., int]).__module__)

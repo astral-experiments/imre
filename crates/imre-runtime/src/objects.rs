@@ -83,7 +83,9 @@ mod tempdirs;
 mod text;
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
-pub(crate) use text::{expand_tabs, find_text, ord_byte, ord_char, partition_text, split_parts};
+pub(crate) use text::{
+    expand_tabs, find_text, ord_byte, ord_char, partition_text, python_isspace, split_parts,
+};
 mod typing;
 pub(crate) use text::short_string;
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
