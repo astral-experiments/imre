@@ -253,6 +253,7 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
+                | Value::MappingViewIterator { .. }
         ) {
             return Ok(false);
         }
@@ -568,6 +569,7 @@ impl Context {
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::DictIterator(_)
+            | Value::MappingViewIterator { .. }
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
