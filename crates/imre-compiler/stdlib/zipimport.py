@@ -27,7 +27,7 @@ def _directory(path: str) -> str:
     return path
 
 
-class zipimporter:
+class _ZipResourceLoader:
     archive: str
     prefix: str
     _indexed_archive: str

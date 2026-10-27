@@ -222,6 +222,11 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        // Changes to sys.path can select a ZIP loader at runtime. Register the same
+        // spec factory used for explicit import_module and find_spec calls.
+        if cfg!(unix) && self.sys_path(e) {
+            self.add(0, "importlib");
+        }
         if let Expr::Attribute(a) = e
             && typed_machinery_export(a.attr.as_str())
             && let Some(receiver) = UnqualifiedName::from_expr(&a.value)

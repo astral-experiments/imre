@@ -32,14 +32,22 @@ pub(super) fn call(
             }
             Ok(TRUE)
         }
-        ("read", [path, key], []) => {
+        ("read" | "contains", [path, key], []) => {
             let path = ctx.str_value(*path)?;
             let key = ctx.str_value(*key)?;
             let archive = ctx
                 .zip_directories
                 .get(path)
                 .ok_or_else(|| Error::new("ValueError", "archive has not been indexed"))?;
-            let bytes = archive.import_data(&key.into())?;
+            let key = key.into();
+            if name == "contains" {
+                return Ok(if archive.contains_import(&key) {
+                    TRUE
+                } else {
+                    FALSE
+                });
+            }
+            let bytes = archive.import_data(&key)?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
         _ => Err(Error::new(
