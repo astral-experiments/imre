@@ -49,6 +49,19 @@ def current():
         drive, tail = os.path.splitdrive(path)
         assert tail is value
         print(drive, os.path.basename(path), os.path.splitext(path))
+    class ChangedSearch(str):
+        def rfind(self, sep):
+            if sep == "/":
+                return None
+            raise LookupError("dot search")
+
+    try:
+        posixpath.splitext(ChangedSearch("a.b"))
+    except LookupError as error:
+        print(str(error))
+    else:
+        raise AssertionError("the extension search must run")
+
     for value in (NoMethod(), Raises(), Path(42), None):
         try:
             fspath(value)

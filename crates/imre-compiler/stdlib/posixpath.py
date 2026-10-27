@@ -38,10 +38,12 @@ def splitext(p):
         sep, dot = b"/", b"."
     else:
         sep, dot = "/", "."
-    start = p.rfind(sep) + 1
+    sep_index = p.rfind(sep)
     cut = p.rfind(dot)
-    while start < cut:
-        if p[start:start + 1] != dot:
-            return p[:cut], p[cut:]
-        start += 1
+    if cut > sep_index:
+        start = sep_index + 1
+        while start < cut:
+            if p[start:start + 1] != dot:
+                return p[:cut], p[cut:]
+            start += 1
     return p, p[:0]
