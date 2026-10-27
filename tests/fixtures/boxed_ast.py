@@ -13,6 +13,19 @@ class DroppingChild(ast.AST):
 
 
 def current():
+    decorated_source = (
+        "if ready:\n"
+        "    @first\n"
+        "    @second(\n"
+        "        value\n"
+        "    )\n"
+        "    # def in a comment\n"
+        "    def \\\n"
+        "      f(): pass\n"
+    )
+    decorated = ast.parse(decorated_source).body[0].body[0]
+    print(decorated.lineno, decorated.col_offset, decorated.end_lineno)
+    print([item.lineno for item in decorated.decorator_list])
     tree = ast.parse("if ready:\n    value = source.method('X')\n")
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
