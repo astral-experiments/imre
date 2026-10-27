@@ -7,6 +7,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod float;
+pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
@@ -194,6 +195,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removeprefix",
     "removesuffix",
     "replace",
+    "rfind",
     "rpartition",
     "rsplit",
     "rstrip",
@@ -213,7 +215,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
@@ -250,12 +252,19 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::TextFile(_)
             if matches!(
                 attr,
-                "read" | "readline" | "write" | "flush" | "close" | "__enter__" | "__exit__"
+                "read"
+                    | "readline"
+                    | "write"
+                    | "flush"
+                    | "close"
+                    | "isatty"
+                    | "__enter__"
+                    | "__exit__"
             ) =>
         {
             "TextIOWrapper"
         }
-        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop") => "list",
+        Value::List(_) if matches!(attr, "append" | "extend" | "insert" | "pop" | "sort") => "list",
         Value::Set { frozen: false, .. }
             if matches!(attr, "add" | "update" | "issuperset" | "__contains__") =>
         {

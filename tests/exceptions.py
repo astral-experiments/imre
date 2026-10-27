@@ -24,6 +24,32 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "deep_context_default_repr": """
+from contextvars import Context, ContextVar
+n = 3000
+rows: list[list[object]] = []
+keys: list[object] = []
+ctx = Context()
+for _ in range(n):
+    items: list[object] = []
+    var = ContextVar("deep", default=items)
+    rows.append(items)
+    try:
+        ctx[var]
+    except KeyError as missing:
+        keys.append(missing.args[0])
+for i in range(n - 1):
+    rows[i].append(keys[i + 1])
+
+try:
+    text = repr(keys[0])
+except RecursionError:
+    print("recursion limit")
+else:
+    print(len(text) > 40 * n)
+for row in rows:
+    row.clear()
+""",
     "import_error_expanded_keywords": "print(ImportError(**{'name': 'pkg'}).name)",
     "private_forwarded_exception_fields": """
 class Root(Exception):
@@ -1280,6 +1306,14 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "unhandled_skip_class": (
+        'import unittest\nraise unittest.SkipTest("skip")\n',
+        "unittest.case.SkipTest",
+    ),
+    "unhandled_json_class": (
+        'import json\njson.loads("{")\n',
+        "json.decoder.JSONDecodeError",
+    ),
     "handler_optional_arithmetic": (
         """\
 value: int | None = 1
@@ -1313,6 +1347,32 @@ finally:
         'try:\n    raise ValueError("again")\nexcept ValueError:\n    raise\n',
         "ValueError",
     ),
+    "unhandled_mixed_chain": (
+        """
+try:
+    raise ValueError("first")
+except ValueError:
+    try:
+        raise RuntimeError("middle")
+    except RuntimeError as middle:
+        raise KeyError("last") from middle
+""",
+        "KeyError",
+    ),
+    "unhandled_reversed_context": (
+        """
+first = ValueError("first")
+last = RuntimeError("last")
+try:
+    raise first
+except ValueError:
+    try:
+        raise last
+    except RuntimeError:
+        raise first
+""",
+        "ValueError",
+    ),
     "unhandled_explicit_chain": (
         """
 try:
@@ -1337,7 +1397,25 @@ except KeyError:
 }
 
 CAUSE_SEPARATOR = "The above exception was the direct cause of the following exception:"
-EXPLICIT_REPORTS = {
+CONTEXT_SEPARATOR = "During handling of the above exception, another exception occurred:"
+CHAIN_REPORTS = {
+    "unhandled_mixed_chain": [
+        "ValueError: first",
+        CONTEXT_SEPARATOR,
+        "RuntimeError: middle",
+        CAUSE_SEPARATOR,
+        "KeyError: 'last'",
+    ],
+    "unhandled_reversed_context": [
+        "RuntimeError: last",
+        CONTEXT_SEPARATOR,
+        "ValueError: first",
+    ],
+    "unhandled_finally_replacement": [
+        "ValueError: first",
+        CONTEXT_SEPARATOR,
+        "IndexError: replacement",
+    ],
     "unhandled_explicit_chain": [
         "KeyError: 'inner'",
         CAUSE_SEPARATOR,
@@ -1345,6 +1423,7 @@ EXPLICIT_REPORTS = {
         CAUSE_SEPARATOR,
         "RuntimeError: outer",
     ],
+    "unhandled_skip_class": ["unittest.case.SkipTest: skip"],
     "unhandled_suppressed_context": ["ValueError: visible"],
 }
 
@@ -1423,9 +1502,9 @@ def main() -> None:
                     name,
                     reference,
                 )
-                if name in EXPLICIT_REPORTS:
+                if name in CHAIN_REPORTS:
                     assert (
-                        exception_report(reference.stderr) == EXPLICIT_REPORTS[name]
+                        exception_report(reference.stderr) == CHAIN_REPORTS[name]
                     ), (
                         name,
                         reference.stderr,
@@ -1460,16 +1539,15 @@ def main() -> None:
                     reference,
                 )
                 if category:
-                    if name in EXPLICIT_REPORTS:
+                    if name in CHAIN_REPORTS:
                         assert actual.returncode == 1 and exception_report(
                             actual.stderr
                         ) == exception_report(reference.stderr), (name, level, actual)
                     else:
-                        # Implicit context is not retained, but the terminal
-                        # category and message must match CPython.
+                        # These cases check the terminal exception and its message.
                         assert (
                             actual.returncode == 1
-                            and actual.stderr.startswith(category + ":")
+                            and exception_report(actual.stderr)[-1].startswith(category + ":")
                             and exception_report(actual.stderr)[-1:]
                             == exception_report(reference.stderr)[-1:]
                         ), (name, level, actual.stderr, reference.stderr)

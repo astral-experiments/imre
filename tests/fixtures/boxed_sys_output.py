@@ -11,6 +11,8 @@ original = sys.stderr
 assert original is sys.__stderr__
 assert sys.stdout is sys.__stdout__
 assert sys.stdout is not original
+assert isinstance(sys.stdout.isatty(), bool)
+assert isinstance(sys.stderr.isatty(), bool)
 assert sys.stdout.write("stdout π\n") == 9
 assert sys.stdout.flush() is None
 assert original.write("stderr 🌍\n") == 9

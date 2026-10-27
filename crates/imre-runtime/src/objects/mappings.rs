@@ -1914,6 +1914,20 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     ))))
 }
 
+/// Identify the bound mapping's `OrderedDict` method through a base `dict` view.
+///
+/// # Safety
+/// The caller holds a live mapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_is_ordered(owner: *const Object) -> bool {
+    // SAFETY: the caller roots the mapping during this shared borrow.
+    unsafe {
+        object(owner)
+            .0
+            .with(|s| s.dictionary().order_version.is_some())
+    }
+}
+
 /// Select the bound dictionary's class before consuming the first key.
 ///
 /// # Safety

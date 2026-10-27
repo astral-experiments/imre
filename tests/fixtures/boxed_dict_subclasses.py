@@ -3,6 +3,15 @@
 
 def current():
     from collections import Counter
+    from collections import _count_elements
+    from _collections import _count_elements as native_count
+
+    counted = {"a": 4}
+    print(native_count is _count_elements, native_count(counted, "aba"), counted)
+    try:
+        native_count(None, 3)
+    except TypeError as error:
+        print(type(error).__name__)
 
     counts = Counter(a=10, b=5, c=0)
     print(counts.total(), counts["absent"], len(counts))
@@ -16,6 +25,12 @@ def current():
     with_zero = Counter(a=1, b=0)
     print(plain == with_zero, plain != with_zero, with_zero == dict(plain))
     print(Counter(b=-1) < Counter(), plain <= with_zero, with_zero > plain)
+    counts = Counter(a=2, b=1, ignored=-3)
+    elements = counts.elements()
+    print(next(elements))
+    counts["a"] = 0
+    counts["b"] = 2
+    print(list(elements))
 
     class Data(dict):
         pass
@@ -127,6 +142,17 @@ def current():
 
     pending.extend([FirstPair(), ("original", 4)])
     print(dict(pending))
+
+    class BrokenPair(dict):
+        def __iter__(self):
+            raise TypeError("from pair iterator")
+
+    for pair in (42, BrokenPair()):
+        partial = {"kept": 1}
+        try:
+            partial.update([("good", 4), pair, ("late", 9)], tail=1)
+        except TypeError as error:
+            print(error.args, partial)
 
     pairs = dict.__iter__({("first", 1): None, ("bad",): None, ("later", 2): None})
     copied = {}

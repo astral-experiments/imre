@@ -45,39 +45,16 @@ fn arguments(args: &[Id], kwargs: &[(String, Id)]) -> Result<(Id, Id)> {
 
 pub(super) fn filter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (names, pat) = arguments(args, kwargs)?;
-    let pat = if let Some(method) = ctx.bound_slot(pat, "__fspath__")? {
-        let value = ctx.call(method, Vec::new(), Vec::new())?;
-        if !matches!(ctx.heap.get(value), Value::Str(_) | Value::Bytes(_)) {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "expected {}.__fspath__() to return str or bytes, not {}",
-                    ctx.type_name(pat),
-                    ctx.type_name(value)
-                ),
-            ));
-        }
-        value
-    } else {
-        pat
-    };
-    let (matches, bytes) = match ctx.heap.get(pat) {
+    let pat = super::posixpath::fspath(ctx, pat)?;
+    let (matches, bytes) = match ctx.heap.get(ctx.scalar_value(pat)) {
         Value::Str(text) => (compile(text), false),
         Value::Bytes(value) => (compile(&byte_spelling(value)), true),
-        _ => {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "expected str, bytes or os.PathLike object, not {}",
-                    ctx.type_name(pat)
-                ),
-            ));
-        }
+        _ => unreachable!(),
     };
     let iter = ctx.iterator(names)?;
     let result = ctx.alloc(Value::List(Vec::new()));
     while let Some(name) = ctx.next_item(iter)? {
-        let selected = match ctx.heap.get(name) {
+        let selected = match ctx.heap.get(ctx.scalar_value(name)) {
             Value::Str(text) if !bytes => matches(text),
             Value::Bytes(value) | Value::ByteArray(value) if bytes => {
                 matches(&byte_spelling(value))

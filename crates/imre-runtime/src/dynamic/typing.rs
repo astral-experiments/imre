@@ -371,16 +371,37 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
-        let i = bases
-            .iter()
-            .position(|base| *base == id)
-            .ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
         let callable = named_class(ctx, "collections.abc", "Callable");
         let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
-        if !bases.contains(&callable) {
+        let mut has_callable = false;
+        for &base in &bases {
+            if base == callable {
+                has_callable = true;
+                break;
+            }
+            let equal = ctx.binary("==", base, callable)?;
+            if ctx.truth(equal)? {
+                has_callable = true;
+                break;
+            }
+        }
+        if !has_callable {
             result.push(callable);
         }
+        let mut i = None;
+        for (index, &base) in bases.iter().enumerate() {
+            if base == id {
+                i = Some(index);
+                break;
+            }
+            let equal = ctx.binary("==", base, id)?;
+            if ctx.truth(equal)? {
+                i = Some(index);
+                break;
+            }
+        }
+        let i = i.ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
         let mut later_generic = false;
         for &base in &bases[i + 1..] {
             if matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")
