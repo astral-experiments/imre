@@ -2524,14 +2524,14 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::Cached { function, entries } => {
-                if !args
-                    .iter()
-                    .chain(kwargs.iter().map(|(_, v)| v))
-                    .all(|&id| builtins::hashable(self, id))
-                {
-                    return Err(Error::new("TypeError", "unhashable cache argument"));
+            Value::Cached { function, .. } => {
+                for &value in args.iter().chain(kwargs.iter().map(|(_, value)| value)) {
+                    self.dictionary_hash(value)?;
                 }
+                // A hash hook can call this wrapper and evict earlier entries.
+                let Value::Cached { entries, .. } = self.heap.get(callable) else {
+                    unreachable!()
+                };
                 let hit = entries.iter().position(|call| {
                     call.args.len() == args.len()
                         && call.args.iter().zip(&args).all(|(&x, &y)| self.equal(x, y))
