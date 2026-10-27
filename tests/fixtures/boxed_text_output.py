@@ -1,7 +1,9 @@
 def exercise(path):
-    def buffered():
+    def buffered(saved=None):
         stream = open(path, "w")
         stream.write("loop")
+        if saved is not None:
+            saved.append(stream)
         return stream
 
     for keep in (False, True):
@@ -13,6 +15,17 @@ def exercise(path):
         else:
             with open(path, "rb") as reader:
                 assert reader.read() == (b"" if keep else b"loop")
+        if keep:
+            saved[0].close()
+
+        saved = []
+        try:
+            _first, _second = [buffered(saved if keep else None)]
+        except ValueError:
+            with open(path, "rb") as reader:
+                assert reader.read() == (b"" if keep else b"loop")
+        else:
+            raise AssertionError("expected unpacking failure")
         if keep:
             saved[0].close()
 
