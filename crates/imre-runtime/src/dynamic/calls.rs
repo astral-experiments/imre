@@ -641,6 +641,9 @@ impl Context {
             | Value::Tuple(_)
             | Value::DictIterator(_)
             | Value::MappingViewIterator { .. }
+            | Value::CallableIterator(_)
+            | Value::FormatIterator { .. }
+            | Value::File(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
@@ -692,6 +695,7 @@ impl Context {
                     return Some("typing._CallableType");
                 }
                 if builtins::is_builtin_type(name)
+                    || builtins::is_iterator_type(name)
                     || matches!(
                         name.as_str(),
                         "NoneType"
@@ -706,12 +710,6 @@ impl Context {
                             | "builtin_function_or_method"
                             | "method-wrapper"
                             | "wrapper_descriptor"
-                            | "generator"
-                            | "list_iterator"
-                            | "tuple_iterator"
-                            | "bytes_iterator"
-                            | "bytearray_iterator"
-                            | "range_iterator"
                             | "getset_descriptor"
                             | "mappingproxy"
                             | "functools._PlaceholderType"
@@ -719,11 +717,7 @@ impl Context {
                             | "operator.itemgetter"
                             | "collections.defaultdict"
                             | "array.array"
-                            | "itertools.count"
                             | super::deque::CLASS
-                            | super::deque::ITERATOR
-                            | super::deque::REVERSE_ITERATOR
-                            | "itertools.repeat"
                             | "weakref.ReferenceType"
                             | "weakref.ProxyType"
                             | "weakref.CallableProxyType"

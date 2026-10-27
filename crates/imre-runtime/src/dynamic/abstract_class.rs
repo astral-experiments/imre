@@ -23,6 +23,11 @@ impl Context {
         }
         for &method in methods {
             let name = self.str_value(method)?;
+            if matches!(name, "__iter__" | "__next__")
+                && matches!(self.heap.get(class), Value::Native(kind) if super::builtins::is_iterator_type(kind))
+            {
+                continue;
+            }
             let value = self
                 .class_attr(class, name)
                 .or_else(|| self.own_class_attr(class, name));
@@ -41,7 +46,8 @@ impl Context {
 
     /// Only ABC classes use a Python subclass hook for public instance and subclass checks.
     pub(super) fn has_abc_subclass_hook(&self, class: Id) -> bool {
-        self.class_attr(class, "__subclasshook__").is_some() && self.is_bundled_abc(class)
+        self.class_attr(class, "__subclasshook__").is_some()
+            && (self.is_bundled_abc(class) || super::mapping_abc::is_abc_class(self, class))
     }
 
     pub(super) fn abc_hook_result(&mut self, child: Id, parent: Id) -> Result<Option<bool>> {
