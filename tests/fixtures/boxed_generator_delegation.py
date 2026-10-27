@@ -1,6 +1,12 @@
 events = []
 
 
+class RefuseUnary:
+    def __neg__(self):
+        events.append("refused unary")
+        return NotImplemented
+
+
 def rows(groups):
     events.append("start")
     for label, values in groups:
@@ -40,6 +46,11 @@ def stopped(cause):
 def raise_after_yield(error, cause):
     yield -1, +1, ~1, not 1
     raise error from cause
+
+
+def declined_unary(value):
+    yield "before unary"
+    yield -value
 
 
 def annotated():
@@ -85,6 +96,13 @@ def current():
             next(g)
         except (ValueError, RuntimeError) as caught:
             print(type(caught).__name__, caught.__cause__ is cause, next(g, "closed"))
+
+    declined = declined_unary(RefuseUnary())
+    print(next(declined))
+    try:
+        next(declined)
+    except TypeError as error:
+        print(str(error), events[-1], next(declined, "closed"))
 
     paused = wrapped([("gc", [1, 2])])
     print(next(paused))
