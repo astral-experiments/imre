@@ -42,12 +42,9 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     ctx.bind(class_scope, "__annotations__", annotations);
     ctx.bind(class_scope, "_fields", fields);
     let base = ctx.builtin("typing.NamedTuple");
-    let ancestors = ctx.lineage(base);
-    let key = ctx.alloc(Value::Class {
-        name: "SelectorKey".into(),
-        scope: class_scope,
-        ancestors,
-    });
+    let key = ctx
+        .allocate_class("SelectorKey".into(), class_scope, vec![base])
+        .expect("a single named tuple base has a linearization");
     ctx.bind(scope, "SelectorKey", key);
 }
 

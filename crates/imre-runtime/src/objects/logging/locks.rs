@@ -7,14 +7,14 @@ use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 #[derive(Default)]
-pub(in crate::objects) struct HandlerLock {
+pub(crate) struct HandlerLock {
     owner: Mutex<Option<(ThreadId, usize)>>,
     available: Condvar,
 }
 
 impl HandlerLock {
     /// An owner may acquire recursively; other callers wait for the final release.
-    fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
+    pub(crate) fn acquire(&self, blocking: bool, timeout: Option<Duration>) -> Result<bool> {
         let id = thread::current().id();
         let mut owner = self.owner.lock().unwrap();
         if let Some((thread, depth)) = owner.as_mut()
@@ -47,7 +47,7 @@ impl HandlerLock {
     }
 
     /// Wake a waiting thread only after the matching outer release.
-    fn release(&self) -> Result<()> {
+    pub(crate) fn release(&self) -> Result<()> {
         let mut owner = self.owner.lock().unwrap();
         if let Some((id, depth)) = owner.as_mut()
             && *id == thread::current().id()

@@ -62,6 +62,19 @@ def current():
         break
     print(length_hint(pairs), list(pairs), length_hint(pairs))
 
+    live = {"first": 1, "second": 2}
+    live_items = iter(live.items())
+    live_values = iter(live.values())
+    print(next(live_items), next(live_values))
+    live["second"] = 99
+    print(next(live_items), next(live_values))
+    live["third"] = 3
+    for cursor in (live_items, live_values):
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            print(error, length_hint(cursor))
+
     def replace_and_append(value):
         if value == 1:
             sequence[1] = 3

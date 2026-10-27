@@ -94,7 +94,11 @@ pub(in crate::dynamic) fn attribute(
         ("date" | "datetime", "timetuple" | "toordinal" | "weekday")
         | ("timedelta", "total_seconds") => {
             let callable = ctx.builtin(&format!("datetime.{class}.{name}"));
-            return Ok(ctx.alloc(Value::Method { callable, receiver }));
+            return Ok(ctx.alloc(Value::Method {
+                callable,
+                receiver,
+                explicit: false,
+            }));
         }
         ("datetime" | "date", _) => {
             let fields = if class == "date" {

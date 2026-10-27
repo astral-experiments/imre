@@ -65,7 +65,7 @@ pub(super) fn number_for(name: &Str) -> Option<Int> {
 }
 
 /// Resolve a configured name through the same aliased registry as Logger.setLevel.
-pub(super) fn named_level(name: &Str) -> Result<Int, Error> {
+pub(crate) fn named_level(name: &Str) -> Result<Int, Error> {
     number_for(name).ok_or_else(|| {
         Error::new(
             Kind::ValueError,
@@ -74,7 +74,7 @@ pub(super) fn named_level(name: &Str) -> Result<Int, Error> {
     })
 }
 
-pub(super) fn level_name(level: &Int) -> StrOwner {
+pub(crate) fn level_name(level: &Int) -> StrOwner {
     LEVELS.with(|levels| {
         // SAFETY: the registry roots the integer-key dictionary; lookup returns a string owner.
         unsafe { lookup(crate::ObjectOwner::as_ptr(&levels.numbers), level.0) }.map_or_else(

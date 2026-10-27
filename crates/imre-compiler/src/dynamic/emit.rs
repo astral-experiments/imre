@@ -17,6 +17,7 @@ declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
 declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
+declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
@@ -83,6 +84,7 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
+    GeneratorFunction(&'a [ast::Stmt]),
     Annotations(Vec<(&'a str, &'a ast::Expr)>),
     Expression(&'a ast::Expr),
     Generator(&'a ast::Comprehension, &'a ast::Expr),
@@ -201,6 +203,7 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
+            Body::GeneratorFunction(_) => {}
             Body::Annotations(entries) => f.annotations(&entries),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
