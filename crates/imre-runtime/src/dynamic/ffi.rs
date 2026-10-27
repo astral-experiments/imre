@@ -103,16 +103,20 @@ impl Context {
                 Ok(a)
             }
             "update" | "keywords" => {
-                let mapping = self.for_each_mapping_item(b, |ctx, key, val| {
-                    if op == "keywords" {
-                        ctx.str_value(key)
-                            .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
-                        ctx.op("keyword", a, key, val)?;
-                    } else {
-                        ctx.put_item(a, key, val)?;
-                    }
-                    Ok(())
-                })?;
+                let mapping = self.for_each_mapping_item(
+                    b,
+                    super::calls::MappingOperation::Unpack,
+                    |ctx, key, val| {
+                        if op == "keywords" {
+                            ctx.str_value(key)
+                                .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+                            ctx.op("keyword", a, key, val)?;
+                        } else {
+                            ctx.put_item(a, key, val)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 if !mapping {
                     return Err(Error::new("TypeError", "expected a mapping"));
                 }
@@ -250,8 +254,8 @@ impl Context {
                 Ok(self.raised_instance(error))
             }
             "matches" => {
-                if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
-                    Ok(flag(self.error_matches(kind, b)))
+                if let Value::Raised(error) = self.heap.get(a) {
+                    Ok(flag(self.raised_error_matches(error, b)))
                 } else {
                     Ok(FALSE)
                 }
@@ -365,7 +369,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
+        call_depth: 0,
         pending: None,
+        slot_depth: 0,
     };
     // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
@@ -686,12 +692,63 @@ impl Context {
             };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        let signature = self.code_object(code).parameters;
+        let signature: serde_json::Value = if signature == NONE {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(
+                self.str_value(signature)
+                    .expect("function parameters are text"),
+            )
+            .expect("function parameters are valid JSON")
+        };
+        let entries = self
+            .dict_entries(defaults)
+            .expect("function defaults are a dict")
+            .to_vec();
+        let lookup = |name: &str| {
+            entries.iter().find_map(|&(key, value)| {
+                matches!(self.heap.get(key), Value::Str(text) if text == name).then_some(value)
+            })
+        };
+        let mut positional = Vec::new();
+        for key in ["posonly", "positional"] {
+            for name in signature[key].as_array().into_iter().flatten() {
+                if let Some(name) = name.as_str()
+                    && let Some(value) = lookup(name)
+                {
+                    positional.push(value);
+                }
+            }
+        }
+        let keyword: Vec<(Id, Id)> = entries
+            .into_iter()
+            .filter(|&(key, _)| {
+                let Value::Str(name) = self.heap.get(key) else {
+                    return false;
+                };
+                signature["kwonly"]
+                    .as_array()
+                    .is_some_and(|names| names.iter().any(|item| item.as_str() == Some(name)))
+            })
+            .collect();
+        let defaults = if positional.is_empty() {
+            NONE
+        } else {
+            self.alloc(Value::Tuple(positional))
+        };
+        let kwdefaults = if keyword.is_empty() {
+            NONE
+        } else {
+            self.dict(keyword)
+        };
         self.alloc(Value::Function {
             fields,
             code,
             scope,
             class_cell,
             defaults,
+            kwdefaults,
         })
     }
 }

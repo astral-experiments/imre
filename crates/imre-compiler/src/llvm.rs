@@ -5567,6 +5567,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::ArgparseChoiceDigits(digits) => {
+                self.line(format!(
+                    "call void @imre_argparse_choice_digits(i64 {digits})"
+                ));
+                self.check_error();
+                none()
+            }
             Builtin::ArgparseText { usage, output } => {
                 let file = args.get(2).map_or("null", |file| &file.value.operand);
                 let text = self.checked_instruction(format!(
@@ -7022,6 +7029,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DictCopy => self.call("imre_dict_copy", returns, &[&args[0].value]),
+            Builtin::DictIsOrdered => self.call("imre_dict_is_ordered", returns, &[&args[0].value]),
             Builtin::DictFromKeysTarget => self.call(
                 "imre_dict_fromkeys_target",
                 returns,
@@ -9604,6 +9612,7 @@ declare ptr @imre_namespace_dict(ptr)
 declare i64 @imre_namespace_get(ptr, ptr)
 declare void @imre_namespace_delete(ptr, ptr)
 declare ptr @imre_dict_copy(ptr)
+declare i1 @imre_dict_is_ordered(ptr)
 declare ptr @imre_dict_fromkeys_target(ptr, ptr)
 declare ptr @imre_ordered_dict(ptr)
 declare i64 @imre_deep_copy(i64, i32)
@@ -9755,6 +9764,7 @@ declare i32 @imre_text_flush(ptr)
 declare i32 @imre_text_close(ptr)
 declare i32 @imre_text_closed(ptr)
 declare void @imre_args_init(i32, ptr)
+declare void @imre_argparse_choice_digits(i64)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
 declare ptr @imre_sys_stdout()

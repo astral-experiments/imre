@@ -40,13 +40,59 @@ class Broken(Cursor):
         raise ValueError("broken")
 
 
+class FailedIterable:
+    def __iter__(self):
+        raise TypeError("from iter")
+
+
+class FailedCursor:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise TypeError("from next")
+
+
 def current():
     values = iter([1, 0, 7])
     print(all([]), all(values), next(values))
 
+
+    for source in (FailedIterable(), FailedCursor()):
+        try:
+            print(1 in source)
+        except TypeError as error:
+            print(error.args)
     cursor = Cursor()
     cursor.__iter__ = lambda: []
     print(iter(cursor) is cursor)
+    target = [7]
+    alias = target
+    target.extend(len(alias) for _ in range(3))
+    try:
+        target.extend(12 // value for value in (3, 2, 0))
+    except ZeroDivisionError:
+        print(alias)
+    target.extend(alias)
+    print(alias)
+
+    class Hint:
+        def __iter__(self):
+            events.append("iter")
+            return iter((3,))
+
+        def __length_hint__(self):
+            events.append("hint")
+            alias.append(9)
+            raise ValueError("stop")
+
+    events = []
+    try:
+        target.extend(Hint())
+    except ValueError as error:
+        print(str(error), events, alias)
+    else:
+        raise AssertionError("ignored length hint")
     growing = [4, 5]
     for index, item in enumerate(growing, start=1 << 70):
         print(index, item)
@@ -112,3 +158,20 @@ def current():
                 function(*args, **kwargs)
             except TypeError as exc:
                 print(str(exc))
+
+    cursor = Cursor()
+    print(1 in cursor, cursor.calls, next(cursor, None))
+    try:
+        1 in Broken()
+    except ValueError as exc:
+        print(str(exc))
+
+    calls = []
+
+    class Candidate:
+        def __eq__(self, other):
+            calls.append(other)
+            return other == 17
+
+    item = Candidate()
+    print(17 in [item], 17 in Rows([item]), item in [item], calls)

@@ -299,7 +299,18 @@ pub(super) fn collect(graph: &SourceGraph) -> Result<Declarations, String> {
                 ids.insert(def, id);
                 named.push(NamedException {
                     id,
-                    name: node.name.to_string(),
+                    name: if module_id == graph.entry {
+                        node.name.to_string()
+                    } else {
+                        // The bundled unittest shim re-exports CPython's unittest.case.SkipTest.
+                        let module =
+                            if module.is_bundled("unittest") && node.name.as_str() == "SkipTest" {
+                                "unittest.case"
+                            } else {
+                                &module.name
+                            };
+                        format!("{module}.{}", node.name)
+                    },
                     base,
                     ancestors,
                 });

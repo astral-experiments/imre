@@ -1,7 +1,10 @@
 """Recover every owner after refusing the allocation used by one list observation."""
+from copy import deepcopy
 from difflib import ndiff
 from itertools import tee
 from sys import argv
+
+from imre import struct
 
 
 class RowsError(Exception):
@@ -18,7 +21,85 @@ def union_truth(value: list[str] | str) -> bool:
     return bool(value)
 
 
+@struct
+class PackedRow:
+    value: float
+    enabled: bool
+
+
+def packed_rows(mode: str, shape: str) -> None:
+    rows = [PackedRow(1.5, True), PackedRow(2.5, False)]
+    result: list[PackedRow] = []
+    count = 0 if shape == "empty" else 2
+    print("armed")
+    for attempt in range(2):
+        try:
+            if mode == "packed-slice":
+                result = rows[:count]
+            else:
+                result = rows * count
+            print("ok")
+            break
+        except MemoryError as error:
+            print("refused")
+            print(repr(error))
+    for row in rows:
+        print(row.value)
+        print(row.enabled)
+    print(len(result))
+    for row in result:
+        print(row.value)
+        print(row.enabled)
+
+
+def check_dict_copy(shape: str) -> None:
+    shared = [7]
+    source: dict[str, list[int]] = {}
+    if shape == "full":
+        source["a"] = shared
+        source["b"] = shared
+    print("armed")
+    for attempt in range(2):
+        try:
+            copied = source.copy()
+            print("ok")
+            print(copied)
+            print(copied is source)
+            if shape == "full":
+                print(copied["a"] is shared)
+            break
+        except MemoryError as error:
+            print("refused")
+            print(repr(error))
+    print(source)
+
+
 def check(mode: str, shape: str) -> None:
+    if mode == "dict-copy-owners":
+        check_dict_copy(shape)
+        return
+    if mode == "packed-slice" or mode == "packed-repeat":
+        packed_rows(mode, shape)
+        return
+    if mode == "deepcopy-graph":
+        child = [7]
+        graph = ({"left": child, "right": child}, {"one"})
+        print("armed")
+        for attempt in range(2):
+            try:
+                mapping, keys = deepcopy(graph)
+                print("ok")
+                print(mapping["left"] is mapping["right"])
+                print(mapping["left"] is child)
+                mapping["left"].append(9)
+                print(child)
+                print(mapping["right"])
+                keys.add("two")
+                print("two" in graph[1])
+                return
+            except MemoryError:
+                print("refused")
+        raise RuntimeError("deep copy did not recover")
     left = [argv[3], argv[4]]
     right = [argv[4], argv[3]]
     if shape == "sparse":

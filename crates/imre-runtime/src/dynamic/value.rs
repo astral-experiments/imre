@@ -71,6 +71,7 @@ pub(super) struct ImportFields {
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
+    pub class: Option<Id>,
     pub message: String,
     pub args: Option<Vec<Id>>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
@@ -83,6 +84,7 @@ impl Error {
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
         Self {
             kind: kind.to_owned(),
+            class: None,
             message: message.into(),
             args: None,
             os_args: None,
@@ -116,6 +118,7 @@ impl Error {
             .iter()
             .flatten()
             .copied()
+            .chain(self.class)
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
                     .frames
@@ -387,7 +390,7 @@ pub(super) enum Value {
         items: Vec<Id>,
         frozen: bool,
     },
-    Dict(Vec<(Id, Id)>),
+    Dict(super::dictionary::Entries),
     MappingProxy(Id),
     DictView {
         dict: Id,
@@ -396,7 +399,7 @@ pub(super) enum Value {
     DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
-        entries: Vec<(Id, Id)>,
+        entries: super::dictionary::Entries,
     },
     Scope(Scope),
     ClassCell(Option<Id>),
@@ -417,6 +420,7 @@ pub(super) enum Value {
         scope: Id,
         class_cell: Option<Id>,
         defaults: Id,
+        kwdefaults: Id,
     },
     Code(CodeObject),
     Generator {
@@ -483,7 +487,10 @@ pub(super) enum Value {
         entries: Vec<CachedCall>,
     },
     Yielded(Id),
-    AstWalk(std::collections::VecDeque<Id>),
+    AstWalk {
+        queue: std::collections::VecDeque<Id>,
+        running: bool,
+    },
     Enumerate {
         input: Id,
         next_index: crate::Int,
@@ -615,7 +622,7 @@ impl Value {
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
-            Self::AstWalk(queue) => visit.extend(queue),
+            Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
@@ -653,10 +660,11 @@ impl Value {
                 class_cell,
                 code,
                 defaults,
+                kwdefaults,
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults]);
+                visit.extend([*scope, *code, *defaults, *kwdefaults]);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
@@ -767,7 +775,8 @@ pub(super) struct DictIterator {
     dict: Option<Id>,
     kind: DictViewKind,
     expected_len: Option<usize>,
-    index: usize,
+    position: usize,
+    remaining: usize,
 }
 
 impl DictIterator {
@@ -777,7 +786,8 @@ impl DictIterator {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
-            index: 0,
+            position: 0,
+            remaining: size,
         }
     }
 
@@ -786,7 +796,7 @@ impl DictIterator {
         self.dict
             .and_then(|dict| ctx.dict_entries(dict))
             .filter(|entries| Some(entries.len()) == self.expected_len)
-            .map_or(0, |entries| entries.len() - self.index)
+            .map_or(0, |_| self.remaining)
     }
 
     /// Check the live size before each pull, including the one that reaches exhaustion.
@@ -794,7 +804,11 @@ impl DictIterator {
         let Some(dict) = self.dict else {
             return Ok(None);
         };
-        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        let storage = ctx.dict_storage(dict).expect("dictionary iterator source");
+        let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get(storage)
+        else {
+            unreachable!("dictionary storage");
+        };
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
             return Err(Error::new(
@@ -802,11 +816,19 @@ impl DictIterator {
                 "dictionary changed size during iteration",
             ));
         }
-        let Some(&(key, value)) = entries.get(self.index) else {
+        let Some((position, key, value)) = entries.at(self.position) else {
             self.dict = None;
             return Ok(None);
         };
-        self.index += 1;
+        if self.remaining == 0 {
+            self.dict = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary keys changed during iteration",
+            ));
+        }
+        self.position = position + 1;
+        self.remaining -= 1;
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,

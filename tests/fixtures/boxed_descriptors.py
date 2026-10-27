@@ -114,3 +114,33 @@ def current():
     wrapper.field = {"kept": 1}
     update_wrapper(wrapper, hidden, ("field",), ("field",))
     print(wrapper.field, wrapper.__wrapped__ is hidden)
+
+    class Loop:
+        pass
+
+    callback = Loop()
+    Loop.__call__ = callback
+
+    class Recursive:
+        __setitem__ = callback
+
+    try:
+        Recursive()[1] = 2
+    except RecursionError:
+        print("recursive setter")
+    Loop.__call__ = lambda self, key, value: print("retry", key, value)
+    Recursive()[3] = 4
+
+    class Next:
+        def __get__(self, receiver, owner):
+            return receiver.target
+
+    class Link:
+        __call__ = Next()
+
+    target = lambda: 73
+    for _ in range(1200):
+        link = Link()
+        link.target = target
+        target = link
+    print(target())

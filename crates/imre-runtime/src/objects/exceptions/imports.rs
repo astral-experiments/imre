@@ -2,6 +2,11 @@
 use crate::StrOwner;
 mod suggestions;
 
+/// Choose the nearest parameter name in declaration order for a binding error.
+pub(crate) fn keyword_suggestion<'a>(wrong: &str, names: &[&'a str]) -> Option<&'a str> {
+    suggestions::declaration_order(wrong, names)
+}
+
 use super::*;
 use crate::objects::boxed_values::{
     checked_text, concrete, length, sequence_item, tuple_item, word_text,
@@ -141,7 +146,7 @@ pub unsafe extern "C" fn imre_exception_keyword_message(
                 (&*(ptr as *const Str)).as_str()
             })
             .collect();
-        match suggestions::declaration_order((&*wrong).as_str(), &choices) {
+        match keyword_suggestion((&*wrong).as_str(), &choices) {
             Some(spelling) => crate::StrOwner::into_raw(crate::StrOwner::new(
                 format!("{}. Did you mean '{spelling}'?", *prefix).into(),
             )),

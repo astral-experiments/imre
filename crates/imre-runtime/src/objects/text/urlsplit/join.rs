@@ -76,8 +76,8 @@ fn resolve_path(base: &str, target: &str) -> Result<String> {
 }
 
 fn join(base: &str, url: &str, fragments: bool) -> Result<String> {
-    let clean_base = clean(base, false);
-    let clean_url = clean(url, false);
+    let clean_base = clean(base, false)?;
+    let clean_url = clean(url, false)?;
     let base = split(&clean_base, "", fragments)?;
     let target = split(&clean_url, "", fragments)?;
     let scheme = if target.scheme.is_empty() {

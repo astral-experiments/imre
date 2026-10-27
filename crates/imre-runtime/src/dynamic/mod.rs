@@ -5,6 +5,7 @@ mod abstract_class;
 mod builtins;
 mod calls;
 mod complex;
+mod dictionary;
 mod enums;
 mod ffi;
 mod function_fields;
@@ -74,7 +75,10 @@ pub(crate) struct Context {
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    slot_depth: usize,
 }
 
 impl Context {
@@ -111,7 +115,7 @@ impl Context {
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
-        self.alloc(Value::Dict(entries))
+        self.alloc(Value::Dict(entries.into()))
     }
 
     fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {
@@ -142,7 +146,7 @@ impl Context {
     }
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(id) {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -152,6 +156,17 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+            return self.truth(flag);
+        }
+        self.bytearray_exports.push(input);
+        let result = self.truth(flag);
+        self.bytearray_exports.pop();
+        result
     }
 
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
@@ -196,7 +211,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::AstWalk(_)
+                | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -213,6 +228,14 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
+            let closed = match self.heap.get(id) {
+                Value::File(file) => file.closed(),
+                Value::TextFile(file) => file.closed(),
+                _ => false,
+            };
+            if closed {
+                return Err(Error::new("ValueError", "I/O operation on closed file."));
+            }
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
@@ -307,7 +330,7 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
-            Value::List(values) if *reverse => {
+            Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
             Value::List(values) | Value::Tuple(values) => {
@@ -346,8 +369,8 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(!queue.is_empty());
+        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
+            return stdlib::ast::has_item(self, id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -366,7 +389,7 @@ impl Context {
 
     fn is_stop_iteration(&mut self, error: &Error) -> bool {
         let stop = self.builtin("StopIteration");
-        self.error_matches(&error.kind, stop)
+        self.raised_error_matches(error, stop)
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
@@ -394,7 +417,7 @@ impl Context {
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } => {}
-            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -408,15 +431,24 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
+            Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Zip { .. } => {
+                // A zip input can itself be a zip, so advancing a row can descend many native frames.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_zip_or_map(id)
+                });
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
-                return match self.code_object(code).body {
-                    value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                        self.resume_source(id)
+                // Delegated generators resume their children on the native stack.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    match self.code_object(code).body {
+                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                            self.resume_source(id)
+                        }
                     }
-                };
+                });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::File(_) | Value::TextFile(_) => {
@@ -464,7 +496,7 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::AstWalk(_)
+            Value::AstWalk { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
@@ -995,6 +1027,11 @@ impl Context {
         });
         self.modules.insert(name.to_owned(), module);
         match name {
+            "os" => {
+                let path = self.module("posixpath")?;
+                self.bind(scope, "path", path);
+                self.modules.insert("os.path".to_owned(), path);
+            }
             "io" => stdlib::io::install(self, scope),
             "_io" => {
                 self.module("io")?;

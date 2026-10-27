@@ -15,23 +15,8 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             )));
         }
     };
-    if matches!(ctx.heap.get(value), Value::Float(_)) {
-        return Ok(value);
-    }
-    if let Some(method) = ctx.bound_slot(value, "__float__")? {
-        let result = ctx.call(method, Vec::new(), Vec::new())?;
-        if matches!(ctx.heap.get(result), Value::Float(_)) {
-            return Ok(result);
-        }
-        return Err(type_error(format!(
-            "{}.__float__ returned non-float (type {})",
-            ctx.type_name(value),
-            ctx.type_name(result),
-        )));
-    }
-    if let Some(integer) = ctx.index_value(value)? {
-        let number = crate::floats::int_to_float(&integer)?;
-        return Ok(ctx.alloc(Value::Float(number)));
+    if let Some(number) = from_numeric(ctx, value)? {
+        return Ok(number);
     }
     let parsed = if let Ok(text) = ctx.str_value(value) {
         crate::floats::parse(text)
@@ -50,4 +35,32 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
         )
     })?;
     Ok(ctx.alloc(Value::Float(number)))
+}
+
+/// Return the float supplied by the numeric protocol, preserving callback results and errors.
+pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
+    if matches!(ctx.heap.get(value), Value::Float(_)) {
+        return Ok(Some(value));
+    }
+    if let Some(method) = ctx.bound_slot(value, "__float__")? {
+        let result = ctx.call(method, Vec::new(), Vec::new())?;
+        let scalar = ctx.scalar_value(result);
+        if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+            return Ok(Some(scalar));
+        }
+        return Err(type_error(format!(
+            "{}.__float__ returned non-float (type {})",
+            ctx.type_name(value),
+            ctx.type_name(result),
+        )));
+    }
+    let scalar = ctx.scalar_value(value);
+    if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+        return Ok(Some(scalar));
+    }
+    if let Some(integer) = ctx.index_value(value)? {
+        let number = crate::floats::int_to_float(&integer)?;
+        return Ok(Some(ctx.alloc(Value::Float(number))));
+    }
+    Ok(None)
 }

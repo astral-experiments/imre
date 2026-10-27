@@ -52,15 +52,15 @@ impl Context {
     }
 
     pub(super) fn local_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
-        if name == "__class__" {
-            return Ok(self.builtin(CLASS));
-        }
         let dict = self.local_dict(obj);
         if name == "__dict__" {
             return Ok(dict);
         }
         let key = self.text(name);
         match self.get_item(dict, key) {
+            Err(error) if error.kind == "KeyError" && name == "__class__" => {
+                Ok(self.builtin(CLASS))
+            }
             Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
             result => result,
         }
@@ -118,7 +118,7 @@ mod tests {
             let payload: Rc<[Vec<String>]> = Rc::from([]);
             let probe = Rc::downgrade(&payload);
             let value = heap.alloc(Value::AttrGetter(payload));
-            (heap.alloc(Value::Dict(vec![(NONE, value)])), probe)
+            (heap.alloc(Value::Dict(vec![(NONE, value)].into())), probe)
         };
         let (parent, parent_probe) = dictionary();
         let (worker, worker_probe) = dictionary();

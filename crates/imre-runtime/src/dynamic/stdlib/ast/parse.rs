@@ -1,6 +1,6 @@
 //! Convert the Rust parser's tree into mutable Python AST nodes.
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, parsed_instance};
 use crate::dynamic::value::{FALSE, TRUE};
@@ -8,6 +8,7 @@ use crate::dynamic::value::{FALSE, TRUE};
 struct Parser<'a> {
     ctx: &'a mut Context,
     lines: Vec<usize>,
+    function_starts: Vec<TextSize>,
     load: Id,
     store: Id,
 }
@@ -121,7 +122,7 @@ impl Parser<'_> {
 
     fn statement(&mut self, s: ast::Stmt) -> Result<Id> {
         use ast::Stmt;
-        let range = s.range();
+        let range = self.statement_range(&s);
         let (kind, fields) = match s {
             Stmt::Expr(v) => ("Expr", vec![self.expr(*v.value)?]),
             Stmt::Pass(_) => ("Pass", vec![]),
@@ -182,6 +183,19 @@ impl Parser<'_> {
             }
         };
         Ok(self.node(kind, &fields, range))
+    }
+
+    fn statement_range(&self, statement: &ast::Stmt) -> TextRange {
+        if let ast::Stmt::FunctionDef(function) = statement
+            && let Some(last) = function.decorator_list.last()
+        {
+            // Ruff includes decorators in the range. Python starts at the def keyword.
+            let next = self
+                .function_starts
+                .partition_point(|start| *start < last.end());
+            return TextRange::new(self.function_starts[next], function.end());
+        }
+        statement.range()
     }
 
     fn context(&self, context: ast::ExprContext) -> Result<Id> {
@@ -319,6 +333,7 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let mut parser = Parser {
         ctx,
         lines,
+        function_starts: Vec::new(),
         load,
         store,
     };
@@ -326,6 +341,12 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     match mode.as_str() {
         "exec" => {
             let body = ruff_python_parser::parse_module(&source).map_err(syntax)?;
+            parser.function_starts = body
+                .tokens()
+                .iter()
+                .filter(|token| token.kind() == ast::token::TokenKind::Def)
+                .map(Ranged::start)
+                .collect();
             let body = parser.suite(body.into_syntax().body)?;
             let ignores = parser.list(vec![]);
             Ok(parsed_instance(

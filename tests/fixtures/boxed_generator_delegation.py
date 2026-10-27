@@ -11,6 +11,7 @@ def rows(groups):
 
 
 def wrapped(groups):
+    """Delegate the grouped rows."""
     yield from rows(groups)
     return 42
 
@@ -50,6 +51,7 @@ def annotated():
 
 
 def current():
+    print(wrapped.__doc__)
     two = wrapped([("a", [1, 2]), ("b", [3])])
     print(two.gi_code is wrapped.__code__, events)
     for first in two:
@@ -108,3 +110,11 @@ def current():
         next(values)
     except UnboundLocalError as error:
         print(str(error), next(values, "closed"))
+
+    def relay(values):
+        yield from values
+
+    nested = [42]
+    for _ in range(6000):
+        nested = relay(nested)
+    print(next(nested), list(nested))

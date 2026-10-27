@@ -505,7 +505,7 @@ unsafe fn write_repr_with(
     output: &mut ReprWriter<'_>,
     word: usize,
     kind: WordKind,
-    check_digits: bool,
+    mut check_digits: bool,
 ) -> std::fmt::Result {
     let mut pending = ReprStack::new();
     let mut callback_roots = std::collections::HashMap::new();
@@ -725,7 +725,18 @@ unsafe fn write_repr_with(
                     })?
                 }
                 ReprTask::Context(view) => {
-                    view.write(output)?;
+                    if let Some((word, kind, tail)) = view.begin(output)? {
+                        pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                        pending.push(ReprTask::ContextEnd(tail, check_digits));
+                        check_digits = false;
+                        Some(ReprTask::Word(word, kind))
+                    } else {
+                        None
+                    }
+                }
+                ReprTask::ContextEnd(tail, outer_check_digits) => {
+                    check_digits = outer_check_digits;
+                    tail.write(output)?;
                     None
                 }
                 ReprTask::Exception(owner) => {
@@ -777,6 +788,7 @@ unsafe fn write_repr_with(
 
 enum ReprTask {
     Context(super::contextvars::ReprView),
+    ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
     Object(*const Object, usize),
     Exception(*const Object),
@@ -787,6 +799,7 @@ enum ReprTask {
 impl ReprTask {
     fn root(&self) -> Option<(usize, WordKind)> {
         match *self {
+            Self::ContextEnd(_, _) => None,
             Self::Context(ref view) => view.owner().map(|owner| (owner as usize, WordKind::new(5))),
             Self::Word(word, kind) => Some((word, kind)),
             Self::Object(owner, _) | Self::Exception(owner) => {

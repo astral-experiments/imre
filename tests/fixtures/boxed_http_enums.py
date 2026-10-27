@@ -26,6 +26,10 @@ class COEP(Enum):
     UNSAFE_NONE = "unsafe-none"
     REQUIRE_CORP = "require-corp"
 
+    @staticmethod
+    def identity(value):
+        return value
+
 
 class COOP(Enum):
     UNSAFE_NONE = "unsafe-none"
@@ -37,5 +41,6 @@ for policy in (COEP, COOP):
     for member in policy:
         print(member.name, member.value, str(member), repr(member))
         print(policy(member.value) is member, policy[member.name] is member)
+print(tuple(COEP.__members__), COEP.identity("static"))
 print(COEP.UNSAFE_NONE is COOP.UNSAFE_NONE, COEP.UNSAFE_NONE == COOP.UNSAFE_NONE)
 print(isinstance(COEP.UNSAFE_NONE, str), COEP.UNSAFE_NONE == "unsafe-none")

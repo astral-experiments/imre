@@ -130,6 +130,30 @@ print(PlainCallable.__mro__ == (PlainCallable, cabc.Callable, t.Generic, object)
 print(t.Callable.__mro_entries__((t.Callable,)) == (cabc.Callable, t.Generic))
 
 
+class EqualBase:
+    def __init__(self, target, error=None):
+        self.target = target
+        self.error = error
+
+    def __eq__(self, other):
+        if other is self.target:
+            if self.error is not None:
+                raise RuntimeError(self.error)
+            return True
+        return False
+
+
+equal_origin = EqualBase(cabc.Callable)
+print(t.Callable.__mro_entries__((equal_origin, t.Callable)) == (t.Generic,))
+equal_callable = EqualBase(t.Callable)
+print(t.Callable.__mro_entries__((equal_callable, t.Callable)) == (cabc.Callable,))
+for target, message in ((cabc.Callable, "origin equality"), (t.Callable, "self equality")):
+    try:
+        t.Callable.__mro_entries__((EqualBase(target, message), t.Callable))
+    except RuntimeError as error:
+        print(str(error))
+
+
 class AddsGeneric:
     def __mro_entries__(self, bases):
         return (t.Generic,)
