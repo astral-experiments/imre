@@ -420,12 +420,15 @@ impl Context {
             Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
             Value::Generator { code, .. } => {
                 let code = *code;
-                return match self.code_object(code).body {
-                    value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                        self.resume_source(id)
+                // Delegated generators resume their children on the native stack.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    match self.code_object(code).body {
+                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                            self.resume_source(id)
+                        }
                     }
-                };
+                });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::File(_) | Value::TextFile(_) => {
