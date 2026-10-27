@@ -32,7 +32,7 @@ def current():
         result = f(n, digits)
         print(type(result).__name__, repr(result))
 
-    for invoke in (lambda: f(), lambda: f(1, 2, 3), lambda: f("1"),
+    for invoke in (lambda: f(), lambda: f(1, 2, 3), lambda: f("1"), lambda: f(list), lambda: f(abs),
                    lambda: f(2.5, 1.5), lambda: f(float("nan")),
                    lambda: f(float("inf")), lambda: f(1.79e308, -308)):
         try:

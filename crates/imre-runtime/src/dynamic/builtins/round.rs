@@ -20,9 +20,11 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         ctx.heap.get(scalar),
         Value::Int(_) | Value::Bool(_) | Value::Float(_)
     ) {
+        let kind = ctx
+            .builtin_type_name(value)
+            .unwrap_or_else(|| ctx.type_name(value));
         return Err(type_error(format!(
-            "type {} doesn't define __round__ method",
-            ctx.type_name(value)
+            "type {kind:.100} doesn't define __round__ method"
         )));
     }
     let places = digits
