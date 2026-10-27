@@ -740,8 +740,17 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
         fail("SystemError", "unchecked float format precision");
     }
     // The low bit selects percentages. A zero high byte keeps the default sign.
-    let percent = flags & 1 != 0;
-    let positive_sign = (flags >> 8) as u8;
+    let result = format_fixed_float(value, precision, flags & 1 != 0, (flags >> 8) as u8);
+    StrOwner::into_raw(StrOwner::new(result))
+}
+
+/// Render a fixed-point or percentage field after its precision and sign have been checked.
+pub(crate) fn format_fixed_float(
+    value: f64,
+    precision: u32,
+    percent: bool,
+    positive_sign: u8,
+) -> Str {
     let value = if percent { value * 100.0 } else { value };
     let mut result = if value.is_nan() {
         Str::from("nan")
@@ -761,7 +770,7 @@ pub extern "C" fn imre_float_format(value: f64, precision: u32, flags: u32) -> *
     if percent {
         result.push('%');
     }
-    StrOwner::into_raw(StrOwner::new(result))
+    result
 }
 
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
