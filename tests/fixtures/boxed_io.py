@@ -36,6 +36,40 @@ class ReadCount(RawIOBase):
 
 
 def exercise(path):
+    from io import UnsupportedOperation
+
+    target_path = path + ".output"
+    with open(target_path, "wb") as output:
+        alias = output
+        print(output.write(b"\x00\xff"), alias.closed)
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+        alias.flush()
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+    with open(target_path, "ab") as output:
+        print(output.write(bytearray(b"x")))
+    with open(target_path, "rb") as reader:
+        print(reader.read())
+    try:
+        open(target_path, "xb")
+    except FileExistsError:
+        print("exclusive create")
+    try:
+        alias.read()
+    except UnsupportedOperation as error:
+        print(alias.closed, isinstance(error, OSError), isinstance(error, ValueError))
+    for operation, argument in ((alias.read, 1 << 40), (alias.readline, 1 << 100),
+                                (alias.readinto, b""), (alias.read, -2)):
+        try:
+            operation(argument)
+        except (OverflowError, TypeError, OSError) as error:
+            print(type(error).__name__)
+    try:
+        alias.write(b"x")
+    except ValueError:
+        print("closed writer")
+
     for invalid in ("./missing-binary-input/file", path + "/child", "."):
         try:
             open(invalid, "rb")
@@ -60,6 +94,14 @@ def exercise(path):
             print(stream.read(1), stream.readline(), stream.readline())
         reader.close()
         print(reader.closed, reader.flushes, stream.seek(0), stream.read(2))
+        try:
+            stream.read(-2)
+        except ValueError:
+            print(stream.tell(), stream.readline(-2))
+    try:
+        stream.read(1 << 100)
+    except OverflowError:
+        print("closed read validates the size")
     raw = RawIOBase()
     try:
         raw.readinto(b"")

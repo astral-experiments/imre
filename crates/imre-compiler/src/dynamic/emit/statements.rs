@@ -9,7 +9,6 @@ enum Place {
     Name(String),
     Attr(String, String),
     Item(String, String),
-    Slice(String, String),
 }
 
 impl Function<'_, '_> {
@@ -118,7 +117,7 @@ impl Function<'_, '_> {
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
                     } else if generator {
-                        Body::Unsupported(stmt, "generator function")
+                        Body::GeneratorFunction(&v.body)
                     } else {
                         Body::Statements(&v.body)
                     };
@@ -358,6 +357,22 @@ impl Function<'_, '_> {
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
+        let generator = if let Body::GeneratorFunction(stmts) = &body {
+            let first = stmts[0].start();
+            let start = first.to_usize();
+            let end = stmts.last().unwrap().end().to_usize();
+            let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
+            let indent = if prefix.chars().all(char::is_whitespace) {
+                prefix
+            } else {
+                " "
+            };
+            // Slice the suite as written so indentation inside multiline strings survives.
+            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            Some((self.output.data(text.as_bytes()), self.source.line(first)))
+        } else {
+            None
+        };
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
@@ -391,7 +406,11 @@ impl Function<'_, '_> {
         }
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
-        self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope))
+        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
+        if let Some((source, line)) = generator {
+            self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
+        }
+        function
     }
 
     pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
@@ -436,11 +455,7 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                if let ast::Expr::Slice(slice) = &*s.slice {
-                    Place::Slice(obj, self.slice_bounds(slice))
-                } else {
-                    Place::Item(obj, self.expr(&s.slice))
-                }
+                Place::Item(obj, self.expr(&s.slice))
             }
             _ => {
                 self.unsupported("assignment target");
@@ -454,7 +469,6 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("lookup", &[&self.scope.clone(), n]),
             Place::Attr(v, n) => self.op("attr", &[v, n]),
             Place::Item(v, k) => self.op("get", &[v, k]),
-            Place::Slice(v, bounds) => self.op("slice", &[v, bounds]),
         }
     }
 
@@ -463,7 +477,6 @@ impl Function<'_, '_> {
             Place::Name(n) => self.op("assign", &[&self.scope.clone(), n, value]),
             Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
             Place::Item(v, k) => self.op("put", &[v, k, value]),
-            Place::Slice(v, bounds) => self.op("setslice", &[v, bounds, value]),
         };
     }
 
@@ -749,7 +762,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) => captures.visit_body(stmts),
+        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
         Body::Generator(generator, element) => {
             for filter in &generator.ifs {

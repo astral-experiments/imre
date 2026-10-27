@@ -15,15 +15,17 @@ pub(super) mod datetime;
 mod email;
 mod files;
 mod fnmatch;
+mod formatters;
 mod functools;
 mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
 mod time;
-pub(super) use files::ReadSource;
+pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
+mod logging;
 mod marshal;
 mod operator;
 mod pickle;
@@ -56,6 +58,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "json"
+            | "_imre_logging"
             | "marshal"
             | "pickle"
             | "datetime"
@@ -68,6 +71,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "importlib"
             | "importlib.machinery"
             | "functools"
+            | "_string"
             | "inspect"
             | "collections"
             | "_collections_abc"
@@ -210,6 +214,9 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    if module == "_imre_logging" && logging::is_function(name) {
+        return Ok(ctx.builtin(&format!("{module}.{name}")));
+    }
     if matches!((module, name), ("importlib", "machinery") | ("os", "path")) {
         return ctx.module(&format!("{module}.{name}"));
     }
@@ -230,8 +237,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
+        ("types", "FunctionType") => ctx.builtin("function"),
+        ("types", "BuiltinFunctionType") => ctx.builtin("builtin_function_or_method"),
+        ("types", "EllipsisType") => ctx.builtin("ellipsis"),
+        ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
+        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
@@ -397,6 +409,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
+        | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
         | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
@@ -433,11 +446,20 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("itertools.count.") {
+    if name == "itertools.repeat" {
+        return itertools::repeat(ctx, args, kwargs);
+    }
+    if let Some(method) = name
+        .strip_prefix("itertools.count.")
+        .or_else(|| name.strip_prefix("itertools.repeat."))
+    {
         return itertools::method(ctx, method, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(function) = name.strip_prefix("_imre_logging.") {
+        return logging::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("urllib.parse.") {
         return urllib::call(ctx, function, args, kwargs);
@@ -575,7 +597,9 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
+            (2, &[])
+        }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -588,11 +612,14 @@ pub(super) fn call(
         | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
+        | "_string.formatter_parser"
+        | "_string.formatter_field_name_split"
         | "collections.defaultdict"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.flush"
         | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),
@@ -609,6 +636,12 @@ pub(super) fn call(
         ));
     }
     let value = match name {
+        "_string.formatter_parser" | "_string.formatter_field_name_split" => {
+            return ctx.format_cursor(
+                argument(args, 0)?,
+                name == "_string.formatter_field_name_split",
+            );
+        }
         "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode" => {
             let id = option(args, 0, kwargs, "s")?
