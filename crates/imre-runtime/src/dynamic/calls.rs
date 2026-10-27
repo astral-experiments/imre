@@ -185,7 +185,8 @@ impl Context {
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::Method { .. }
-        ) || self.slot(value, "__call__").is_some()
+        ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
+            || self.slot(value, "__call__").is_some()
     }
 
     fn native_data_descriptor(&self, descriptor: Id) -> bool {
@@ -249,6 +250,7 @@ impl Context {
                             | "list.sort"
                             | "map.__iter__"
                             | "map.__next__"
+                            | weakref::REFERENCE_HASH
                     ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
@@ -404,6 +406,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
+            Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::PartialPlaceholder => "functools._PlaceholderType",
@@ -461,6 +464,9 @@ impl Context {
                             | "operator.attrgetter"
                             | "itertools.count"
                             | "itertools.repeat"
+                            | "weakref.ReferenceType"
+                            | "weakref.ProxyType"
+                            | "weakref.CallableProxyType"
                             | super::thread_local::CLASS
                             | super::thread_lock::CLASS
                             | "traceback"
@@ -481,6 +487,7 @@ impl Context {
                         name.as_str(),
                         "binascii.a2b_base64" | "binascii.b2a_base64" | "posix.fspath"
                     )
+                    || name.starts_with("_weakref.")
                 {
                     "builtin_function_or_method"
                 } else {
@@ -542,6 +549,16 @@ impl Context {
             Value::Class { name, .. } | Value::Native(name) => name.as_str(),
             _ => return false,
         };
+        if let Value::Weak(wr) = self.heap.get(value) {
+            if wr.kind.class() == name {
+                return true;
+            }
+            if wr.kind != weakref::Kind::Reference
+                && let Some(target) = wr.target
+            {
+                return self.instance_of(target, class);
+            }
+        }
         match (name, self.heap.get(value)) {
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
@@ -699,6 +716,7 @@ impl Context {
         name: &str,
         original: Option<Id>,
     ) -> Result<Id> {
+        let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
@@ -1120,6 +1138,28 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Weak(wr) if name == "__callback__" => return Ok(wr.callback),
+            Value::Weak(_) if name == "__hash__" => {
+                let callable = self.builtin(weakref::REFERENCE_HASH);
+                let class = self.builtin(weakref::Kind::Reference.class());
+                return self.bind_attribute(callable, obj, class);
+            }
+            Value::Native(ref class)
+                if class == weakref::Kind::Reference.class() && name == "__hash__" =>
+            {
+                return Ok(self.builtin(weakref::REFERENCE_HASH));
+            }
+            Value::Native(ref method)
+                if method == weakref::REFERENCE_HASH && name == "__qualname__" =>
+            {
+                return Ok(self.text("ReferenceType.__hash__"));
+            }
+            Value::Native(ref builtin)
+                if name == "__module__"
+                    && (builtin.starts_with("weakref.") || builtin.starts_with("_weakref.")) =>
+            {
+                return Ok(self.text(builtin.split('.').next().unwrap()));
+            }
             Value::ContextVar { name: var_name, .. } if name == "name" => return Ok(var_name),
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
@@ -1329,6 +1369,7 @@ impl Context {
         name: &str,
         original: Option<Id>,
     ) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_local_attribute(
                 obj,
@@ -1514,13 +1555,17 @@ impl Context {
                     unreachable!()
                 };
                 if name == "__dict__" && member.is_none() {
-                    fields.clear();
+                    let previous = std::mem::take(fields);
+                    for value in previous.into_values() {
+                        self.heap.weak_edge_removed(value);
+                    }
                     return Ok(());
                 }
-                fields
+                let value = fields
                     .remove(name)
-                    .map(|_| ())
-                    .ok_or_else(|| self.missing_attribute(obj, name))
+                    .ok_or_else(|| self.missing_attribute(obj, name))?;
+                self.heap.weak_edge_removed(value);
+                Ok(())
             }
             Value::Native(ref class) if self.builtin_type_name(obj) == Some("type") => {
                 Err(Error::new(
@@ -1550,6 +1595,7 @@ impl Context {
         original: Option<Id>,
         value: Id,
     ) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_local_attribute(
                 obj,
@@ -1687,7 +1733,11 @@ impl Context {
                 self.bind(scope, name, value);
             }
             Value::Instance { class, fields, .. } if Some(*class) != object_class => {
-                fields.insert(name.to_owned(), value);
+                if let Some(previous) = fields.insert(name.to_owned(), value)
+                    && previous != value
+                {
+                    self.heap.weak_edge_removed(previous);
+                }
             }
             Value::Class { scope, .. } => {
                 let scope = *scope;
@@ -1814,6 +1864,24 @@ impl Context {
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
         match self.heap.get(callable).clone() {
+            Value::Weak(wr) => match wr.kind {
+                weakref::Kind::Reference if args.is_empty() && kwargs.is_empty() => {
+                    Ok(wr.target.unwrap_or(NONE))
+                }
+                weakref::Kind::Reference if !kwargs.is_empty() => Err(Error::new(
+                    "TypeError",
+                    "weakref() takes no keyword arguments",
+                )),
+                weakref::Kind::Reference => Err(Error::new(
+                    "TypeError",
+                    format!("weakref expected 0 arguments, got {}", args.len()),
+                )),
+                weakref::Kind::CallableProxy => self.call(wr.upgrade()?, args, kwargs),
+                weakref::Kind::Proxy => Err(Error::new(
+                    "TypeError",
+                    "'weakref.ProxyType' object is not callable",
+                )),
+            },
             Value::GenericAlias(alias) => {
                 let result = self.call(alias.origin, args, kwargs)?;
                 if matches!(self.heap.get(result), Value::Instance { .. })

@@ -69,6 +69,7 @@ exception_kinds!(
     AssertionError,
     MemoryError,
     BufferError,
+    ReferenceError,
     SystemExit,
     StopIteration,
     Warning,
