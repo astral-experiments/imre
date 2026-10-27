@@ -412,11 +412,15 @@ impl Context {
         let mut active = Vec::new();
         let mut ancestors = std::collections::HashSet::new();
         // CPython guards nested slice formatting against the thread's native stack.
-        // Its pinned 3.14 release uses 66 pointer words per nested slice on x86-64
-        // and keeps two 2,048-word margins before raising a catchable error.
+        // The pinned x86-64 Linux reference build uses 624 bytes per slice
+        // and keeps two native-stack margins before raising RecursionError.
+        const SLICE_FRAME_WORDS: usize = 78;
+        const STACK_MARGIN_WORDS: usize = 2048;
         let slice_budget = if checked {
-            stacker::remaining_stack()
-                .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * 2048) / 66)
+            stacker::remaining_stack().map(|bytes| {
+                (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS)
+                    / SLICE_FRAME_WORDS
+            })
         } else {
             None
         };
