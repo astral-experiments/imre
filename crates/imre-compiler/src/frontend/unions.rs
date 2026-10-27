@@ -278,6 +278,10 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         use InstanceType::{Deque, Exact, List, Tuple};
+        if self.collection_binding(expression) == Some(Binding::Intrinsic(Intrinsic::Number)) {
+            // int includes bool and IntEnum. The typed value representation has no complex.
+            return Ok(vec![Exact(Type::Int), Exact(Type::Float)]);
+        }
         match self.collection_class_name(expression) {
             Some("collections.deque") => return Ok(vec![Deque]),
             Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
@@ -558,8 +562,15 @@ impl Checker<'_> {
                 "issubclass requires two positional operands",
             ));
         };
-        let first = self.expr(first)?;
-        let second = self.expr(second)?;
+        let mut class_operand = |operand: &ast::Expr| {
+            if self.collection_binding(operand) == Some(Binding::Intrinsic(Intrinsic::Number)) {
+                Ok(annotations::class_value("numbers.Number"))
+            } else {
+                self.expr(operand)
+            }
+        };
+        let first = class_operand(first)?;
+        let second = class_operand(second)?;
         self.builtin_subclass_values(first, second, call)
     }
 

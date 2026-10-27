@@ -157,6 +157,8 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
 
 fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     match ctx.heap.get(value) {
+        Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
+        Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
@@ -197,7 +199,10 @@ pub(in super::super) fn remove_dict_item(
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
-    Ok(Some(entries.remove(index).1))
+    let (key, value) = entries.remove(index);
+    ctx.heap.weak_edge_removed(key);
+    ctx.heap.weak_edge_removed(value);
+    Ok(Some(value))
 }
 
 pub(in super::super) fn set_member(
@@ -591,5 +596,7 @@ fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)
     if !(0..len).contains(&index) {
         return Err(Error::new("IndexError", "pop index out of range"));
     }
-    Ok(items.remove(index as usize))
+    let value = items.remove(index as usize);
+    ctx.heap.weak_edge_removed(value);
+    Ok(value)
 }

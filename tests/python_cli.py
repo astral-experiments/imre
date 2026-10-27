@@ -42,11 +42,12 @@ def main():
         }
         env["IMRE_CACHE_DIR"] = str(root / "cache")
 
-        def run(exe, *args, extra=None):
+        def run(exe, *args, extra=None, stdin=None):
             return subprocess.run(
                 [exe, *args],
                 cwd=root,
                 env=env | (extra or {}),
+                input=stdin,
                 capture_output=True,
                 check=False,
                 timeout=60,
@@ -69,6 +70,15 @@ def main():
         # A cached object-runtime executable cannot satisfy a subsequent static build.
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+
+        (root / "reader.py").write_text(
+            "for _ in range(3):\n    print(repr(input()))\n"
+            "try:\n    input()\nexcept EOFError:\n    print('EOF')\n"
+        )
+        for exe in (sys.executable, imre):
+            actual = run(exe, "-B", "-c", "import reader", stdin="one\r\n\nλ".encode())
+            assert actual.returncode == 0 and not actual.stderr, actual.stderr
+            assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
@@ -439,6 +449,7 @@ def report(text):
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_float_arithmetic.py",
+            "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
@@ -477,6 +488,7 @@ def report(text):
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_set_union.py",
+            "boxed_weakref.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",

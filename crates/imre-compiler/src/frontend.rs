@@ -1451,6 +1451,12 @@ fn signature(
                             owner,
                         )?;
                         Ok(types.list(element))
+                    } else if !graph.mutable_documents
+                        && graph.resolve_type(module, value)
+                            == Some(Binding::Intrinsic(Intrinsic::Any))
+                    {
+                        // Store supported arguments in the same heterogeneous view as object.
+                        Ok(Type::ObjectValue)
                     } else {
                         annotation_in_class(value, graph, module, classes, types, owner)
                     }

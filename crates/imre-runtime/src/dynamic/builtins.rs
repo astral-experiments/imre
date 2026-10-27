@@ -4,6 +4,7 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod exceptions;
 mod float;
 pub(super) use float::from_numeric;
 mod integer;
@@ -38,6 +39,8 @@ exception_kinds!(
     TypeError,
     ValueError,
     EOFError,
+    SyntaxError,
+    IndentationError,
     UnicodeError,
     UnicodeDecodeError,
     UnicodeEncodeError,
@@ -68,8 +71,7 @@ exception_kinds!(
     AssertionError,
     MemoryError,
     BufferError,
-    SyntaxError,
-    IndentationError,
+    ReferenceError,
     SystemExit,
     StopIteration,
     Warning,
@@ -95,6 +97,7 @@ const FUNCTIONS: &[&str] = &[
     "delattr",
     "hasattr",
     "open",
+    "input",
     "print",
     "pow",
     "sum",
@@ -141,6 +144,24 @@ pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+/// Return the exception that declares the inherited CPython allocation slot.
+pub(super) fn exception_new_owner(name: &str) -> &str {
+    match name {
+        "KeyError" => "LookupError",
+        "SystemExit" => "BaseException",
+        "NameError"
+        | "UnboundLocalError"
+        | "AttributeError"
+        | "ImportError"
+        | "ModuleNotFoundError"
+        | "StopIteration"
+        | "binascii.Incomplete" => "Exception",
+        "binascii.Error" => "ValueError",
+        name if exception_subclass(name, "OSError") == Some(true) => "OSError",
+        _ => name,
+    }
+}
+
 /// Consult the native hierarchy when both names denote known exception types.
 pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
     Some(crate::objects::exceptions::imre_builtin_exception_subclass(
@@ -154,13 +175,9 @@ pub(super) fn is_builtin(name: &str) -> bool {
 }
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
-pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
-    match name {
-        "float.__new__" => Some("float"),
-        "int.__new__" => Some("int"),
-        "str.__new__" => Some("str"),
-        _ => None,
-    }
+pub(super) fn constructor_owner(name: &str) -> Option<&str> {
+    let owner = name.strip_suffix(".__new__")?;
+    (matches!(owner, "float" | "int" | "str") || is_exception(owner)).then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -217,6 +234,7 @@ pub(super) const STR_METHODS: &[&str] = &[
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
@@ -224,7 +242,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
-            if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip" | "translate") =>
+            if matches!(
+                attr,
+                "__mod__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
+            ) =>
         {
             "bytes"
         }
@@ -518,7 +539,7 @@ pub(super) fn boolean(value: bool) -> Id {
     if value { TRUE } else { FALSE }
 }
 
-fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
+pub(super) fn attribute_name(ctx: &Context, value: Id) -> Result<String> {
     ctx.str_value(value).map(str::to_owned).map_err(|_| {
         type_error(format!(
             "attribute name must be string, not '{}'",
@@ -665,6 +686,14 @@ pub(super) fn call(
     }
     if matches!(name, "delattr" | "object.__delattr__") {
         return delete_attribute(ctx, name, args, kwargs);
+    }
+    if let Some(owner) = name.strip_suffix(".__new__")
+        && is_exception(owner)
+    {
+        return exceptions::allocate(ctx, owner, args);
+    }
+    if let Some(owner @ ("BaseException" | "StopIteration")) = name.strip_suffix(".__init__") {
+        return exceptions::initialize(ctx, owner, args, kwargs);
     }
     if name == "object.__init__" {
         if args.len() != 1 || !kwargs.is_empty() {
@@ -1163,6 +1192,11 @@ pub(super) fn call(
                 }
             }
             Ok(boolean(!stop_value))
+        }
+        "input" => {
+            positional(name, kwargs)?;
+            arity(name, args, 0, 0)?;
+            Ok(ctx.text(crate::sys::read_input_line()?))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

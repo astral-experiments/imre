@@ -159,38 +159,46 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         .map(|v| ctx.truth(v))
         .transpose()?
         .unwrap_or(true);
-    let mut causes = vec![(value, tb, None)];
-    if chain {
-        let mut seen = std::collections::HashSet::from([value]);
-        let mut child = value;
-        while let Value::Raised(error) = ctx.heap.get(child) {
-            let Some(trace) = &error.trace else { break };
-            let (prior, message) = if let Some(cause) = trace.cause {
-                (
-                    cause,
-                    "\nThe above exception was the direct cause of the following exception:\n\n",
-                )
-            } else if let Some(context) = trace.context {
-                (
-                    context,
-                    "\nDuring handling of the above exception, another exception occurred:\n\n",
-                )
-            } else {
-                break;
-            };
-            if prior == NONE || !seen.insert(prior) {
-                break;
-            }
-            causes.push((prior, ctx.exception_traceback(prior)?, Some(message)));
-            child = prior;
-        }
-    }
-    let mut lines = Vec::new();
-    for (value, tb, separator) in causes.into_iter().rev() {
-        format_exception(ctx, value, tb, limit, &mut lines)?;
+    let mut sections = Vec::new();
+    let mut seen = std::collections::HashSet::from([value]);
+    let (mut current, mut current_tb) = (value, tb);
+    let mut separator: Option<&str> = None;
+    loop {
+        // Exception text is captured from the outermost error inwards. Its hook can
+        // change the cause, drop references, and run Python's garbage collector.
+        ctx.heap.keep(current);
+        let mut lines = Vec::new();
+        format_exception(ctx, current, current_tb, limit, &mut lines)?;
         if let Some(separator) = separator {
             lines.push(separator.to_owned());
         }
+        sections.push(lines);
+        let Value::Raised(error) = ctx.heap.get(current) else {
+            break;
+        };
+        let Some(trace) = &error.trace else { break };
+        let (prior, message) = if let Some(cause) = trace.cause {
+            (
+                cause,
+                "\nThe above exception was the direct cause of the following exception:\n\n",
+            )
+        } else if let Some(context) = trace.context {
+            (
+                context,
+                "\nDuring handling of the above exception, another exception occurred:\n\n",
+            )
+        } else {
+            break;
+        };
+        if prior == NONE || !seen.insert(prior) {
+            break;
+        }
+        current = prior;
+        current_tb = ctx.exception_traceback(prior)?;
+        separator = Some(message);
+    }
+    if !chain {
+        sections.truncate(1);
     }
     let file = match option(args, 4, kwargs, "file")?.filter(|&f| f != NONE) {
         Some(file) => file,
@@ -201,7 +209,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     };
     // A write callback can replace sys.stderr and trigger collection before the next line.
     ctx.heap.keep(file);
-    for line in lines {
+    for line in sections.into_iter().rev().flatten() {
         let write = ctx.lookup_attr(file, "write")?;
         let line = ctx.text(line);
         ctx.call(write, vec![line], Vec::new())?;
@@ -213,7 +221,7 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
 }
 
 fn format_exception(
-    ctx: &Context,
+    ctx: &mut Context,
     value: Id,
     mut tb: Id,
     limit: Option<i64>,
@@ -279,6 +287,11 @@ fn format_exception(
             i += same;
         }
     }
+    let convert = ctx.builtin("str");
+    let text = match ctx.call(convert, vec![value], Vec::new()) {
+        Ok(result) => ctx.str_value(result)?.to_owned(),
+        Err(_) => "<exception str() failed>".to_owned(),
+    };
     let qualname = match ctx.heap.get(value) {
         Value::Raised(error) => error
             .class
@@ -288,13 +301,6 @@ fn format_exception(
     let name = qualname
         .and_then(|name| ctx.str_value(name).ok())
         .unwrap_or_else(|| ctx.type_name(value));
-    let text = match ctx.heap.get(value) {
-        Value::Raised(error) if error.kind == "KeyError" => match error.args.as_deref() {
-            Some([key]) => ctx.repr(*key),
-            _ => ctx.display(value),
-        },
-        _ => ctx.display(value),
-    };
     lines.push(if text.is_empty() {
         format!("{name}\n")
     } else {
