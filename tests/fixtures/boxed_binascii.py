@@ -14,6 +14,15 @@ class Resize:
         return True
 
 
+class DropIndex:
+    def __init__(self, data):
+        self.data = data
+
+    def __index__(self):
+        del self.data[:]
+        return 0
+
+
 def current():
     from binascii import Error, Incomplete, a2b_base64, b2a_base64
 
@@ -40,5 +49,7 @@ def current():
         except BufferError as error:
             print(str(error), data)
     del data[::-2]
+    drop = DropIndex(data)
+    del data[drop:4]
     data.extend(b"!")
     print(data)

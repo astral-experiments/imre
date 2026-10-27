@@ -697,8 +697,9 @@ impl Context {
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
             ));
         }
+        let bounds = super::slice::sequence_components(self, parts)?;
         let vals = self.items(obj)?;
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, vals.len())?;
+        let [start, end, step] = super::slice::normalize(bounds, vals.len() as i64);
         let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
         match self.heap.get(obj) {
             Value::Str(_) => {
@@ -728,17 +729,20 @@ impl Context {
     }
 
     fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
-        let Value::ByteArray(target) = self.heap.get(obj) else {
-            return Err(Error::new(
-                "TypeError",
-                "object does not support slice assignment",
-            ));
-        };
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, target.len())?;
+        let mut bounds = super::slice::sequence_components(self, parts)?;
         let data = match source {
-            Some(source) => builtins::bytes_from_iterable(self, source)?,
+            Some(source) => {
+                let data = builtins::bytes_from_iterable(self, source)?;
+                // CPython retries the assignment with a converted or aliased bytearray.
+                if source == obj || !matches!(self.heap.get(source), Value::ByteArray(_)) {
+                    bounds = super::slice::sequence_components(self, parts)?;
+                }
+                data
+            }
             None => Vec::new(),
         };
+        let len = self.bytes_like(obj)?.len() as i64;
+        let [start, end, step] = super::slice::normalize(bounds, len);
         if (step == 1 && data.len() != (end - start).max(0) as usize)
             || (step != 1 && data.is_empty() && slice_positions(start, end, step).next().is_some())
         {
