@@ -171,3 +171,15 @@ except ValueError:
     print("wrong builtin")
 except builtin_value_error:
     print("native handler")
+
+
+class Unrelated:
+    def __init__(self):
+        raise AssertionError("invalid raise constructed an unrelated class")
+
+
+for target, cause in ((Unrelated, None), (ValueError, Unrelated), (ValueError, print)):
+    try:
+        raise target from cause
+    except TypeError as error:
+        print(type(error).__name__, str(error))
