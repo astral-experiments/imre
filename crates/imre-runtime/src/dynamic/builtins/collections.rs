@@ -442,6 +442,7 @@ pub(super) fn method(
         "dict.pop"
             | "set.issuperset"
             | "frozenset.issuperset"
+            | "set.discard"
             | "frozenset.copy"
             | "set.copy"
             | "frozenset.__contains__"
@@ -629,6 +630,33 @@ pub(super) fn method(
                 }
             }
             Ok(TRUE)
+        }
+        "set.discard" => {
+            arity(name, args, 1, 1)?;
+            if !matches!(ctx.heap.get(receiver), Value::Set { frozen: false, .. }) {
+                return Err(type_error("descriptor 'discard' requires a 'set' object"));
+            }
+            let key = if let Value::Set {
+                entries,
+                frozen: false,
+            } = ctx.heap.get(args[0])
+            {
+                ctx.alloc(Value::Set {
+                    entries: entries.clone(),
+                    frozen: true,
+                })
+            } else {
+                args[0]
+            };
+            if let Some(index) = ctx.find_dictionary_key(receiver, key, None)?.1 {
+                let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
+                    unreachable!()
+                };
+                let (key, value) = entries.remove(index);
+                ctx.heap.weak_edge_removed(key);
+                ctx.heap.weak_edge_removed(value);
+            }
+            Ok(NONE)
         }
         "set.add" => {
             arity(name, args, 1, 1)?;
