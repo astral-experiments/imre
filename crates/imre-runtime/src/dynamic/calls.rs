@@ -229,14 +229,8 @@ impl Context {
             if parent == "object" {
                 return self.builtin_type_name(class) == Some("type");
             }
-            if let (Some(child), Some(parent)) = (
-                builtins::exception_kind(child),
-                builtins::exception_kind(parent),
-            ) {
-                return crate::objects::exceptions::imre_builtin_exception_subclass(
-                    child as u32,
-                    parent as u32,
-                );
+            if let Some(result) = builtins::exception_subclass(child, parent) {
+                return result;
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
@@ -290,6 +284,7 @@ impl Context {
             | Value::Dict(_)
             | Value::Set { .. }
             | Value::Range { .. }
+            | Value::Slice(_)
             | Value::Iterator { .. }
             | Value::Tuple(_)
             | Value::Class { .. }
@@ -303,6 +298,7 @@ impl Context {
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",
+            Value::Repeat(_) => "itertools.repeat",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -343,6 +339,7 @@ impl Context {
                             | "getset_descriptor"
                             | "operator.attrgetter"
                             | "itertools.count"
+                            | "itertools.repeat"
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -434,6 +431,7 @@ impl Context {
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
+            | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
@@ -442,6 +440,7 @@ impl Context {
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("itertools.count", Value::Count { .. })
+            | ("itertools.repeat", Value::Repeat(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -478,36 +477,20 @@ impl Context {
         }
     }
     pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
+        if let Value::Native(parent) = self.heap.get(class)
+            && let Some(result) = builtins::exception_subclass(kind, parent)
+        {
+            return result;
+        }
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.error_matches(kind, c)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
                     || (name == "Exception" && kind != "SystemExit")
-                    || (name == "RuntimeError" && kind == "RecursionError")
                     || (name == "ValueError"
                         && matches!(kind, "JSONDecodeError" | "binascii.Error"))
-                    || (name == "ImportError" && kind == "ModuleNotFoundError")
-                    || (name == "LookupError" && matches!(kind, "KeyError" | "IndexError"))
-                    || (matches!(name.as_str(), "OSError" | "ConnectionError")
-                        && matches!(
-                            kind,
-                            "BrokenPipeError"
-                                | "ConnectionRefusedError"
-                                | "ConnectionResetError"
-                                | "ConnectionAbortedError"
-                        ))
-                    || (name == "OSError"
-                        && matches!(
-                            kind,
-                            "FileNotFoundError"
-                                | "PermissionError"
-                                | "IsADirectoryError"
-                                | "NotADirectoryError"
-                                | "BlockingIOError"
-                                | "TimeoutError"
-                                | "socket.gaierror"
-                        ))
+                    || (name == "OSError" && kind == "socket.gaierror")
                     || self
                         .classes
                         .get(kind)
@@ -622,7 +605,9 @@ impl Context {
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
             }
-            Value::Native(class) if matches!(class.as_str(), "traceback" | "frame" | "complex") => {
+            Value::Native(class)
+                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float") =>
+            {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
                     "__module__" => return Ok(self.text("builtins")),
@@ -641,6 +626,13 @@ impl Context {
             }
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
+            }
+            Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
+                return Ok(parts[match name {
+                    "start" => 0,
+                    "stop" => 1,
+                    _ => 2,
+                }]);
             }
             Value::Property(property) => {
                 if let Some(attribute) = property.attribute(self, name)? {
@@ -701,11 +693,17 @@ impl Context {
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
-            Value::Native(class) if class == "itertools.count" => match name {
-                "__name__" | "__qualname__" => return Ok(self.text("count")),
-                "__module__" => return Ok(self.text("itertools")),
-                _ => {}
-            },
+            Value::Native(class)
+                if matches!(class.as_str(), "itertools.count" | "itertools.repeat") =>
+            {
+                match name {
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
+                    }
+                    "__module__" => return Ok(self.text("itertools")),
+                    _ => {}
+                }
+            }
             Value::Native(class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
             }
@@ -746,11 +744,7 @@ impl Context {
                 _ => {}
             },
             Value::File(handle) if name == "closed" => {
-                return Ok(if handle.borrow().is_none() {
-                    TRUE
-                } else {
-                    FALSE
-                });
+                return Ok(if handle.closed() { TRUE } else { FALSE });
             }
             Value::Native(class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
@@ -850,6 +844,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
+            Value::Native(class)
+                if class == "slice" && matches!(name, "indices" | "__reduce__") =>
+            {
+                return Ok(self.builtin(&format!("slice.{name}")));
+            }
             Value::Native(class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
             }
@@ -928,6 +927,11 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
             let name = self.text(name);
             self.call(hook, vec![name], Vec::new())?;
@@ -1082,6 +1086,11 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::Slice(_))
+            && matches!(name, "start" | "stop" | "step")
+        {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
             let name = self.text(name);
             self.call(hook, vec![name, value], Vec::new())?;
@@ -1284,6 +1293,7 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "slice"
                                 | "function"
                                 | "method"
                                 | "object"

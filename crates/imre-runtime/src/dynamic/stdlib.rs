@@ -22,7 +22,7 @@ mod hmac;
 mod inspect;
 pub(super) mod itertools;
 mod time;
-pub(super) use files::ReadSource;
+pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
 mod json;
 mod logging;
@@ -243,6 +243,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
+        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
@@ -445,7 +446,13 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("itertools.count.") {
+    if name == "itertools.repeat" {
+        return itertools::repeat(ctx, args, kwargs);
+    }
+    if let Some(method) = name
+        .strip_prefix("itertools.count.")
+        .or_else(|| name.strip_prefix("itertools.repeat."))
+    {
         return itertools::method(ctx, method, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
@@ -590,7 +597,9 @@ pub(super) fn call(
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "warnings.warn" => (2, &[]),
+        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
+            (2, &[])
+        }
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
@@ -610,6 +619,7 @@ pub(super) fn call(
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.flush"
         | "file.fileno"
         | "file.tell"
         | "file.__enter__" => (1, &[]),

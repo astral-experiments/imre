@@ -1,16 +1,16 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::cell::RefCell;
-use std::io::{self, Write};
 use std::rc::Rc;
 
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod float;
 mod integer;
+mod print;
 mod text;
-pub(super) use collections::{hashable, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -18,7 +18,11 @@ macro_rules! exception_kinds {
         const EXCEPTIONS: &[&str] = &[$(stringify!($kind)),*];
         pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
             use crate::objects::exceptions::Kind;
-            match name { $(stringify!($kind) => Some(Kind::$kind),)* _ => None }
+            match name {
+                $(stringify!($kind) => Some(Kind::$kind),)*
+                "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+                _ => None,
+            }
         }
     };
 }
@@ -55,6 +59,7 @@ exception_kinds!(
     BlockingIOError,
     TimeoutError,
     FileNotFoundError,
+    FileExistsError,
     IsADirectoryError,
     NotADirectoryError,
     PermissionError,
@@ -96,6 +101,7 @@ const TYPES: &[&str] = &[
     "bytes",
     "complex",
     "dict",
+    "float",
     "frozenset",
     "int",
     "list",
@@ -105,6 +111,7 @@ const TYPES: &[&str] = &[
     "staticmethod",
     "range",
     "set",
+    "slice",
     "str",
     "tuple",
     "type",
@@ -120,8 +127,16 @@ pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+/// Consult the native hierarchy when both names denote known exception types.
+pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
+    Some(crate::objects::exceptions::imre_builtin_exception_subclass(
+        exception_kind(child)? as u32,
+        exception_kind(parent)? as u32,
+    ))
+}
+
 pub(super) fn is_builtin(name: &str) -> bool {
-    is_builtin_type(name) || FUNCTIONS.contains(&name)
+    (name != "UnsupportedOperation" && is_builtin_type(name)) || FUNCTIONS.contains(&name)
 }
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
@@ -149,6 +164,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "get",
     "items",
     "keys",
+    "pop",
     "setdefault",
     "update",
     "values",
@@ -157,6 +173,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 pub(super) const STR_METHODS: &[&str] = &[
     "encode",
     "endswith",
+    "expandtabs",
     "find",
     "format",
     "join",
@@ -180,6 +197,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
@@ -258,12 +276,18 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "fileno"
                     | "readline"
                     | "readinto"
-                    | "seek"
-                    | "tell"
+                    | "write"
+                    | "flush"
                     | "close"
                     | "__enter__"
                     | "__exit__"
             ) =>
+        {
+            "file"
+        }
+        Value::File(file)
+            if matches!(attr, "seek" | "tell")
+                && matches!(file.as_ref(), super::stdlib::BinaryFile::Reader(_)) =>
         {
             "file"
         }
@@ -272,6 +296,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
+        Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
+            "itertools.repeat"
+        }
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {
@@ -560,6 +587,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
+            "slice" => super::slice::method(ctx, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -798,6 +826,7 @@ pub(super) fn call(
                 pending: None,
             }))
         }
+        "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 3)?;
@@ -886,16 +915,8 @@ pub(super) fn call(
                 let file = crate::objects::TextFile::open(path, text_mode)?;
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
-            if mode != "rb" {
-                return Err(Error::new(
-                    "ValueError",
-                    "unsupported mode for dynamic files",
-                ));
-            }
-            let (file, _) = crate::objects::open_file(path, 0)?;
-            Ok(ctx.alloc(Value::File(Rc::new(RefCell::new(Some(
-                io::BufReader::new(super::stdlib::ReadSource::File(file)),
-            ))))))
+            let file = super::stdlib::BinaryFile::open(path, mode)?;
+            Ok(ctx.alloc(Value::File(Rc::new(file))))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(
@@ -920,6 +941,7 @@ pub(super) fn call(
             ctx.module(name.split('.').next().unwrap())
         }
         "complex" => ctx.new_complex(args, kwargs),
+        "float" => float::construct(ctx, args, kwargs),
         "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -931,33 +953,7 @@ pub(super) fn call(
             }
             Ok(FALSE)
         }
-        "print" => {
-            let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
-            let flush = ctx.optional_truth(flush, false)?;
-            if file.is_some_and(|id| id != NONE) {
-                return Err(type_error("print supports standard output"));
-            }
-            let sep = sep
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or(" ");
-            let end = end
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("\n");
-            let values = args
-                .iter()
-                .map(|&id| ctx.display(id))
-                .collect::<Vec<_>>()
-                .join(sep);
-            let mut out = io::stdout().lock();
-            write!(out, "{values}{end}")
-                .and_then(|()| if flush { out.flush() } else { Ok(()) })
-                .map_err(|err| Error::new("OSError", err.to_string()))?;
-            Ok(NONE)
-        }
+        "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

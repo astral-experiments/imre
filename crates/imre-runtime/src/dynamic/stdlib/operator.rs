@@ -214,6 +214,9 @@ impl Context {
             })?;
             return Ok(self.int(length));
         }
+        if let Value::Repeat(repeat) = self.heap.get(value) {
+            return Ok(self.int(repeat.remaining.map_or(default, |n| n as i64)));
+        }
         if let Some(hint) = self.bound_slot(value, "__length_hint__")? {
             let hint = match self.call(hint, vec![], vec![]) {
                 Ok(hint) => hint,

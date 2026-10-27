@@ -16,6 +16,7 @@ pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
 };
@@ -47,7 +48,7 @@ pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;
-pub(crate) use itertools::CountValue;
+pub(crate) use itertools::{CountValue, Repeat};
 mod join_buffer;
 mod joined_lines;
 mod json;
@@ -82,7 +83,7 @@ mod tempdirs;
 mod text;
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, urlquote, urlsplit};
-pub(crate) use text::{find_text, ord_byte, ord_char, partition_text, split_parts};
+pub(crate) use text::{expand_tabs, find_text, ord_byte, ord_char, partition_text, split_parts};
 mod typing;
 pub(crate) use text::short_string;
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
@@ -93,7 +94,7 @@ mod words;
 mod zipfile;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::{errno_error, open_file};
+pub(crate) use files::{FileState, errno_error, open_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -148,7 +149,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
-    Repeat(itertools::Repeat),
+    Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),

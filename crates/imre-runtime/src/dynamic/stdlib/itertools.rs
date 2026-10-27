@@ -1,6 +1,29 @@
 use super::{Context, Error, Id, Result, Value};
 use crate::objects::CountValue;
 
+/// Build the shared repeat cursor, converting a supplied count exactly once.
+pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let missing = || {
+        Error::new(
+            "TypeError",
+            "repeat() missing required argument 'object' (pos 1)",
+        )
+    };
+    if args.is_empty() && kwargs.len() <= 2 && !kwargs.iter().any(|(key, _)| key == "object") {
+        return Err(missing());
+    }
+    let [value, times] = super::super::builtins::bind_method_arguments(
+        "repeat",
+        args,
+        kwargs,
+        ["object", "times"],
+        2,
+    )?;
+    let times = times.map(|id| ctx.index_integer(id)).transpose()?;
+    let cursor = crate::objects::Repeat::new(value.ok_or_else(missing)?, times.as_ref())?;
+    Ok(ctx.alloc(Value::Repeat(cursor)))
+}
+
 fn number(ctx: &Context, id: Id) -> Result<CountValue> {
     match ctx.heap.get(id) {
         Value::Int(n) => Ok(CountValue::Int(n.clone())),
@@ -48,7 +71,31 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (receiver, rest) = args.split_first().expect("bound count method");
+    let (receiver, rest) = args.split_first().expect("bound itertools method");
+    if name == "__length_hint__" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "repeat.__length_hint__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "repeat.__length_hint__() takes no arguments ({} given)",
+                    rest.len()
+                ),
+            ));
+        }
+        let Value::Repeat(repeat) = ctx.heap.get(*receiver) else {
+            unreachable!("repeat method")
+        };
+        let n = repeat
+            .remaining
+            .ok_or_else(|| Error::new("TypeError", "len() of unsized object"))?;
+        return Ok(ctx.int(n as i64));
+    }
     if !rest.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -63,7 +110,9 @@ pub(super) fn method(
     }
     match name {
         "__iter__" => Ok(*receiver),
-        "__next__" => advance(ctx, *receiver),
-        _ => unreachable!("count method"),
+        "__next__" => ctx
+            .next_result(*receiver)?
+            .ok_or_else(|| Error::new("StopIteration", "")),
+        _ => unreachable!("itertools method"),
     }
 }

@@ -9,17 +9,6 @@ enum Element<'a> {
 }
 
 impl Function<'_, '_> {
-    pub(super) fn slice_bounds(&mut self, slice: &ast::ExprSlice) -> String {
-        let indices = self.op("list", &[]);
-        for bound in [&slice.lower, &slice.upper, &slice.step] {
-            let value = bound
-                .as_deref()
-                .map_or_else(|| "0".into(), |e| self.expr(e));
-            self.op("append", &[&indices, &value]);
-        }
-        indices
-    }
-
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
@@ -41,14 +30,14 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(v) => {
                 let object = self.expr(&v.value);
-                if let ast::Expr::Slice(s) = &*v.slice {
-                    let indices = self.slice_bounds(s);
-                    self.op("slice", &[&object, &indices])
-                } else {
-                    let key = self.expr(&v.slice);
-                    let span = self.expression_span(expr, &v.value, b'[');
-                    self.op_at("get", &[&object, &key], span)
-                }
+                let key = self.expr(&v.slice);
+                let span = self.expression_span(expr, &v.value, b'[');
+                self.op_at("get", &[&object, &key], span)
+            }
+            ast::Expr::Slice(slice) => {
+                let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
+                    .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
+                self.op("slice_object", &[&start, &stop, &step])
             }
             ast::Expr::List(v) => self.display("list", &v.elts),
             ast::Expr::Set(v) => self.display("set", &v.elts),
