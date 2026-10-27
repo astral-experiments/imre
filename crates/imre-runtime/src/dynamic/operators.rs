@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use num_traits::{Signed, ToPrimitive, Zero};
+use num_traits::ToPrimitive;
 
 use super::*;
 
@@ -25,6 +25,19 @@ impl Context {
             _ => None,
         }
     }
+    fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
+        match self.heap.get(id) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                Some((v.len(), v.get(index).copied()))
+            }
+            Value::Instance { class, fields, .. } => {
+                let names = self.namedtuple_fields(*class)?;
+                Some((names.len(), names.get(index).map(|key| fields[key])))
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn optional_truth(&mut self, value: Option<Id>, default: bool) -> Result<bool> {
         value.map_or(Ok(default), |id| self.truth(id))
     }
@@ -111,7 +124,11 @@ impl Context {
                 .dict_entries(*dict)
                 .expect("dict view backing")
                 .is_empty(),
-            Value::Context(bindings) => !bindings.is_empty(),
+            Value::Context(bindings)
+            | Value::Iterator {
+                context: Some(bindings),
+                ..
+            } => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
@@ -145,31 +162,39 @@ impl Context {
     }
 
     /// Walk arbitrary container pairs without tying their depth to the Rust stack.
-    pub(super) fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
-        use std::{borrow::Cow, collections::HashSet};
+    pub(super) fn checked_equal(&mut self, a: Id, b: Id) -> Result<bool> {
+        self.checked_equal_impl(a, b, true)
+    }
 
-        enum Children<'a> {
-            Sequence(Cow<'a, [Id]>, Cow<'a, [Id]>, usize),
-            Dict(std::slice::Iter<'a, (Id, Id)>, &'a [(Id, Id)]),
-            Context(
-                std::collections::hash_map::Iter<'a, Id, Id>,
-                &'a HashMap<Id, Id>,
-            ),
+    fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
+        use std::collections::HashSet;
+
+        enum Children {
+            Sequence(usize),
+            Dict(usize),
+            Context(usize),
         }
-        let sequence = |id| match self.heap.get(id) {
-            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
-                Some(Cow::Borrowed(v.as_slice()))
-            }
-            Value::Instance { .. } => self.sequence(id).map(Cow::Owned),
-            _ => None,
-        };
         let mut active = HashSet::new();
         let mut frames = Vec::new();
         let mut pair = Some((a, b));
-        loop {
+        let mut check_special = rich_initial;
+        while pair.is_some() || !frames.is_empty() {
             if let Some((a, b)) = pair.take()
                 && a != b
             {
+                if check_special
+                    && (matches!(self.heap.get(a), Value::Instance { .. })
+                        || matches!(self.heap.get(b), Value::Instance { .. }))
+                {
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                }
+                if check_special && let Some(result) = self.binary_special("==", a, b)? {
+                    if !self.truth(result)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
                 let children = match (self.heap.get(a), self.heap.get(b)) {
@@ -184,20 +209,20 @@ impl Context {
                         if x.len() != y.len() {
                             return Ok(false);
                         }
-                        Some(Children::Dict(x.iter(), y))
+                        Some(Children::Dict(0))
                     }
                     (Value::Context(x), Value::Context(y)) => {
                         if x.len() != y.len() {
                             return Ok(false);
                         }
-                        (!std::rc::Rc::ptr_eq(x, y)).then(|| Children::Context(x.iter(), y))
+                        (!std::rc::Rc::ptr_eq(x, y)).then_some(Children::Context(0))
                     }
-                    _ => match (sequence(a), sequence(b)) {
-                        (Some(x), Some(y)) => {
-                            if x.len() != y.len() {
+                    _ => match (self.sequence_at(a, 0), self.sequence_at(b, 0)) {
+                        (Some((x, _)), Some((y, _))) => {
+                            if x != y {
                                 return Ok(false);
                             }
-                            Some(Children::Sequence(x, y, 0))
+                            Some(Children::Sequence(0))
                         }
                         _ if self.equal(a, b) => None,
                         _ => return Ok(false),
@@ -213,20 +238,37 @@ impl Context {
                         ));
                     }
                     frames.try_reserve(1).map_err(memory)?;
+                    self.heap.keep(a);
+                    self.heap.keep(b);
                     frames.push(((a, b), children));
                 }
             }
+            check_special = true;
             while let Some((parents, children)) = frames.last_mut() {
+                let (a, b) = *parents;
                 pair = match children {
-                    Children::Sequence(x, y, index) => x.get(*index).map(|&left| {
-                        let right = y[*index];
-                        *index += 1;
-                        (left, right)
-                    }),
-                    Children::Dict(items, other) => {
-                        if let Some(&(key, value)) = items.next() {
-                            let Some(&(_, right)) =
-                                other.iter().find(|&&(k, _)| self.equal(key, k))
+                    Children::Sequence(index) => {
+                        let (xlen, x) = self.sequence_at(a, *index).expect("sequence parent");
+                        let (ylen, y) = self.sequence_at(b, *index).expect("sequence parent");
+                        if xlen != ylen {
+                            return Ok(false);
+                        }
+                        if let (Some(x), Some(y)) = (x, y) {
+                            *index += 1;
+                            Some((x, y))
+                        } else {
+                            None
+                        }
+                    }
+                    Children::Dict(index) => {
+                        let x = self.dict_entries(a).expect("dict parent");
+                        let y = self.dict_entries(b).expect("dict parent");
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        if let Some(&(key, value)) = x.get(*index) {
+                            *index += 1;
+                            let Some(&(_, right)) = y.iter().find(|&&(k, _)| self.equal(key, k))
                             else {
                                 return Ok(false);
                             };
@@ -235,9 +277,18 @@ impl Context {
                             None
                         }
                     }
-                    Children::Context(items, other) => {
-                        if let Some((key, &value)) = items.next() {
-                            let Some(&right) = other.get(key) else {
+                    Children::Context(index) => {
+                        let (Value::Context(x), Value::Context(y)) =
+                            (self.heap.get(a), self.heap.get(b))
+                        else {
+                            unreachable!()
+                        };
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        if let Some((&key, &value)) = x.iter().nth(*index) {
+                            *index += 1;
+                            let Some(&right) = y.get(&key) else {
                                 return Ok(false);
                             };
                             Some((value, right))
@@ -252,13 +303,10 @@ impl Context {
                 active.remove(parents);
                 frames.pop();
             }
-            if pair.is_none() {
-                return Ok(true);
-            }
         }
+        Ok(true)
     }
 
-    /// Compare child values within the caller's remaining recursion budget.
     fn equal_inner(&self, a: Id, b: Id, remaining: usize, exhausted: &mut bool) -> bool {
         if a == b {
             return true;
@@ -329,7 +377,7 @@ impl Context {
             },
         }
     }
-    pub(super) fn compare(&self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
+    pub(super) fn compare(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
         let unsupported = || {
             Error::new(
                 "TypeError",
@@ -383,31 +431,67 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.render_containers(id, false)
+        self.render_containers(id, false, false)
+            .expect("unlimited rendering")
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.render_containers(id, true)
+        self.render_containers(id, true, false)
+            .expect("unlimited rendering")
     }
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
-    fn render_containers(&self, root: Id, quoted: bool) -> String {
+    pub(super) fn checked_format(&self, root: Id, quoted: bool) -> Result<String> {
+        self.render_containers(root, quoted, true)
+    }
+
+    fn render_containers(&self, root: Id, quoted: bool, checked: bool) -> Result<String> {
         enum Part<'a> {
             Value(Id, bool),
             Text(&'a str),
             Sequence(&'a [Id], usize),
             Mapping(&'a [(Id, Id)], usize),
+            Fields(
+                &'a [String],
+                &'a std::collections::HashMap<String, Id>,
+                usize,
+            ),
             Leave(Id, &'static str),
             ContextEnd(Id),
+            SliceEnd,
+            NamedTupleEnd,
         }
         let mut output = String::new();
         let mut work = vec![Part::Value(root, quoted)];
         let mut active = Vec::new();
         let mut ancestors = std::collections::HashSet::new();
+        // CPython guards nested slice formatting against the thread's native stack.
+        // The pinned x86-64 Linux reference build uses 624 bytes per slice
+        // and keeps two native-stack margins before raising RecursionError.
+        const SLICE_FRAME_WORDS: usize = 78;
+        const STACK_MARGIN_WORDS: usize = 2048;
+        let slice_budget = if checked {
+            stacker::remaining_stack().map(|bytes| {
+                (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS)
+                    / SLICE_FRAME_WORDS
+            })
+        } else {
+            None
+        };
+        let mut slice_depth = 0usize;
+        let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::NamedTupleEnd => {
+                    namedtuple_depth -= 1;
+                    output.push(')');
+                }
+                Part::SliceEnd => {
+                    slice_depth -= 1;
+                    output.push(')');
+                }
                 Part::Leave(id, end) => {
                     ancestors.remove(&id);
                     let last = active.pop();
@@ -423,6 +507,17 @@ impl Context {
                         work.push(Part::Value(item, true));
                     }
                 }
+                Part::Fields(names, fields, index) => {
+                    if let Some(name) = names.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        output.push_str(name);
+                        output.push('=');
+                        work.push(Part::Fields(names, fields, index + 1));
+                        work.push(Part::Value(fields[name], true));
+                    }
+                }
                 Part::Mapping(items, index) => {
                     if let Some(&(key, value)) = items.get(index) {
                         if index != 0 {
@@ -436,12 +531,43 @@ impl Context {
                 }
                 Part::Value(id, repr) => {
                     match self.heap.get(id) {
+                        Value::Slice(items) => {
+                            if slice_budget.is_some_and(|limit| slice_depth >= limit) {
+                                return Err(Error::new(
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded while getting the repr of an object",
+                                ));
+                            }
+                            slice_depth += 1;
+                            output.push_str("slice(");
+                            work.push(Part::SliceEnd);
+                            work.push(Part::Sequence(items, 0));
+                            continue;
+                        }
                         Value::Instance {
                             scalar: None,
                             dictionary: Some(backing),
                             ..
                         } if self.enum_member(id).is_none() => {
                             work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::Instance { class, fields, .. }
+                            if let Value::Class {
+                                name,
+                                namedtuple_fields: Some(names),
+                                ..
+                            } = self.heap.get(*class)
+                                && names.iter().all(|field| fields.contains_key(field)) =>
+                        {
+                            if checked {
+                                self.check_call_depth(namedtuple_depth)?;
+                            }
+                            namedtuple_depth += 1;
+                            output.push_str(name);
+                            output.push('(');
+                            work.push(Part::NamedTupleEnd);
+                            work.push(Part::Fields(names, fields, 0));
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
@@ -510,7 +636,7 @@ impl Context {
                 }
             }
         }
-        output
+        Ok(output)
     }
 
     /// Renders positional values inside tuples and exception representations.
@@ -537,6 +663,25 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { class, .. } = value
+            && self.classes.get("re.RegexFlag") == Some(class)
+            && let Some((_, name, bits)) = self.enum_member(id)
+        {
+            return match self.str_value(name) {
+                Ok(names) => names
+                    .split('|')
+                    .map(|name| {
+                        if name.starts_with("0x") {
+                            name.to_owned()
+                        } else {
+                            format!("re.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                Err(_) => format!("re.RegexFlag({})", self.repr(bits)),
+            };
+        }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
             && let Some((class, name, member_value)) = self.enum_member(id)
@@ -592,6 +737,7 @@ impl Context {
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
@@ -775,12 +921,13 @@ impl Context {
                 .copied()
                 .ok_or_else(|| self.lookup_error("KeyError", key));
         }
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            if let Some(&(_, v)) = entries.iter().find(|(k, _)| self.equal(*k, key)) {
-                return Ok(v);
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            let (_, index) = self.find_dictionary_key(obj, key, None)?;
+            if let Some(index) = index {
+                return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
             }
             if let Value::DefaultDict { factory, .. } = self.heap.get(obj)
                 && *factory != NONE
@@ -873,21 +1020,11 @@ impl Context {
         })
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
-        if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {
-            if !builtins::hashable(self, key) {
-                return Err(Error::new("TypeError", "unhashable dictionary key"));
-            }
-            let index = entries.iter().position(|(k, _)| self.equal(*k, key));
-            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                self.heap.get_mut(obj)
-            else {
-                unreachable!()
-            };
-            if let Some(i) = index {
-                entries[i].1 = val
-            } else {
-                entries.push((key, val));
-            }
+        if matches!(
+            self.heap.get(obj),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.set_dictionary_key(obj, key, val, None, true)?;
         } else if let Value::ByteArray(data) = self.heap.get(obj) {
             if let Value::Slice(parts) = *self.heap.get(key) {
                 return self.set_slice(obj, parts, Some(val));
@@ -954,9 +1091,8 @@ impl Context {
         if matches!(
             self.heap.get(container),
             Value::Dict(_) | Value::DefaultDict { .. }
-        ) && !builtins::hashable(self, item)
-        {
-            return Err(Error::new("TypeError", "unhashable key"));
+        ) {
+            return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
         let iterator = self.iterator(container).map_err(|error| {
             let ty = self.builtin("TypeError");
@@ -1145,7 +1281,7 @@ impl Context {
                 return builtins::bytes_percent(self, &bytes.clone(), b);
             }
             "==" | "!=" => {
-                let equal = self.checked_equal(a, b)?
+                let equal = self.checked_equal_impl(a, b, false)?
                     && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
@@ -1187,6 +1323,16 @@ impl Context {
                     return Err(Error::new(
                         "TypeError",
                         format!("can't concat {} to bytes", self.type_name(b)),
+                    ));
+                }
+                (Value::ByteArray(x), Value::Bytes(y) | Value::ByteArray(y)) => {
+                    let bytes = crate::objects::concat_bytes(x, y)?;
+                    return Ok(self.alloc(Value::ByteArray(bytes)));
+                }
+                (Value::ByteArray(_), _) => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
                 }
                 (Value::List(x), Value::List(y)) => {
@@ -1332,37 +1478,30 @@ impl Context {
                 }
             }
         }
+        if op == "**"
+            && [left, right]
+                .into_iter()
+                .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
         }
         let result = if op == "**" {
-            let (x, y) = (x.big(), y.big());
-            if y.is_negative() {
-                if x.is_zero() {
-                    return Err(Error::new(
-                        "ZeroDivisionError",
-                        "0.0 cannot be raised to a negative power",
-                    ));
-                }
-                return Err(Error::new(
-                    "TypeError",
-                    "negative powers require floating-point results",
-                ));
+            if y.cmp(&crate::Int::from(0)).is_lt() {
+                let result = crate::integer_power::negative_power(&x, &y)?;
+                return Ok(self.alloc(Value::Float(result)));
             }
-            if let Some(exp) = y.to_u32() {
-                crate::Int::new(x.pow(exp))
-            } else if x.is_zero() || x.magnitude().bits() == 1 {
-                crate::Int::from(if x.is_zero() {
-                    0
-                } else if x.is_negative() && y.bit(0) {
-                    -1
-                } else {
-                    1
-                })
-            } else {
-                return Err(Error::new("OverflowError", "exponent is too large"));
-            }
+            crate::integer_power::power(&x, &y)?
         } else {
             let code = match op {
                 "+" => 0,
@@ -1384,7 +1523,12 @@ impl Context {
             };
             crate::integer_binary(&x, &y, code)?
         };
-        Ok(self.alloc(Value::Int(result)))
+        let class = if matches!(op, "&" | "|" | "^") {
+            self.flag_class(a).or_else(|| self.flag_class(b))
+        } else {
+            None
+        };
+        self.flag_or_integer(class, result)
     }
 }
 
@@ -1417,13 +1561,18 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         let Some(method) = self.bound_slot(obj, name)? else {
+            if name == "__ne__"
+                && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
+            {
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
             return Ok(None);
         };
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
 
-    fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+    pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
@@ -1460,12 +1609,27 @@ impl Context {
         {
             return Ok(result);
         }
-        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
-            let extra = self.items(b)?;
-            let Value::List(values) = self.heap.get_mut(a) else {
+        if op == "+"
+            && let Value::ByteArray(left) = self.heap.get(a)
+            && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
+        {
+            if right.is_empty() {
+                return Ok(a);
+            }
+            // Reading the right-hand buffer exports it during the resize.
+            if a == b {
+                return Err(Self::exported_bytearray_error());
+            }
+            self.check_bytearray_resize(a)?;
+            let bytes = crate::objects::concat_bytes(left, right)?;
+            let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            values.extend(extra);
+            *left = bytes;
+            return Ok(a);
+        }
+        if op == "+" && matches!(self.heap.get(a), Value::List(_)) {
+            builtins::call(self, "list.extend", &[a, b], &[])?;
             return Ok(a);
         }
         if op == "*"
@@ -1475,7 +1639,12 @@ impl Context {
             let Value::List(items) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            *items = values;
+            if values.is_empty() && self.sorting_lists.contains(&a) {
+                // The allocated callback buffer records a mutation until the sort restores it.
+                items.clear();
+            } else {
+                *items = values;
+            }
             return Ok(a);
         }
         self.binary(op, a, b)

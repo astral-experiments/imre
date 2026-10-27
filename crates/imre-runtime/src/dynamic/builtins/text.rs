@@ -1,8 +1,10 @@
-use num_traits::Signed;
+use std::borrow::Cow;
+
+use num_traits::{Signed, ToPrimitive};
 
 use ruff_python_literal::cformat::{
-    CFormatContext, CFormatError, CFormatErrorType, CFormatPart, CFormatPrecision, CFormatQuantity,
-    CFormatSpec, CFormatString,
+    CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
+    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString, CFormatType,
 };
 use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
@@ -11,6 +13,8 @@ use ruff_python_literal::format::{
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
+
+mod maketrans;
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -87,7 +91,7 @@ pub(super) fn construct(
             {
                 return ctx.call(repr, Vec::new(), Vec::new());
             }
-            Ok(ctx.text(ctx.repr(args[0])))
+            Ok(ctx.text(ctx.checked_format(args[0], true)?))
         }
         "int" => {
             if kwargs.iter().any(|(k, _)| k != "base") {
@@ -163,7 +167,7 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.display(value)))
+            Ok(ctx.text(ctx.checked_format(value, false)?))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -217,42 +221,60 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// Parse the sign and bounded precision of a fixed-point or percentage field.
+fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
+    let prefix = spec.strip_suffix(['f', '%'])?;
+    let (digits, sign) = match prefix.as_bytes().first() {
+        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+        Some(b'-') => (&prefix[1..], 0),
+        _ => (prefix, 0),
+    };
+    let precision = if digits.is_empty() {
+        6
+    } else {
+        let digits = digits.strip_prefix('.')?;
+        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()?
+    };
+    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+}
+
+/// Convert a numeric formatting operand to binary64, checking large integers first.
+fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
+    Ok(match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Float(n) => Some(*n),
+        Value::Int(n) => Some(crate::floats::int_to_float(n)?),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    })
+}
+
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
+        if let Value::Int(number) = ctx.heap.get(value) {
+            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+        }
         return Ok(ctx.display(value));
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));
     }
+    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+        let number = float_operand(ctx, value)?
+            .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
+        return Ok(
+            crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
+        );
+    }
     if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
-        let int = ctx.as_int(value)?;
-        let int = int.big();
-        let (sign, spec) = match spec.as_bytes().first() {
-            Some(b'+' | b' ' | b'-') => (&spec[..1], &spec[1..]),
-            _ => ("", spec),
-        };
-        let digits = match spec {
-            "" | "d" => int.magnitude().to_string(),
-            "b" => format!("{:b}", int.magnitude()),
-            "o" => format!("{:o}", int.magnitude()),
-            "x" => format!("{:x}", int.magnitude()),
-            "X" => format!("{:X}", int.magnitude()),
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("unsupported integer format {spec:?}"),
-                ));
-            }
-        };
-        let sign = if int.is_negative() {
-            "-"
-        } else if sign == "-" {
-            ""
-        } else {
-            sign
-        };
-        return Ok(format!("{sign}{digits}"));
+        return Ok(crate::objects::brace_integer_field(
+            spec,
+            ctx.as_int(value)?,
+            ctx.type_name(value),
+        )?);
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
 }
@@ -404,13 +426,25 @@ fn negative_format_char(prefix: &[u8], ch: char) -> bool {
     !after_quantity && i32::from(ch as u8 as std::ffi::c_char).is_negative()
 }
 
-/// Decimal conversions accept real numbers. Octal and hex require the integer-index protocol.
-fn render_percent_integer(
+/// Convert the numeric operand after its starred width and precision have been consumed.
+fn render_percent_number(
     ctx: &mut Context,
     value: Id,
     spec: &CFormatSpec,
     field: &str,
+    star_width: Option<isize>,
+    star_precision: Option<usize>,
 ) -> Result<String> {
+    let stars = star_width
+        .map(|w| crate::Int::from(w as i64))
+        .into_iter()
+        .chain(star_precision.map(crate::Int::from_usize));
+    if matches!(spec.format_type, CFormatType::Float(_)) {
+        let number = float_operand(ctx, value)?.ok_or_else(|| {
+            type_error(format!("must be real number, not {}", ctx.type_name(value)))
+        })?;
+        return Ok(crate::objects::percent_float_field(field, stars, number)?);
+    }
     let conversion = spec.format_char;
     let decimal = matches!(conversion, 'd' | 'i' | 'u');
     let mut convert = || {
@@ -429,7 +463,8 @@ fn render_percent_integer(
         ctx.index_integer(value)
     };
     let integer = convert().map_err(|error| {
-        if error.kind == "TypeError" {
+        let ty = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(&error, ty) {
             let required = if decimal {
                 "a real number"
             } else {
@@ -444,12 +479,15 @@ fn render_percent_integer(
         }
     })?;
     // CPython leaves room for an integer sign and a two-character base prefix.
-    if let Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(precision))) = spec.precision
-        && precision > (i32::MAX - 3) as usize
-    {
+    let precision = match spec.precision {
+        Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(n))) => Some(n),
+        _ => star_precision,
+    };
+    if precision.is_some_and(|n| n > (i32::MAX - 3) as usize) {
         return Err(Error::new("OverflowError", "precision too large"));
     }
-    crate::objects::percent_integer_field(field, integer).map_err(|e| {
+    let operands = stars.chain(std::iter::once(integer));
+    crate::objects::percent_integer_field(field, operands).map_err(|e| {
         let error = Error::from(e);
         if error.kind == "MemoryError" {
             Error::new("MemoryError", "")
@@ -534,7 +572,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
         let end = input.peek().map_or(format.len(), |&(i, _)| i);
         let field = std::str::from_utf8(&format[start + 1..end])
             .expect("positional octal fields are ASCII");
-        let rendered = render_percent_integer(ctx, value, &spec, field)?;
+        let rendered = render_percent_number(ctx, value, &spec, field, None, None)?;
         // Keep space for the unprocessed literal bytes as well as this field.
         output
             .try_reserve(rendered.len().saturating_add(format.len() - end))
@@ -560,6 +598,49 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+/// Consume the width and precision before asking for, or converting, the field value.
+fn percent_layout(
+    ctx: &Context,
+    spec: &CFormatSpec,
+    args: &mut dyn Iterator<Item = Id>,
+) -> Result<(isize, Option<usize>)> {
+    let mut star = || {
+        let arg = args
+            .next()
+            .ok_or_else(|| type_error("not enough arguments for format string"))?;
+        ctx.as_int(arg).map_err(|_| type_error("* wants int"))
+    };
+    let width = match spec.min_field_width {
+        None => 0,
+        Some(CFormatQuantity::Amount(n)) => {
+            isize::try_from(n).map_err(|_| Error::new("ValueError", "width too big"))?
+        }
+        Some(CFormatQuantity::FromValuesTuple) => star()?.big().to_isize().ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?,
+    };
+    let precision = match spec.precision {
+        None => None,
+        Some(CFormatPrecision::Dot) => Some(0),
+        Some(CFormatPrecision::Quantity(CFormatQuantity::Amount(n))) => Some(
+            i32::try_from(n).map_err(|_| Error::new("ValueError", "precision too big"))? as usize,
+        ),
+        Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple)) => Some(
+            star()?
+                .big()
+                .to_i32()
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?
+                .max(0) as usize,
+        ),
+    };
+    Ok((width, precision))
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -579,54 +660,78 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 let decorated = spec.precision.is_some()
                     || spec.min_field_width.is_some()
                     || !spec.flags.is_empty();
-                let number_field = matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X')
-                    && !matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple))
-                    && !matches!(
-                        spec.precision,
-                        Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
-                    );
-                if decorated && !number_field {
+                let float_field = matches!(spec.format_type, CFormatType::Float(_));
+                let number_field = float_field
+                    || decorated && matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
+                let star_width =
+                    matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple));
+                let star_precision = matches!(
+                    spec.precision,
+                    Some(CFormatPrecision::Quantity(CFormatQuantity::FromValuesTuple))
+                );
+                let text_field = decorated && matches!(spec.format_char, 's' | 'r' | 'a' | 'c');
+                if decorated && !number_field && !text_field {
                     return Err(Error::new(
                         "ValueError",
                         "unsupported flags, width or precision for percent interpolation",
                     ));
                 }
-                let arg = if let Some(name) = &spec.mapping_key {
+                let mut mapped;
+                let field_args: &mut dyn Iterator<Item = Id> = if let Some(name) = &spec.mapping_key
+                {
                     if !mapping {
                         return Err(type_error("format requires a mapping"));
                     }
                     // A mapping lookup consumes the single positional operand.
                     args.next();
                     let key = ctx.text(name);
-                    ctx.get_item(rhs, key)?
+                    mapped = std::iter::once(ctx.get_item(rhs, key)?);
+                    &mut mapped
                 } else {
-                    args.next()
-                        .ok_or_else(|| type_error("not enough arguments for format string"))?
+                    &mut args
                 };
-                if decorated {
+                let layout = (text_field || float_field || star_width || star_precision)
+                    .then(|| percent_layout(ctx, spec, field_args))
+                    .transpose()?;
+                let arg = field_args
+                    .next()
+                    .ok_or_else(|| type_error("not enough arguments for format string"))?;
+                if number_field {
                     let (_, (start, _)) = positions
                         .find(|(i, _)| i == position)
                         .expect("parsed percent fields follow their source character positions");
-                    let rendered = render_percent_integer(ctx, arg, spec, &format[start + 1..])?;
+                    let (width, precision) = layout.unwrap_or_default();
+                    let rendered = render_percent_number(
+                        ctx,
+                        arg,
+                        spec,
+                        &format[start + 1..],
+                        star_width.then_some(width),
+                        precision.filter(|_| star_precision),
+                    )?;
                     output
                         .try_reserve(rendered.len())
                         .map_err(|_| Error::new("MemoryError", ""))?;
                     output.push_str(&rendered);
                     continue;
                 }
-                let rendered = match spec.format_char {
-                    's' => ctx.display(arg),
-                    'r' => ctx.repr(arg),
-                    'a' => ascii(&ctx.repr(arg)),
-                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string(),
-                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?,
+                let rendered: Cow<'_, str> = match spec.format_char {
+                    's' => match ctx.heap.get(arg) {
+                        Value::Str(s) => Cow::Borrowed(s),
+                        _ => ctx.display(arg).into(),
+                    },
+                    'r' => ctx.repr(arg).into(),
+                    'a' => ascii(&ctx.repr(arg)).into(),
+                    'd' | 'i' | 'u' => ctx.as_int(arg)?.to_string().into(),
+                    ch @ ('o' | 'x' | 'X') => format_value(ctx, arg, &ch.to_string())?.into(),
                     'c' => match ctx.heap.get(arg) {
-                        Value::Str(s) if s.chars().count() == 1 => s.clone(),
+                        Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
                         _ => u32::try_from(ctx.as_integer(arg)?)
                             .ok()
                             .and_then(char::from_u32)
                             .ok_or_else(|| Error::new("OverflowError", "%c arg not in range"))?
-                            .to_string(),
+                            .to_string()
+                            .into(),
                     },
                     _ => {
                         return Err(Error::new(
@@ -635,7 +740,28 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                         ));
                     }
                 };
-                output.push_str(&rendered);
+                if let Some((width, precision)) = layout {
+                    let left = width < 0 || spec.flags.contains(CConversionFlags::LEFT_ADJUST);
+                    let width = width.checked_abs().unwrap_or(0) as usize;
+                    let end = precision
+                        .filter(|_| spec.format_char != 'c')
+                        .and_then(|n| rendered.char_indices().nth(n))
+                        .map_or(rendered.len(), |(i, _)| i);
+                    let text = &rendered[..end];
+                    let padding = width.saturating_sub(text.chars().count());
+                    output
+                        .try_reserve(text.len().saturating_add(padding))
+                        .map_err(|_| Error::new("MemoryError", "formatted string is too long"))?;
+                    if !left {
+                        output.extend(std::iter::repeat_n(' ', padding));
+                    }
+                    output.push_str(text);
+                    if left {
+                        output.extend(std::iter::repeat_n(' ', padding));
+                    }
+                } else {
+                    output.push_str(&rendered);
+                }
             }
         }
     }
@@ -654,6 +780,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if owner == "str" && name == "maketrans" {
+        return maketrans::table(ctx, args, kwargs);
+    }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
@@ -945,7 +1074,7 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::List(values)))
         }
         "splitlines" => {
-            let [keep] = bind(name, args, kwargs, ["keepends"])?;
+            let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
             let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));

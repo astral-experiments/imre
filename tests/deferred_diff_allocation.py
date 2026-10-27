@@ -24,6 +24,7 @@ def check(args, directory):
     modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
     cases.append(("deepcopy-graph", "short", "A", "B"))
+    cases += [(mode, "short", "A", "B") for mode in ("extend-list", "extend-self", "extend-converted")]
     cases.append(("join-owner", "short", "A", "B"))
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
     cases.append(("slice-owner", "short", "A", "B"))
@@ -51,6 +52,10 @@ def check(args, directory):
                 indices = (count,)
             elif argv[0] in ("repr", "frozen"):
                 indices = (1,)
+            elif argv[0] == "extend-converted":
+                indices = {1, count}
+            elif argv[0] in ("extend-list", "extend-self"):
+                indices = (count,)
             elif argv[0] == "join-owner":
                 indices = (count,)
             elif argv[0] in ("pack-project", "restore"):

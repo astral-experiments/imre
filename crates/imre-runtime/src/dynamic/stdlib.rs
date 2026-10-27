@@ -22,6 +22,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
+pub(super) mod tempfile;
 mod time;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) mod io;
@@ -73,7 +74,9 @@ pub(super) fn is_module(name: &str) -> bool {
             | "datetime"
             | "email"
             | "email.utils"
+            | "tempfile"
             | "time"
+            | "random"
             | "hashlib"
             | "hmac"
             | "re"
@@ -265,20 +268,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("enum", "auto") => ctx.enum_auto_class()?,
+        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
-        ("re", "ASCII") => ctx.int(regex::ASCII),
-        ("re", "UNICODE") => ctx.int(regex::UNICODE),
-        ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
-        ("re", "A" | "U" | "X") => {
-            let module = ctx.module("re")?;
-            let flag = match name {
-                "A" => "ASCII",
-                "U" => "UNICODE",
-                _ => "VERBOSE",
-            };
-            ctx.lookup_attr(module, flag)?
-        }
+        ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
@@ -435,21 +429,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
-        | (
-            "platform",
-            "system"
-            | "node"
-            | "release"
-            | "version"
-            | "machine"
-            | "mac_ver"
-            | "python_version"
-            | "python_version_tuple"
-            | "python_implementation",
-        )
+        | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
+        | ("random", "random")
         | ("codecs", "lookup")
         | ("marshal", "loads")
         | ("pickle", "dumps")
@@ -458,11 +442,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes",
         )
-        | ("hashlib", "sha1")
+        | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile")
+        | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
+        | ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
@@ -522,12 +506,82 @@ fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     Ok(NONE)
 }
 
+/// Invoke the text object's ASCII encoder, preserving user hooks and their exceptions.
+fn base64_ascii(ctx: &mut Context, text: Id) -> Result<Id> {
+    let result = ctx.lookup_attr(text, "encode").and_then(|encoder| {
+        let ascii = ctx.text("ascii");
+        ctx.call(encoder, vec![ascii], Vec::new())
+    });
+    result.map_err(|error| {
+        let class = ctx.builtin("UnicodeEncodeError");
+        if ctx.raised_error_matches(&error, class) {
+            Error::new(
+                "ValueError",
+                "string argument should contain only ASCII characters",
+            )
+        } else {
+            error
+        }
+    })
+}
+
+/// A nonstandard encoder may supply its own translation object before standard decoding.
+fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
+    let encoded = base64_ascii(ctx, text)?;
+    if matches!(
+        ctx.heap.get(encoded),
+        Value::Bytes(_) | Value::ByteArray(_) | Value::Str(_)
+    ) {
+        return Ok((encoded, true));
+    }
+    // The inherited str.translate with this table only remaps the URL alphabet.
+    if let Some(text) = ctx.string_storage(encoded)
+        && let Value::Instance { class, fields, .. } = ctx.heap.get(encoded)
+        && !fields.contains_key("translate")
+        && ctx.class_attr(*class, "translate") == ctx.builtins.get("str.translate").copied()
+        && ctx.class_attr(*class, "__getattribute__").is_none()
+    {
+        return Ok((text, true));
+    }
+    let translate = ctx.lookup_attr(encoded, "translate")?;
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(256)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    table.extend(0..=u8::MAX);
+    table[b'-' as usize] = b'+';
+    table[b'_' as usize] = b'/';
+    let table = ctx.alloc(Value::Bytes(table));
+    let translated = ctx.call(translate, vec![table], Vec::new())?;
+    let data = if ctx.string_storage(translated).is_some() {
+        base64_ascii(ctx, translated)?
+    } else {
+        translated
+    };
+    Ok((data, false))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "random.random" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "Random.random() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("Random.random() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
@@ -620,6 +674,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("selectors.") {
         return readiness::call(ctx, method, args, kwargs);
     }
+    if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
+        return ctx.auto_method(name, args, kwargs);
+    }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
     }
@@ -644,6 +701,12 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("contextvars.") {
         return contextvars::call(ctx, method, args, kwargs);
+    }
+    if name == "tempfile.TemporaryFile" {
+        return tempfile::open(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("BufferedRandom.") {
+        return tempfile::method(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
@@ -721,6 +784,9 @@ pub(super) fn call(
     if name == "pattern.search" {
         return regex::search(ctx, args, kwargs);
     }
+    if name == "pattern.split" {
+        return regex::pattern_split(ctx, args, kwargs);
+    }
     if name.starts_with("re.") {
         return regex::module_call(ctx, name, args, kwargs);
     }
@@ -737,7 +803,7 @@ pub(super) fn call(
             1,
             &["obj", "default", "ensure_ascii", "sort_keys", "separators"],
         ),
-        "hashlib.sha1" => (1, &["data", "usedforsecurity"]),
+        "hashlib.sha1" | "hashlib.sha256" => (1, &["data", "usedforsecurity"]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -796,6 +862,14 @@ pub(super) fn call(
         _ if urlsafe => {
             let id = single_argument(name.trim_start_matches("base64."), "s", args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";
+            let (id, urlsafe) = if decode
+                && matches!(ctx.heap.get(id), Value::Instance { .. })
+                && ctx.string_storage(id).is_some()
+            {
+                urlsafe_input(ctx, id)?
+            } else {
+                (id, true)
+            };
             let bytes = match ctx.heap.get(id) {
                 Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
                 Value::Str(text) if decode && text.is_ascii() => text.as_bytes(),
@@ -818,7 +892,7 @@ pub(super) fn call(
                 }
             };
             let result = if decode {
-                crate::objects::urlsafe_decode(bytes)?
+                crate::objects::base64_decode(bytes, urlsafe)?
             } else {
                 crate::objects::urlsafe_encode(bytes)?
             };
@@ -828,14 +902,9 @@ pub(super) fn call(
         "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hashlib.sha1" => return hashlib::sha1(ctx, args, kwargs),
+        "hashlib.sha256" => return hashlib::sha256(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);
-        }
-        "platform.python_implementation" => ctx.text("Imre"),
-        "platform.python_version" => ctx.text(full_version(ctx)?),
-        "platform.python_version_tuple" => {
-            let version = full_version(ctx)?;
-            tuple_text(ctx, &version.split('.').collect::<Vec<_>>())
         }
         "platform.system" | "platform.node" | "platform.release" | "platform.version"
         | "platform.machine" => {

@@ -294,7 +294,7 @@ impl Formatter {
                     } else {
                         format_spec
                     };
-                    append(&mut out, &format_specifier(&v, &spec)?)?;
+                    append(&mut out, &format_specifier(&v, &spec, "int")?)?;
                 }
             }
         }
@@ -408,7 +408,11 @@ fn number(v: &OwnedWord) -> Result<f64> {
 }
 
 /// Apply Python's alignment after converting the scalar; the field width counts characters.
-fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
+pub(super) fn format_specifier(
+    value: &OwnedWord,
+    spec: &str,
+    integer_name: &str,
+) -> Result<String> {
     if spec.is_empty() {
         return display(value);
     }
@@ -417,7 +421,8 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     let mut fill = ' ';
     let mut chars = tail.chars();
     let first = chars.next();
-    if let Some(second) = chars.next().filter(|c| "<^>=".contains(*c)) {
+    let explicit_fill = chars.next().filter(|c| "<^>=".contains(*c));
+    if let Some(second) = explicit_fill {
         fill = first.unwrap();
         align = Some(second);
         tail = chars.as_str();
@@ -429,13 +434,17 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     if sign.is_some() {
         tail = &tail[1..];
     }
+    let negative_zero = value.kind.raw() == 2 && tail.starts_with('z');
+    if negative_zero {
+        tail = &tail[1..];
+    }
     let alternate = tail.starts_with('#');
     if alternate {
         tail = &tail[1..];
     }
     if let Some(rest) = tail.strip_prefix('0') {
         tail = rest;
-        if fill == ' ' {
+        if explicit_fill.is_none() {
             fill = '0';
         }
         if align.is_none() {
@@ -447,8 +456,8 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
         0
     } else {
         tail[..size]
-            .parse::<usize>()
-            .map_err(|_| error("Too many decimal digits in format string"))?
+            .parse::<isize>()
+            .map_err(|_| error("Too many decimal digits in format string"))? as usize
     };
     tail = &tail[size..];
     let group = tail.chars().next().filter(|c| ",_".contains(*c));
@@ -477,8 +486,53 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
             }
         }
         _ if tail.chars().count() == 1 => tail.chars().next().unwrap(),
+        _ if value.kind.raw() == 2 => {
+            return Err(error(format!(
+                "Invalid format specifier '{spec}' for object of type '{integer_name}'"
+            )));
+        }
         _ => return Err(error(format!("Invalid format specifier '{spec}'"))),
     };
+    let integer = value.kind.raw() == 2;
+    let integer_code = matches!(c, 'b' | 'o' | 'd' | 'x' | 'X' | 'n' | 'c');
+    if integer && integer_code {
+        if negative_zero {
+            return Err(error(
+                "Negative zero coercion (z) not allowed in integer format specifier",
+            ));
+        }
+        if precision.is_some() {
+            return Err(error("Precision not allowed in integer format specifier"));
+        }
+        if let Some(group) = group
+            && (matches!(c, 'n' | 'c') || group == ',' && matches!(c, 'x' | 'X' | 'o' | 'b'))
+        {
+            return Err(error(format!("Cannot specify '{group}' with '{c}'.")));
+        }
+        if c == 'c' {
+            if sign.is_some() || alternate {
+                return Err(error(if sign.is_some() {
+                    "Sign not allowed with integer format specifier 'c'"
+                } else {
+                    "Alternate form (#) not allowed with integer format specifier 'c'"
+                }));
+            }
+            // SAFETY: this field holds a rooted native integer.
+            let n = unsafe { Int::borrow(value.word) };
+            n.to_i64()
+                .and_then(|n| std::ffi::c_long::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C long",
+                    )
+                })?;
+        }
+    } else if integer && !"eEfFgG%".contains(c) {
+        return Err(error(format!(
+            "Unknown format code '{c}' for object of type '{integer_name}'"
+        )));
+    }
     let flags = format!(
         "{}{}",
         sign.map_or(String::new(), |c| c.to_string()),
@@ -490,22 +544,29 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
         let spec = format!("{flags}{precision}f");
         let temp = record::float(n);
         format!("{}%", record::percent_value(&spec, &temp)?.0)
+    } else if integer && matches!(c, 'd' | 'o' | 'x' | 'X' | 'n') {
+        // SAFETY: an integer word retains the native Int throughout formatting.
+        let number = unsafe { Int::borrow(value.word) };
+        let code = if c == 'n' { 'd' } else { c };
+        record::percent_integer_field(&format!("{flags}{code}"), [(*number).clone()])?
     } else if c == 'b' {
-        if value.kind.raw() != 2 {
+        if !integer {
             return Err(error("Unknown format code 'b' for this value"));
         }
-        // SAFETY: value retains the checked integer throughout conversion.
-        let n = unsafe { Int::borrow(value.word) };
-        let s = n.big().to_str_radix(2);
-        if alternate {
-            if let Some(n) = s.strip_prefix('-') {
-                format!("-0b{n}")
-            } else {
-                format!("0b{s}")
-            }
+        // SAFETY: the integer descriptor and its owner were checked above.
+        let number = unsafe { Int::borrow(value.word) };
+        let number = number.big();
+        let sign = if number.sign() == num_bigint::Sign::Minus {
+            "-"
         } else {
-            s
-        }
+            match sign {
+                Some('+') => "+",
+                Some(' ') => " ",
+                _ => "",
+            }
+        };
+        let prefix = if alternate { "0b" } else { "" };
+        format!("{sign}{prefix}{:b}", number.magnitude())
     } else if c == 'n' {
         record::percent_value(
             &format!(
@@ -518,7 +579,48 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
     } else {
         record::percent_value(&format!("{flags}{precision}{c}"), value)?.0
     };
+    let sign_len = usize::from(c != 'c' && s.starts_with(['-', '+', ' ']));
+    let prefix_len = if integer && alternate && matches!(c, 'b' | 'o' | 'x' | 'X') {
+        2
+    } else {
+        0
+    };
+    let head = sign_len + prefix_len;
     if let Some(group) = group
+        && integer
+        && matches!(c, 'd' | 'b' | 'o' | 'x' | 'X')
+    {
+        let step = if c == 'd' { 3 } else { 4 };
+        let digits = s.len() - head;
+        let zeros = if fill == '0' && align == Some('=') {
+            let target = width.saturating_sub(head);
+            target
+                .saturating_sub(target.saturating_sub(1) / (step + 1))
+                .saturating_sub(digits)
+        } else {
+            0
+        };
+        let digits = digits + zeros;
+        let mut grouped = String::new();
+        let bytes = head
+            .checked_add(digits)
+            .and_then(|n| n.checked_add((digits - 1) / step))
+            .ok_or_else(|| Error::new(Kind::OverflowError, "formatted string is too long"))?;
+        grouped
+            .try_reserve_exact(bytes)
+            .map_err(|_| Error::new(Kind::MemoryError, "formatted string is too long"))?;
+        grouped.push_str(&s[..head]);
+        for (i, digit) in std::iter::repeat_n(b'0', zeros)
+            .chain(s.bytes().skip(head))
+            .enumerate()
+        {
+            if i != 0 && (digits - i).is_multiple_of(step) {
+                grouped.push(group);
+            }
+            grouped.push(char::from(digit));
+        }
+        s = grouped;
+    } else if let Some(group) = group
         && numeric
     {
         let start = s.find(|ch: char| ch.is_ascii_digit()).unwrap_or(s.len());
@@ -538,11 +640,7 @@ fn format_specifier(value: &OwnedWord, spec: &str) -> Result<String> {
         '^' => (count / 2, count - count / 2),
         _ => (count, 0),
     };
-    let pos = if align == '=' {
-        usize::from(s.starts_with(['-', '+', ' ']))
-    } else {
-        0
-    };
+    let pos = if align == '=' { head } else { 0 };
     let mut out = String::new();
     let bytes = count
         .checked_mul(fill.len_utf8())

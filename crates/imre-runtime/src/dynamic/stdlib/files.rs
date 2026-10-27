@@ -9,7 +9,10 @@ use super::{
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
-    Reader(RefCell<Option<BufReader<ReadSource>>>),
+    Reader {
+        slot: RefCell<Option<ReadSource>>,
+        socket: bool,
+    },
     Writer(RefCell<crate::objects::FileState>),
 }
 
@@ -19,7 +22,7 @@ impl BinaryFile {
         let mode = match mode {
             "rb" => {
                 let (file, _) = crate::objects::open_file(path, 0)?;
-                return Ok(Self::reader(BufReader::new(ReadSource::File(file))));
+                return Ok(Self::reader(ReadSource::File(BufReader::new(file))));
             }
             "wb" => 1,
             "ab" => 2,
@@ -37,14 +40,24 @@ impl BinaryFile {
     }
 
     /// Files and sockets share the same buffered reader methods.
-    pub(in crate::dynamic) fn reader(reader: BufReader<ReadSource>) -> Self {
-        Self::Reader(RefCell::new(Some(reader)))
+    pub(in crate::dynamic) fn reader(reader: ReadSource) -> Self {
+        Self::Reader {
+            socket: matches!(reader, ReadSource::Socket(_)),
+            slot: RefCell::new(Some(reader)),
+        }
+    }
+
+    /// A refused handle allocation drops its reader and releases any retained socket.
+    pub(in crate::dynamic) fn into_value(self) -> Result<Value> {
+        crate::shared::Shared::try_new(self)
+            .map(Value::File)
+            .map_err(|_| Error::new("MemoryError", ""))
     }
 
     /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
-            Self::Reader(slot) => slot.borrow().is_none(),
+            Self::Reader { slot, .. } => slot.borrow().is_none(),
             Self::Writer(file) => file.borrow().closed(),
         }
     }
@@ -52,7 +65,7 @@ impl BinaryFile {
 
 /// One buffered cursor serves filesystem input and a socket retained by makefile.
 pub(in crate::dynamic) enum ReadSource {
-    File(std::fs::File),
+    File(BufReader<std::fs::File>),
     Socket(crate::objects::socket::SocketInput),
 }
 
@@ -61,6 +74,22 @@ impl Read for ReadSource {
         match self {
             Self::File(file) => file.read(buf),
             Self::Socket(sock) => sock.read(buf),
+        }
+    }
+}
+
+impl BufRead for ReadSource {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        match self {
+            Self::File(file) => file.fill_buf(),
+            Self::Socket(sock) => sock.fill_buf(),
+        }
+    }
+
+    fn consume(&mut self, count: usize) {
+        match self {
+            Self::File(file) => file.consume(count),
+            Self::Socket(sock) => sock.consume(count),
         }
     }
 }
@@ -77,7 +106,7 @@ impl Seek for ReadSource {
 impl AsRawFd for ReadSource {
     fn as_raw_fd(&self) -> RawFd {
         match self {
-            Self::File(file) => file.as_raw_fd(),
+            Self::File(file) => file.get_ref().as_raw_fd(),
             Self::Socket(sock) => sock.as_raw_fd(),
         }
     }
@@ -261,9 +290,19 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
-    let slot = match handle.as_ref() {
-        BinaryFile::Reader(slot) => slot,
+    let (slot, socket) = match handle.as_ref() {
+        BinaryFile::Reader { slot, socket } => (slot, *socket),
         BinaryFile::Writer(file) => {
+            // Converting a size can close this same writer.
+            match (name, &args[1..]) {
+                ("file.read", [size]) => {
+                    crate::objects::FileState::check_writer_read_size(&ctx.index_integer(*size)?)?;
+                }
+                ("file.readline", [size]) if read_length(ctx, Some(*size))? == 0 => {
+                    return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+                }
+                _ => {}
+            }
             let mut file = file.borrow_mut();
             return match (name, &args[1..]) {
                 ("file.write", [value]) => {
@@ -285,22 +324,13 @@ pub(super) fn call(
                 ("file.__enter__", []) => Ok(first),
                 ("file.fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-                    match (name, &args[1..]) {
-                        ("file.read", [size]) => {
-                            crate::objects::FileState::check_writer_read_size(&ctx.as_int(*size)?)?;
-                        }
-                        ("file.readline", [size]) if *size != NONE => {
-                            ctx.as_integer(*size)?;
-                        }
-                        ("file.readinto", [buffer])
-                            if !matches!(ctx.heap.get(*buffer), Value::ByteArray(_)) =>
-                        {
-                            return Err(Error::new(
-                                "TypeError",
-                                "readinto() requires a writable bytes-like object",
-                            ));
-                        }
-                        _ => {}
+                    if let ("file.readinto", [buffer]) = (name, &args[1..])
+                        && !matches!(ctx.heap.get(*buffer), Value::ByteArray(_))
+                    {
+                        return Err(Error::new(
+                            "TypeError",
+                            "readinto() requires a writable bytes-like object",
+                        ));
                     }
                     Err(Error::new("UnsupportedOperation", "read"))
                 }
@@ -316,14 +346,79 @@ pub(super) fn call(
         "file.read" | "file.readline" => Some(read_length(ctx, args.get(1).copied())?),
         _ => None,
     };
+    if socket && name == "file.tell" {
+        // SocketIO.tell() calls its unsupported raw seek even after close.
+        return Err(Error::new("UnsupportedOperation", "seek"));
+    }
+    if name == "file.seek" {
+        let target = argument(args, 1)?;
+        let value = option(args, 2, kwargs, "whence")?;
+        let whence = match value {
+            None => 0,
+            Some(value) => ctx
+                .index_integer(value)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?,
+        };
+        if !matches!(
+            whence,
+            libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
+        ) {
+            return Err(Error::new(
+                "ValueError",
+                format!("whence value {whence} unsupported"),
+            ));
+        }
+        {
+            let mut slot = slot.borrow_mut();
+            let reader = slot
+                .as_mut()
+                .ok_or_else(|| Error::new("ValueError", "seek of closed file"))?;
+            let seekable = match reader {
+                ReadSource::File(file) => file.get_mut().stream_position().is_ok(),
+                ReadSource::Socket(_) => false,
+            };
+            if !seekable {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+        }
+        // An offset conversion may advance or close this same stream.
+        let offset = ctx.index_integer(target)?.to_i64().ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                format!(
+                    "cannot fit '{}' into an offset-sized integer",
+                    ctx.type_name(target)
+                ),
+            )
+        })?;
+        let mut slot = slot.borrow_mut();
+        let reader = slot
+            .as_mut()
+            .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
+        let pos = match whence {
+            0 => SeekFrom::Start(
+                u64::try_from(offset)
+                    .map_err(|_| Error::new("OSError", "invalid negative seek position"))?,
+            ),
+            1 => SeekFrom::Current(offset),
+            2 => SeekFrom::End(offset),
+            _ => return Err(Error::new("ValueError", "invalid seek whence")),
+        };
+        return Ok(ctx.int(reader.seek(pos).map_err(os_error)? as i64));
+    }
     let mut slot = slot.borrow_mut();
     if name == "file.write" {
         return Err(Error::new("UnsupportedOperation", "write"));
     }
     if matches!(name, "file.__exit__" | "file.close") {
-        if let Some(reader) = slot.take()
-            && let ReadSource::Socket(mut raw) = reader.into_inner()
-        {
+        if let Some(ReadSource::Socket(mut raw)) = slot.take() {
             raw.close().map_err(os_error)?;
         }
         return Ok(NONE);
@@ -333,7 +428,6 @@ pub(super) fn call(
             "file.read" => "read of closed file",
             "file.readline" => "readline of closed file",
             "file.readinto" => "readinto of closed file",
-            "file.seek" => "seek of closed file",
             "file.__enter__" | "file.flush" => "I/O operation on closed file.",
             _ => "I/O operation on closed file",
         };
@@ -376,25 +470,8 @@ pub(super) fn call(
     match name {
         "file.__enter__" => Ok(first),
         "file.flush" => Ok(NONE),
-        "file.fileno" => Ok(ctx.int(i64::from(f.get_ref().as_raw_fd()))),
+        "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
-        "file.seek" => {
-            let offset = ctx.as_integer(argument(args, 1)?)?;
-            let whence = option(args, 2, kwargs, "whence")?
-                .map(|id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(0);
-            let pos = match whence {
-                0 => SeekFrom::Start(
-                    u64::try_from(offset)
-                        .map_err(|_| Error::new("OSError", "invalid negative seek position"))?,
-                ),
-                1 => SeekFrom::Current(offset),
-                2 => SeekFrom::End(offset),
-                _ => return Err(Error::new("ValueError", "invalid seek whence")),
-            };
-            Ok(ctx.int(f.seek(pos).map_err(os_error)? as i64))
-        }
         "file.readinto" => {
             let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
                 return Err(Error::new(

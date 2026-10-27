@@ -9,11 +9,11 @@ permissions:
 
 concurrency:
   group: main-check
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   check:
-    runs-on: ${{ github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

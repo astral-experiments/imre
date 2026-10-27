@@ -22,10 +22,11 @@ class TraceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ptrace permissions"):
                 require_attached(41, Path("events"), "/usr/bin/strace")
 
-    def audit(self, *events):
+    def audit(self, *events, binary=None):
         with tempfile.TemporaryDirectory() as temp:
-            binary = Path(temp) / "server"
-            binary.touch()
+            if binary is None:
+                binary = Path(temp) / "server"
+                binary.touch()
             path = Path(temp) / "events"
             events = [f'41 execve("{binary}", ["server"], 0x1) = 0', *events, "41 +++ killed by SIGTERM +++"]
             path.write_text("\n".join(events) + "\n")
@@ -66,11 +67,44 @@ class TraceTests(unittest.TestCase):
                     subprocess.run(["cc", "-shared", "-fPIC", *flags, "-x", "c", "-", "-o", path],
                                    check=True, input=source.encode())
                     event = f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{path}>, 0) = 0x1000"
-                    if rejected:
-                        with self.assertRaisesRegex(ValueError, "mapped libpython"):
-                            self.audit(event)
-                    else:
-                        self.assertEqual(self.audit(event)["libpython_mappings"], 0)
+                    with patch("native_identity.require_stable_trace_path"):
+                        if rejected:
+                            with self.assertRaisesRegex(ValueError, "mapped libpython"):
+                                self.audit(event)
+                        else:
+                            self.assertEqual(self.audit(event)["libpython_mappings"], 0)
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("cc") and
+                         (shutil.which("readelf") or shutil.which("llvm-readelf")), "Linux ELF toolchain")
+    def test_replaced_mapped_elf_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mapped image.so"
+            replacement = Path(temp) / "replacement.so"
+            subprocess.run(
+                ["cc", "-shared", "-fPIC", "-Wl,-soname,libpython3.14.so.1.0",
+                 "-x", "c", "-", "-o", path],
+                check=True, input=b"int ordinary(void) { return 1; }",
+            )
+            subprocess.run(
+                ["cc", "-shared", "-fPIC", "-Wl,-soname,extension.so",
+                 "-x", "c", "-", "-o", replacement],
+                check=True, input=b"int ordinary(void) { return 1; }",
+            )
+            event = f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{path}>, 0) = 0x1000"
+            replacement.replace(path)
+            with self.assertRaisesRegex(ValueError, "cannot establish mapped file identity"):
+                self.audit(event)
+
+    def test_mutable_mappings_to_primary_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / "server"
+            binary.touch()
+            alias = Path(temp) / "mapped.so"
+            alias.hardlink_to(binary)
+            for path in (alias, binary):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "mapped file identity"):
+                    self.audit(f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{path}>, 0) = 0x1000",
+                               binary=binary)
 
     def test_unavailable_file_backed_mapping(self):
         for descriptor in ("3", "3</nonexistent/path/to/an/image>"):

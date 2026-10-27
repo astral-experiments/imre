@@ -154,8 +154,8 @@ pub(crate) fn urlsafe_encode(data: &[u8]) -> Result<Bytes> {
     encode(data, &URL_SAFE, false)
 }
 
-pub(crate) fn urlsafe_decode(data: &[u8]) -> Result<Bytes> {
-    decode(data, false, true)
+pub(crate) fn base64_decode(data: &[u8], urlsafe: bool) -> Result<Bytes> {
+    decode(data, false, urlsafe)
 }
 
 /// # Safety

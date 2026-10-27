@@ -25,6 +25,8 @@ MAPPED_FD = re.compile(r",\s*(-?\d+)(?:<(.*)>)?,\s*(?:0x[0-9a-fA-F]+|\d+)\)\s+="
 def mapped_python(name, path, cache, identity=None):
     if LIBPYTHON.search(name):
         return True
+    if identity is None:
+        require_stable_trace_path(path)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
         with os.fdopen(fd, "rb") as stream:
@@ -39,6 +41,24 @@ def mapped_python(name, path, cache, identity=None):
             return cache[key]
     except OSError as error:
         raise ValueError(f"cannot verify mapped file {name}: {error}") from error
+
+
+def require_stable_trace_path(path):
+    """Fail if a post-exit pathname does not have a durable identity."""
+    # audit_trace runs after the tracee exits, so it cannot compare the live
+    # mapped inode with this pathname. Only trust an immutable system path;
+    # otherwise the tracee could replace the file before this open.
+    if os.geteuid() == 0:
+        raise ValueError(f"cannot establish mapped file identity after exit as root: {path}")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            info = current.lstat()
+        except OSError as error:
+            raise ValueError(f"cannot establish mapped file identity after exit: {path}: {error}") from error
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ValueError(f"cannot establish mapped file identity after exit: {path}")
 
 
 def python_elf(fd):

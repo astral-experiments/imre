@@ -2,7 +2,6 @@
 
 use super::super::{c_int, zipfile::Member};
 use super::*;
-use num_traits::ToPrimitive;
 
 pub(super) struct Memory {
     data: crate::BytesOwner,
@@ -212,7 +211,7 @@ impl FileState {
         self.seek(at)
     }
 
-    pub(super) fn read_line_bytes(&mut self) -> Result<Bytes> {
+    pub(crate) fn read_line_bytes(&mut self) -> Result<Bytes> {
         match self.kind {
             FileKind::BinaryRandom => match self.stream.as_mut() {
                 Some(Stream::Random(file)) => file.readline(),
@@ -257,6 +256,42 @@ impl FileState {
                 disk_offset(offset)
             }
         }
+    }
+
+    /// Repositions a buffered disk stream using Python's signed offset and whence.
+    pub(crate) fn seek_disk(&mut self, offset: &Int, whence: i64) -> Result<u64> {
+        if !(0..=2).contains(&whence) {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("whence value {whence} unsupported"),
+            ));
+        }
+        if self.closed() {
+            return Err(Error::new(Kind::ValueError, "seek of closed file"));
+        }
+        let offset = offset.to_i64().ok_or_else(|| {
+            Error::new(
+                Kind::ValueError,
+                "cannot fit 'int' into an offset-sized integer",
+            )
+        })?;
+        self.seek(match whence {
+            0 => SeekFrom::Start(disk_offset(i128::from(offset))?),
+            1 => SeekFrom::Current(offset),
+            _ => SeekFrom::End(offset),
+        })
+    }
+
+    /// Reports the logical position without flushing pending writes or consuming input.
+    pub(crate) fn tell(&mut self) -> Result<u64> {
+        self.check_member("tell on closed file.")?;
+        if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && self.closed() {
+            return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
+        }
+        if let Some(Stream::Random(file)) = &mut self.stream {
+            return file.tell().map_err(super::errno_error);
+        }
+        self.seek(SeekFrom::Current(0))
     }
 
     pub(crate) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
@@ -360,47 +395,17 @@ pub unsafe extern "C" fn imre_binary_seek(
                 f.stream()?;
             }
             let whence = i64::from(c_int(whence)?);
-            let off = match f.kind {
-                FileKind::Memory => {
-                    let off = offset
-                        .as_small()
-                        .or_else(|| offset.big().to_i64())
-                        .ok_or_else(|| {
-                            Error::new(
-                                Kind::OverflowError,
-                                "Python int too large to convert to C ssize_t",
-                            )
-                        })?;
-                    return f.seek_memory(off, whence as i32);
-                }
-                _ => {
-                    if !(0..=2).contains(&whence) {
-                        return Err(Error::new(
-                            Kind::ValueError,
-                            format!("whence value {whence} unsupported"),
-                        ));
-                    }
-                    if f.stream.is_none() {
-                        return Err(Error::new(Kind::ValueError, "seek of closed file"));
-                    }
-                    offset
-                        .as_small()
-                        .or_else(|| offset.big().to_i64())
-                        .ok_or_else(|| {
-                            Error::new(
-                                Kind::ValueError,
-                                "cannot fit 'int' into an offset-sized integer",
-                            )
-                        })?
-                }
-            };
-            let at = match whence {
-                0 => SeekFrom::Start(f.absolute_offset(i128::from(off))?),
-                1 => SeekFrom::Current(off),
-                2 => SeekFrom::End(off),
-                _ => return Err(Error::new(Kind::ValueError, "whence value unsupported")),
-            };
-            f.seek(at)
+            if f.kind == FileKind::Memory {
+                let off = offset.to_i64().ok_or_else(|| {
+                    Error::new(
+                        Kind::OverflowError,
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                f.seek_memory(off, whence as i32)
+            } else {
+                f.seek_disk(&offset, whence)
+            }
         })
     };
     finish(result.map(|n| Int::from_usize(n as usize).into_raw()), 0)
@@ -413,20 +418,7 @@ pub unsafe extern "C" fn imre_binary_seek(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_binary_tell(file: *const Object) -> usize {
     // SAFETY: the position query cannot invoke Python code.
-    let result = unsafe {
-        object(file).0.with_mut(|s| {
-            let f = s.file_mut();
-            f.check_member("tell on closed file.")?;
-            if matches!(f.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && f.stream.is_none()
-            {
-                return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
-            }
-            if let Some(Stream::Random(file)) = &mut f.stream {
-                return file.tell().map_err(super::errno_error);
-            }
-            f.seek(SeekFrom::Current(0))
-        })
-    };
+    let result = unsafe { object(file).0.with_mut(|s| s.file_mut().tell()) };
     finish(result.map(|n| Int::from_usize(n as usize).into_raw()), 0)
 }
 

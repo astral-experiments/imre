@@ -66,7 +66,7 @@ thread_local! {
         let word = unsafe { OwnedWord::from_owned(raw as usize,WordKind::new(5)) };
         crate::ObjectOwner::new(Object(StorageCell::new(Storage::ObjectValue(word))))
     };
-    static REPR: RefCell<HashSet<usize>> = RefCell::default();
+    static REPR: RefCell<HashSet<(usize, usize)>> = RefCell::default();
 }
 fn current() -> Rc<State> {
     TOUCHED.set(true);
@@ -153,7 +153,7 @@ impl ReprView {
         match self {
             Self::Context(owner) => write!(out, "<_contextvars.Context object at {owner:p}>")?,
             Self::Var(owner, var) => {
-                let key = owner as usize;
+                let key = (owner as usize, values::active_repr_depth());
                 let inserted = REPR.with_borrow_mut(|seen| {
                     if seen.contains(&key) {
                         return Ok(false);
@@ -204,7 +204,7 @@ impl ReprView {
 pub(super) struct ReprEnd {
     // Keeps the default or token key alive until its representation is complete.
     owner: crate::ObjectOwner,
-    key: Option<usize>,
+    key: Option<(usize, usize)>,
 }
 
 impl ReprEnd {

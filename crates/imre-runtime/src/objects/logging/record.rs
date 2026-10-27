@@ -552,14 +552,38 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
 }
 
-/// Render a statically sized integer conversion from the original percent field.
-/// The dynamic caller has already looked up any mapping key.
-pub(crate) fn percent_integer_field(field: &str, value: Int) -> Result<String> {
+/// Render the original integer field with its positional width and precision operands.
+pub(crate) fn percent_integer_field(
+    field: &str,
+    operands: impl IntoIterator<Item = Int>,
+) -> Result<String> {
+    percent_numeric_field(field, operands.into_iter().map(|n| owned(n.into_raw(), 2)))
+}
+
+/// Render a floating-point field with any starred operands before its binary64 value.
+pub(crate) fn percent_float_field(
+    field: &str,
+    stars: impl Iterator<Item = Int>,
+    number: f64,
+) -> Result<String> {
+    let args = stars
+        .map(|n| owned(n.into_raw(), 2))
+        .chain(std::iter::once(owned(number.to_bits() as usize, 7)));
+    percent_numeric_field(field, args)
+}
+
+/// The boxed caller has already looked up a named field's mapping key.
+fn percent_numeric_field(field: &str, mut args: impl Iterator<Item = OwnedWord>) -> Result<String> {
     let field = match field.strip_prefix('(') {
         Some(mapping) => mapping_key(mapping)?.1,
         None => field,
     };
-    percent_value(field, &owned(value.into_raw(), 2)).map(|(text, _)| text)
+    percent_value_in(field, &mut args, None).map(|(text, _)| text)
+}
+
+/// Apply a brace-format field to a rooted native integer.
+pub(crate) fn brace_integer_field(spec: &str, value: Int, type_name: &str) -> Result<String> {
+    super::formatter::format_specifier(&owned(value.into_raw(), 2), spec, type_name)
 }
 
 fn unpack_object(value: OwnedWord) -> OwnedWord {
@@ -803,19 +827,43 @@ fn percent_value_in<'a>(
                     return Err(Error::new(Kind::TypeError, message));
                 }
             };
-            let precision = precision.unwrap_or(6);
-            let spec = format!("%{flags}{width}.{precision}{c}");
+            // Python ignores a NaN's sign bit. Apply minimum width after conversion
+            // so zero padding also works for infinities and NaNs.
+            let n = if n.is_nan() { f64::NAN } else { n };
+            let precision = if n.is_finite() {
+                precision.unwrap_or(6)
+            } else {
+                0
+            };
+            let spec = format!("%{flags}.{precision}{c}");
             let pattern = std::ffi::CString::new(spec).unwrap();
             // SAFETY: pattern is assembled from flags, a decimal precision and one double conversion.
             let len = unsafe { libc::snprintf(std::ptr::null_mut(), 0, pattern.as_ptr(), n) };
             if len < 0 {
                 return Err(Error::new(Kind::ValueError, "float formatting failed"));
             }
-            let mut bytes = vec![0u8; len as usize + 1];
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(len as usize + 1)
+                .map_err(|_| Error::allocation())?;
+            bytes.resize(len as usize + 1, 0u8);
             // SAFETY: snprintf reported the exact writable capacity including the trailing NUL.
             unsafe { libc::snprintf(bytes.as_mut_ptr().cast(), bytes.len(), pattern.as_ptr(), n) };
             bytes.pop();
-            String::from_utf8_lossy(&bytes).into_owned()
+            let text = String::from_utf8_lossy(&bytes);
+            if flags.contains('0') && !flags.contains('-') && width > text.len() {
+                let sign = usize::from(text.starts_with(['+', '-', ' ']));
+                let mut padded = String::new();
+                padded
+                    .try_reserve_exact(width)
+                    .map_err(|_| Error::allocation())?;
+                padded.push_str(&text[..sign]);
+                padded.extend(std::iter::repeat_n('0', width - text.len()));
+                padded.push_str(&text[sign..]);
+                padded
+            } else {
+                text.into_owned()
+            }
         }
         _ => {
             let message = if let Some(full) = full {

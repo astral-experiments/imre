@@ -97,6 +97,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         };
         let ancestors = ctx.lineage(base);
         let class = ctx.alloc(Value::Class {
+            namedtuple_fields: None,
             name: spec.name.into(),
             scope,
             ancestors,
@@ -245,13 +246,11 @@ pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id
 fn children(ctx: &mut Context, node: Id) -> Result<Vec<Id>> {
     ctx.heap.keep(node);
     let fields = ctx.lookup_attr(node, "_fields")?;
-    let fields = ctx.items(fields)?;
-    for &field in &fields {
-        ctx.heap.keep(field);
-    }
+    let fields = ctx.iterator(fields)?;
+    ctx.heap.keep(fields);
     let mut children = Vec::new();
     let ast = ctx.builtins["ast.AST"];
-    for field in fields {
+    while let Some(field) = ctx.next_item(fields)? {
         let name = ctx.str_value(field)?.to_owned();
         let value = match ctx.lookup_attr(node, &name) {
             Ok(value) => value,

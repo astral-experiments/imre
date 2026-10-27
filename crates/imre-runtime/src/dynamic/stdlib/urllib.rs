@@ -10,6 +10,13 @@ const FIELDS: [&str; 5] = ["scheme", "netloc", "path", "query", "fragment"];
 const SPLIT: &str = "SplitResult";
 const SPLIT_BYTES: &str = "SplitResultBytes";
 
+/// Bind the mutable scheme registry once, in this module's Python namespace.
+pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
+    let schemes = urlsplit::USES_NETLOC.iter().map(|&s| ctx.text(s)).collect();
+    let registry = ctx.alloc(Value::List(schemes));
+    ctx.bind(scope, "uses_netloc", registry);
+}
+
 fn input(ctx: &Context, id: Id) -> Result<UrlInput<'_>> {
     match ctx.heap.get(id) {
         Value::Str(s) => Ok(UrlInput::Text(s)),
@@ -234,8 +241,8 @@ fn unsplit(ctx: &mut Context, components: Id) -> Result<Id> {
         return Err(Error::new("ValueError", message));
     }
     let bytes = matches!(input(ctx, items[0])?, UrlInput::Bytes(_));
-    let mut fields = [""; 5];
-    for (field, id) in fields.iter_mut().zip(items) {
+    let mut text = [NONE; 5];
+    for (field, id) in text.iter_mut().zip(items) {
         let value = input(ctx, id)?;
         if bytes != matches!(value, UrlInput::Bytes(_)) && !value.as_bytes().is_empty() {
             return Err(Error::new(
@@ -243,9 +250,23 @@ fn unsplit(ctx: &mut Context, components: Id) -> Result<Id> {
                 "Cannot mix str and non-str arguments",
             ));
         }
-        *field = value.decoded()?;
+        *field = match value {
+            UrlInput::Text(_) => id,
+            UrlInput::Bytes(_) => {
+                let decoded = value.decoded()?.to_owned();
+                ctx.text(decoded)
+            }
+        };
     }
-    let out = urlsplit::join_fields(fields)?;
+    let registered = if !ctx.str_value(text[0])?.is_empty() && ctx.str_value(text[1])?.is_empty() {
+        let module = ctx.module("urllib.parse")?;
+        let schemes = ctx.lookup_attr(module, "uses_netloc")?;
+        ctx.contains(text[0], schemes)?
+    } else {
+        false
+    };
+    let fields = text.map(|id| ctx.str_value(id).expect("coerced URL component"));
+    let out = urlsplit::join_fields(fields, registered)?;
     Ok(if bytes {
         ctx.alloc(Value::Bytes(out.into_bytes()))
     } else {

@@ -26,6 +26,15 @@ class BufferedInput(RawIOBase):
         return self.stream.readinto(buffer)
 
 
+class ClosingOffset:
+    def __init__(self, reader):
+        self.reader = reader
+
+    def __index__(self):
+        self.reader.close()
+        return 0
+
+
 class ReadCount(RawIOBase):
     def __init__(self, count):
         self.count = count
@@ -45,6 +54,15 @@ class ReadSize:
         return 1
 
 
+class ClosingWriterSize:
+    def __init__(self, writer):
+        self.writer = writer
+
+    def __index__(self):
+        self.writer.close()
+        return 0
+
+
 def exercise(path):
     with open(path, "rb") as reader:
         reader.read(1)
@@ -52,6 +70,13 @@ def exercise(path):
             reader.read(sys.maxsize)
         except OverflowError as error:
             print(error.args, reader.tell(), reader.read(1))
+    with open(path, "ab") as writer:
+        print(writer.readline(ClosingWriterSize(writer)), writer.closed)
+    with open(path, "ab") as writer:
+        try:
+            writer.read(ClosingWriterSize(writer))
+        except io.UnsupportedOperation as error:
+            print(error.args, writer.closed)
     with open(path, "rb") as stream:
         print(stream.read(ReadSize(stream)), stream.tell())
         stream.seek(0)
@@ -191,6 +216,12 @@ def exercise(path):
         return item
 
     print([truncate(item) for item in target], bytes(target))
+
+    with open(path, "rb") as reader:
+        try:
+            reader.seek(ClosingOffset(reader))
+        except ValueError as error:
+            print(error.args, reader.closed)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

@@ -222,6 +222,7 @@ impl Checker<'_> {
                 ("json", "JSONDecodeError"),
                 ("binascii", "Error"),
                 ("binascii", "Incomplete"),
+                ("importlib.metadata", "PackageNotFoundError"),
                 ("csv", "Error"),
                 ("socket", "gaierror"),
             ]

@@ -124,6 +124,15 @@ def check(mode: str, shape: str) -> None:
                 next(second)
     number = 0
     value = ""
+    converted: list[int | None] = []
+    integers: list[int] = []
+    if mode == "extend-list" or mode == "extend-self" or mode == "extend-converted":
+        alias = []
+        for index in range(12):
+            alias.append(str(index))
+            converted.append(None)
+            integers.append((1 << 83) + index)
+        rows = alias if mode == "extend-self" else list(alias)
     print("armed")
     for attempt in range(2):
         try:
@@ -151,6 +160,10 @@ def check(mode: str, shape: str) -> None:
                     number = 1
             elif mode == "frozen":
                 number = len(frozenset(rows))
+            elif mode == "extend-list" or mode == "extend-self":
+                alias.extend(rows)
+            elif mode == "extend-converted":
+                converted.extend(integers)
             elif mode == "boxed":
                 if truth(boxed):
                     number = 1
@@ -167,6 +180,8 @@ def check(mode: str, shape: str) -> None:
         except MemoryError as error:
             print("refused")
             print(repr(error))
+    if mode == "extend-converted":
+        print(repr(converted))
     print(number)
     print(repr(value))
     print(repr(rows))
