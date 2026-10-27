@@ -29,6 +29,13 @@ def exercise(path):
         if keep:
             saved[0].close()
 
+    def finish():
+        stream = buffered()
+        stream.write("!")
+
+    with open(path, "rb") as reader:
+        assert (finish(), reader.read()) == (None, b"loop!")
+
     sample = "Málaga 東京🧪e\u0301\n"
     with open(path, "w") as ready:
         alias = ready

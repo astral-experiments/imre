@@ -1399,19 +1399,8 @@ pub(super) fn call(
                     .and_then(super::stdlib::BinaryFile::into_value),
             };
             match file {
-                Ok(file) => {
-                    if writing {
-                        ctx.heap
-                            .file_writers
-                            .try_reserve(1)
-                            .map_err(|_| Error::new("MemoryError", ""))?;
-                    }
-                    let id = ctx.alloc(file);
-                    if writing {
-                        ctx.heap.file_writers.push(id);
-                    }
-                    Ok(id)
-                }
+                Ok(file) if writing => ctx.heap.alloc_file_writer(file),
+                Ok(file) => Ok(ctx.alloc(file)),
                 Err(error) => Err(ctx.with_open_filename(error, filename)?),
             }
         }
