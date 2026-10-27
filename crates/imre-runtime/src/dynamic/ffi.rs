@@ -270,6 +270,13 @@ impl Context {
                     Ok(self.alloc(Value::List(out)))
                 }
             }
+            "unpack_take" => {
+                let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
+                let Value::List(items) = self.heap.get_mut(a) else {
+                    unreachable!("private unpack result")
+                };
+                Ok(std::mem::replace(&mut items[index], NONE))
+            }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "call" => {
                 let args = self.items(b)?;
@@ -1086,6 +1093,30 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: 
     unsafe { (&mut *ctx).discard_truth(mark) }
 }
 
+/// Borrow the explicitly live handles in the generated caller's temporary array.
+unsafe fn live_handles<'a>(live: *const Id, len: usize) -> &'a [Id] {
+    if len == 0 {
+        &[]
+    } else {
+        // SAFETY: the native caller provides an array of len handles for this call.
+        unsafe { slice::from_raw_parts(live, len) }
+    }
+}
+
+/// Finish one target before the next target can observe a replaced writer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+) {
+    // SAFETY: the caller owns the context and its live handle array.
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
+    if ctx.heap.assignment_target(live) {
+        ctx.collect_unreachable();
+    }
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement(
     ctx: *mut Context,
@@ -1108,13 +1139,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     caught: Id,
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
-    let ctx = unsafe { &mut *ctx };
-    let live = if len == 0 {
-        &[]
-    } else {
-        // SAFETY: the native frame owns this array of len live handles.
-        unsafe { slice::from_raw_parts(live, len) }
-    };
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
     // SAFETY: file names are static constants in the generated native program.
     let file = unsafe { cstr(file) };
     ctx.checkpoint(

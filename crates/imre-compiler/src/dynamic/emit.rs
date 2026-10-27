@@ -22,6 +22,7 @@ declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_discard_truth(ptr, i64)
+declare void @imre_dyn_assignment_target(ptr, ptr, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -490,14 +491,19 @@ impl Function<'_, '_> {
         Some([line, start - beginning, split - beginning, end - beginning])
     }
 
-    fn checkpoint(&mut self, node: &impl Ranged) {
+    /// Store the handles that must survive the next statement or assignment target.
+    fn live_handles(&mut self) -> (&'static str, usize) {
         let count = self.live.len();
         self.max_live = self.max_live.max(count);
         for (i, value) in self.live.clone().iter().enumerate() {
             let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
             self.line(&format!("store i64 {value}, ptr {ptr}"));
         }
-        let ptr = if count == 0 { "null" } else { "%live" };
+        (if count == 0 { "null" } else { "%live" }, count)
+    }
+
+    fn checkpoint(&mut self, node: &impl Ranged) {
+        let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",

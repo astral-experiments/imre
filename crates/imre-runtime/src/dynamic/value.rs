@@ -1767,6 +1767,17 @@ impl Heap {
         self.collect_next_statement |= self.has_unbound_writer(NONE);
     }
 
+    /// Keep the operands needed by later targets after a source assignment releases its old value.
+    pub(super) fn assignment_target(&mut self, live: &[Id]) -> bool {
+        if !self.has_unbound_writer(NONE) {
+            return false;
+        }
+        let temporaries = &mut self.frames.last_mut().unwrap().live;
+        temporaries.clear();
+        temporaries.extend_from_slice(live);
+        true
+    }
+
     pub fn statement(
         &mut self,
         globals: impl Iterator<Item = Id>,
