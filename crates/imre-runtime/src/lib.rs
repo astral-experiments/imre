@@ -1139,11 +1139,13 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
     finish(
-        parse_decimal_int(original).and_then(|value| {
-            value
-                .map(Int::into_raw)
-                .ok_or_else(|| integer_text::invalid_literal(original))
-        }),
+        parse_decimal_int_with_limit(original, integer_text::decimal_digit_limit()).and_then(
+            |value| {
+                value
+                    .map(Int::into_raw)
+                    .ok_or_else(|| integer_text::invalid_literal(original))
+            },
+        ),
         1,
     )
 }
@@ -1151,15 +1153,16 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
 /// Parses a decimal integer without setting a pending Python exception. Callers
 /// such as argparse can report conversion failures in their own error context.
 fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
-    let source = original.trim();
-    // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
-    // small inputs need neither normalization nor temporary BigInt allocations;
-    // separators and larger values still take the checked path below.
-    if let Ok(value) = source.parse::<i64>()
-        && let Some(value) = Int::small(value)
-    {
-        return Ok(Some(value));
-    }
+    // These internal consumers validate the limit themselves or restore an existing integer.
+    parse_decimal_int_with_limit(original, 0)
+}
+
+fn parse_decimal_int_with_limit(original: &str, limit: u32) -> Result<Option<Int>> {
+    // CPython checks the prefix digit limit before detecting an embedded NUL.
+    let (input, embedded_nul) = original
+        .split_once('\0')
+        .map_or((original, false), |(prefix, _)| (prefix, true));
+    let source = input.trim();
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
     } else {
@@ -1177,21 +1180,25 @@ fn parse_decimal_int(original: &str) -> Result<Option<Int>> {
                 normalized.push(char::from(b'0' + digit));
             }
         }
-        if let Ok(value) = normalized.parse::<i64>()
-            && let Some(value) = Int::small(value)
-        {
-            return Ok(Some(value));
-        }
         Cow::Owned(normalized)
     };
     let digits = source.strip_prefix(['+', '-']).unwrap_or(&source);
-    if digits.is_empty()
-        || digits.starts_with('_')
-        || digits.ends_with('_')
-        || digits.contains("__")
-        || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
+    let small = source.parse::<i64>().ok().and_then(Int::small);
+    if small.is_none()
+        && (digits.is_empty()
+            || digits.starts_with('_')
+            || digits.ends_with('_')
+            || digits.contains("__")
+            || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_'))
     {
         return Ok(None);
+    }
+    integer_text::check_input_digits(digits, limit)?;
+    if embedded_nul {
+        return Ok(None);
+    }
+    if let Some(value) = small {
+        return Ok(Some(value));
     }
     BigInt::parse_bytes(source.as_bytes(), 10)
         .map(Int::try_new)
@@ -2415,6 +2422,36 @@ mod tests {
             objects::imre_object_release(error);
         }
         assert_eq!(imre_error_pending(), 0);
+    }
+
+    #[test]
+    fn decimal_input_checks_digits_after_validating_the_literal() {
+        let limit = 640;
+        for text in [
+            "0".repeat(641),
+            "１".repeat(641),
+            format!("+1{}", "_1".repeat(640)),
+        ] {
+            assert!(parse_decimal_int_with_limit(&text, limit).is_err());
+            assert!(matches!(
+                parse_decimal_int_with_limit(&text, 0),
+                Ok(Some(_))
+            ));
+        }
+        let exact = format!(" -٠{} ", "_０".repeat(639));
+        let value = parse_decimal_int_with_limit(&exact, limit).ok().flatten();
+        assert_eq!(value.and_then(|value| value.as_small()), Some(0));
+        let embedded_nul = format!("{}\0suffix", "0".repeat(641));
+        assert!(parse_decimal_int_with_limit(&embedded_nul, limit).is_err());
+        assert!(matches!(
+            parse_decimal_int_with_limit(&embedded_nul, 0),
+            Ok(None)
+        ));
+        let invalid = format!("{}_", "0".repeat(641));
+        assert!(matches!(
+            parse_decimal_int_with_limit(&invalid, limit),
+            Ok(None)
+        ));
     }
 
     #[test]
