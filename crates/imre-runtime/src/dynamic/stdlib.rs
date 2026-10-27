@@ -485,7 +485,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
-            | "quote_plus" | "quote_from_bytes",
+            | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
         | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
