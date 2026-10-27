@@ -712,8 +712,10 @@ impl Context {
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(class)
-                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float")
-                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
+                if matches!(
+                    class.as_str(),
+                    "traceback" | "frame" | "complex" | "float" | "enumerate"
+                ) && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
