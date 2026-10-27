@@ -75,6 +75,7 @@ pub(super) struct Error {
     pub class: Option<Id>,
     pub message: String,
     pub args: Option<Vec<Id>>,
+    pub stop_value: Id,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
@@ -88,6 +89,7 @@ impl Error {
             class: None,
             message: message.into(),
             args: None,
+            stop_value: NONE,
             os_args: None,
             trace: None,
             exit_status: None,
@@ -120,6 +122,7 @@ impl Error {
             .flatten()
             .copied()
             .chain(self.class)
+            .chain((self.stop_value != NONE).then_some(self.stop_value))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
                     .frames
@@ -276,6 +279,9 @@ impl Context {
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
         error.args = Some(args.to_vec());
+        if kind == "StopIteration" {
+            error.stop_value = args.first().copied().unwrap_or(NONE);
+        }
         error.message = self.exception_message(&error, &mut Vec::new());
         if kind == "SystemExit" {
             error.exit_status = match args {
