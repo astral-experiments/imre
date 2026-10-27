@@ -5,8 +5,10 @@ pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const METHODS: &[&str] = &[
+    "__init__",
     "append",
     "appendleft",
+    "clear",
     "extend",
     "remove",
     "pop",
@@ -28,6 +30,16 @@ pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse:
 }
 
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let queue = ctx.alloc(Value::Deque(Box::new(crate::objects::DequeRing::new(
+        (),
+        None,
+    ))));
+    initialize(ctx, queue, args, kwargs)?;
+    Ok(queue)
+}
+
+/// Validate the new bound before clearing the deque, then consume the source in order.
+fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
     let [iterable, maxlen] =
         builtins::bind_method_arguments("deque", args, kwargs, ["iterable", "maxlen"], 2)?;
     let maxlen = maxlen
@@ -49,14 +61,25 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
                 .map_err(|_| Error::new("ValueError", "maxlen must be non-negative"))
         })
         .transpose()?;
-    let queue = ctx.alloc(Value::Deque(Box::new(crate::objects::DequeRing::new(
-        (),
-        maxlen,
-    ))));
+    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+        unreachable!()
+    };
+    ring.maxlen = maxlen;
+    clear(ctx, queue);
     if let Some(source) = iterable {
         extend(ctx, queue, source)?;
     }
-    Ok(queue)
+    Ok(())
+}
+
+/// Remove the ring's traced edges after detaching all its items.
+fn clear(ctx: &mut Context, queue: Id) {
+    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+        unreachable!()
+    };
+    for item in ring.take_items() {
+        ctx.heap.weak_edge_removed(item);
+    }
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
@@ -165,18 +188,32 @@ pub(super) fn method(
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("unbound method deque.{name}() needs an argument"),
+            if name == "__init__" {
+                "descriptor '__init__' of 'collections.deque' object needs an argument".to_owned()
+            } else {
+                format!("unbound method deque.{name}() needs an argument")
+            },
         ));
     };
     let Value::Deque(ring) = ctx.heap.get_mut(receiver) else {
+        let actual = ctx.type_name(receiver);
         return Err(Error::new(
             "TypeError",
-            format!(
-                "descriptor '{name}' for 'collections.deque' objects doesn't apply to a '{}' object",
-                ctx.type_name(receiver)
-            ),
+            if name == "__init__" {
+                format!(
+                    "descriptor '__init__' requires a 'collections.deque' object but received a '{actual}'"
+                )
+            } else {
+                format!(
+                    "descriptor '{name}' for 'collections.deque' objects doesn't apply to a '{actual}' object"
+                )
+            },
         ));
     };
+    if name == "__init__" {
+        initialize(ctx, receiver, rest, kwargs)?;
+        return Ok(NONE);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -211,6 +248,10 @@ pub(super) fn method(
         ));
     }
     match name {
+        "clear" => {
+            clear(ctx, receiver);
+            Ok(NONE)
+        }
         "reverse" => {
             ring.reverse();
             Ok(NONE)
