@@ -3,7 +3,27 @@
 import json
 
 class Plain:
-    pass
+    declaring_module = __module__
+
+assert Plain.__module__ == __name__ == Plain.declaring_module
+
+def local_class():
+    __name__ = "function local"
+    class Local:
+        pass
+    return Local
+
+assert local_class().__module__ == __name__
+
+class Explicit:
+    __module__ = "selected.module"
+
+assert Explicit.__module__ == "selected.module"
+
+class Removed:
+    del __module__
+
+assert Removed.__module__ == __name__
 
 class Advertised:
     @property

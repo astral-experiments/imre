@@ -1856,12 +1856,29 @@ impl Context {
         };
         body_scope.class_body = Some(Vec::new());
         body_scope.class_cell = Some(cell);
+        let mut globals = parent;
+        while let Some(outer) = self.scope_data(globals).parent {
+            globals = outer;
+        }
+        let module_name = if let Some(exec_globals) = self.scope_data(globals).exec_globals {
+            self.source_global(exec_globals, "__name__")?
+        } else {
+            self.scope_name(globals, "__name__")
+                .unwrap_or_else(|| self.text("builtins"))
+        };
+        self.bind(scope, "__module__", module_name);
         if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
             self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        if self.scope_name(scope, "__module__").is_none() {
+            let namespace = self.module_globals(parent);
+            if let Some(name) = self.dict_named_item(namespace, "__name__") {
+                self.bind(scope, "__module__", name);
+            }
+        }
         // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
         if let Some(&protocol) = self.classes.get("typing.Protocol")
             && bases.iter().any(|&base| self.subclass(base, protocol))
