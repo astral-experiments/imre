@@ -14,6 +14,20 @@ def current():
         def label(self):
             return self.__name__
 
+    class ReadHooks(ModuleType):
+        def __getattribute__(self, name):
+            if name == "answer":
+                return 42
+            return super().__getattribute__(name)
+
+        def __getattr__(self, name):
+            return "fallback"
+
+    hooks = ReadHooks("custom")
+    hooks.__dict__["answer"] = 7
+    assert hooks.answer == 42
+    assert hooks.missing == "fallback"
+
     fresh = ModuleType(name="sys", doc=17)
     assert fresh is not sys and not hasattr(fresh, "stdout")
     bindings = fresh.__dict__
