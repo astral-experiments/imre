@@ -1,6 +1,7 @@
 //! Native operating-system errors and Python-constructed OSError payloads.
 
 use super::builtins;
+use super::operators::append_rendered_text as append;
 use super::value::{Error, Id, NONE, Result, Value};
 use super::{Context, copy_ids};
 use crate::objects::exceptions::OsErrorArgs;
@@ -23,13 +24,6 @@ pub(super) struct Fields {
     filename: Option<Id>,
     filename2: Option<Id>,
     written: Option<i64>,
-}
-
-fn append(out: &mut String, text: &str) -> Result<()> {
-    out.try_reserve(text.len())
-        .map_err(|_| Error::new("MemoryError", ""))?;
-    out.push_str(text);
-    Ok(())
 }
 
 #[derive(Clone, Copy)]

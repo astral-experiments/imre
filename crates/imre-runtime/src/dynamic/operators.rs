@@ -4,6 +4,36 @@ use num_traits::Signed;
 
 use super::*;
 
+fn render_allocation(_: std::collections::TryReserveError) -> Error {
+    Error::new("MemoryError", "")
+}
+
+fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
+    stack.try_reserve(1).map_err(render_allocation)?;
+    stack.push(value);
+    Ok(())
+}
+
+fn enter_ancestor(seen: &mut std::collections::HashSet<Id>, id: Id) -> Result<bool> {
+    if seen.contains(&id) {
+        return Ok(false);
+    }
+    seen.try_reserve(1).map_err(render_allocation)?;
+    Ok(seen.insert(id))
+}
+
+pub(super) fn append_rendered_text(out: &mut String, text: &str) -> Result<()> {
+    out.try_reserve(text.len()).map_err(render_allocation)?;
+    out.push_str(text);
+    Ok(())
+}
+
+fn close_parens(out: &mut String, count: usize) -> Result<()> {
+    out.try_reserve(count).map_err(render_allocation)?;
+    out.extend(std::iter::repeat_n(')', count));
+    Ok(())
+}
+
 enum RenderRoot<'a> {
     Object(Id),
     Dictionary { object: Id, storage: Id },
@@ -768,6 +798,11 @@ impl Context {
         if self.class_attr(*class, "__repr__").is_none() {
             return Ok(None);
         }
+        self.repr_ancestors
+            .try_reserve(ancestors.len())
+            .map_err(render_allocation)?;
+        self.heap
+            .reserve_temporaries(work.len().saturating_add(1))?;
         let mark = self.heap.temporary_mark();
         let depth = self.repr_ancestors.len();
         self.heap.keep(id);
@@ -777,7 +812,11 @@ impl Context {
         self.repr_ancestors.extend_from_slice(ancestors);
         let result = self.repr_override(id).and_then(|value| {
             value
-                .map(|s| self.str_value(s).map(str::to_owned))
+                .map(|s| {
+                    let mut text = String::new();
+                    append_rendered_text(&mut text, self.str_value(s)?)?;
+                    Ok(text)
+                })
                 .transpose()
         });
         self.repr_ancestors.truncate(depth);
@@ -798,25 +837,28 @@ impl Context {
         let mut seen = std::collections::HashSet::new();
         loop {
             if repr {
-                output.push_str(error.kind.rsplit('.').next().unwrap_or(&error.kind));
+                append_rendered_text(output, error.kind.rsplit('.').next().unwrap_or(&error.kind))?;
             } else if let Some(message) =
                 error.trace.as_ref().and_then(|trace| trace.import_message)
                 && let Value::Str(text) = self.heap.get(message)
             {
-                output.push_str(text);
-                output.extend(std::iter::repeat_n(')', closing));
+                append_rendered_text(output, text)?;
+                close_parens(output, closing)?;
                 break;
             } else if let Some(super::os_error::Args::Python(fields)) = error.os_args.as_deref()
                 && let Some(fragments) = fields.fragments()
             {
                 work.try_reserve(9)
                     .map_err(|_| Error::new("MemoryError", ""))?;
-                work.push(Part::Closing(closing));
+                push_frame(work, Part::Closing(closing))?;
                 for part in fragments.into_iter().rev().flatten() {
-                    work.push(match part {
-                        super::os_error::Fragment::Text(text) => Part::Text(text),
-                        super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
-                    });
+                    push_frame(
+                        work,
+                        match part {
+                            super::os_error::Fragment::Text(text) => Part::Text(text),
+                            super::os_error::Fragment::Value(id, repr) => Part::Value(id, repr),
+                        },
+                    )?;
                 }
                 break;
             } else if matches!(
@@ -827,19 +869,19 @@ impl Context {
                 .as_ref()
                 .is_some_and(|trace| trace.source_syntax.is_some())
             {
-                output.push_str(&error.message);
-                output.extend(std::iter::repeat_n(')', closing));
+                append_rendered_text(output, &error.message)?;
+                close_parens(output, closing)?;
                 break;
             }
             let args = self.exception_arguments(error);
             if let Some([arg]) = args {
                 if repr {
-                    output.push('(');
+                    append_rendered_text(output, "(")?;
                     closing += 1;
                 }
                 repr |= self.is_builtin_error(error, "KeyError");
                 if let Value::Raised(next) = self.heap.get(*arg) {
-                    if !seen.insert(*arg) {
+                    if !enter_ancestor(&mut seen, *arg)? {
                         let op = if repr { "repr" } else { "str" };
                         return Err(Error::new(
                             "RecursionError",
@@ -851,32 +893,38 @@ impl Context {
                     error = next;
                     continue;
                 }
-                work.push(Part::Closing(closing));
-                work.push(Part::Value(*arg, repr));
+                push_frame(work, Part::Closing(closing))?;
+                push_frame(work, Part::Value(*arg, repr))?;
             } else if let Some(tuple) = error.args {
-                work.push(Part::Closing(closing));
+                push_frame(work, Part::Closing(closing))?;
                 if repr || args.is_some_and(|items| !items.is_empty()) {
-                    work.push(Part::Value(tuple, true));
+                    push_frame(work, Part::Value(tuple, true))?;
                 }
             } else {
                 if repr {
-                    output.push('(');
+                    append_rendered_text(output, "(")?;
                     if let Some(super::os_error::Args::Native { source: os, .. }) =
                         error.os_args.as_deref()
                     {
-                        output.push_str(&format!(
-                            "{}, {}",
-                            os.errno,
-                            crate::objects::exceptions::string_repr(&os.description)
-                        ));
+                        append_rendered_text(
+                            output,
+                            &format!(
+                                "{}, {}",
+                                os.errno,
+                                crate::objects::exceptions::string_repr(&os.description)
+                            ),
+                        )?;
                     } else if !error.message.is_empty() {
-                        output.push_str(&crate::objects::exceptions::string_repr(&error.message));
+                        append_rendered_text(
+                            output,
+                            &crate::objects::exceptions::string_repr(&error.message),
+                        )?;
                     }
-                    output.push(')');
+                    append_rendered_text(output, ")")?;
                 } else {
-                    output.push_str(&error.message);
+                    append_rendered_text(output, &error.message)?;
                 }
-                output.extend(std::iter::repeat_n(')', closing));
+                close_parens(output, closing)?;
             }
             break;
         }
@@ -895,21 +943,23 @@ impl Context {
         let mut output = String::new();
         let mut work = Vec::new();
         let mut active = Vec::new();
-        let mut ancestors: std::collections::HashSet<Id> = if checked {
-            ctx.repr_ancestors.iter().copied().collect()
-        } else {
-            Default::default()
-        };
+        let mut ancestors = std::collections::HashSet::new();
+        if checked {
+            ancestors
+                .try_reserve(ctx.repr_ancestors.len())
+                .map_err(render_allocation)?;
+            ancestors.extend(ctx.repr_ancestors.iter().copied());
+        }
         match root {
-            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
             RenderRoot::Dictionary { object, storage } => {
-                if !ancestors.insert(object) {
+                if !enter_ancestor(&mut ancestors, object)? {
                     return Ok("{...}".to_owned());
                 }
-                output.push('{');
-                active.push(object);
-                work.push(Part::Leave(object, "}"));
-                work.push(Part::Entries(storage, 0, true));
+                append_rendered_text(&mut output, "{")?;
+                push_frame(&mut active, object)?;
+                push_frame(&mut work, Part::Leave(object, "}"))?;
+                push_frame(&mut work, Part::Entries(storage, 0, true))?;
             }
             RenderRoot::Exception(error) => {
                 ctx.render_exception(error, quoted, &mut output, &mut work)?;
@@ -932,22 +982,29 @@ impl Context {
         let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
-                Part::Closing(count) => output.extend(std::iter::repeat_n(')', count)),
-                Part::Text(text) => output.push_str(text),
-                Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::Closing(count) => close_parens(&mut output, count)?,
+                Part::Text(text) => append_rendered_text(&mut output, text)?,
+                Part::ContextEnd(id) => {
+                    use std::fmt::Write;
+                    output
+                        .try_reserve(7 + 2 * std::mem::size_of::<Id>())
+                        .map_err(render_allocation)?;
+                    write!(&mut output, " at {id:#x}>")
+                        .expect("the hexadecimal object ID fits the reserved space");
+                }
                 Part::NamedTupleEnd => {
                     namedtuple_depth -= 1;
-                    output.push(')');
+                    append_rendered_text(&mut output, ")")?;
                 }
                 Part::SliceEnd => {
                     slice_depth -= 1;
-                    output.push(')');
+                    append_rendered_text(&mut output, ")")?;
                 }
                 Part::Leave(id, end) => {
                     ancestors.remove(&id);
                     let last = active.pop();
                     debug_assert_eq!(last, Some(id));
-                    output.push_str(end);
+                    append_rendered_text(&mut output, end)?;
                 }
                 Part::Sequence(id, index) => {
                     let item = match ctx.heap.get(id) {
@@ -957,10 +1014,10 @@ impl Context {
                     };
                     if let Some(&item) = item {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::Sequence(id, index + 1));
-                        work.push(Part::Value(item, true));
+                        push_frame(&mut work, Part::Sequence(id, index + 1))?;
+                        push_frame(&mut work, Part::Value(item, true))?;
                     }
                 }
                 Part::Fields(id, index) => {
@@ -972,26 +1029,29 @@ impl Context {
                     };
                     if let Some(name) = names.get(index) {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        output.push_str(name);
-                        output.push('=');
-                        work.push(Part::Fields(id, index + 1));
-                        work.push(Part::Value(
-                            *fields
-                                .get(name)
-                                .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
-                            true,
-                        ));
+                        append_rendered_text(&mut output, name)?;
+                        append_rendered_text(&mut output, "=")?;
+                        push_frame(&mut work, Part::Fields(id, index + 1))?;
+                        push_frame(
+                            &mut work,
+                            Part::Value(
+                                *fields
+                                    .get(name)
+                                    .ok_or_else(|| Error::new("AttributeError", name.clone()))?,
+                                true,
+                            ),
+                        )?;
                     }
                 }
                 Part::SetMembers(members, index) => {
                     if let Some(&member) = members.get(index) {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::SetMembers(members, index + 1));
-                        work.push(Part::Value(member, true));
+                        push_frame(&mut work, Part::SetMembers(members, index + 1))?;
+                        push_frame(&mut work, Part::Value(member, true))?;
                     }
                 }
                 Part::Entries(id, index, include_values) => {
@@ -1006,14 +1066,14 @@ impl Context {
                     };
                     if let Some((position, key, value)) = entry {
                         if index != 0 {
-                            output.push_str(", ");
+                            append_rendered_text(&mut output, ", ")?;
                         }
-                        work.push(Part::Entries(id, position + 1, include_values));
+                        push_frame(&mut work, Part::Entries(id, position + 1, include_values))?;
                         if include_values {
-                            work.push(Part::Value(value, true));
-                            work.push(Part::Text(": "));
+                            push_frame(&mut work, Part::Value(value, true))?;
+                            push_frame(&mut work, Part::Text(": "))?;
                         }
-                        work.push(Part::Value(key, true));
+                        push_frame(&mut work, Part::Value(key, true))?;
                     }
                 }
                 Part::Value(id, repr) => {
@@ -1021,7 +1081,7 @@ impl Context {
                         && repr
                         && let Some(text) = element_repr(&mut ctx, id, &mut work, &active)?
                     {
-                        output.push_str(&text);
+                        append_rendered_text(&mut output, &text)?;
                         continue;
                     }
                     match ctx.heap.get(id) {
@@ -1031,12 +1091,12 @@ impl Context {
                                     error.os_args.as_deref()
                                 && fields.fragments().is_some()
                             {
-                                if !ancestors.insert(id) {
-                                    output.push_str("...");
+                                if !enter_ancestor(&mut ancestors, id)? {
+                                    append_rendered_text(&mut output, "...")?;
                                     continue;
                                 }
-                                active.push(id);
-                                work.push(Part::Leave(id, ""));
+                                push_frame(&mut active, id)?;
+                                push_frame(&mut work, Part::Leave(id, ""))?;
                             }
                             ctx.render_exception(error, repr, &mut output, &mut work)?;
                             continue;
@@ -1046,36 +1106,36 @@ impl Context {
                             constructor: Some(_),
                             ..
                         } => {
-                            if !ancestors.insert(id) {
+                            if !enter_ancestor(&mut ancestors, id)? {
                                 if checked {
                                     return Err(Error::new(
                                         "RecursionError",
                                         "maximum recursion depth exceeded",
                                     ));
                                 }
-                                output.push_str("<module ...>");
+                                append_rendered_text(&mut output, "<module ...>")?;
                                 continue;
                             }
-                            active.push(id);
-                            output.push_str("<module ");
-                            work.push(Part::Leave(id, ">"));
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, "<module ")?;
+                            push_frame(&mut work, Part::Leave(id, ">"))?;
                             if let Some(file) =
                                 ctx.scope_name(*scope, "__file__").filter(|&id| id != NONE)
                             {
-                                work.push(Part::Value(file, true));
-                                work.push(Part::Text(" from "));
+                                push_frame(&mut work, Part::Value(file, true))?;
+                                push_frame(&mut work, Part::Text(" from "))?;
                             } else if let Some(loader) = ctx
                                 .scope_name(*scope, "__loader__")
                                 .filter(|&id| id != NONE)
                             {
-                                work.push(Part::Text(")"));
-                                work.push(Part::Value(loader, true));
-                                work.push(Part::Text(" ("));
+                                push_frame(&mut work, Part::Text(")"))?;
+                                push_frame(&mut work, Part::Value(loader, true))?;
+                                push_frame(&mut work, Part::Text(" ("))?;
                             }
                             if let Some(name) = ctx.scope_name(*scope, "__name__") {
-                                work.push(Part::Value(name, true));
+                                push_frame(&mut work, Part::Value(name, true))?;
                             } else {
-                                work.push(Part::Text("'?'"));
+                                push_frame(&mut work, Part::Text("'?'"))?;
                             }
                             continue;
                         }
@@ -1087,9 +1147,9 @@ impl Context {
                                 ));
                             }
                             slice_depth += 1;
-                            output.push_str("slice(");
-                            work.push(Part::SliceEnd);
-                            work.push(Part::Sequence(id, 0));
+                            append_rendered_text(&mut output, "slice(")?;
+                            push_frame(&mut work, Part::SliceEnd)?;
+                            push_frame(&mut work, Part::Sequence(id, 0))?;
                             continue;
                         }
                         Value::Instance {
@@ -1097,7 +1157,7 @@ impl Context {
                             dictionary: Some(backing),
                             ..
                         } if ctx.enum_member(id).is_none() => {
-                            work.push(Part::Value(*backing, repr));
+                            push_frame(&mut work, Part::Value(*backing, repr))?;
                             continue;
                         }
                         Value::Instance { class, fields, .. }
@@ -1112,30 +1172,33 @@ impl Context {
                                 ctx.check_call_depth(namedtuple_depth)?;
                             }
                             namedtuple_depth += 1;
-                            output.push_str(name);
-                            output.push('(');
-                            work.push(Part::NamedTupleEnd);
-                            work.push(Part::Fields(id, 0));
+                            append_rendered_text(&mut output, name)?;
+                            append_rendered_text(&mut output, "(")?;
+                            push_frame(&mut work, Part::NamedTupleEnd)?;
+                            push_frame(&mut work, Part::Fields(id, 0))?;
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {
-                            output.push_str("<ContextVar name=");
-                            work.push(Part::ContextEnd(id));
+                            append_rendered_text(&mut output, "<ContextVar name=")?;
+                            push_frame(&mut work, Part::ContextEnd(id))?;
                             if let Some(default) = default {
-                                work.push(Part::Value(*default, true));
-                                work.push(Part::Text(" default="));
+                                push_frame(&mut work, Part::Value(*default, true))?;
+                                push_frame(&mut work, Part::Text(" default="))?;
                             }
-                            work.push(Part::Value(*name, true));
+                            push_frame(&mut work, Part::Value(*name, true))?;
                             continue;
                         }
                         Value::ContextToken { variable, used, .. } => {
-                            output.push_str(if *used {
-                                "<Token used var="
-                            } else {
-                                "<Token var="
-                            });
-                            work.push(Part::ContextEnd(id));
-                            work.push(Part::Value(*variable, true));
+                            append_rendered_text(
+                                &mut output,
+                                if *used {
+                                    "<Token used var="
+                                } else {
+                                    "<Token var="
+                                },
+                            )?;
+                            push_frame(&mut work, Part::ContextEnd(id))?;
+                            push_frame(&mut work, Part::Value(*variable, true))?;
                             continue;
                         }
                         _ => {}
@@ -1164,7 +1227,10 @@ impl Context {
                         Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
-                                output.push_str(if *frozen { "frozenset()" } else { "set()" });
+                                append_rendered_text(
+                                    &mut output,
+                                    if *frozen { "frozenset()" } else { "set()" },
+                                )?;
                                 continue;
                             }
                             (
@@ -1179,17 +1245,20 @@ impl Context {
                             )
                         }
                         _ => {
-                            output.push_str(&ctx.format_value(id, repr, &mut active));
+                            append_rendered_text(
+                                &mut output,
+                                &ctx.format_value(id, repr, &mut active),
+                            )?;
                             continue;
                         }
                     };
-                    if !ancestors.insert(id) {
-                        output.push_str(placeholder);
+                    if !enter_ancestor(&mut ancestors, id)? {
+                        append_rendered_text(&mut output, placeholder)?;
                         continue;
                     }
-                    active.push(id);
-                    output.push_str(start);
-                    work.push(Part::Leave(id, end));
+                    push_frame(&mut active, id)?;
+                    append_rendered_text(&mut output, start)?;
+                    push_frame(&mut work, Part::Leave(id, end))?;
                     match contents {
                         Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
@@ -1201,9 +1270,9 @@ impl Context {
                                 .try_reserve_exact(entries.len())
                                 .map_err(|_| Error::new("MemoryError", ""))?;
                             members.extend(entries.iter().map(|&(key, _)| key));
-                            work.push(Part::SetMembers(members, 0));
+                            push_frame(&mut work, Part::SetMembers(members, 0))?;
                         }
-                        part => work.push(part),
+                        part => push_frame(&mut work, part)?,
                     }
                 }
             }

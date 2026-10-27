@@ -55,3 +55,16 @@ def current():
 
     group = {Member(), 1}
     print(repr(group), len(group))
+
+
+def allocation():
+    value = [23]
+    for _ in range(18):
+        value = [value]
+    marker = {}
+    marker["start formatter allocation probe 2332"] = 1
+    try:
+        repr(value)
+    except MemoryError as error:
+        print("caught", error.args)
+    print(len(repr(value)))

@@ -36,7 +36,7 @@ def check_boxed_call_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
     imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
     # The first equal-sized allocation copies the call's positional arguments.
@@ -67,6 +67,18 @@ def check_boxed_call_allocation(imre, root, run):
         })
         assert (result.returncode, result.stdout, result.stderr) == (
             0, output, b"refused\n" if ordinal else b"",
+        ), result
+
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_recursive_repr as fixture; fixture.allocation()"
+    # Refuse the initial traversal stack, then its first growth on a nested list.
+    for size, expected in ((0, b"40\n"), (128, b"caught ()\n40\n"), (256, b"caught ()\n40\n")):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_CALL_SIZE": str(size),
+            "IMRE_TEST_GETTER_ALLOCATION": "1",
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if size else b"",
         ), result
 
 
