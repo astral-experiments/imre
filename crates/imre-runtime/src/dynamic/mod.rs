@@ -4,6 +4,7 @@
 mod abstract_class;
 mod builtins;
 mod calls;
+mod complex;
 mod dictionary;
 mod enums;
 mod ffi;
@@ -11,6 +12,7 @@ mod function_fields;
 mod iterators;
 mod operators;
 mod property;
+mod slice;
 mod source_code;
 mod static_method;
 mod stdlib;
@@ -62,6 +64,8 @@ pub(crate) struct Context {
     modules: HashMap<String, Id>,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
+    // Python wrappers retain their registered logger for the lifetime of this heap.
+    logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     pending: Option<Error>,
@@ -178,10 +182,12 @@ impl Context {
                 | Value::AstWalk(_)
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
+                | Value::Repeat(_)
         )
     }
 
@@ -288,8 +294,14 @@ impl Context {
 
     /// Reads the current position and permanently detaches the source on exhaustion.
     fn iterator_has_item(&mut self, id: Id) -> Result<bool> {
+        if let Value::FormatIterator { input, offset, .. } = *self.heap.get(id) {
+            return Ok(offset < self.str_value(input)?.len());
+        }
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
+        }
+        if let Value::Repeat(repeat) = self.heap.get(id) {
+            return Ok(repeat.remaining != Some(0));
         }
         if let Value::LoopIterator { source, peeked } = *self.heap.get(id) {
             if peeked.is_some() {
@@ -358,12 +370,16 @@ impl Context {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::DictionaryIterator(_) => return self.next_dictionary_item(id),
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Generator { code, .. } => {
                 let code = *code;
                 return match self.code_object(code).body {
                     value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) => self.resume_source(id),
+                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                        self.resume_source(id)
+                    }
                 };
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
@@ -419,10 +435,12 @@ impl Context {
                 | Value::AstWalk(_)
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
+                | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
+                | Value::Repeat(_)
         ) || self.slot(id, "__iter__").is_some()
         {
             let iter = self.iterator(id)?;
@@ -663,7 +681,9 @@ impl Context {
     fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
-            value::Body::Source(_) => return self.call_source(code, scope),
+            value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                return self.call_source(code, scope);
+            }
         };
         self.heap.enter(scope, code);
         // SAFETY: a compiler-generated initializer or function uses this ABI and

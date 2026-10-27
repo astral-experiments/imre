@@ -26,6 +26,10 @@ pub(super) struct CodeObject {
 pub(super) enum Body {
     Native(Code),
     Source(std::rc::Rc<super::source_code::Program>),
+    PendingGenerator {
+        source: &'static str,
+        body_line: u32,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +106,16 @@ impl Error {
 }
 
 impl Context {
+    /// Reuse the Python exception object when an already observed error is raised again.
+    pub(super) fn raised_instance(&mut self, mut error: Error) -> Id {
+        if let Some(id) = error.trace.as_mut().and_then(|trace| trace.instance.take()) {
+            *self.heap.get_mut(id) = Value::Raised(error);
+            id
+        } else {
+            self.alloc(Value::Raised(error))
+        }
+    }
+
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
         if let Some((mut loc, frame)) = self.heap.trace_location() {
             if let Some(&[line, start, split, end]) = span {
@@ -153,12 +167,18 @@ impl Context {
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
+            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
+            Value::Repeat(_) => "repeat",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
+            Value::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Reader(_) => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+            },
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
@@ -168,6 +188,7 @@ impl Context {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
             Value::Set { frozen: true, .. } => "frozenset",
@@ -182,6 +203,11 @@ impl Context {
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
+            Value::ClassMethod(_) => "classmethod",
+            Value::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
             Value::Partial { .. } => "partial",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
@@ -283,11 +309,13 @@ pub(super) enum Value {
     Bool(bool),
     Int(crate::Int),
     Float(f64),
+    Complex(super::complex::Complex),
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
+    Slice([Id; 3]),
     Range {
         start: i64,
         stop: i64,
@@ -307,6 +335,8 @@ pub(super) enum Value {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
+    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     List(Vec<Id>),
     Tuple(Vec<Id>),
@@ -353,6 +383,7 @@ pub(super) enum Value {
     Generator {
         code: Id,
         scope: Id,
+        iterators: Vec<Id>,
         offset: Option<usize>,
         running: bool,
     },
@@ -389,6 +420,7 @@ pub(super) enum Value {
         receiver: Id,
         explicit: bool,
     },
+    ClassMethod(Id),
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -415,6 +447,7 @@ pub(super) enum Value {
         current: Id,
         step: Id,
     },
+    Repeat(crate::objects::Repeat<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -432,11 +465,16 @@ pub(super) enum Value {
         offset: usize,
         reverse: bool,
     },
+    FormatIterator {
+        input: Id,
+        offset: usize,
+        kind: FormatKind,
+    },
     IoMethod {
         owner: Id,
         name: &'static str,
     },
-    File(std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<super::stdlib::ReadSource>>>>),
+    File(std::rc::Rc<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     RegexMatch {
@@ -458,6 +496,12 @@ pub(super) enum Value {
     TokenMissing,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum FormatKind {
+    Markup,
+    Field,
+}
+
 #[derive(Clone)]
 pub(super) struct CachedCall {
     pub args: Vec<Id>,
@@ -470,7 +514,10 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::FormatIterator { input, .. } => visit.push(*input),
+            Self::ClassMethod(callable) => visit.push(*callable),
             Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {
                 inputs, pending, ..
             } => {
@@ -515,6 +562,7 @@ impl Value {
                 visit.extend(old);
             }
             Self::Yielded(item) => visit.push(*item),
+            Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
@@ -561,7 +609,15 @@ impl Value {
                 visit.extend([code.name, code.filename, code.parameters]);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
             }
-            Self::Generator { code, scope, .. } => visit.extend([*code, *scope]),
+            Self::Generator {
+                code,
+                scope,
+                iterators,
+                ..
+            } => {
+                visit.extend([*code, *scope]);
+                visit.extend(iterators);
+            }
             Self::Class {
                 scope, ancestors, ..
             } => {
@@ -621,12 +677,15 @@ impl Value {
             | Self::Bool(_)
             | Self::Int(_)
             | Self::Float(_)
+            | Self::Complex(_)
             | Self::Str(_)
             | Self::Bytes(_)
             | Self::ByteArray(_)
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
+            | Self::LoggerHandle(_)
+            | Self::HandlerLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)

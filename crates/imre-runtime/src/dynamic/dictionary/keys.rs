@@ -298,6 +298,17 @@ impl Context {
             let hash = finish_tuple(acc, values.len());
             self.heap.immutable_hashes.insert(key, hash);
             hash
+        } else if let Value::Slice(parts) = *self.heap.get(key) {
+            // Slice components are hashed again on each lookup, in start/stop/step order.
+            let mut hash = TUPLE_START;
+            for part in parts {
+                hash = tuple_lane(hash, self.dictionary_hash(part)?);
+            }
+            if hash == u64::MAX {
+                1_546_275_796
+            } else {
+                hash as i64
+            }
         } else if let Value::Set {
             items,
             frozen: true,
@@ -327,6 +338,8 @@ impl Context {
                 Value::Int(n) => integer_hash(n),
                 Value::Bool(b) => i64::from(*b),
                 Value::Float(f) => float_hash(*f, key),
+                Value::Complex(z) => normalized(float_hash(z.real, key))
+                    .wrapping_add(1_000_003_i64.wrapping_mul(normalized(float_hash(z.imag, key)))),
                 Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),
                 Value::Bytes(bytes) => data_hash(bytes),
                 Value::None => 0xfca8_6420,
@@ -393,6 +406,10 @@ impl Context {
             return Ok(true);
         }
         if let Some(answer) = self.binary_special("==", left, right)? {
+            return self.truth(answer);
+        }
+        if let (Value::Slice(a), Value::Slice(b)) = (self.heap.get(left), self.heap.get(right)) {
+            let answer = super::super::slice::compare(self, "==", *a, *b)?;
             return self.truth(answer);
         }
         if let (Some(left), Some(right)) = (self.tuple_keys(left), self.tuple_keys(right)) {

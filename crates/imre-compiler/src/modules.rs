@@ -52,13 +52,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
+        "logging" => Some((
+            "logging/__init__.py",
+            concat!(
+                include_str!("../stdlib/logging/stream.py"),
+                "\n",
+                include_str!("../stdlib/logging/boxed.py"),
+            ),
+        )),
         "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+        // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
+        "string" => Some((
+            "string/__init__.py",
+            include_str!("../stdlib/string/cpython.py"),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
         )),
         "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+        "_imre_gettext_locale" => Some((
+            "_imre_gettext_locale.py",
+            include_str!("../stdlib/_imre_gettext_locale.py"),
+        )),
+        "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
     }
@@ -89,6 +107,8 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
+    /// A module guard selects the function object when the module executes.
+    ConditionalFunction,
     Value(DefinitionId),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
@@ -1900,6 +1920,7 @@ fn resolve_binding(
                     stdlib_attribute(modules, module, target, attribute)
                 }
                 Binding::Definition(_)
+                | Binding::ConditionalFunction
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
@@ -1969,6 +1990,7 @@ struct Loader<'a> {
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
+    needs_object_imports: bool,
     inputs: crate::SourceInputs,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -2013,6 +2035,7 @@ impl<'a> Loader<'a> {
             extension_roots,
             inputs: crate::SourceInputs::default(),
             checked_builtin_imports: Vec::new(),
+            needs_object_imports: false,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -2176,7 +2199,7 @@ impl<'a> Loader<'a> {
             virtual_command: false,
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
-            needs_object_runtime: std::cell::Cell::new(false),
+            needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -2394,6 +2417,30 @@ impl<'a> Loader<'a> {
                     )?;
                 }
                 _ => {
+                    if let ast::Stmt::If(guard) = statement
+                        && guard
+                            .elif_else_clauses
+                            .last()
+                            .is_some_and(|clause| clause.test.is_none())
+                    {
+                        for function in guard
+                            .body
+                            .iter()
+                            .filter_map(ast::Stmt::as_function_def_stmt)
+                        {
+                            let name = function.name.as_str();
+                            if guard.elif_else_clauses.iter().all(|clause| {
+                                clause
+                                    .body
+                                    .iter()
+                                    .filter_map(ast::Stmt::as_function_def_stmt)
+                                    .any(|other| other.name.as_str() == name)
+                            }) {
+                                self.bind(id, name, Binding::ConditionalFunction, function)?;
+                                self.needs_object_imports = true;
+                            }
+                        }
+                    }
                     let entry_global = id == 0
                         && !executable
                         && (last_definition.is_some_and(|last| index < last)
@@ -2647,6 +2694,7 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
+                                Binding::ConditionalFunction => false,
                                 _ => package,
                             };
                             if !available {
@@ -2747,7 +2795,11 @@ impl<'a> Loader<'a> {
             .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
-                include_str!("../stdlib/logging/classes.py"),
+                concat!(
+                    include_str!("../stdlib/logging/stream.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/classes.py")
+                ),
             )),
             (module == Some(IntrinsicModule::LoggingHandlers)).then_some((
                 LOGGING_HANDLER_CLASSES,

@@ -67,6 +67,13 @@ that import before its method runs.
 [CPython source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/weakref.py#L461)
 and [boxed fixture](../../../../tests/fixtures/boxed_itertools_count.py).
 
+Werkzeug imports `itertools.repeat` when loading its data structures. Its
+`ImmutableDictMixin.fromkeys` supplies a finite key iterator and an unbounded
+`repeat(value)` to `zip`. The boxed fixture runs that dictionary initialization
+with a mutable value and checks that every key refers to the original object.
+It also checks finite exhaustion, size hints and exceptions from `__index__`.
+[Boxed repeat fixture](../../../../tests/fixtures/boxed_itertools_repeat.py)
+
 [tee.py](tee.py) compares independent positions, forks of a partly consumed
 fork, a discarded lagging fork, source mutation, and an empty result that must
 not obtain an iterator. The larger `test_tee` body also requires weak references,

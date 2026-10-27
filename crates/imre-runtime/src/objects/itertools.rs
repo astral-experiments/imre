@@ -3,13 +3,20 @@
 use super::*;
 use words::WordKind;
 
-pub(super) struct Repeat {
-    pub(super) value: OwnedWord,
-    pub(super) remaining: Option<usize>,
+/// A finite or unbounded cursor that retains the same element across pulls.
+#[derive(Clone)]
+pub(crate) struct Repeat<T> {
+    pub(crate) value: T,
+    pub(crate) remaining: Option<usize>,
 }
 
-impl Repeat {
-    pub(super) fn next(&mut self) -> Option<OwnedWord> {
+impl<T: Clone> Repeat<T> {
+    pub(crate) fn new(value: T, times: Option<&Int>) -> crate::Result<Self> {
+        let remaining = times.map(ssize).transpose()?.map(|n| n.max(0) as usize);
+        Ok(Self { value, remaining })
+    }
+
+    pub(crate) fn next(&mut self) -> Option<T> {
         if let Some(remaining) = &mut self.remaining {
             *remaining = remaining.checked_sub(1)?;
         }
@@ -63,22 +70,16 @@ pub unsafe extern "C" fn imre_cursor_length_hint(cursor: *const Object, default:
 /// is a rooted canonical integer; zero means that the argument was omitted.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_repeat(kind: u32, value: usize, times: usize) -> *const Object {
-    let remaining = if times == 0 {
-        None
-    } else {
-        // SAFETY: the caller roots the count throughout conversion.
-        let times = unsafe { Int::borrow(times) };
-        let times = match ssize(&times) {
-            Ok(times) => times,
-            Err(error) => return error.returning(std::ptr::null()),
-        };
-        Some(times.max(0) as usize)
-    };
+    // SAFETY: a nonzero count is rooted by the caller throughout conversion.
+    let times = (times != 0).then(|| unsafe { Int::borrow(times) });
     // SAFETY: the kind describes the caller's rooted argument.
     let value = unsafe { WordKind::new(kind).acquire(value) };
-    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Repeat(Repeat { value, remaining }),
-    ))))
+    match Repeat::new(value, times.as_deref()) {
+        Ok(repeat) => crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(
+            StorageCell::new(Storage::Repeat(repeat)),
+        ))),
+        Err(error) => error.returning(std::ptr::null()),
+    }
 }
 
 mod count;

@@ -7,6 +7,8 @@ const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let unsupported = ctx.builtin("UnsupportedOperation");
+    ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
     let object = ctx.builtin("object");

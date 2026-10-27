@@ -96,7 +96,7 @@ impl Entries {
         self.values.push(value);
     }
 
-    pub(super) fn remove(&mut self, index: usize) {
+    pub(super) fn remove(&mut self, index: usize) -> (Id, Id) {
         let position = self.positions.as_ref().map_or(index, |p| p[index]);
         if let Some(keys) = &mut self.index {
             keys.remove(index, position);
@@ -104,7 +104,7 @@ impl Entries {
         self.positions
             .get_or_insert_with(|| (0..self.next).collect())
             .remove(index);
-        self.values.remove(index);
+        self.values.remove(index)
     }
 
     fn at(&self, position: usize) -> Option<(usize, Id, Id)> {

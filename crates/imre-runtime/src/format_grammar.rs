@@ -1,4 +1,4 @@
-//! The two string.Formatter grammars advance by Unicode scalar. Delimiters are ASCII.
+//! Shared by typed and boxed string.Formatter cursors. Delimiters are ASCII.
 use std::ops::Range;
 
 pub(super) type Result<T> = std::result::Result<T, &'static str>;

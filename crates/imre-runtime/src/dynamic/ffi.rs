@@ -147,11 +147,7 @@ impl Context {
                     Ok(self.alloc(Value::List(out)))
                 }
             }
-            "slice" => self.slice(a, b),
-            "setslice" => {
-                self.set_slice(a, b, c)?;
-                Ok(c)
-            }
+            "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "call" => {
                 let args = self.items(b)?;
                 let kwargs = self.keyword_args(c)?;
@@ -185,6 +181,16 @@ impl Context {
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
+            }
+            "neg" | "pos" if let Value::Complex(z) = self.heap.get(a) => {
+                if op == "pos" {
+                    Ok(a)
+                } else {
+                    Ok(self.alloc(Value::Complex(super::complex::Complex {
+                        real: -z.real,
+                        imag: -z.imag,
+                    })))
+                }
             }
             "neg" | "pos" | "~" => {
                 let slot = match op {
@@ -244,16 +250,11 @@ impl Context {
                 Ok(self.text(s))
             }
             "take_error" => {
-                let mut e = self
+                let error = self
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
-                if let Some(instance) = e.trace.as_mut().and_then(|trace| trace.instance.take()) {
-                    *self.heap.get_mut(instance) = Value::Raised(e);
-                    Ok(instance)
-                } else {
-                    Ok(self.alloc(Value::Raised(e)))
-                }
+                Ok(self.raised_instance(error))
             }
             "matches" => {
                 if let Value::Raised(Error { kind, .. }) = self.heap.get(a) {
@@ -367,6 +368,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         modules: HashMap::new(),
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
+        logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
         sources: HashMap::new(),
         pending: None,
@@ -470,6 +472,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
             .try_into()
             .map(|bytes| Value::Float(f64::from_le_bytes(bytes)))
             .map_err(|_| Error::new("SystemError", "invalid float literal")),
+        4 if data.len() == 16 => Ok(Value::Complex(super::complex::Complex {
+            real: f64::from_le_bytes(data[..8].try_into().unwrap()),
+            imag: f64::from_le_bytes(data[8..].try_into().unwrap()),
+        })),
         _ => Err(Error::new("SystemError", "invalid literal kind")),
     };
     let value = value.map(|v| ctx.alloc(v));
@@ -561,6 +567,29 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
         annotate,
         annotation_scope,
     )
+}
+
+/// Attach the original generator suite to the code object before applying Python decorators.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_generator_body(
+    ctx: *mut Context,
+    function: Id,
+    source: *const c_char,
+    body_line: u32,
+) {
+    // SAFETY: the generated call provides the live context that owns the function.
+    let ctx = unsafe { &mut *ctx };
+    let Value::Function { code, .. } = *ctx.heap.get(function) else {
+        unreachable!("compiled Python function");
+    };
+    let Value::Code(code) = ctx.heap.get_mut(code) else {
+        unreachable!("compiled code object");
+    };
+    if matches!(code.body, value::Body::Native(_)) {
+        // SAFETY: the UTF-8 constant is embedded in the executable and outlives all code objects.
+        let source = unsafe { cstr(source) };
+        code.body = value::Body::PendingGenerator { source, body_line };
+    }
 }
 
 /// Static per-definition record emitted beside its native entry point.
@@ -727,6 +756,7 @@ impl Context {
             self.modules
                 .values()
                 .chain(self.classes.values())
+                .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_code_objects.values())
