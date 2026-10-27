@@ -426,7 +426,7 @@ pub(crate) enum Intrinsic {
     BinasciiError,
     BinasciiIncomplete,
     PackageNotFoundError,
-    ImportModule,
+    RegisteredImport(&'static str),
     Socket,
     GaiError,
     SocketGetFqdn,
@@ -758,12 +758,17 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
             // Execution requests the native loader. Binding the name alone stays on the typed path.
-            (Self::Importlib, "import_module") => Intrinsic::ImportModule,
+            (Self::Importlib, "import_module") => {
+                Intrinsic::RegisteredImport("importlib.import_module")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::Declaration("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibUtil, "find_spec") => {
+                Intrinsic::RegisteredImport("importlib.util.find_spec")
+            }
             (Self::ImportlibUtil, "cache_from_source") => Intrinsic::CachePath { reverse: false },
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
