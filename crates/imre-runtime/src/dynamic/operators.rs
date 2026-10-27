@@ -727,8 +727,52 @@ impl Context {
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
 
+    /// Keep the boxed result of str(arg) when an exception has one positional argument.
+    pub(super) fn single_exception_str(&mut self, root: Id) -> Result<Option<Id>> {
+        let mut value = root;
+        let mut seen = std::collections::HashSet::new();
+        while let Value::Raised(error) = self.heap.get(value) {
+            if error.os_args.is_some()
+                || error.trace.as_ref().is_some_and(|trace| {
+                    trace
+                        .import_message
+                        .is_some_and(|msg| matches!(self.heap.get(msg), Value::Str(_)))
+                        || trace.source_syntax.is_some()
+                })
+                || self.is_builtin_error(error, "KeyError")
+                || error
+                    .class
+                    .is_some_and(|class| self.class_attr(class, "__str__").is_some())
+            {
+                break;
+            }
+            let Some([arg]) = self.exception_arguments(error) else {
+                break;
+            };
+            if matches!(self.heap.get(*arg), Value::Raised(_)) {
+                seen.try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                if !seen.insert(value) {
+                    return Err(Error::new(
+                        "RecursionError",
+                        "maximum recursion depth exceeded while getting the str of an object",
+                    ));
+                }
+            }
+            value = *arg;
+        }
+        if value == root {
+            return Ok(None);
+        }
+        let string = self.builtin("str");
+        self.call(string, vec![value], Vec::new()).map(Some)
+    }
+
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
+        if !quoted && let Some(value) = self.single_exception_str(root)? {
+            return self.str_value(value).map(str::to_owned);
+        }
         self.checked_render(RenderRoot::Object(root), quoted)
     }
 
