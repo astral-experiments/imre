@@ -28,6 +28,8 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -41,6 +43,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "collections" => Some((
             "collections/__init__.py",
             include_str!("../stdlib/collections/__init__.py"),
@@ -3138,6 +3141,7 @@ impl<'a> Loader<'a> {
             }
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => {
                 Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))

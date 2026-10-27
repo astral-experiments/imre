@@ -964,12 +964,28 @@ impl Context {
                 receiver,
                 explicit,
             } => match name {
-                "__func__" => return Ok(callable),
                 "__self__" => return Ok(receiver),
+                "__func__"
+                    if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
+                {
+                    return Ok(callable);
+                }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
                     return self.lookup_attr(callable, name);
                 }
-                _ => {}
+                _ => {
+                    if let Value::Native(method) = self.heap.get(callable) {
+                        let value = match name {
+                            "__name__" => method.rsplit('.').next(),
+                            "__qualname__" => Some(method.as_str()),
+                            "__module__" => return Ok(NONE),
+                            _ => None,
+                        };
+                        if let Some(value) = value {
+                            return Ok(self.text(value.to_owned()));
+                        }
+                    }
+                }
             },
             Value::RegexPattern(pattern) if name == "flags" => return Ok(self.int(pattern.flags)),
             Value::RegexPattern(pattern) if name == "groups" => {

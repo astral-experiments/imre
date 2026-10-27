@@ -230,7 +230,7 @@ impl Context {
                 .own_class_attr(class, "__qualname__")
                 .and_then(|id| self.str_value(id).ok())
                 .unwrap_or_else(|| self.key_type_name(key));
-            if module == "builtins" {
+            if matches!(module.as_str(), "builtins" | "__main__") {
                 name.to_owned()
             } else {
                 format!("{module}.{name}")

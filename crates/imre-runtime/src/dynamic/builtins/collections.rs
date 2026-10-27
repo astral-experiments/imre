@@ -402,7 +402,12 @@ pub(super) fn method(
     };
     if matches!(
         name,
-        "dict.pop" | "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
+        "dict.pop"
+            | "set.issuperset"
+            | "frozenset.issuperset"
+            | "frozenset.copy"
+            | "frozenset.__contains__"
+            | "set.__contains__"
     ) && !kwargs.is_empty()
     {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -532,8 +537,13 @@ pub(super) fn method(
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
-            arity(name, args, 1, 1)?;
-            Ok(boolean(set_member(ctx, receiver, args[0], true)?))
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            Ok(boolean(set_member(ctx, receiver, *value, true)?))
         }
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
