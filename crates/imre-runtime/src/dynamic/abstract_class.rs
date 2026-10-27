@@ -23,7 +23,8 @@ impl Context {
     }
 
     pub(super) fn init_abstract_class(&mut self, class: Id, name: &str, scope: Id) -> Result<()> {
-        if !(name == "ABC" && self.scope_data(scope).module == "abc")
+        if !super::mapping_abc::is_abc_class(self, class)
+            && !(name == "ABC" && self.scope_data(scope).module == "abc")
             && !self
                 .module_class("abc", "ABC")
                 .is_some_and(|abc| self.subclass(class, abc))

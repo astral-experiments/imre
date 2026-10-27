@@ -313,6 +313,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
+        (
+            "_collections_abc",
+            abc
+            @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
+        ) => super::mapping_abc::class(ctx, abc)?,
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
@@ -772,6 +777,9 @@ pub(super) fn call(
     }
     if let Some(name) = name.strip_prefix("ast.") {
         return ast::call(ctx, name, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("abc.") {
+        return super::mapping_abc::call(ctx, method, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
