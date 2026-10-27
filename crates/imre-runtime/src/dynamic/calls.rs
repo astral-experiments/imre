@@ -933,8 +933,13 @@ impl Context {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
         }
-        let Value::Instance { class, .. } = *self.heap.get(obj) else {
-            return self.default_get_attr(obj, name);
+        let class = match *self.heap.get(obj) {
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => class,
+            _ => return self.default_get_attr(obj, name),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
