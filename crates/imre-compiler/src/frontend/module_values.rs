@@ -299,7 +299,10 @@ impl Checker<'_> {
             }
             _ => unreachable!(),
         };
-        if callables::contains_callable(value.ty, self.types) {
+        // A native frozenset predicate captures only its already-initialized immutable set.
+        let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
+            if set.ty == Type::FrozenStrings);
+        if !frozen_predicate && callables::contains_callable(value.ty, self.types) {
             return Err(error(
                 self.source,
                 statement,

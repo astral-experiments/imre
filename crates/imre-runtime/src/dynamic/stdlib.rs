@@ -29,6 +29,7 @@ pub(super) mod io;
 mod json;
 mod logging;
 mod marshal;
+mod math;
 mod operator;
 mod pickle;
 mod posixpath;
@@ -68,6 +69,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "math"
             | "unicodedata"
             | "json"
             | "_imre_logging"
@@ -181,6 +183,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
+        property: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -275,13 +278,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
-        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
-        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -657,6 +659,9 @@ pub(super) fn call(
                 None => ctx.scalar_value(*text),
             },
         );
+    }
+    if let Some(operation) = name.strip_prefix("math.") {
+        return math::round(ctx, operation, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);

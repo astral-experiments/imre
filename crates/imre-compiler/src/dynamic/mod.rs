@@ -99,7 +99,13 @@ impl Imports {
         if level == 0
             && matches!(
                 name,
-                "sysconfig" | "platform" | "site" | "importlib.machinery" | "struct" | "traceback"
+                "sysconfig"
+                    | "platform"
+                    | "keyword"
+                    | "site"
+                    | "importlib.machinery"
+                    | "struct"
+                    | "traceback"
             )
         {
             self.runtime_imports = true;
@@ -304,6 +310,7 @@ pub(crate) fn compile(
         && ![
             "sys",
             "platform",
+            "keyword",
             "site",
             "importlib",
             "operator",

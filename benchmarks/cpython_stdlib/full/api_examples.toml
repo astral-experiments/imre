@@ -38,6 +38,7 @@ inspect = ["`cleandoc(doc=text)` for strings. `getattr_static` for selected owne
 io = ["In-memory `StringIO` and `BytesIO` streams.","benchmarks/cpython_stdlib/full/doctest/stringio/README.md"]
 itertools = ["Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators.","benchmarks/cpython_stdlib/full/itertools/README.md"]
 json = ["Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`.","benchmarks/cpython_stdlib/full/json/README.md"]
+keyword = ["Check hard and soft keywords with `iskeyword` and `issoftkeyword`.","benchmarks/cpython_stdlib/full/keyword/README.md"]
 linecache = ["Filesystem-backed `getline`, cache population and invalidation.","benchmarks/cpython_stdlib/full/linecache/README.md"]
 logging = ["Send runtime-loaded log messages to `sys.stderr` with `getLogger` and `StreamHandler`, change the handler stream, and rotate log files by size or time.","benchmarks/cpython_stdlib/full/logging/README.md"]
 math = ["`prod` multiplies integer factors from iterables with an optional integer start.","tests/fixtures/iterables/math_product.py"]

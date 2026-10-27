@@ -1,6 +1,30 @@
 """Compare dict subclass storage, inherited methods, and explicit base dispatch."""
 
 
+def inherited_deletion():
+    from operator import delitem
+
+    class Data(dict):
+        pass
+
+    class Child(Data):
+        pass
+
+    class Override(Data):
+        def __delitem__(self, key):
+            self.last_key = key
+            return "ignored"
+
+    data = Child(a=1, b=2, c=3)
+    print(Child.__delitem__ is dict.__delitem__)
+    print(delitem(data, "a"), dict(data))
+    del data["b"]
+    print(dict.__delitem__(data, "c"), dict(data))
+    override = Override(x=4)
+    print(delitem(override, "x"), override.last_key, dict(override))
+    print(dict.__delitem__(override, "x"), dict(override))
+
+
 def current():
     from collections import Counter
     from collections import _count_elements
@@ -32,6 +56,7 @@ def current():
     counts["b"] = 2
     print(list(elements))
 
+    inherited_deletion()
     class Data(dict):
         pass
 
@@ -323,3 +348,27 @@ def current():
     once = Once()
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
+
+    class Late:
+        pass
+
+    retained = Late()
+    target = {retained: 7}
+    Late.__eq__ = lambda left, right: left is right
+    target[Late()] = 11
+    print(target[retained], len(target))
+
+    class Child(EqualOnly):
+        pass
+
+    del EqualOnly.__eq__
+    print(EqualOnly.__hash__ is None)
+    for key in (EqualOnly(), Child()):
+        try:
+            target[key] = 41
+        except TypeError:
+            print("implicit hash disabled")
+
+    del Colliding.__hash__
+    key = Colliding()
+    print({key: 13}[key])

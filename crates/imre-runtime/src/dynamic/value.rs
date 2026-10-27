@@ -497,6 +497,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
+        property: Option<Box<super::property::Property>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -780,7 +781,11 @@ impl Value {
                 dictionary,
                 scalar,
                 memory_stream,
+                property,
             } => {
+                if let Some(property) = property {
+                    property.children(visit);
+                }
                 if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
                     visit.extend(stream.snapshot.get());
                 }
