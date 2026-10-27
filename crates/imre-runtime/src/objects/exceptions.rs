@@ -2484,7 +2484,10 @@ pub unsafe extern "C" fn imre_exception_with_origin(
             let Storage::Exception(exception) = storage else {
                 fail("SystemError", "expected an exception object");
             };
-            let origins = &mut exception.details_mut().origins;
+            let Ok(details) = exception.try_details_mut() else {
+                return;
+            };
+            let origins = &mut details.origins;
             if origins.try_reserve(1).is_ok() {
                 crate::imre_str_retain(filename);
                 origins.push((StrOwner::from_raw(filename), line));
