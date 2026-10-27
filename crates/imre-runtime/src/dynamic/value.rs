@@ -190,6 +190,7 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
+            Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
@@ -442,6 +443,10 @@ pub(super) enum Value {
     },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Enumerate {
+        input: Id,
+        next_index: crate::Int,
+    },
     Count {
         current: Id,
         step: Id,
@@ -563,6 +568,7 @@ impl Value {
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
+            Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);

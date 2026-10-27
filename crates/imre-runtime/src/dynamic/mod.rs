@@ -184,6 +184,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
+                | Value::Enumerate { .. }
                 | Value::Count { .. }
                 | Value::Repeat(_)
         )
@@ -245,6 +246,7 @@ impl Context {
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
+                | Value::Enumerate { .. }
         ) {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -361,6 +363,10 @@ impl Context {
             Value::Iterator { .. } | Value::Zip { .. } => {}
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
+            Value::Enumerate { input, .. } => {
+                let input = *input;
+                return self.next_enumerated(id, input);
+            }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Generator { code, .. } => {
@@ -430,6 +436,7 @@ impl Context {
                 | Value::TextFile(_)
                 | Value::Count { .. }
                 | Value::Repeat(_)
+                | Value::Enumerate { .. }
         ) || self.slot(id, "__iter__").is_some()
         {
             let iter = self.iterator(id)?;

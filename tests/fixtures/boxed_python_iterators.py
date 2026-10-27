@@ -44,6 +44,11 @@ def current():
     cursor = Cursor()
     cursor.__iter__ = lambda: []
     print(iter(cursor) is cursor)
+    growing = [4, 5]
+    for index, item in enumerate(growing, start=1 << 70):
+        print(index, item)
+        if item == 4:
+            growing.append(6)
     for item in cursor:
         print(item)
         break
