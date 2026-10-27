@@ -179,6 +179,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
+        property: None,
         memory_stream: None,
         fields: fields
             .iter()

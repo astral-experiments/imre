@@ -194,6 +194,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "__contains__",
     "__getitem__",
     "__setitem__",
+    "__delitem__",
     "get",
     "items",
     "keys",
@@ -238,7 +239,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
-        Value::Property(_) if attr == "setter" => "property",
+        Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
             if matches!(
@@ -731,7 +732,7 @@ pub(super) fn call(
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
-            "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
+            "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -1110,10 +1111,7 @@ pub(super) fn call(
             };
             super::static_method::construct(ctx, *callable)
         }
-        "property" => {
-            let fields = bind(name, args, kwargs, ["fget", "fset", "fdel", "doc"])?;
-            super::property::construct(ctx, fields)
-        }
+        "property" => super::property::construct(ctx, args, kwargs),
         "open" => {
             arity(name, args, 0, 2)?;
             let [path, mode, encoding] = bind(name, args, kwargs, ["file", "mode", "encoding"])?;

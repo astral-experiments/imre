@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/python/cpython",
+  "tag": "v3.14.5",
+  "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "module": "test.test_keyword",
+  "files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/keyword.py": "e22c837835e740aa9be9ffed805757836a06b0ea",
+    "Lib/test/test_keyword.py": "858e5de3b92e6a243a5385d7820f2a6456bd6204"
+  }
+}

@@ -6162,6 +6162,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
+                Intrinsic::ImportModule => {
+                    return Err(self.object_runtime_export("importlib.import_module", expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -7587,6 +7590,15 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
                 }
+                if receiver.ty == Type::FrozenStrings && attribute.attr.as_str() == "__contains__" {
+                    return Ok(self.bound_builtin(
+                        attribute,
+                        receiver,
+                        Builtin::SetContains,
+                        vec![Type::Str],
+                        Type::Bool,
+                    ));
+                }
                 if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
                 {
                     return Ok(self.bound_builtin(
@@ -8656,10 +8668,13 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Cast)) => {
                 self.reject_builtin_keywords(call)?;
                 if let [target, value] = call.arguments.args.as_ref()
-                    && matches!(
+                    && (matches!(
                         self.resolve(target),
                         Some(Binding::Intrinsic(Intrinsic::BytesIo | Intrinsic::StringIo))
-                    )
+                    ) || target.as_name_expr().is_some_and(|name| {
+                        annotations::is_builtin_type(name.id.as_str())
+                            && self.unshadowed_builtin(target, name.id.as_str())
+                    }))
                 {
                     // Python cast() returns its operand, including on a wrong assertion.
                     return self.typed_expr(value);
@@ -8759,6 +8774,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ImportModule)) => {
+                return Err(self.object_runtime_export("importlib.import_module", call));
             }
             Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
                 return Err(self.runtime_attrgetter(call));

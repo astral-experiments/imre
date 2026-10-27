@@ -110,6 +110,24 @@ ACCEPTED = {
             "print([type(node).__name__ for node in walk(tree)])\n"
         ),
     },
+    "registered_import_module": {
+        "main.py": (
+            "from consumer import ensure, with_local\nfrom importlib import import_module as load\n"
+            "import importlib\nprint('before')\nensure('.'.join(['orchard', 'leaf']))\n"
+            "leaf = load('orchard.leaf')\nprint(leaf.marker, load is importlib.import_module)\n"
+            "print(leaf is load('.leaf', 'orchard'), leaf is load(name='..leaf', package='orchard.bud'))\n"
+            "print(with_local(str))\n"
+            "try:\n    load('absent' + '_package.child')\nexcept ModuleNotFoundError as e:\n    print(e.name)\n"
+        ),
+        "consumer.py": (
+            "from importlib import import_module\n"
+            "def ensure(package_name: str) -> None:\n    import_module(package_name)\n"
+            "def with_local(import_module):\n    return import_module('unrelated')\n"
+        ),
+        "orchard/__init__.py": "print('package init')\n",
+        "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
+        "unrelated.py": "invalid syntax for an unrelated source file!\n",
+    },
     "conditional_function_export": {
         "main.py": (
             "from helper import selected as chosen\nimport helper\n"
