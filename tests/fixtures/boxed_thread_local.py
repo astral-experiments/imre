@@ -4,7 +4,7 @@ from _thread import _local
 from threading import local
 
 
-def run():
+def current():
     state = local()
     unused = _local()
     backing = state.__dict__
@@ -29,4 +29,5 @@ def run():
             print(type(error).__name__, str(error))
 
 
-run()
+if __name__ == "__main__":
+    current()
