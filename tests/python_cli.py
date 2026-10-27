@@ -639,6 +639,7 @@ def report(text):
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_itertools_repeat.py",
+            "boxed_module_type.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_dict_subclasses.py",

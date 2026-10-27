@@ -131,10 +131,10 @@ impl Context {
         ) && self.subclass(receiver, start)
         {
             receiver
-        } else if let Value::Instance { class, .. } = self.heap.get(receiver)
-            && self.subclass(*class, start)
+        } else if let Some(class) = self.heap.get(receiver).instance_class()
+            && self.subclass(class, start)
         {
-            *class
+            class
         } else if self.instance_of(receiver, start) {
             self.exact_type(receiver)?
         } else {

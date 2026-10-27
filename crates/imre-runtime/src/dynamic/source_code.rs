@@ -1,5 +1,6 @@
 //! In-process execution of source received by the boxed Python runtime.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -240,9 +241,18 @@ impl Context {
                 )
             });
         }
-        let source = self.str_value(source)?;
-        let filename = self.str_value(filename)?;
-        let parsed = ruff_python_parser::parse_module(source)
+        let filename_text = self.str_value(filename)?;
+        let source = match self.heap.get(self.scalar_value(source)) {
+            Value::Bytes(data) | Value::ByteArray(data) => {
+                match crate::objects::decode_compile_source(data) {
+                    Ok(text) => Cow::Owned(text),
+                    Err(error) => return Err(self.source_decode_error(error, filename)),
+                }
+            }
+            _ => Cow::Borrowed(self.str_value(source)?),
+        };
+        let filename = filename_text;
+        let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
@@ -250,6 +260,64 @@ impl Context {
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.lower(&parsed.syntax().body, &lines, false)?;
         Ok(self.box_source_code(Rc::new(code), None))
+    }
+
+    /// Attach the filename after tokenization, just as compile does for string input.
+    fn source_decode_error(
+        &mut self,
+        error: crate::objects::SourceDecodeError,
+        filename: Id,
+    ) -> Error {
+        use crate::objects::SourceDecodeError::*;
+        let null = matches!(error, Null);
+        let (message, range) = match error {
+            Null => (
+                "source code string cannot contain null bytes".to_owned(),
+                None,
+            ),
+            Invalid(message, range) => (message, range),
+            NonText(message) => (message, None),
+            Unsupported(name) => {
+                return Error::new(
+                    "NotImplementedError",
+                    format!("compile: native source decoder for '{name}' is unavailable"),
+                );
+            }
+        };
+        let msg = self.text(&message);
+        let mut args = vec![msg];
+        let mut rendered = message;
+        if !null {
+            let lineno = range.as_ref().map_or(0, |r| r.line);
+            let name = self
+                .str_value(filename)
+                .expect("compile validated its filename");
+            let basename = name
+                .rsplit(std::path::MAIN_SEPARATOR)
+                .next()
+                .unwrap_or(name);
+            rendered = format!("{rendered} ({basename}, line {lineno})");
+            let line = self.int(lineno as i64);
+            let details = if let Some(r) = range {
+                vec![
+                    if r.tokenizer { NONE } else { filename },
+                    line,
+                    self.int(r.start as i64),
+                    self.text(r.text),
+                    line,
+                    self.int(r.end as i64),
+                ]
+            } else {
+                vec![filename, line, self.int(-1), NONE]
+            };
+            args.push(self.alloc(Value::Tuple(details)));
+        }
+        let mut error = self.exception("SyntaxError", &args);
+        error.message = rendered;
+        let args = error.args.expect("exception retains its arguments");
+        // SyntaxError's diagnostic fields survive reassignment of BaseException.args.
+        error.tracing().source_syntax = Some([if null { NONE } else { filename }, args]);
+        error
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {

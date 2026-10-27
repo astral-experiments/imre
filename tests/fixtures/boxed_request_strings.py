@@ -21,6 +21,11 @@ class CustomAlnum(str):
         return "override"
 
 
+class CustomUpper(str):
+    def isupper(self):
+        return "override"
+
+
 class FailingFlag:
     def __bool__(self):
         raise ValueError("keepends")
@@ -106,6 +111,14 @@ def current():
         print(value.isalnum(), str.isalnum(value))
     for call in (lambda: str.isalnum(), lambda: str.isalnum(1), lambda: "a".isalnum(1),
                  lambda: "a".isalnum(value="x")):
+        try:
+            call()
+        except TypeError as error:
+            print(error)
+    for value in ("", "7_東", "É_7東", "Éa", "Aǅ", "Ⅰ", "Aʕ", Text("𐐀"), CustomUpper("a")):
+        print(value.isupper(), str.isupper(value))
+    for call in (lambda: str.isupper(), lambda: str.isupper(1), lambda: "A".isupper(1),
+                 lambda: "A".isupper(value="x")):
         try:
             call()
         except TypeError as error:

@@ -30,3 +30,37 @@ def current():
         reader()
     except NameError:
         print("removed")
+    for fn, args in ((read_local, (False,)), (read_cell, (False, False)), (read_cell, (False, True))):
+        try:
+            print(fn(*args))
+        except NameError as error:
+            print(type(error).__name__, str(error))
+    print(read_class_namespace(False))
+
+
+marker = "global"
+
+
+def read_class_namespace(assigned):
+    if assigned:
+        marker = "outer"
+
+    class C:
+        seen = marker
+        marker = "class"
+    return C.seen
+
+
+def read_local(assigned):
+    if assigned:
+        marker = "local"
+    return marker
+
+
+def read_cell(assigned, child):
+    def read():
+        return marker
+
+    if assigned:
+        marker = "local"
+    return read() if child else marker

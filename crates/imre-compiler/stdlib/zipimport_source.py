@@ -1,6 +1,8 @@
 """Source package imports for the native module registry."""
 from _imre_zipimport import contains as _contains
 
+_ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+
 
 class zipimporter(_ZipResourceLoader):
     def _member(self, fullname):
@@ -36,8 +38,15 @@ class zipimporter(_ZipResourceLoader):
             line = line.lstrip(' \t\f')
             if line and not line.startswith('#'):
                 break
-            if 'coding:' in line or 'coding=' in line:
-                raise NotImplementedError('encoding declarations in ZIP source are unsupported')
+            for marker in ('coding:', 'coding='):
+                offset = line.find(marker)
+                while offset >= 0:
+                    offset += len(marker)
+                    while offset < len(line) and line[offset] in ' \t':
+                        offset += 1
+                    if offset < len(line) and line[offset] in _ENCODING_NAME_CHARS:
+                        raise NotImplementedError('encoding declarations in ZIP source are unsupported')
+                    offset = line.find(marker, offset)
         return compile(text, filename, 'exec')
 
     def exec_module(self, module):

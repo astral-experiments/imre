@@ -602,7 +602,12 @@ impl Context {
                             output.push_str(text);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
-                        } else if error.os_args.is_some() {
+                        } else if error.os_args.is_some()
+                            || error
+                                .trace
+                                .as_ref()
+                                .is_some_and(|trace| trace.source_syntax.is_some())
+                        {
                             output.push_str(&error.message);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
@@ -710,6 +715,44 @@ impl Context {
                     match self.heap.get(id) {
                         Value::Raised(error) => {
                             work.push(Part::Exception(error, repr));
+                            continue;
+                        }
+                        Value::Module {
+                            scope,
+                            constructor: Some(_),
+                            ..
+                        } => {
+                            if !ancestors.insert(id) {
+                                if checked {
+                                    return Err(Error::new(
+                                        "RecursionError",
+                                        "maximum recursion depth exceeded",
+                                    ));
+                                }
+                                output.push_str("<module ...>");
+                                continue;
+                            }
+                            active.push(id);
+                            output.push_str("<module ");
+                            work.push(Part::Leave(id, ">"));
+                            if let Some(file) =
+                                self.scope_name(*scope, "__file__").filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Value(file, true));
+                                work.push(Part::Text(" from "));
+                            } else if let Some(loader) = self
+                                .scope_name(*scope, "__loader__")
+                                .filter(|&id| id != NONE)
+                            {
+                                work.push(Part::Text(")"));
+                                work.push(Part::Value(loader, true));
+                                work.push(Part::Text(" ("));
+                            }
+                            if let Some(name) = self.scope_name(*scope, "__name__") {
+                                work.push(Part::Value(name, true));
+                            } else {
+                                work.push(Part::Text("'?'"));
+                            }
                             continue;
                         }
                         Value::Slice(items) => {
@@ -1058,6 +1101,10 @@ impl Context {
                 self.weakref_descriptor_owner(*owner)
             ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
+            Value::Module {
+                constructor: Some(_),
+                ..
+            } => self.repr(id),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
                 format!(
