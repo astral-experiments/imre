@@ -402,6 +402,27 @@ impl Context {
         Ok(normalized(hash))
     }
 
+    /// Look up a Python name in immutable builtin type dictionaries. Type lookup clears errors.
+    pub(in super::super) fn lookup_builtin_type_name(
+        &mut self,
+        key: Id,
+        names: &[&'static str],
+    ) -> Option<&'static str> {
+        if let Value::Str(text) = self.heap.get(key) {
+            return names.iter().copied().find(|&name| name == text);
+        }
+        let hash = self.dictionary_hash(key).ok()?;
+        for &name in names {
+            if normalized(data_hash(name.as_bytes())) == hash {
+                let stored = self.text(name);
+                if self.dictionary_equal(stored, key).ok()? {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
     fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
