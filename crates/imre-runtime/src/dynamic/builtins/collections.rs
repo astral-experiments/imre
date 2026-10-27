@@ -494,7 +494,7 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method @ ("clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
+    if let Some(method @ ("append" | "clear" | "copy" | "index" | "pop" | "reverse" | "sort")) =
         name.strip_prefix("list.")
     {
         let Some((&receiver, args)) = args.split_first() else {
@@ -510,6 +510,19 @@ pub(super) fn method(
             )));
         }
         return match method {
+            "append" => {
+                if !kwargs.is_empty() {
+                    return Err(type_error(format!("{name}() takes no keyword arguments")));
+                }
+                let [value] = args else {
+                    return Err(type_error(format!(
+                        "{name}() takes exactly one argument ({} given)",
+                        args.len()
+                    )));
+                };
+                list_items_mut(ctx, receiver)?.push(*value);
+                Ok(NONE)
+            }
             "index" => list_index(ctx, receiver, args, kwargs),
             "pop" => list_pop(ctx, receiver, args, kwargs),
             "sort" => list_sort(ctx, receiver, args, kwargs),
@@ -738,11 +751,6 @@ pub(super) fn method(
         "dict.update" | "dict.__init__" => {
             arity(name, args, 0, 1)?;
             update(ctx, receiver, args.first().copied(), kwargs)?;
-            Ok(NONE)
-        }
-        "list.append" => {
-            arity(name, args, 1, 1)?;
-            list_items_mut(ctx, receiver)?.push(args[0]);
             Ok(NONE)
         }
         "list.extend" => {

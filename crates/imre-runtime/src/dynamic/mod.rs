@@ -1197,7 +1197,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
-            "list" => &["__repr__", "__init__"],
+            "list" => &["__repr__", "__init__", "append"],
             "tuple" => &["__repr__", "__getitem__"],
             "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,
