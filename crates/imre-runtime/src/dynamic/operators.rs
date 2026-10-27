@@ -1868,6 +1868,9 @@ impl Context {
         } else {
             (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
         };
+        if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
+            return super::union::make(self, &[a, b]);
+        }
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }
