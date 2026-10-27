@@ -1097,6 +1097,21 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_normalization_retains_the_input() {
+        let form = StrOwner::new(Str::new("NFC"));
+        let input = StrOwner::new(Str::new("already normalized"));
+        let raw = StrOwner::as_ptr(&input);
+        // SAFETY: both input owners outlive the call.
+        let normalized =
+            unsafe { normalization::imre_unicode_normalize(StrOwner::as_ptr(&form), raw) };
+        assert_eq!(normalized, raw);
+        assert_eq!(StrOwner::strong_count(&input), 2);
+        // SAFETY: normalization transferred the second strong reference.
+        unsafe { StrOwner::decrement_strong_count(normalized) };
+        assert_eq!(StrOwner::strong_count(&input), 1);
+    }
+
+    #[test]
     fn refused_short_string_does_not_poison_the_cache() {
         SHORT_STRINGS.with_borrow_mut(|strings| strings[0xe9] = None);
         assert!(owned_string_with("é", |_| Err(())).is_err());
