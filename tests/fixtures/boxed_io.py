@@ -169,3 +169,10 @@ def exercise(path):
             print(stream.readline(), [line for line in stream], stream.readline())
         with open(lines, mode) as stream:
             print(iter(stream) is stream, list(zip(stream, stream)), next(stream, "done"))
+        for acquire in (iter, lambda stream: zip((), stream)):
+            try:
+                acquire(stream)
+            except ValueError as error:
+                assert str(error) == "I/O operation on closed file."
+            else:
+                raise AssertionError("closed file iterator")
