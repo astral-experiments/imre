@@ -86,25 +86,6 @@ impl BytesIo {
     }
 }
 
-fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
-    let message = match name {
-        "read" | "read1" | "readline" | "truncate" if n > 1 => {
-            format!("{name} expected at most 1 argument, got {n}")
-        }
-        "seek" if n == 0 => "seek expected at least 1 argument, got 0".into(),
-        "seek" if n > 2 => format!("seek expected at most 2 arguments, got {n}"),
-        "write" | "readinto" if n != 1 => {
-            format!("BytesIO.{name}() takes exactly one argument ({n} given)")
-        }
-        "read" | "read1" | "readline" | "seek" | "write" | "readinto" | "truncate" | "__exit__" => {
-            return Ok(());
-        }
-        _ if n != 0 => format!("{owner}.{name}() takes no arguments ({n} given)"),
-        _ => return Ok(()),
-    };
-    Err(Error::new("TypeError", message))
-}
-
 /// Coerce Python arguments before borrowing the native state, so index hooks can reenter.
 pub(super) fn call(
     ctx: &mut Context,
@@ -136,7 +117,7 @@ pub(super) fn call(
             format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    argument_count(owner, name, args.len())?;
+    super::argument_count(owner, name, args.len())?;
     match name {
         "read" | "read1" | "readline" => {
             let size = match args.first().copied() {

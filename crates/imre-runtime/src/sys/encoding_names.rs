@@ -27,9 +27,13 @@ pub extern "C" fn imre_sys_init_encoding_names() {
     NAMES.with(|_| ());
 }
 
+pub(crate) fn default_encoding() -> StrOwner {
+    NAMES.with(|names| names.unicode.clone())
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_default_encoding() -> *const Str {
-    NAMES.with(|names| StrOwner::into_raw(names.unicode.clone()))
+    StrOwner::into_raw(default_encoding())
 }
 
 /// Transfer a reference to the canonical codec name. A locale outside the native
