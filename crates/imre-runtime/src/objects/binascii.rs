@@ -27,17 +27,32 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
             low
         }
     };
-    // zlib normalizes both halves even for an empty input and a noncanonical seed.
     const BASE: u32 = 65_521;
-    let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
-    crate::Int::from_usize(zlib_rs::adler32::adler32(seed, data) as usize).into_raw()
+    let checksum = if data.len() == 1 {
+        // Match zlib's observable one-byte fast path, including its single
+        // subtraction for each noncanonical seed half.
+        let mut sum1 = (seed & 0xffff) + u32::from(data[0]);
+        if sum1 >= BASE {
+            sum1 -= BASE;
+        }
+        let mut sum2 = (seed >> 16) + sum1;
+        if sum2 >= BASE {
+            sum2 -= BASE;
+        }
+        (sum2 << 16) | sum1
+    } else {
+        // zlib normalizes both halves for empty and multi-byte inputs.
+        let seed = (((seed >> 16) % BASE) << 16) | ((seed & 0xffff) % BASE);
+        zlib_rs::adler32::adler32(seed, data)
+    };
+    crate::Int::from_usize(checksum as usize).into_raw()
 }
 
 fn owned(bytes: Bytes) -> *const Bytes {
     BytesOwner::into_raw(BytesOwner::new(bytes))
 }
 
-fn encode(data: &[u8], alphabet: &GeneralPurpose, newline: bool) -> Result<*const Bytes> {
+fn encode(data: &[u8], alphabet: &GeneralPurpose, newline: bool) -> Result<Bytes> {
     let n = base64::encoded_len(data.len(), true).ok_or_else(Error::allocation)?;
     let mut encoded = allocate(
         n.checked_add(usize::from(newline))
@@ -50,21 +65,23 @@ fn encode(data: &[u8], alphabet: &GeneralPurpose, newline: bool) -> Result<*cons
     if newline {
         encoded.push(b'\n');
     }
-    Ok(owned(encoded))
+    Ok(encoded)
 }
 
-fn digit(byte: u8) -> Option<u8> {
+fn digit(byte: u8, urlsafe: bool) -> Option<u8> {
     Some(match byte {
         b'A'..=b'Z' => byte - b'A',
         b'a'..=b'z' => byte - b'a' + 26,
         b'0'..=b'9' => byte - b'0' + 52,
         b'+' => 62,
         b'/' => 63,
+        b'-' if urlsafe => 62,
+        b'_' if urlsafe => 63,
         _ => return None,
     })
 }
 
-fn decode(data: &[u8], strict: bool) -> Result<*const Bytes> {
+fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
     let mut decoded = allocate(data.len().div_ceil(4) * 3)?;
     let mut count = 0;
     let mut pads = 0;
@@ -86,7 +103,7 @@ fn decode(data: &[u8], strict: bool) -> Result<*const Bytes> {
             };
             return Err(Error::new(Kind::BinasciiError, message));
         }
-        let Some(value) = digit(byte) else {
+        let Some(value) = digit(byte, urlsafe) else {
             if strict {
                 return Err(Error::new(
                     Kind::BinasciiError,
@@ -122,7 +139,23 @@ fn decode(data: &[u8], strict: bool) -> Result<*const Bytes> {
     if position != 0 && position + pads < 4 {
         return Err(Error::new(Kind::BinasciiError, "Incorrect padding"));
     }
-    Ok(owned(decoded))
+    Ok(decoded)
+}
+
+pub(crate) fn binascii_encode(data: &[u8], newline: bool) -> Result<Bytes> {
+    encode(data, &STANDARD, newline)
+}
+
+pub(crate) fn binascii_decode(data: &[u8], strict: bool) -> Result<Bytes> {
+    decode(data, strict, false)
+}
+
+pub(crate) fn urlsafe_encode(data: &[u8]) -> Result<Bytes> {
+    encode(data, &URL_SAFE, false)
+}
+
+pub(crate) fn urlsafe_decode(data: &[u8]) -> Result<Bytes> {
+    decode(data, false, true)
 }
 
 /// # Safety
@@ -151,7 +184,7 @@ pub unsafe extern "C" fn imre_binascii_ascii_input(value: *const Str) -> *const 
 pub unsafe extern "C" fn imre_binascii_encode(value: *const Bytes, newline: bool) -> *const Bytes {
     // SAFETY: the caller supplied an exact bytes owner.
     finish(
-        encode(unsafe { &*value }, &STANDARD, newline),
+        binascii_encode(unsafe { &*value }, newline).map(owned),
         std::ptr::null(),
     )
 }
@@ -161,7 +194,10 @@ pub unsafe extern "C" fn imre_binascii_encode(value: *const Bytes, newline: bool
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_binascii_decode(value: *const Bytes, strict: bool) -> *const Bytes {
     // SAFETY: the caller supplied an exact bytes owner.
-    finish(decode(unsafe { &*value }, strict), std::ptr::null())
+    finish(
+        binascii_decode(unsafe { &*value }, strict).map(owned),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety
@@ -170,7 +206,7 @@ pub unsafe extern "C" fn imre_binascii_decode(value: *const Bytes, strict: bool)
 pub unsafe extern "C" fn imre_urlsafe_b64encode(value: *const Bytes) -> *const Bytes {
     // SAFETY: the caller supplied an exact bytes owner.
     finish(
-        encode(unsafe { &*value }, &URL_SAFE, false),
+        urlsafe_encode(unsafe { &*value }).map(owned),
         std::ptr::null(),
     )
 }

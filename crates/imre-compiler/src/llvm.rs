@@ -131,6 +131,7 @@ impl Type {
             | Self::ZipInfo
             | Self::Context
             | Self::ContextMissing
+            | Self::WeakProxy(_)
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
@@ -229,6 +230,7 @@ impl Type {
             | Self::ZipInfo
             | Self::Context
             | Self::ContextMissing
+            | Self::WeakProxy(_)
             | Self::ContextVar(_)
             | Self::ContextToken(_)
             | Self::CsvReader
@@ -927,6 +929,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -3745,6 +3748,7 @@ impl Emitter<'_, '_> {
                 | Type::ZipInfo
                 | Type::Context
                 | Type::ContextMissing
+                | Type::WeakProxy(_)
                 | Type::ContextVar(_)
                 | Type::ContextToken(_)
                 | Type::CsvReader
@@ -3991,6 +3995,12 @@ impl Emitter<'_, '_> {
             self.static_functions.insert(root.clone());
             return self.rooted_record(returns, &root, |emitter| emitter.expr(&expressions[0]));
         }
+        if let Builtin::MarkCoroutine(id) = builtin {
+            let function = self.expr(&expressions[0]);
+            let marker = self.output.global_ref(format!("coroutine_mark_{id}"));
+            self.line(format!("store i8 1, ptr @{marker}"));
+            return function;
+        }
         if let Builtin::AnnotationMember(layout) = builtin {
             let frame = Expr {
                 ty: Type::Tuple(*layout),
@@ -4199,6 +4209,7 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::StaticFunction(_)
+            | Builtin::MarkCoroutine(_)
             | Builtin::AnnotationMember(_)
             | Builtin::BoxAnnotation(_)
             | Builtin::ForwardRefField(_)
@@ -5952,6 +5963,17 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::InspectSentinel => self.call("imre_inspect_sentinel", returns, &[]),
+            Builtin::IsCoroutineFunction => {
+                let table = self.output.global_ref("coroutine_targets".to_owned());
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!(
+                        "call zeroext i1 @imre_inspect_coroutine_fn(ptr {}, ptr @{table})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::FunctionWrappedSet => self.call(
                 "imre_function_set_wrapped",
                 returns,
@@ -5991,6 +6013,17 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::HashCopy => self.call("imre_hash_copy", Type::Hash, &[&args[0].value]),
+            Builtin::WeakProxyNew => self.call(
+                "imre_weak_proxy_new",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::WeakProxyCallable => {
+                self.call("imre_weak_proxy_callable", returns, &[&args[0].value])
+            }
+            Builtin::WeakProxyTarget => {
+                self.call("imre_weak_proxy_target", returns, &[&args[0].value])
+            }
             Builtin::ContextVar(operation) => self.context_operation(*operation, &args, returns),
             Builtin::StringIo(operation) => {
                 use crate::ir::StringIoOperation as Op;
@@ -6407,6 +6440,9 @@ impl Emitter<'_, '_> {
             Builtin::DefaultRecordRepr => {
                 self.call("imre_record_default_repr", Type::Str, &[&args[0].value])
             }
+            Builtin::DecimalIntegerText => {
+                self.call("imre_decimal_int_text", Type::Str, &[&args[0].value])
+            }
             Builtin::Str => match args[0].value.ty {
                 Type::Path | Type::PurePath(_) => {
                     self.call("imre_path_text", Type::Str, &[&args[0].value])
@@ -6454,6 +6490,9 @@ impl Emitter<'_, '_> {
                         operand: self.instruction(format!("or i64 {tagged}, 1")),
                         small_integer: true,
                     }
+                }
+                Type::Str if args.len() == 2 => {
+                    self.call("imre_int_parse_hex", Type::Int, &[&args[0].value])
                 }
                 Type::Str => self.call("imre_int_parse", Type::Int, &[&args[0].value]),
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
@@ -7664,6 +7703,7 @@ impl Emitter<'_, '_> {
                     | Type::ZipInfo
                     | Type::Context
                     | Type::ContextMissing
+                    | Type::WeakProxy(_)
                     | Type::ContextVar(_)
                     | Type::ContextToken(_)
                     | Type::CsvReader
@@ -7986,6 +8026,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -8099,6 +8140,7 @@ impl Emitter<'_, '_> {
             | Type::ZipInfo
             | Type::Context
             | Type::ContextMissing
+            | Type::WeakProxy(_)
             | Type::ContextVar(_)
             | Type::ContextToken(_)
             | Type::CsvReader
@@ -8762,6 +8804,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::ZipInfo
         | Type::Context
         | Type::ContextMissing
+        | Type::WeakProxy(_)
         | Type::ContextVar(_)
         | Type::ContextToken(_)
         | Type::CsvReader
@@ -9346,6 +9389,9 @@ declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
 declare void @imre_import_error_reject_reset(ptr, ptr, ptr)
 declare ptr @imre_box_value(i32, i64)
+declare ptr @imre_weak_proxy_new(ptr, i1 zeroext)
+declare zeroext i1 @imre_weak_proxy_callable(ptr)
+declare ptr @imre_weak_proxy_target(ptr)
 declare ptr @imre_contextvars_new(i1 zeroext)
 declare ptr @imre_contextvars_copy(ptr)
 declare ptr @imre_contextvars_var(ptr, i32, i64)
@@ -9427,6 +9473,7 @@ declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
 declare ptr @imre_function_set_wrapped(ptr, ptr)
+declare zeroext i1 @imre_inspect_coroutine_fn(ptr, ptr) nounwind
 declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
@@ -9693,6 +9740,7 @@ declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @imre_int_str(i64)
+declare ptr @imre_decimal_int_text(i64)
 declare ptr @imre_bool_str(i32)
 declare ptr @imre_none_str()
 declare ptr @imre_text_open(ptr, i32, ptr)
@@ -9982,6 +10030,7 @@ declare ptr @imre_class_name_part(ptr, i32)
 declare i32 @imre_optional_int_equal(i64, i64)
 declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
+declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
 declare void @imre_random_seed_none()

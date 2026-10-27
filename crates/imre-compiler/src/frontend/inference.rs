@@ -560,7 +560,7 @@ impl Checker<'_> {
         Ok(scope.finish(self.call_value(signature, ty, args)))
     }
 
-    fn bind_source(
+    pub(super) fn bind_source(
         &mut self,
         call: &ast::ExprCall,
         signature: &Signature,

@@ -10,7 +10,9 @@ The [native evidence](native-linux.json) covers two of the 362 original occurren
 
 The [comparison](cleandoc_cases.py) runs the six rows of CPython’s unchanged `cleandoc_testdata` through the compiled public function. CPython runs `GetSourceBase.setUp`, the original loop, and its `subTest` assertions. Compiling that loop directly stops at the assignment to the builtin name `input` on line 721. Truncating the native output at NUL fails row 2. Removing trailing spaces fails rows 1 and 5.
 
-Direct calls accept a string positionally or by the keyword `doc`. A stored callable accepts a positional string. Imre reports binding errors and statically incompatible argument types at compile time. The controls compare those diagnostics with CPython’s runtime exceptions. CPython also accepts some duck-typed inputs. Imre needs a statically known string, including a `str | None` narrowed to `str`.
+The typed frontend accepts a string positionally or by the keyword `doc`. A stored callable accepts a positional string. Imre reports binding errors and statically incompatible argument types at compile time. The controls compare those diagnostics with CPython’s runtime exceptions. CPython also accepts some duck-typed inputs. The typed frontend needs a statically known string, including a `str | None` narrowed to `str`.
+
+Runtime-loaded modules use the same bundled Python function. The [CLI fixture](../../../../tests/fixtures/boxed_inspect_coroutine.py) imports it alongside the native coroutine functions and checks keyword calls, tabs, NUL, CRLF, nonbreaking spaces and trailing spaces.
 
 The [wheel comparison](werkzeug_cache_docs.py) imports Werkzeug 3.1.8 from the seven hash-pinned Flask gate wheels. CPython runs the real property factory and descriptors. All 17 class property docs and seven explicit factory calls are compared with native `cleandoc` in ordinary and reachable-only O0/O3 builds.
 

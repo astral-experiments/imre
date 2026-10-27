@@ -84,15 +84,15 @@ pub(super) unsafe fn acquire(mode: u32, source: usize) -> crate::ObjectOwner {
 }
 
 pub(in crate::objects) struct Progression {
-    pub(super) current: RefCell<Int>,
-    pub(super) step: Int,
-    pub(super) stop: Option<Int>,
+    current: RefCell<Int>,
+    step: Int,
+    stop: Int,
     ascending: bool,
 }
 
 impl Progression {
-    pub(super) fn remaining(&self) -> Option<Int> {
-        let stop = self.stop.as_ref()?;
+    pub(super) fn remaining(&self) -> Int {
+        let stop = &self.stop;
         let current = self.current.borrow();
         let step = self.step.big();
         let (distance, stride) = if self.ascending {
@@ -103,11 +103,11 @@ impl Progression {
         } else {
             (current.big().as_ref() - stop.big().as_ref(), -step.as_ref())
         };
-        Some(if distance.sign() != num_bigint::Sign::Plus {
+        if distance.sign() != num_bigint::Sign::Plus {
             Int::from_usize(0)
         } else {
             Int::new((distance - 1u8) / stride + 1u8)
-        })
+        }
     }
 
     pub(super) fn next(&self) -> Option<OwnedWord> {
@@ -115,11 +115,9 @@ impl Progression {
         // SAFETY: the current value, limit and step remain independently rooted;
         // exact integer comparison and addition cannot reenter or raise.
         unsafe {
-            if let Some(stop) = &self.stop {
-                let order = crate::imre_int_compare(current.0, stop.0);
-                if (self.ascending && order >= 0) || (!self.ascending && order <= 0) {
-                    return None;
-                }
+            let order = crate::imre_int_compare(current.0, self.stop.0);
+            if (self.ascending && order >= 0) || (!self.ascending && order <= 0) {
+                return None;
             }
             let next = Int(crate::imre_int_binary(current.0, self.step.0, 0));
             let old = std::mem::replace(&mut *current, next);
@@ -140,8 +138,14 @@ pub unsafe extern "C" fn imre_progression(start: usize, stop: usize, step: usize
             (*Int::borrow(step)).clone(),
         )
     };
+    let Some(stop) = stop else {
+        return crate::ObjectOwner::into_raw(adapter(Adapter::Count {
+            current: RefCell::new(CountValue::Int(start)),
+            step: CountValue::Int(step),
+        }));
+    };
     let sign = step.big().sign();
-    if stop.is_some() && sign == num_bigint::Sign::NoSign {
+    if sign == num_bigint::Sign::NoSign {
         return Error::new(Kind::ValueError, "range() arg 3 must not be zero")
             .returning(std::ptr::null());
     }

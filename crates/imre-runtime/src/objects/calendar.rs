@@ -1,6 +1,9 @@
 //! Immutable Python calendar values. Civil dates use an ordinal and microseconds of day;
 //! fixed zones keep their original offset and owner, including the canonical UTC singleton.
 use super::*;
+pub(super) mod boxed;
+mod clock;
+pub(super) use clock::clock_parts;
 mod conversion;
 mod maildates;
 /// # Safety
@@ -8,7 +11,10 @@ mod maildates;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_seconds(d: *const Object) -> f64 {
     // SAFETY: the caller roots the exact timedelta until the conversion returns.
-    let n = delta(unsafe { object(d) });
+    total_seconds(delta(unsafe { object(d) }))
+}
+
+fn total_seconds(n: i128) -> f64 {
     if n == 0 {
         return 0.0;
     }
@@ -151,6 +157,11 @@ const FACTORS: [i64; 7] = [
 pub(super) enum Value {
     Delta(i128),
     DateOnly(i128),
+    Time {
+        local: i128,
+        zone: Option<crate::ObjectOwner>,
+        fold: i32,
+    },
     // The value is local civil microseconds since ordinal 1. Both naive and aware datetimes
     // use the same calendar; the fixed offset matters for instant comparison, not day addition.
     Date {
@@ -302,21 +313,30 @@ pub(super) fn write_repr(v: &Value, out: &mut super::values::ReprWriter<'_>) -> 
             }
             out.write_char(')')?;
         }
-        Value::Date { local, zone, fold } => {
-            let [y, m, d, h, mi, s, u, _] = date_fields(*local, *fold);
-            write!(out, "datetime.datetime({y}, {m}, {d}, {h}, {mi}")?;
+        Value::Date { local, zone, fold } | Value::Time { local, zone, fold } => {
+            if matches!(v, Value::Date { .. }) {
+                let (y, m, d) = ymd(local.div_euclid(DAY) + 1);
+                write!(out, "datetime.datetime({y}, {m}, {d}, ")?;
+            } else {
+                out.write_str("datetime.time(")?;
+            }
+            let [h, mi, s, u, _] = time_fields(*local, *fold);
+            write!(out, "{h}, {mi}")?;
             if s != 0 || u != 0 {
                 write!(out, ", {s}")?;
             }
             if u != 0 {
                 write!(out, ", {u}")?;
             }
-            if *fold != 0 {
+            if *fold != 0 && matches!(v, Value::Date { .. }) {
                 out.write_str(", fold=1")?;
             }
             if let Some(z) = zone {
                 out.write_str(", tzinfo=")?;
                 with(z, |v| write_repr(v, out))?;
+            }
+            if *fold != 0 && matches!(v, Value::Time { .. }) {
+                out.write_str(", fold=1")?;
             }
             out.write_char(')')?;
         }
@@ -340,6 +360,7 @@ pub unsafe extern "C" fn imre_calendar_equal_optional(a: usize, b: usize) -> boo
 pub(super) fn equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Delta(a), Value::Delta(b)) => a == b,
+        (Value::Time { .. }, Value::Time { .. }) => clock::order(a, b).is_some_and(|o| o.is_eq()),
         (Value::DateOnly(a), Value::DateOnly(b)) => a == b,
         (Value::Zone { offset: a, .. }, Value::Zone { offset: b, .. }) => delta(a) == delta(b),
         (
@@ -522,6 +543,11 @@ fn datetime_from_fields(
     zone: Option<crate::ObjectOwner>,
 ) -> Result<crate::ObjectOwner, Error> {
     let ord = checked_ordinal(y, m, d)?;
+    let local = (ord - 1) * DAY + time_micros([h, mn, s, u, fold])?;
+    try_owner(Value::Date { local, zone, fold })
+}
+
+fn time_micros([h, mn, s, u, fold]: [i32; 5]) -> Result<i128, Error> {
     check(h, "hour", 0, 23)?;
     check(mn, "minute", 0, 59)?;
     check(s, "second", 0, 59)?;
@@ -532,8 +558,7 @@ fn datetime_from_fields(
             format!("fold must be either 0 or 1, not {fold}"),
         ));
     }
-    let local = (ord - 1) * DAY + i128::from(h * 3600 + mn * 60 + s) * 1_000_000 + i128::from(u);
-    try_owner(Value::Date { local, zone, fold })
+    Ok(i128::from(h * 3600 + mn * 60 + s) * 1_000_000 + i128::from(u))
 }
 
 /// # Safety
@@ -569,28 +594,35 @@ pub unsafe extern "C" fn imre_calendar_combine(
     time: *const Object,
     zone: usize,
 ) -> *const Object {
-    // SAFETY: the compiler roots each argument and only admits a naive clock time.
-    let (value, [hour, minute, second, micros, fold], zone) = unsafe {
+    // SAFETY: the typed caller roots both operands and any nonzero fixed timezone.
+    let (day, time, zone) = unsafe {
         (
             object(value),
-            object(time).0.with(|s| match s {
-                Storage::ClockTime(c) => c.0,
-                _ => unreachable!(),
-            }),
+            object(time),
             (zone != 0).then(|| retain(zone as *const Object)),
         )
     };
-    let start = with(value, |v| match v {
+    rc_result(combine(day, time, zone))
+}
+
+fn combine(
+    day: &Object,
+    time: &Object,
+    zone: Option<crate::ObjectOwner>,
+) -> Result<crate::ObjectOwner, Error> {
+    let start = with(day, |v| match v {
         Value::DateOnly(ord) => (ord - 1) * DAY,
         Value::Date { local, .. } => local.div_euclid(DAY) * DAY,
         _ => unreachable!(),
     });
-    let local = start + i128::from(((hour * 60 + minute) * 60 + second) * 1_000_000 + micros);
-    rc_result(try_owner(Value::Date {
-        local,
-        zone,
-        fold: fold as i32,
-    }))
+    with(time, |v| match v {
+        Value::Time { local, fold, .. } => try_owner(Value::Date {
+            local: start + local,
+            zone,
+            fold: *fold,
+        }),
+        _ => unreachable!(),
+    })
 }
 fn check_datetime_range(local: i128) -> Result<(), Error> {
     if (0..MAX_ORD * DAY).contains(&local) {
@@ -610,11 +642,13 @@ fn date(local: i128, zone: Option<crate::ObjectOwner>) -> Result<crate::ObjectOw
 fn date_fields(local: i128, fold: i32) -> [i128; 8] {
     let ord = local.div_euclid(DAY) + 1;
     let (y, m, d) = ymd(ord);
+    let [h, mi, s, u, fold] = time_fields(local, fold);
+    [y.into(), m.into(), d.into(), h, mi, s, u, fold]
+}
+
+fn time_fields(local: i128, fold: i32) -> [i128; 5] {
     let tod = local.rem_euclid(DAY);
     [
-        y.into(),
-        m.into(),
-        d.into(),
         tod / 3_600_000_000,
         tod / 60_000_000 % 60,
         tod / 1_000_000 % 60,
@@ -622,9 +656,15 @@ fn date_fields(local: i128, fold: i32) -> [i128; 8] {
         fold.into(),
     ]
 }
+
 fn date_text(local: i128, zone: &Option<crate::ObjectOwner>, sep: char) -> String {
-    let [y, m, d, h, mi, s, u, _] = date_fields(local, 0);
-    let mut text = format!("{y:04}-{m:02}-{d:02}{sep}{h:02}:{mi:02}:{s:02}");
+    let (y, m, d) = ymd(local.div_euclid(DAY) + 1);
+    format!("{y:04}-{m:02}-{d:02}{sep}{}", time_text(local, zone))
+}
+
+fn time_text(local: i128, zone: &Option<crate::ObjectOwner>) -> String {
+    let [h, mi, s, u, _] = time_fields(local, 0);
+    let mut text = format!("{h:02}:{mi:02}:{s:02}");
     if u != 0 {
         text.push_str(&format!(".{u:06}"));
     }
@@ -815,11 +855,17 @@ pub unsafe extern "C" fn imre_calendar_zonename(z: *const Object) -> *const Str 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *const Str {
     // SAFETY: the compiler roots this exact calendar value while its fields are formatted.
-    let s = with(unsafe { object(o) }, |v| match v {
+    let s = with(unsafe { object(o) }, |v| calendar_text(v, iso));
+    crate::StrOwner::into_raw(text::owned_string(&s))
+}
+
+fn calendar_text(value: &Value, iso: bool) -> String {
+    match value {
         Value::DateOnly(ord) => {
             let (y, m, d) = ymd(*ord);
             format!("{y:04}-{m:02}-{d:02}")
         }
+        Value::Time { local, zone, .. } => time_text(*local, zone),
         Value::Date { local, zone, .. } => date_text(*local, zone, if iso { 'T' } else { ' ' }),
         Value::Delta(n) => {
             let (d, s, u) = parts(*n);
@@ -843,6 +889,5 @@ pub unsafe extern "C" fn imre_calendar_text(o: *const Object, iso: bool) -> *con
         Value::Zone { offset, name } => name
             .as_ref()
             .map_or_else(|| zone_name(delta(offset)), |s| s.as_str().to_owned()),
-    });
-    crate::StrOwner::into_raw(text::owned_string(&s))
+    }
 }

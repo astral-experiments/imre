@@ -1,8 +1,88 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
+use std::borrow::Cow;
 use std::fmt::{self, Write};
 
+use num_bigint::BigInt;
+use num_traits::Zero;
+
 use crate::{Error, Kind, Str};
+
+/// Parse the `int(text, 16)` conversion used by UUID's hexadecimal constructor.
+///
+/// # Safety
+/// The compiler roots the immutable string for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_parse_hex(text: *const Str) -> usize {
+    // SAFETY: the borrowed text is immutable for the duration of this conversion.
+    let text = unsafe { &*text };
+    crate::finish(parse_radix(text, 16).map(crate::Int::into_raw), 1)
+}
+
+/// Parse Python integer text at a validated radix, including prefixes and Unicode decimal digits.
+pub(crate) fn parse_radix(source: &str, mut base: u32) -> crate::Result<crate::Int> {
+    let original = source;
+    let original_base = base;
+    let error = || invalid_literal_in_base(original, original_base);
+    let source = source.trim();
+    let source = if source.is_ascii() {
+        Cow::Borrowed(source)
+    } else {
+        let mut normalized = String::new();
+        normalized
+            .try_reserve_exact(source.len())
+            .map_err(|_| Error::allocation())?;
+        normalized.extend(
+            source
+                .chars()
+                .map(|ch| decimal_digit(ch).map_or(ch, |digit| char::from(b'0' + digit))),
+        );
+        Cow::Owned(normalized)
+    };
+    let source = source.as_ref();
+    let (negative, digits) = match source.as_bytes().first() {
+        Some(b'-') => (true, &source[1..]),
+        Some(b'+') => (false, &source[1..]),
+        _ => (false, source),
+    };
+    let radix_prefix = digits.as_bytes().get(..2).and_then(|v| match v {
+        b"0b" | b"0B" => Some(2),
+        b"0o" | b"0O" => Some(8),
+        b"0x" | b"0X" => Some(16),
+        _ => None,
+    });
+    let mut digits = digits;
+    let guessed = base == 0;
+    let prefixed = radix_prefix.is_some_and(|r| base == 0 || r == base);
+    if prefixed {
+        base = radix_prefix.unwrap();
+        digits = digits[2..].strip_prefix('_').unwrap_or(&digits[2..]);
+    } else if guessed {
+        base = 10;
+    }
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+        || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
+    {
+        return Err(error());
+    }
+    let normalized = if digits.contains('_') {
+        let mut text = String::new();
+        text.try_reserve_exact(digits.len())
+            .map_err(|_| Error::allocation())?;
+        text.extend(digits.chars().filter(|&ch| ch != '_'));
+        Cow::Owned(text)
+    } else {
+        Cow::Borrowed(digits)
+    };
+    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(error)?;
+    if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
+        return Err(error());
+    }
+    crate::Int::try_new(if negative { -value } else { value }).map_err(|_| Error::allocation())
+}
 
 /// Record the interpreter setting before any user code can change the environment.
 #[unsafe(no_mangle)]
@@ -59,6 +139,33 @@ pub(super) fn decimal_digits_allowed(count: usize) -> bool {
     limit == 0 || count <= limit as usize
 }
 
+/// Enforces the limit on a validated, unsigned ASCII digit sequence with optional separators.
+pub(super) fn check_input_digits(digits: &str, limit: u32) -> crate::Result<()> {
+    if limit == 0 || digits.len() <= limit as usize {
+        return Ok(());
+    }
+    let count = digits.bytes().filter(u8::is_ascii_digit).count();
+    if count <= limit as usize {
+        return Ok(());
+    }
+    let (mut limit_buf, mut count_buf) = (itoa::Buffer::new(), itoa::Buffer::new());
+    let parts = [
+        "Exceeds the limit (",
+        limit_buf.format(limit),
+        " digits) for integer string conversion: value has ",
+        count_buf.format(count),
+        " digits; use sys.set_int_max_str_digits() to increase the limit",
+    ];
+    let mut detail = String::new();
+    detail
+        .try_reserve_exact(parts.iter().map(|part| part.len()).sum())
+        .map_err(|_| Error::allocation())?;
+    for part in parts {
+        detail.push_str(part);
+    }
+    Err(Error::new(Kind::ValueError, detail))
+}
+
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     let limit = decimal_limit();
@@ -93,6 +200,52 @@ pub(super) fn decimal_string(value: &crate::Int) -> crate::Result<Str> {
     let big = value.big();
     check_decimal(&big)?;
     Ok(Str::from(big.to_string()))
+}
+
+/// Format the full integer coefficient, ignoring the limit used by str(int).
+pub(super) fn try_decimal_coefficient(value: &crate::Int) -> Option<Str> {
+    let mut buffer = itoa::Buffer::new();
+    if let Some(value) = value.as_small() {
+        return Some(Str::new(buffer.format(value)));
+    }
+
+    const BASE: u64 = 1_000_000_000;
+    let value = value.big();
+    let mut groups = Vec::<u32>::new();
+    // Each nine-digit group holds more than 29 bits.
+    let capacity = usize::try_from(value.bits().div_ceil(29)).ok()?;
+    groups.try_reserve_exact(capacity).ok()?;
+    for limb in value.iter_u32_digits().rev() {
+        let mut carry = u64::from(limb);
+        for group in &mut groups {
+            let word = (u64::from(*group) << 32) + carry;
+            *group = (word % BASE) as u32;
+            carry = word / BASE;
+        }
+        while carry != 0 {
+            groups.push((carry % BASE) as u32);
+            carry /= BASE;
+        }
+    }
+
+    let mut groups = groups.into_iter().rev();
+    let first = buffer.format(groups.next().unwrap_or(0));
+    let negative = value.sign() == num_bigint::Sign::Minus;
+    let length = groups
+        .len()
+        .checked_mul(9)?
+        .checked_add(first.len() + usize::from(negative))?;
+    let mut text = Str::try_with_capacity(length).ok()?;
+    if negative {
+        text.push('-');
+    }
+    text.push_str(first);
+    for group in groups {
+        let digits = buffer.format(group);
+        text.push_str(&"000000000"[digits.len()..]);
+        text.push_str(digits);
+    }
+    Some(text)
 }
 
 /// Builds Python's base-ten conversion diagnostic from the original literal.
@@ -203,6 +356,25 @@ fn literal_repr_prefix(value: &str) -> Str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decimal_coefficients_preserve_sign_and_zero_padded_groups() {
+        use num_bigint::BigInt;
+
+        for bits in [0, 1, 30, 62, 63, 64, 127, 257, 16384] {
+            let power = BigInt::from(1u8) << bits;
+            for delta in [-1, 0, 1] {
+                let coefficient: BigInt = &power + delta;
+                for value in [coefficient.clone(), -coefficient] {
+                    let expected = value.to_string();
+                    assert_eq!(
+                        try_decimal_coefficient(&crate::Int::new(value)).as_deref(),
+                        Some(expected.as_str())
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn invalid_literal_prefix_preserves_late_quotes_and_partial_escapes() {

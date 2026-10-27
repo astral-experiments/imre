@@ -52,6 +52,10 @@ REJECTED = {
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
+    "conditional_missing_export": ({
+        "main.py": "from helper import chosen\n",
+        "helper.py": "if False:\n    def chosen():\n        return 1\n",
+    }, "no static binding"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
@@ -98,6 +102,21 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "conditional_function_export": {
+        "main.py": (
+            "from helper import selected as chosen\nimport helper\n"
+            "print(chosen(), helper.selected is chosen, helper.other())\n"
+        ),
+        "helper.py": (
+            "import sys\n"
+            "def guard(prefix):\n    print(prefix)\n    return sys.platform.startswith(prefix)\n"
+            "if guard('win'):\n    def selected():\n        return 'windows'\n"
+            "elif guard('linux'):\n    def selected():\n        return 'linux'\n"
+            "else:\n    def selected():\n        return 'other'\n"
+            "if guard(''):\n    def other():\n        return 'always'\n"
+            "else:\n    def other():\n        return 'unreachable'\n"
+        ),
+    },
     "ready_function_in_cycle": {
         "main.py": "from pkg.parent import observed\nprint(observed)\n",
         "pkg/__init__.py": "",

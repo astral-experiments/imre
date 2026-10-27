@@ -58,6 +58,8 @@ Two original root configuration methods check the formatter, handler replacement
 Two more [filename configuration methods](config.md#filename-configuration) check native option conflicts and the UTF-8 bytes emitted through the root. The option-conflict assertions run in Imre; CPython checks the emitted file.
 Two [ASCII file configuration methods](config.md#file-encoding-and-errors) check explicit and default error handling. Their bodies and assertions run in CPython, and their file handlers emit in Imre.
 FileHandler also routes records through the live handler list. The 25 file-delivery observations add zero upstream test IDs.
+The runtime-import comparison calls the locked Werkzeug wheel’s original `_log` twice. It verifies the identity of the registered Logger and its single StreamHandler, the handler’s `sys.stderr` stream, and both emitted lines at O0 and O3. This separate consumer fixture adds zero occurrences to the 272-test suite. [Werkzeug fixture and reproduction](../../../flask/README.md#werkzeug-access-logging)
+
 Four bodies verify native stderr with the original
 CPython output helper. The 51 methods with CPython bodies exercise [logger cache invalidation](cache.md), named handler registration, the registry, timed and rotating
 files, record flags, [formatters](formatters.md), or [configuration](config.md).

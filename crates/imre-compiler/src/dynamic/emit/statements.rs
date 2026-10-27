@@ -1,8 +1,9 @@
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
+use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Function, LoopTarget};
+use super::{Body, Cleanup, Function, LoopTarget};
 
 enum Place {
     Name(String),
@@ -11,23 +12,81 @@ enum Place {
 }
 
 impl Function<'_, '_> {
+    /// A global declaration applies to the entire code block, even in an untaken branch.
+    pub(super) fn declare_globals(&mut self, suite: &[ast::Stmt]) {
+        #[derive(Default)]
+        struct Globals<'a>(std::collections::BTreeSet<&'a str>);
+
+        impl<'a> Visitor<'a> for Globals<'a> {
+            fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+                match statement {
+                    ast::Stmt::Global(global) => {
+                        self.0.extend(global.names.iter().map(|name| name.as_str()));
+                    }
+                    ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                    _ => visitor::walk_stmt(self, statement),
+                }
+            }
+
+            fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        }
+
+        let mut globals = Globals::default();
+        globals.visit_body(suite);
+        for name in globals.0 {
+            let name = self.text(name);
+            self.op("declare_global", &[&self.scope.clone(), &name]);
+        }
+    }
+
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
                 break;
             }
             self.checkpoint(stmt);
+            self.simple_call = match stmt {
+                ast::Stmt::Assign(v)
+                    if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                        && matches!(&*v.value, ast::Expr::Call(_)) =>
+                {
+                    Some(v.value.range())
+                }
+                ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+                    ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+                    _ => None,
+                }),
+                _ => None,
+            };
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
                         self.expr(&v.value);
                     }
                 }
-                ast::Stmt::Pass(_) => {}
+                ast::Stmt::Pass(_) | ast::Stmt::Global(_) => {}
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     for t in &v.targets {
                         self.assign(t, &value);
+                    }
+                }
+                ast::Stmt::Delete(v) => {
+                    for target in &v.targets {
+                        match self.place(target) {
+                            Some(Place::Name(name)) => {
+                                self.op("delname", &[&self.scope.clone(), &name]);
+                            }
+                            Some(Place::Item(obj, key)) => {
+                                self.op("delitem", &[&obj, &key]);
+                            }
+                            Some(Place::Attr(obj, name)) => {
+                                self.op("delattr", &[&obj, &name]);
+                            }
+                            _ => {
+                                self.unsupported("deletion target");
+                            }
+                        }
                     }
                 }
                 ast::Stmt::AnnAssign(v) => {
@@ -54,19 +113,26 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
+                    let generator = is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
-                    } else if is_generator(&v.body) {
-                        Body::Unsupported(stmt, "generator function")
+                    } else if generator {
+                        Body::GeneratorFunction(&v.body)
                     } else {
                         Body::Statements(&v.body)
                     };
                     let function = self.define(
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         v.name.as_str(),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         body,
                     );
+                    if v.is_async && !generator {
+                        // Set CO_COROUTINE on the definition before any decorator
+                        // can inspect it. Async generators use a different flag.
+                        self.op("coroutine_function", &[&function]);
+                    }
                     self.decorated(&v.name, &decorators, function);
                 }
                 ast::Stmt::ClassDef(v) => {
@@ -83,7 +149,13 @@ impl Function<'_, '_> {
                     } else {
                         self.op("list", &[])
                     };
-                    let init = self.define(v.name.as_str(), None, None, Body::Namespace(&v.body));
+                    let init = self.define(
+                        v.start(),
+                        v.name.as_str(),
+                        None,
+                        None,
+                        Body::Namespace(&v.body),
+                    );
                     let name = self.text(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
@@ -93,7 +165,9 @@ impl Function<'_, '_> {
                         .value
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.close_contexts(0);
+                    self.live.push(value.clone());
+                    self.run_cleanups(0);
+                    self.live.pop();
                     self.end(&format!("ret i64 {value}"));
                 }
                 ast::Stmt::If(v) => {
@@ -146,7 +220,7 @@ impl Function<'_, '_> {
                             &target.step
                         }
                         .clone();
-                        self.close_contexts(target.with_depth);
+                        self.run_cleanups(target.cleanup_depth);
                         self.jump(&dest);
                     } else {
                         self.unsupported("loop control outside a loop");
@@ -189,7 +263,13 @@ impl Function<'_, '_> {
                         );
                     }
                 }
-                ast::Stmt::Try(v) if !v.is_star && v.finalbody.is_empty() => self.try_except(v),
+                ast::Stmt::Try(v) if !v.is_star => {
+                    if v.finalbody.is_empty() {
+                        self.try_except(v);
+                    } else {
+                        self.try_finally(v);
+                    }
+                }
                 ast::Stmt::With(v) if !v.is_async => self.with(&v.items, &v.body),
                 ast::Stmt::Raise(v) => {
                     let exc = if let Some(e) = &v.exc {
@@ -197,11 +277,8 @@ impl Function<'_, '_> {
                     } else {
                         self.caught.last().cloned().unwrap_or_else(|| "0".into())
                     };
-                    let cause = v
-                        .cause
-                        .as_deref()
-                        .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.raise(&exc, &cause);
+                    let cause = v.cause.as_deref().map(|e| self.expr(e));
+                    self.raise(&exc, cause.as_deref(), v.exc.is_none());
                 }
                 ast::Stmt::Assert(v) => {
                     let test = self.expr(&v.test);
@@ -217,7 +294,7 @@ impl Function<'_, '_> {
                     } else {
                         self.invoke(&cls, &[])
                     };
-                    self.raise(&error, "0");
+                    self.raise(&error, None, false);
                     self.label(&pass);
                 }
                 _ => {
@@ -234,14 +311,69 @@ impl Function<'_, '_> {
 
     pub(super) fn define(
         &mut self,
+        start: TextSize,
         name: &str,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         body: Body<'_>,
     ) -> String {
-        let code = self.output.code(self.source, body);
+        let qualname = format!("{}{name}", self.prefix);
+        let prefix = if matches!(body, Body::Namespace(_)) {
+            format!("{qualname}.")
+        } else {
+            format!("{qualname}.<locals>.")
+        };
+        let doc = match &body {
+            Body::Statements(stmts) if self.output.keep_docstrings => {
+                crate::frontend::docstring(stmts)
+            }
+            Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
+                crate::frontend::docstring(&f.body)
+            }
+            _ => None,
+        };
+        let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
+        let entries = params.map_or_else(Vec::new, |p| {
+            crate::frontend::parameter_annotations(p, returns)
+        });
+        let annotate = if entries.is_empty() {
+            "0".into()
+        } else {
+            let code = self.output.definition(
+                self.source,
+                String::new(),
+                Body::Annotations(entries),
+                params.map_or(start, Ranged::start),
+            );
+            let aname = self.text("__annotate__");
+            let aqname = self.text(&format!("{qualname}.__annotate__"));
+            let sig = self.text(r#"{"posonly":["format"]}"#);
+            let defaults = self.op("dict", &[]);
+            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+        };
+        let qualname = self.text(&qualname);
         let mut signature =
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
+        if params.is_some() && uses_class_cell(&body) {
+            signature["class_cell"] = json!(true);
+        }
+        let generator = if let Body::GeneratorFunction(stmts) = &body {
+            let first = stmts[0].start();
+            let start = first.to_usize();
+            let end = stmts.last().unwrap().end().to_usize();
+            let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
+            let indent = if prefix.chars().all(char::is_whitespace) {
+                prefix
+            } else {
+                " "
+            };
+            // Slice the suite as written so indentation inside multiline strings survives.
+            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            Some((self.output.data(text.as_bytes()), self.source.line(first)))
+        } else {
+            None
+        };
+        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
@@ -274,7 +406,37 @@ impl Function<'_, '_> {
         }
         let sig = self.text(&signature.to_string());
         let name = self.text(name);
-        self.checked(&format!("call i64 @imre_dyn_def(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults})", self.scope))
+        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
+        if let Some((source, line)) = generator {
+            self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
+        }
+        function
+    }
+
+    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+        // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
+        let format = self.lookup("format");
+        let two = self.integer(2);
+        let unsupported = self.op(">", &[&format, &two]);
+        let bad = self.name("b");
+        let good = self.name("b");
+        let condition = self.truth(&unsupported);
+        self.branch(&condition, &bad, &good);
+        self.label(&bad);
+        let error = self.lookup("NotImplementedError");
+        self.raise(&error, None, false);
+        self.label(&good);
+        let values = self.op("dict", &[]);
+        for &(name, expression) in entries {
+            let key = self.text(name);
+            let value = if self.source.string_annotations {
+                self.text(&crate::frontend::annotation_spelling(expression))
+            } else {
+                self.expr(expression)
+            };
+            self.op("put", &[&values, &key, &value]);
+        }
+        self.end(&format!("ret i64 {values}"));
     }
 
     fn decorated(&mut self, name: &ast::Identifier, decorators: &[String], mut value: String) {
@@ -379,7 +541,7 @@ impl Function<'_, '_> {
         self.loops.push(LoopTarget {
             step: step.clone(),
             done: done.clone(),
-            with_depth: self.exits.len(),
+            cleanup_depth: self.exits.len(),
         });
         self.statements(body);
         self.loops.pop();
@@ -390,11 +552,15 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn raise(&mut self, exc: &str, cause: &str) {
+    fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
         // Raising always transfers control to the enclosing handler.
-        let op = self.output.data(b"raise");
+        let op = self
+            .output
+            .data(if reraise { b"reraise" } else { b"raise" });
+        let explicit = if cause.is_some() { 2 } else { 0 };
+        let cause = cause.unwrap_or("0");
         self.line(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 0)"
+            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit})"
         ));
         self.jump(&self.error.clone());
     }
@@ -431,23 +597,69 @@ impl Function<'_, '_> {
                 && let Some(name) = &h.name
             {
                 let name = self.text(name.as_str());
-                self.op("delname", &[&self.scope.clone(), &name]);
+                self.op("clearname", &[&self.scope.clone(), &name]);
             }
             self.jump(&done);
             self.label(&next);
         }
-        self.raise(&exc, "0");
+        self.raise(&exc, None, true);
         self.live.pop();
         self.label(&done);
     }
 
-    fn close_contexts(&mut self, depth: usize) {
-        let exits = self.exits[depth..].to_vec();
-        for (exit, outer) in exits.iter().rev() {
+    /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
+    fn try_finally(&mut self, stmt: &ast::StmtTry) {
+        let handler = self.name("b");
+        let done = self.name("b");
+        let outer = std::mem::replace(&mut self.error, handler.clone());
+        self.exits.push((
+            Cleanup::Finally(stmt.finalbody.as_slice().into()),
+            outer.clone(),
+        ));
+        if stmt.handlers.is_empty() {
+            self.statements(&stmt.body);
+        } else {
+            self.try_except(stmt);
+        }
+        self.exits.pop();
+        self.error = outer;
+        if !self.terminated {
+            self.statements(&stmt.finalbody);
+            self.jump(&done);
+        }
+
+        self.label(&handler);
+        let exception = self.op("take_error", &[]);
+        self.live.push(exception.clone());
+        self.caught.push(exception.clone());
+        self.statements(&stmt.finalbody);
+        self.caught.pop();
+        self.live.pop();
+        if !self.terminated {
+            self.raise(&exception, None, true);
+        }
+        self.label(&done);
+    }
+
+    /// A return, break or continue inside a finally may replace the pending exit.
+    fn run_cleanups(&mut self, depth: usize) {
+        let active = self.exits.clone();
+        for index in (depth..active.len()).rev() {
+            if self.terminated {
+                break;
+            }
+            self.exits.truncate(index);
+            let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
-            self.invoke(exit, &["0", "0", "0"]);
+            match cleanup {
+                Cleanup::With(exit) => {
+                    self.invoke(exit, &["0", "0", "0"]);
+                }
+                Cleanup::Finally(body) => self.statements(body),
+            }
             self.error = previous;
         }
+        self.exits = active;
     }
 
     fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt]) {
@@ -462,7 +674,8 @@ impl Function<'_, '_> {
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
-        self.exits.push((exit.clone(), outer.clone()));
+        self.exits
+            .push((Cleanup::With(exit.clone()), outer.clone()));
         self.live.push(exit.clone());
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);
@@ -477,13 +690,12 @@ impl Function<'_, '_> {
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let ty = self.op("type", &[&exc]);
-        let result = self.invoke(&exit, &[&ty, &exc, "0"]);
+        let result = self.op("exit_exception", &[&exit, &exc]);
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);
         self.label(&propagate);
-        self.raise(&exc, "0");
+        self.raise(&exc, None, true);
         self.label(&done);
     }
 }
@@ -528,6 +740,39 @@ fn is_generator(body: &[ast::Stmt]) -> bool {
     let mut yields = Yields::default();
     yields.visit_body(body);
     yields.0
+}
+
+/// A nested function can close over the declaring class through its enclosing method.
+fn uses_class_cell(body: &Body<'_>) -> bool {
+    struct ClassCell(bool);
+    impl<'a> Visitor<'a> for ClassCell {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if !self.0 && !matches!(stmt, ast::Stmt::ClassDef(_)) {
+                visitor::walk_stmt(self, stmt);
+            }
+        }
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if matches!(expr, ast::Expr::Name(n) if matches!(n.id.as_str(), "super" | "__class__"))
+            {
+                self.0 = true;
+            } else if !self.0 {
+                visitor::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut captures = ClassCell(false);
+    match body {
+        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
+        Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Generator(generator, element) => {
+            for filter in &generator.ifs {
+                captures.visit_expr(filter);
+            }
+            captures.visit_expr(element);
+        }
+        Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
+    }
+    captures.0
 }
 
 fn scalar_annotation(expr: &ast::Expr) -> Option<&'static str> {

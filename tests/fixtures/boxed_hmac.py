@@ -3,6 +3,28 @@ import hmac
 
 
 def check():
+    data = bytearray(b"abc")
+    digest = hashlib.sha1(data)
+    digest.update(data)
+    mac = hmac.new(data, data, "sha1")
+    mac.update(data)
+    data[0] = 90
+    print(digest.hexdigest(), mac.hexdigest())
+    print(hmac.compare_digest(data, b"Zbc"), hmac.compare_digest(b"abc", data),
+          hmac.compare_digest(data, bytearray(b"Zbc")))
+
+    key = bytearray(b"x")
+    lengths = []
+
+    def grow_key(data=b""):
+        lengths.append(len(data))
+        if len(key) == 1:
+            key.extend(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789..")
+        return hashlib.sha1(data)
+
+    grown = hmac.new(key, b"message", grow_key)
+    print(lengths, grown.hexdigest() == hmac.new(bytes(key), b"message", "sha1").hexdigest())
+
     calls = []
 
     def lazy_sha1(data=b""):

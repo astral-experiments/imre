@@ -246,6 +246,10 @@ impl Checker<'_> {
             ));
         }
         let skip = usize::from(receiver.is_some());
+        if signature.asynchronous {
+            self.types
+                .set_coroutine_target(signature.id, crate::types::CoroutineTarget::Coroutine);
+        }
         if signature.params[skip..].iter().any(|parameter| {
             matches!(
                 parameter.kind,
@@ -467,6 +471,17 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if let Type::WeakProxy(class) = callable.ty {
+            return self.weak_proxy_call(call, callable, class);
+        }
+        if let Type::Class(class) = callable.ty
+            && self.classes.methods[class].contains_key("__call__")
+        {
+            return self.dispatch_record(class, callable, call, |checker, layout, receiver| {
+                let signature = checker.classes.methods[layout]["__call__"].clone();
+                checker.source_call(call, &signature, Some(receiver), 1)
+            });
+        }
         if let Type::Placeholder(kind) = callable.ty {
             return self.placeholder_call(call, callable, kind);
         }

@@ -1,6 +1,6 @@
 //! Percent escapes operate on octets. Original Unicode text bypasses decoding.
 use super::super::codecs::Codec;
-use super::{Error, Kind, Result, Str, StrOwner, finish, percent_bytes, url_data};
+use super::{Error, Kind, Result, Str, StrOwner, UrlInput, finish, percent_bytes, url_data};
 use std::{borrow::Cow, ffi::c_void};
 
 fn check_option(value: &str) -> Result<()> {
@@ -170,45 +170,58 @@ pub unsafe extern "C" fn imre_url_unquote(
         // SAFETY: the tag and the optional option pointers come from rooted typed operands.
         let (input, encoding, errors) = unsafe {
             (
-                url_data(source, bytes != 0),
+                if bytes != 0 {
+                    UrlInput::Bytes(url_data(source, true))
+                } else {
+                    UrlInput::Text(&*source.cast::<Str>())
+                },
                 encoding.as_ref(),
                 errors.as_ref(),
             )
         };
-        if bytes == 0 && !input.contains(&b'%') {
-            // SAFETY: the original scalar string remains live for transfer to the caller.
+        if input.is_unescaped_text() {
+            // SAFETY: The original unescaped scalar string remains rooted.
             return Ok(StrOwner::into_raw(unsafe {
                 StrOwner::acquire_word(source as usize)
             }));
         }
-        let encoding = encoding.map(Str::as_str);
-        let errors = errors.map(Str::as_str);
-        if bytes != 0 && encoding.is_none() {
-            return Err(Error::new(
-                Kind::TypeError,
-                "decode() argument 'encoding' must be str, not None",
-            ));
-        }
-        let encoding = encoding.unwrap_or("utf-8");
-        check_option(encoding)?;
-        if bytes != 0 && errors.is_none() {
-            return Err(Error::new(
-                Kind::TypeError,
-                "decode() argument 'errors' must be str, not None",
-            ));
-        }
-        let errors = errors.unwrap_or("replace");
-        check_option(errors)?;
-        let text = if input.is_empty() {
-            String::new()
-        } else if bytes != 0 {
-            Codec::lookup(encoding)?.decode(&unquoted(input)?, Some(errors))?
-        } else {
-            decode_text(input, Codec::lookup(encoding)?, errors)?
-        };
+        let text = decode_component(input, encoding.map(Str::as_str), errors.map(Str::as_str))?;
         crate::checked_owned_str(text.into())
     })();
     finish(result, std::ptr::null())
+}
+
+/// Decode an entire bytes value, or the ASCII spans of percent-escaped UTF-8 text.
+pub(crate) fn decode_component(
+    input: UrlInput<'_>,
+    encoding: Option<&str>,
+    errors: Option<&str>,
+) -> Result<String> {
+    let bytes = matches!(input, UrlInput::Bytes(_));
+    if bytes && encoding.is_none() {
+        return Err(Error::new(
+            Kind::TypeError,
+            "decode() argument 'encoding' must be str, not None",
+        ));
+    }
+    let encoding = encoding.unwrap_or("utf-8");
+    check_option(encoding)?;
+    if bytes && errors.is_none() {
+        return Err(Error::new(
+            Kind::TypeError,
+            "decode() argument 'errors' must be str, not None",
+        ));
+    }
+    let errors = errors.unwrap_or("replace");
+    check_option(errors)?;
+    let input = input.as_bytes();
+    if input.is_empty() {
+        Ok(String::new())
+    } else if bytes {
+        Codec::lookup(encoding)?.decode(&unquoted(input)?, Some(errors))
+    } else {
+        decode_text(input, Codec::lookup(encoding)?, errors)
+    }
 }
 
 mod query;

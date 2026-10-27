@@ -61,10 +61,26 @@ pub unsafe extern "C" fn imre_calendar_replace(
 /// year even for the temporary probes used to resolve a gap or repeated hour.
 fn local_seconds(utc: i64) -> Result<i64, Error> {
     let t = timed::civil(utc, false)?;
-    let year = t.tm_year + 1900;
+    let year = t.tm_year.checked_add(1900).ok_or_else(timed::overflow)?;
     check(year, "year", 1, 9999)?;
     let days = (ordinal(year, t.tm_mon + 1, t.tm_mday) - EPOCH_ORD) as i64;
     Ok(days * 86_400 + i64::from((t.tm_hour * 60 + t.tm_min) * 60 + t.tm_sec))
+}
+
+/// Detect the second occurrence of a repeated local time, as in datetime.fromtimestamp.
+pub(super) fn local_fold(seconds: i64) -> Result<i32, Error> {
+    const DAY_SECONDS: i64 = 86_400;
+    if cfg!(windows) && seconds <= DAY_SECONDS {
+        return Ok(0);
+    }
+    let wall = local_seconds(seconds)?;
+    let previous = seconds
+        .checked_sub(DAY_SECONDS)
+        .ok_or_else(timed::overflow)?;
+    let transition = wall - local_seconds(previous)? - DAY_SECONDS;
+    Ok(i32::from(
+        transition < 0 && local_seconds(seconds + transition)? == wall,
+    ))
 }
 
 /// Solve local_seconds(utc) == wall using the two offsets bracketing a clock

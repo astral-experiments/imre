@@ -1,0 +1,165 @@
+"""Compare dict subclass storage, inherited methods, and explicit base dispatch."""
+
+
+def current():
+    from collections import Counter
+
+    counts = Counter(a=10, b=5, c=0)
+    print(counts.total(), counts["absent"], len(counts))
+    counts.update("ba", a=1 << 100)
+    counts.subtract({"a": 1 << 100, "b": 9}, c=1)
+    copied = counts.copy()
+    del counts["c"]
+    del counts["absent"]
+    print(list(counts.items()), copied.total(), copied["absent"])
+    plain = Counter(a=1)
+    with_zero = Counter(a=1, b=0)
+    print(plain == with_zero, plain != with_zero, with_zero == dict(plain))
+    print(Counter(b=-1) < Counter(), plain <= with_zero, with_zero > plain)
+
+    class Data(dict):
+        pass
+
+    empty = Data()
+    print(isinstance(empty, dict), bool(empty), empty.get("visits", 0), len(empty))
+    source = {"visits": 1}
+    data = Data(source, greeting="hello")
+    data.visits = "attribute"
+    keys = data.keys()
+    data["visits"] += 1
+    data["more"] = "key"
+    print(data.visits, dict.get(data, "visits"), list(keys), len(data))
+    print(dict(data), {**data}, data == dict(data), source)
+    print("visits" in data, "absent" in data, data.get("absent"))
+    print(Data.get is dict.get, Data.__setitem__ is dict.__setitem__)
+
+    class Tracked(Data):
+        def __init__(self, values):
+            self.writes = []
+            dict.__init__(self, values)
+
+        def __setitem__(self, key, value):
+            self.writes.append(key)
+            dict.__setitem__(self, key, value)
+
+        def __missing__(self, key):
+            return "missing " + key
+
+        def __bool__(self):
+            return False
+
+    session = Tracked({"visits": 1})
+    values = session.values()
+    print(bool(session), bool(values), session.writes, session["absent"], session.get("absent"))
+    session["visits"] = session.get("visits", 0) + 1
+    print(session.writes, list(values), session["visits"])
+    print(dict.__setitem__(session, "base", 9), dict.__init__(session, {"another": 10}))
+    dict.update(session, [("key", 11)])
+    print(session.writes, session)
+    data.get = lambda key: "shadow"
+    print(data.get("visits"), dict.get(data, "visits"))
+
+    pairs = dict.__iter__({"first": None, "second": None, "third": None})
+    from operator import length_hint
+
+    print(length_hint(pairs))
+    for key in pairs:
+        print(key)
+        break
+    print(length_hint(pairs))
+
+    class Shared(dict):
+        def __iter__(self):
+            return pairs
+
+    for key in Shared():
+        print(key)
+        break
+    print(length_hint(pairs), list(pairs), length_hint(pairs))
+
+    live = {"first": 1, "second": 2}
+    live_items = iter(live.items())
+    live_values = iter(live.values())
+    print(next(live_items), next(live_values))
+    live["second"] = 99
+    print(next(live_items), next(live_values))
+    live["third"] = 3
+    for cursor in (live_items, live_values):
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            print(error, length_hint(cursor))
+
+    def replace_and_append(value):
+        if value == 1:
+            sequence[1] = 3
+            sequence.append(4)
+        return value
+
+    sequence = [1, 2]
+    visited = []
+    for value in sequence:
+        visited.append(replace_and_append(value))
+    print(visited)
+    sequence = [1, 2]
+    print([replace_and_append(value) for value in sequence])
+
+    class Filtered(Data):
+        def __iter__(self):
+            raise AssertionError("dict copying uses keys")
+
+        def keys(self):
+            return ("visits",)
+
+        def __getitem__(self, key):
+            return dict.__getitem__(self, key) + 10
+
+    filtered = Filtered(data)
+    print(dict(filtered), {**filtered})
+
+    pending = []
+
+    class FirstPair(dict):
+        def __iter__(self):
+            pending[1] = ("replaced", 3)
+            pending.append(("appended", 2))
+            return dict.__iter__({"first": None, 1: None})
+
+    pending.extend([FirstPair(), ("original", 4)])
+    print(dict(pending))
+
+    pairs = dict.__iter__({("first", 1): None, ("bad",): None, ("later", 2): None})
+    copied = {}
+    try:
+        copied.update(pairs)
+    except ValueError:
+        print(copied, list(pairs))
+
+    class FailsLater(Filtered):
+        def keys(self):
+            return ("visits", "absent")
+
+    received = {}
+    try:
+        received.update(FailsLater(data))
+    except KeyError as error:
+        print(received, error.args)
+
+    def only_view():
+        owner = Data(held=["live"])
+        return owner.items()
+
+    view = only_view()
+    for _ in range(6000):
+        []
+    print(list(view), list(values), session.writes)
+
+    try:
+        empty[()]
+    except KeyError as error:
+        print(error.args)
+    for method, args in ((dict.get, ()), (dict.get, (1, "x")), (dict.__setitem__, (1, "x", 2))):
+        try:
+            method(*args)
+        except TypeError as error:
+            print(error.args)

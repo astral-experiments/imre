@@ -102,6 +102,8 @@ def main():
     oracle = observe(reference, operations_timeout=TIMEOUT + 2)
     print("CPython:", oracle[2].splitlines()[0].decode(), flush=True)
     print("CPython: loopback, fd lifetime, short send, EAGAIN, sendall and reset passed", flush=True)
+    boxed = (FIXTURES / "boxed/main.py").resolve()
+    boxed_output = subprocess.check_output([args.python, "-E", boxed], timeout=TIMEOUT)
     with tempfile.TemporaryDirectory(prefix="imre-socket-") as directory:
         for opt in args.opt_levels:
             programs = {}
@@ -113,6 +115,12 @@ def main():
                 programs[name] = [binary]
             observed = observe(programs)
             assert observed == oracle, (observed, oracle)
+            binary = Path(directory) / "boxed-socket"
+            subprocess.run([args.compiler.resolve(), "build", boxed, "--module-root", boxed.parent,
+                            "--no-cache", "--runtime", args.runtime.resolve(), "--clang", args.clang,
+                            "--opt-level", opt, "-o", binary], check=True, timeout=180)
+            with child([binary]) as proc:
+                assert collect(proc) == boxed_output
             print(f"O{opt}: socket observations matched CPython", flush=True)
 
 

@@ -1,5 +1,5 @@
 from enum import StrEnum
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlunsplit
 
 class UrlWord(StrEnum):
     PATH = "a/b!é"
@@ -10,6 +10,10 @@ class UrlWord(StrEnum):
 
 def enum_options(codec: UrlWord | None, errors: UrlWord | None) -> str:
     return unquote("caf%E9", encoding=codec, errors=errors)
+
+def components(calls: list[int]) -> tuple[str, str, UrlWord, str, UrlWord]:
+    calls.append(1)
+    return "https", "example.org", UrlWord.PATH, "", UrlWord.ESCAPED
 
 def encoded(value: str, codec: str | None, errors: str | None) -> str:
     return quote(value, errors=errors, encoding=codec)
@@ -83,3 +87,7 @@ try:
     print(quote("a", encoding="no_such_codec", errors="bad\x00handler"))
 except ValueError as error:
     print(str(error))
+
+calls: list[int] = []
+print(urlunsplit(components(calls)))
+assert len(calls) == 1

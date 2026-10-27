@@ -1,0 +1,33 @@
+import urllib
+from urllib import parse
+from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlunsplit
+
+
+def current():
+    print(urllib.parse is parse, parse.urlsplit is urlsplit)
+    print(urllib.__package__, parse.__package__, parse.__name__, hasattr(urllib, "__path__"))
+    for target in ("/health", "/hello%20there?suffix=%26&suffix=%C3%A9", "//first/second?x=1",
+                   "https://user:pass@[FE80::1%25Scope]:443/a%2Fb?x=1#frag",
+                   b"HTTP://User@EXAMPLE:00080/a%2Fb?#"):
+        parts = urlsplit(target)
+        print(isinstance(parts, tuple), isinstance(parts, SplitResult), isinstance(parts, SplitResultBytes))
+        print(tuple(parts), parts[2], parts.hostname, parts.port, parts.username, parts.password)
+        print(unquote(parts.path), urlunsplit(parts), parts.geturl())
+    print(urlsplit(url=" /a\tb#f", scheme="http", allow_fragments=False))
+    print(unquote(string="%FF+caf%C3%A9"), unquote(b"%FF", encoding="latin-1"))
+    print(unquote("%", errors="werkzeug.url_quote"), unquote("untouched", encoding=None))
+    parts = urlsplit("https://example:bad/path")
+    print(parts.path, parts.hostname)
+    try:
+        print(parts.port)
+    except ValueError as error:
+        print(str(error))
+    try:
+        print(urlsplit("http://[::1"))
+    except ValueError as error:
+        print(str(error))
+    for invalid in (None, ()):
+        try:
+            unquote(invalid)
+        except (TypeError, AttributeError) as error:
+            print(str(error))

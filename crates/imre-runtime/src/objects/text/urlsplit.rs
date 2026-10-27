@@ -172,6 +172,25 @@ fn split<'a>(mut url: &'a str, default_scheme: &'a str, fragments: bool) -> Resu
     })
 }
 
+/// Borrow the five cleaned fields until the caller has copied them to its result.
+pub(crate) fn with_split_fields<T>(
+    url: &str,
+    scheme: &str,
+    fragments: bool,
+    store: impl FnOnce([&str; 5]) -> Result<T>,
+) -> Result<T> {
+    let url = clean(url, false);
+    let scheme = clean(scheme, true);
+    let parts = split(&url, &scheme, fragments)?;
+    store([
+        parts.scheme.as_ref(),
+        parts.netloc.unwrap_or_default(),
+        parts.path,
+        parts.query.unwrap_or_default(),
+        parts.fragment.unwrap_or_default(),
+    ])
+}
+
 /// # Safety
 /// Both input pointers match their flags and stay rooted. The output is a
 /// zero-initialized five-field record; its caller owns any fields written before an error.
@@ -195,7 +214,7 @@ pub unsafe extern "C" fn imre_url_split(
                 ));
             }
             // SAFETY: The generated caller roots the URL through the allocation of its result.
-            let url = clean(unsafe { decoded(url, is_bytes)? }, false);
+            let url = unsafe { decoded(url, is_bytes)? };
             if !is_bytes && scheme_bytes {
                 return Err(Error::new(
                     Kind::TypeError,
@@ -203,26 +222,20 @@ pub unsafe extern "C" fn imre_url_split(
                 ));
             }
             // SAFETY: The scheme remains rooted until the fields have been copied.
-            let scheme = clean(unsafe { decoded(scheme, scheme_bytes)? }, true);
-            let parts = split(&url, &scheme, fragments != 0)?;
-            let fields = [
-                parts.scheme.as_ref(),
-                parts.netloc.unwrap_or_default(),
-                parts.path,
-                parts.query.unwrap_or_default(),
-                parts.fragment.unwrap_or_default(),
-            ];
-            for (i, field) in fields.into_iter().enumerate() {
-                // SAFETY: split returns exactly five fields, each written once to the zeroed record.
-                unsafe { out.add(i).write(owned(field, is_bytes)?) };
-            }
-            Ok(())
+            let scheme = unsafe { decoded(scheme, scheme_bytes)? };
+            with_split_fields(url, scheme, fragments != 0, |fields| {
+                for (i, field) in fields.into_iter().enumerate() {
+                    // SAFETY: split returns exactly five fields, each written once to the zeroed record.
+                    unsafe { out.add(i).write(owned(field, is_bytes)?) };
+                }
+                Ok(())
+            })
         })(),
         (),
     );
 }
 
-fn port(word: &[u8], is_bytes: bool) -> Result<usize> {
+fn port(word: &[u8], is_bytes: bool) -> Result<u16> {
     if !word.iter().all(u8::is_ascii_digit) {
         let mut repr = String::new();
         if is_bytes {
@@ -249,7 +262,7 @@ fn port(word: &[u8], is_bytes: bool) -> Result<usize> {
             .parse::<u16>()
             .map_err(|_| invalid("Port out of range 0-65535"))?
     };
-    Ok(Int::small(i64::from(n)).unwrap().into_raw())
+    Ok(n)
 }
 
 fn partition(input: &[u8], sep: u8) -> (&[u8], Option<&[u8]>) {
@@ -257,6 +270,70 @@ fn partition(input: &[u8], sep: u8) -> (&[u8], Option<&[u8]>) {
         .iter()
         .position(|&b| b == sep)
         .map_or((input, None), |i| (&input[..i], Some(&input[i + 1..])))
+}
+
+pub(crate) enum NetlocValue<'a> {
+    Text(Cow<'a, [u8]>),
+    Port(u16),
+}
+
+/// Read a derived authority field. Port validation happens only on access.
+pub(crate) fn netloc_property(
+    netloc: super::UrlInput<'_>,
+    property: u32,
+) -> Result<Option<NetlocValue<'_>>> {
+    let is_bytes = matches!(netloc, super::UrlInput::Bytes(_));
+    let netloc = netloc.as_bytes();
+    let (info, host) = netloc
+        .iter()
+        .rposition(|&b| b == b'@')
+        .map_or((None, netloc), |i| (Some(&netloc[..i]), &netloc[i + 1..]));
+    if property <= 1 {
+        return Ok(info
+            .and_then(|info| {
+                let (user, pass) = partition(info, b':');
+                if property == 0 { Some(user) } else { pass }
+            })
+            .map(|s| NetlocValue::Text(Cow::Borrowed(s))));
+    }
+    let (hostname, port_bytes) = if let Some(bracketed) = partition(host, b'[').1 {
+        let (name, suffix) = partition(bracketed, b']');
+        (name, suffix.and_then(|s| partition(s, b':').1))
+    } else {
+        partition(host, b':')
+    };
+    if property == 3 {
+        return port_bytes
+            .filter(|p| !p.is_empty())
+            .map(|p| port(p, is_bytes).map(NetlocValue::Port))
+            .transpose();
+    }
+    debug_assert_eq!(property, 2);
+    if hostname.is_empty() {
+        return Ok(None);
+    }
+    let (name, zone) = partition(hostname, b'%');
+    let lower = if is_bytes {
+        let mut lower = Vec::new();
+        lower
+            .try_reserve_exact(hostname.len())
+            .map_err(|_| Error::allocation())?;
+        lower.extend_from_slice(hostname);
+        lower[..name.len()].make_ascii_lowercase();
+        lower
+    } else {
+        let mut lower = super::lowercase::lowercase(std::str::from_utf8(name).unwrap())
+            .map_err(|_| Error::allocation())?;
+        if let Some(zone) = zone {
+            lower
+                .try_reserve(1 + zone.len())
+                .map_err(|_| Error::allocation())?;
+            lower.push('%');
+            lower.push_str(std::str::from_utf8(zone).unwrap());
+        }
+        lower.into_string().into_bytes()
+    };
+    Ok(Some(NetlocValue::Text(Cow::Owned(lower))))
 }
 
 /// # Safety
@@ -268,58 +345,23 @@ pub unsafe extern "C" fn imre_url_property(
     is_bytes: i32,
     property: u32,
 ) -> usize {
-    let is_bytes = is_bytes != 0;
     // SAFETY: The compiler projects the rooted netloc field with its known layout.
-    let netloc = unsafe { data(netloc, is_bytes) };
+    let netloc = unsafe {
+        if is_bytes != 0 {
+            super::UrlInput::Bytes(data(netloc, true))
+        } else {
+            super::UrlInput::Text(&*netloc.cast::<Str>())
+        }
+    };
     finish(
-        (|| {
-            let (info, host) = netloc
-                .iter()
-                .rposition(|&b| b == b'@')
-                .map_or((None, netloc), |i| (Some(&netloc[..i]), &netloc[i + 1..]));
-            let value = match property {
-                0 | 1 => info.and_then(|info| {
-                    let (user, pass) = partition(info, b':');
-                    if property == 0 { Some(user) } else { pass }
-                }),
-                2 | 3 => {
-                    let (hostname, port_bytes) = if let Some(bracketed) = partition(host, b'[').1 {
-                        let (name, suffix) = partition(bracketed, b']');
-                        (name, suffix.and_then(|s| partition(s, b':').1))
-                    } else {
-                        partition(host, b':')
-                    };
-                    if property == 3 {
-                        return port_bytes
-                            .filter(|p| !p.is_empty())
-                            .map_or(Ok(0), |p| port(p, is_bytes));
-                    }
-                    if hostname.is_empty() {
-                        return Ok(0);
-                    }
-                    let (name, zone) = partition(hostname, b'%');
-                    if !is_bytes {
-                        let name = std::str::from_utf8(name).unwrap();
-                        let mut lower =
-                            super::lowercase::lowercase(name).map_err(|_| Error::allocation())?;
-                        if let Some(zone) = zone {
-                            lower.push('%');
-                            lower.push_str(std::str::from_utf8(zone).unwrap());
-                        }
-                        return owned(&lower, false);
-                    }
-                    let mut lower = hostname.to_vec();
-                    lower[..name.len()].make_ascii_lowercase();
-                    return Ok(BytesOwner::into_raw(bytes::owned_input(&lower)?) as usize);
-                }
-                _ => unreachable!(),
-            };
-            match value {
-                None => Ok(0),
-                Some(v) if is_bytes => Ok(BytesOwner::into_raw(bytes::owned_input(v)?) as usize),
-                Some(v) => owned(std::str::from_utf8(v).unwrap(), false),
+        netloc_property(netloc, property).and_then(|value| match value {
+            None => Ok(0),
+            Some(NetlocValue::Port(n)) => Ok(Int::from(i64::from(n)).into_raw()),
+            Some(NetlocValue::Text(v)) if is_bytes != 0 => {
+                Ok(BytesOwner::into_raw(bytes::owned_input(&v)?) as usize)
             }
-        })(),
+            Some(NetlocValue::Text(v)) => owned(std::str::from_utf8(&v).unwrap(), false),
+        }),
         0,
     )
 }
@@ -447,6 +489,21 @@ fn unsplit(
     Ok(text)
 }
 
+/// Recombine the five public split fields, omitting empty query and fragment delimiters.
+pub(crate) fn join_fields(fields: [&str; 5]) -> Result<String> {
+    let [scheme, netloc, path, query, fragment] = fields;
+    let netloc = (!netloc.is_empty()
+        || (uses_netloc(scheme) && (path.is_empty() || path.starts_with('/'))))
+    .then_some(netloc);
+    unsplit(
+        scheme,
+        netloc,
+        path,
+        (!query.is_empty()).then_some(query),
+        (!fragment.is_empty()).then_some(fragment),
+    )
+}
+
 mod join;
 
 /// # Safety
@@ -464,17 +521,7 @@ pub unsafe extern "C" fn imre_url_geturl(
                 // SAFETY: The source has five live same-layout fields throughout reconstruction.
                 *field = unsafe { decoded(*result.add(i), is_bytes)? };
             }
-            let [scheme, netloc, path, query, fragment] = fields;
-            let netloc = (!netloc.is_empty()
-                || (uses_netloc(scheme) && (path.is_empty() || path.starts_with('/'))))
-            .then_some(netloc);
-            let text = unsplit(
-                scheme,
-                netloc,
-                path,
-                (!query.is_empty()).then_some(query),
-                (!fragment.is_empty()).then_some(fragment),
-            )?;
+            let text = join_fields(fields)?;
             Ok(owned(&text, is_bytes)? as *const c_void)
         })(),
         std::ptr::null(),
