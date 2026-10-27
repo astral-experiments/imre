@@ -881,6 +881,10 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        self.bind_local(scope, name, value);
+    }
+
+    fn bind_local(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
             self.heap.replace_cell(cell, Some(value));
             return;
