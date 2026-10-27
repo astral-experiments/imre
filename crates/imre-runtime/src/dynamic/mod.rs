@@ -1454,6 +1454,14 @@ impl Context {
                     self.bind(scope, original, stream);
                 }
             }
+            "array" => {
+                let array = self.builtin("array.array");
+                self.bind(scope, "array", array);
+                let abc = self.module("_collections_abc")?;
+                let sequence = self.lookup_attr(abc, "MutableSequence")?;
+                let register = self.lookup_attr(sequence, "register")?;
+                self.call(register, vec![array], Vec::new())?;
+            }
             "collections" => {
                 let deque = self.builtin(deque::CLASS);
                 self.bind(scope, "deque", deque);

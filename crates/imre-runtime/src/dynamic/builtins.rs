@@ -134,6 +134,7 @@ const TYPES: &[&str] = &[
     "int",
     "list",
     "map",
+    "memoryview",
     "object",
     "property",
     "classmethod",
