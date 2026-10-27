@@ -4,7 +4,7 @@ use num_traits::{Signed, ToPrimitive};
 
 use ruff_python_literal::cformat::{
     CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
-    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString,
+    CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString, CFormatType,
 };
 use ruff_python_literal::format::{
     FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
@@ -241,6 +241,16 @@ fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
     (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
 }
 
+/// Convert a numeric formatting operand to binary64, checking large integers first.
+fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
+    Ok(match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Float(n) => Some(*n),
+        Value::Int(n) => Some(crate::floats::int_to_float(n)?),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    })
+}
+
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
@@ -253,12 +263,8 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         return Ok(ctx.display(value));
     }
     if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
-        let number = match ctx.heap.get(ctx.scalar_value(value)) {
-            Value::Float(value) => *value,
-            Value::Int(value) => crate::floats::int_to_float(value)?,
-            Value::Bool(value) => f64::from(u8::from(*value)),
-            _ => return Err(type_error(format!("unsupported format string {spec:?}"))),
-        };
+        let number = float_operand(ctx, value)?
+            .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
         return Ok(
             crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
         );
@@ -420,8 +426,8 @@ fn negative_format_char(prefix: &[u8], ch: char) -> bool {
     !after_quantity && i32::from(ch as u8 as std::ffi::c_char).is_negative()
 }
 
-/// Decimal conversions accept real numbers. Octal and hex require the integer-index protocol.
-fn render_percent_integer(
+/// Convert the numeric operand after its starred width and precision have been consumed.
+fn render_percent_number(
     ctx: &mut Context,
     value: Id,
     spec: &CFormatSpec,
@@ -429,6 +435,16 @@ fn render_percent_integer(
     star_width: Option<isize>,
     star_precision: Option<usize>,
 ) -> Result<String> {
+    let stars = star_width
+        .map(|w| crate::Int::from(w as i64))
+        .into_iter()
+        .chain(star_precision.map(crate::Int::from_usize));
+    if matches!(spec.format_type, CFormatType::Float(_)) {
+        let number = float_operand(ctx, value)?.ok_or_else(|| {
+            type_error(format!("must be real number, not {}", ctx.type_name(value)))
+        })?;
+        return Ok(crate::objects::percent_float_field(field, stars, number)?);
+    }
     let conversion = spec.format_char;
     let decimal = matches!(conversion, 'd' | 'i' | 'u');
     let mut convert = || {
@@ -470,11 +486,7 @@ fn render_percent_integer(
     if precision.is_some_and(|n| n > (i32::MAX - 3) as usize) {
         return Err(Error::new("OverflowError", "precision too large"));
     }
-    let operands = star_width
-        .map(|w| crate::Int::from(w as i64))
-        .into_iter()
-        .chain(star_precision.map(crate::Int::from_usize))
-        .chain(std::iter::once(integer));
+    let operands = stars.chain(std::iter::once(integer));
     crate::objects::percent_integer_field(field, operands).map_err(|e| {
         let error = Error::from(e);
         if error.kind == "MemoryError" {
@@ -560,7 +572,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
         let end = input.peek().map_or(format.len(), |&(i, _)| i);
         let field = std::str::from_utf8(&format[start + 1..end])
             .expect("positional octal fields are ASCII");
-        let rendered = render_percent_integer(ctx, value, &spec, field, None, None)?;
+        let rendered = render_percent_number(ctx, value, &spec, field, None, None)?;
         // Keep space for the unprocessed literal bytes as well as this field.
         output
             .try_reserve(rendered.len().saturating_add(format.len() - end))
@@ -648,7 +660,9 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 let decorated = spec.precision.is_some()
                     || spec.min_field_width.is_some()
                     || !spec.flags.is_empty();
-                let number_field = matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
+                let float_field = matches!(spec.format_type, CFormatType::Float(_));
+                let number_field = float_field
+                    || decorated && matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
                 let star_width =
                     matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple));
                 let star_precision = matches!(
@@ -676,18 +690,18 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 } else {
                     &mut args
                 };
-                let layout = (text_field || star_width || star_precision)
+                let layout = (text_field || float_field || star_width || star_precision)
                     .then(|| percent_layout(ctx, spec, field_args))
                     .transpose()?;
                 let arg = field_args
                     .next()
                     .ok_or_else(|| type_error("not enough arguments for format string"))?;
-                if decorated && number_field {
+                if number_field {
                     let (_, (start, _)) = positions
                         .find(|(i, _)| i == position)
                         .expect("parsed percent fields follow their source character positions");
                     let (width, precision) = layout.unwrap_or_default();
-                    let rendered = render_percent_integer(
+                    let rendered = render_percent_number(
                         ctx,
                         arg,
                         spec,

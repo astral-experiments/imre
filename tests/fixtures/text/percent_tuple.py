@@ -60,6 +60,8 @@ for pattern in ["%s | %r | %s | %.2f", "%a %s %d %r", "%d %s %s %s", "%s %d %s %
                 "%s %s %s %x", "%c %s %s %s", "%s %c %s %s", "%s %s %s %c", "%s %f %s %s"]:
     render_values(pattern, (None, b"x\xff", True, -0.0))
 print("[%*.*f]" % (8, 2, 1.25))
+for special in [float("inf"), float("-inf"), float("nan"), float("-nan"), -0.0]:
+    print("[%010f][%+010G][%-010E]" % (special, special, special))
 for value in [1.25, -2.5, float("nan"), float("inf"), float("-inf")]:
     try:
         print("%d" % (value,))
