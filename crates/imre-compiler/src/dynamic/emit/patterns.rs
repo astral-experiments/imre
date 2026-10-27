@@ -161,8 +161,25 @@ impl Function<'_, '_> {
                 }
                 self.label(&done);
             }
-            ast::Pattern::MatchClass(_) => {
-                self.unsupported("class pattern");
+            ast::Pattern::MatchClass(p) => {
+                if !p.arguments.patterns.is_empty() {
+                    self.unsupported("positional class pattern");
+                    return;
+                }
+                let class = self.expr(&p.cls);
+                let field_names = self.op("list", &[]);
+                for keyword in &p.arguments.keywords {
+                    let name = self.code_name(keyword.attr.as_str());
+                    self.op("append", &[&field_names, &name]);
+                }
+                let fields = self.op("match_class", &[value, &class, &field_names]);
+                let condition = self.value(&format!("icmp ne i64 {fields}, 0"));
+                self.pattern_check(&condition, failed);
+                for (index, keyword) in p.arguments.keywords.iter().enumerate() {
+                    let index = self.integer(index);
+                    let field = self.op("get", &[&fields, &index]);
+                    self.pattern(&keyword.pattern, &field, failed, captures, names);
+                }
             }
         }
     }

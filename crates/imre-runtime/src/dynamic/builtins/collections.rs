@@ -480,7 +480,7 @@ pub(super) fn method(
             | "set.__repr__"
             | "frozenset.__repr__"
     ) {
-        return container_slot(ctx, name, args, kwargs);
+        return builtin_slot(ctx, name, args, kwargs);
     }
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
@@ -936,19 +936,19 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
 }
 
 /// Call a builtin slot on the receiver’s native payload, bypassing its override.
-fn container_slot(
+pub(super) fn builtin_slot(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (owner, method) = name.split_once('.').expect("container slot");
+    let (owner, method) = name.split_once('.').expect("builtin slot");
     let Some((&object, rest)) = args.split_first() else {
         return Err(type_error(format!(
             "descriptor '{method}' of '{owner}' object needs an argument"
         )));
     };
-    if !ctx.container_slot_accepts(object, owner) {
+    if !ctx.builtin_slot_accepts(object, owner) {
         return Err(type_error(format!(
             "descriptor '{method}' requires a '{owner}' object but received a '{}'",
             ctx.type_name(object)
@@ -965,17 +965,21 @@ fn container_slot(
                 rest.len()
             )));
         }
-        let storage = match ctx.heap.get(storage) {
-            Value::List(_) | Value::Tuple(_) | Value::Set { .. } => storage,
+        let text = match ctx.heap.get(storage) {
+            Value::Str(_) | Value::Bytes(_) => ctx.repr(storage),
+            Value::ByteArray(bytes) => ctx.bytearray_repr(object, bytes),
+            Value::List(_) | Value::Tuple(_) | Value::Set { .. } => {
+                ctx.checked_container_slot_repr(object, storage)?
+            }
             _ => {
                 // Named tuple records store their fields directly rather than in a separate tuple.
                 let fields = ctx
                     .sequence(object)
                     .expect("validated named tuple receiver");
-                ctx.alloc(Value::Tuple(fields))
+                let tuple = ctx.alloc(Value::Tuple(fields));
+                ctx.checked_container_slot_repr(object, tuple)?
             }
         };
-        let text = ctx.checked_container_slot_repr(object, storage)?;
         return Ok(ctx.text(text));
     }
     if !kwargs.is_empty() {

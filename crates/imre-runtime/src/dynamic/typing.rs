@@ -21,6 +21,8 @@ pub(super) enum AliasKind {
     Generic,
     Callable,
     AbcCallable,
+    /// The frozen set of (value, type) pairs, or NONE for unhashable arguments.
+    Literal(Id),
 }
 
 impl AliasKind {
@@ -30,6 +32,7 @@ impl AliasKind {
             Self::Generic => "typing._GenericAlias",
             Self::Callable => "typing._CallableGenericAlias",
             Self::AbcCallable => "collections.abc._CallableGenericAlias",
+            Self::Literal(_) => "typing._LiteralGenericAlias",
         }
     }
 
@@ -43,7 +46,7 @@ impl AliasKind {
 
     /// Parameterized aliases reject both public class checks, even as a union member.
     pub(super) fn class_check_error(self, operation: &str) -> Error {
-        if self.is_typing_alias() {
+        if self.is_typing_alias() || matches!(self, Self::Literal(_)) {
             Error::new(
                 "TypeError",
                 "Subscripted generics cannot be used with class and instance checks",
@@ -68,15 +71,27 @@ pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
 }
 
 impl Alias {
+    /// Literal compares its type-sensitive members without regard to argument order.
+    pub(super) fn comparison_parts(&self, other: &Self) -> Option<(Id, Id)> {
+        if self.origin != other.origin {
+            return None;
+        }
+        match (self.kind, other.kind) {
+            (AliasKind::Literal(a), AliasKind::Literal(b)) => Some((a, b)),
+            (a, b) if a == b => Some((self.args, other.args)),
+            _ => None,
+        }
+    }
+
     pub(super) fn repr(&self, ctx: &Context) -> String {
         let Value::Tuple(args) = ctx.heap.get(self.args) else {
             unreachable!()
         };
         let mut args: Vec<_> = args.iter().map(|&id| type_repr(ctx, id)).collect();
-        let origin = if self.kind == AliasKind::Callable {
-            "typing.Callable".to_owned()
-        } else {
-            type_repr(ctx, self.origin)
+        let origin = match self.kind {
+            AliasKind::Callable => "typing.Callable".to_owned(),
+            AliasKind::Literal(_) => "typing.Literal".to_owned(),
+            _ => type_repr(ctx, self.origin),
         };
         let params = if matches!(self.kind, AliasKind::Callable | AliasKind::AbcCallable)
             && args.first().is_none_or(|arg| arg != "...")
@@ -214,6 +229,87 @@ fn allocate_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Id) -> I
     }))
 }
 
+/// Build the same set of (value, type) pairs used for literal deduplication and hashing.
+fn literal_keys(ctx: &mut Context, values: &[Id]) -> Result<(Id, Vec<Id>)> {
+    let members = ctx.alloc(Value::Set {
+        entries: Default::default(),
+        frozen: true,
+    });
+    ctx.heap.keep(members);
+    let mut unique = Vec::new();
+    for &value in values {
+        let class = ctx.exact_type(value)?;
+        let key = ctx.alloc(Value::Tuple(vec![value, class]));
+        ctx.set_dictionary_key(members, key, NONE, None, false)?;
+        if let Value::Set { entries, .. } = ctx.heap.get(members)
+            && entries.len() != unique.len()
+        {
+            unique.push(value);
+        }
+    }
+    Ok((members, unique))
+}
+
+/// Rebuild the comparison or hash keys because a user-defined __hash__ can change.
+pub(super) fn literal_members(ctx: &mut Context, args: Id) -> Result<Id> {
+    let values = ctx.items(args)?;
+    Ok(literal_keys(ctx, &values)?.0)
+}
+
+pub(super) fn checked_alias_parts(
+    ctx: &mut Context,
+    left: Id,
+    right: Id,
+) -> Result<Option<(Id, Id)>> {
+    let (Value::GenericAlias(a), Value::GenericAlias(b)) =
+        (ctx.heap.get(left), ctx.heap.get(right))
+    else {
+        unreachable!()
+    };
+    if matches!(
+        (a.kind, b.kind),
+        (AliasKind::Literal(_), AliasKind::Literal(_))
+    ) {
+        let (left_args, right_args) = (a.args, b.args);
+        return Ok(Some((
+            literal_members(ctx, left_args)?,
+            literal_members(ctx, right_args)?,
+        )));
+    }
+    Ok(a.comparison_parts(b))
+}
+
+fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
+    let mut flat = Vec::new();
+    for value in ctx.items(parameters)? {
+        if let Value::GenericAlias(Alias {
+            kind: AliasKind::Literal(_),
+            args,
+            ..
+        }) = ctx.heap.get(value)
+        {
+            flat.extend(ctx.items(*args)?);
+        } else {
+            flat.push(value);
+        }
+    }
+    let members = match literal_keys(ctx, &flat) {
+        Ok((members, unique)) => {
+            flat = unique;
+            members
+        }
+        Err(error) if error.kind == "TypeError" => NONE,
+        Err(error) => return Err(error),
+    };
+    let args = ctx.alloc(Value::Tuple(flat));
+    Ok(allocate_alias(
+        ctx,
+        AliasKind::Literal(members),
+        origin,
+        args,
+    ))
+}
+
 /// PEP 585 keeps a tuple supplied to the constructor as the alias's actual arguments.
 pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     let args = if matches!(ctx.heap.get(args), Value::Tuple(_)) {
@@ -227,6 +323,15 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
+    if let Value::GenericAlias(alias) = ctx.heap.get(target)
+        && matches!(alias.kind, AliasKind::Literal(_))
+        && matches!(ctx.heap.get(alias.parameters), Value::Tuple(params) if params.is_empty())
+    {
+        return Some(Err(Error::new(
+            "TypeError",
+            format!("{} is not a generic class", alias.repr(ctx)),
+        )));
+    }
     if matches!(ctx.heap.get(target), Value::Class { .. })
         && ctx.class_attr(target, "__class_getitem__").is_some()
     {
@@ -467,6 +572,12 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         unreachable!()
     };
     let (origin, kind) = (alias.origin, alias.kind);
+    if matches!(kind, AliasKind::Literal(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!("Cannot subclass {}", alias.repr(ctx)),
+        ));
+    }
     let mut result = vec![origin];
     if kind.is_typing_alias() {
         let generic = named_class(ctx, "typing", "Generic");
@@ -739,6 +850,11 @@ pub(super) fn call(
     }
     match (operation, args) {
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
+        ("_LiteralGenericAlias", [origin, parameters]) => literal_alias(ctx, *origin, *parameters),
+        ("_LiteralGenericAlias", _) => Err(Error::new(
+            "TypeError",
+            "_GenericAlias.__init__() requires an origin and arguments",
+        )),
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::GenericAlias(a) => a.origin,
             Value::Union(_) => super::union::class(ctx),

@@ -345,13 +345,14 @@ impl Context {
                     }
                     continue;
                 }
-                if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
-                    (self.heap.get(a), self.heap.get(b))
-                {
-                    if left.kind != right.kind || left.origin != right.origin {
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::GenericAlias(_), Value::GenericAlias(_))
+                ) {
+                    let Some(parts) = super::typing::checked_alias_parts(self, a, b)? else {
                         return Ok(false);
-                    }
-                    pair = Some((left.args, right.args));
+                    };
+                    pair = Some(parts);
                     check_special = true;
                     continue;
                 }
@@ -515,7 +516,7 @@ impl Context {
                 .is_some_and(|(x, y, same)| same && equal(x, y)),
             (Value::Native(a), Value::Native(b)) => a == b,
             (Value::GenericAlias(a), Value::GenericAlias(b)) => {
-                a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
+                a.comparison_parts(b).is_some_and(|(x, y)| equal(x, y))
             }
             (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
             (Value::Union(a), Value::Union(b)) => a.structural_equal(*b, self, equal),
@@ -637,11 +638,11 @@ impl Context {
                 (x, y) = (self.scalar_value(x), self.scalar_value(y));
                 let tail = match (self.heap.get(x), self.heap.get(y)) {
                     (Value::GenericAlias(a), Value::GenericAlias(b)) => {
-                        if a.kind != b.kind || a.origin != b.origin {
+                        let Some(parts) = a.comparison_parts(b) else {
                             result = Some(false);
                             break;
-                        }
-                        Some((a.args, b.args))
+                        };
+                        Some(parts)
                     }
                     (Value::Weak(a), Value::Weak(b))
                         if a.kind == weakref::Kind::Reference
@@ -1439,6 +1440,26 @@ impl Context {
         }
     }
 
+    /// Bytearray repr includes the receiver's class name even for an explicit base slot call.
+    pub(super) fn bytearray_repr(&self, object: Id, bytes: &[u8]) -> String {
+        let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
+            '"'
+        } else {
+            '\''
+        };
+        let mut output = format!("{}(b{quote}", self.type_name(object));
+        for &byte in bytes {
+            if byte == b'"' {
+                output.push('"');
+            } else {
+                output.extend(std::ascii::escape_default(byte).map(char::from));
+            }
+        }
+        output.push(quote);
+        output.push(')');
+        output
+    }
+
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
@@ -1570,24 +1591,7 @@ impl Context {
                 crate::objects::write_bytes_repr(&mut output, bytes);
                 output
             }
-            Value::ByteArray(bytes) => {
-                let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
-                    '"'
-                } else {
-                    '\''
-                };
-                let mut output = format!("bytearray(b{quote}");
-                for &byte in bytes {
-                    if byte == b'"' {
-                        output.push('"');
-                    } else {
-                        output.extend(std::ascii::escape_default(byte).map(char::from));
-                    }
-                }
-                output.push(quote);
-                output.push(')');
-                output
-            }
+            Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
             Value::Instance {
                 dictionary: Some(backing),
                 ..
@@ -2404,6 +2408,15 @@ impl Context {
                 return builtins::bytes_percent(self, &bytes.clone(), b);
             }
             "==" | "!=" => {
+                if a == b
+                    && let Value::GenericAlias(alias) = self.heap.get(a)
+                    && matches!(alias.kind, super::typing::AliasKind::Literal(_))
+                {
+                    let args = alias.args;
+                    let left = super::typing::literal_members(self, args)?;
+                    let right = super::typing::literal_members(self, args)?;
+                    return Ok(truth(self.dictionary_equal(left, right)? == (op == "==")));
+                }
                 let equal = self.checked_equal_impl(a, b, false)?
                     && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
