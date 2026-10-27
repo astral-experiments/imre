@@ -42,6 +42,10 @@ def current():
         bounded = repeat(None, n)
         print(repr(bounded), length_hint(bounded, 92), list(bounded), list(bounded), repr(bounded))
     print(length_hint(forever, 92))
+    recursive = []
+    recursive_cursor = repeat(recursive)
+    recursive.append(recursive_cursor)
+    print(repr(recursive_cursor))
     keys = ("first", "second", "first")
     instance = {}
     instance.__init__(zip(keys, repeat(value)))

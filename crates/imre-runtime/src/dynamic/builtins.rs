@@ -11,6 +11,7 @@ pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
+mod translation;
 pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
@@ -215,8 +216,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_) if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip") => "bytes",
-        Value::ByteArray(_) if attr == "extend" => "bytearray",
+        Value::Bytes(_)
+            if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip" | "translate") =>
+        {
+            "bytes"
+        }
+        Value::ByteArray(_) if matches!(attr, "extend" | "translate") => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -325,6 +330,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -602,6 +608,12 @@ pub(super) fn call(
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
+            "bytes" | "bytearray" if method == "maketrans" => {
+                translation::maketrans(ctx, name, args, kwargs)
+            }
+            "bytes" | "bytearray" if method == "translate" => {
+                translation::translate(ctx, owner, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if method == "extend" => {
                 positional(name, kwargs)?;
@@ -621,7 +633,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
-            "map" => ctx.map_method(method, args, kwargs),
+            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -812,7 +824,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
-            if let Value::List(items) = ctx.heap.get(object) {
+            if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),
                     offset: items.len(),
@@ -853,6 +865,12 @@ pub(super) fn call(
         "len" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
+            let no_length = |ctx: &Context| {
+                type_error(format!(
+                    "object of type '{}' has no len()",
+                    ctx.type_name(args[0])
+                ))
+            };
             let size = match ctx.heap.get(args[0]) {
                 Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
@@ -862,9 +880,7 @@ pub(super) fn call(
                     collections::entries(ctx, *dict)?.len()
                 }
                 Value::Class { .. } => {
-                    let values = ctx
-                        .enum_values(args[0])
-                        .ok_or_else(|| type_error("object has no len()"))?;
+                    let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
                     collections::entries(ctx, values)?.len()
                 }
                 Value::Str(v) => v.chars().count(),
@@ -873,10 +889,10 @@ pub(super) fn call(
                 Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => {
                     ctx.items(args[0])?.len()
                 }
-                Value::Instance { .. } => ctx
-                    .instance_len(args[0])?
-                    .ok_or_else(|| type_error("object has no len()"))?,
-                _ => return Err(type_error("object has no len()")),
+                Value::Instance { .. } => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                }
+                _ => return Err(no_length(ctx)),
             };
             let size = i64::try_from(size).map_err(|_| {
                 Error::new("OverflowError", "length does not fit in a Python index")

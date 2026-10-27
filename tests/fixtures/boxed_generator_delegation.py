@@ -11,6 +11,7 @@ def rows(groups):
 
 
 def wrapped(groups):
+    """Delegate the grouped rows."""
     yield from rows(groups)
     return 42
 
@@ -50,6 +51,7 @@ def annotated():
 
 
 def current():
+    print(wrapped.__doc__)
     two = wrapped([("a", [1, 2]), ("b", [3])])
     print(two.gi_code is wrapped.__code__, events)
     for first in two:

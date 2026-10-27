@@ -77,6 +77,8 @@ pub(crate) struct Context {
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     pending: Option<Error>,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    slot_depth: usize,
 }
 
 impl Context {
@@ -156,6 +158,17 @@ impl Context {
         }
     }
 
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+            return self.truth(flag);
+        }
+        self.bytearray_exports.push(input);
+        let result = self.truth(flag);
+        self.bytearray_exports.pop();
+        result
+    }
+
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
         if self.bytearray_exports.contains(&id) {
             Err(Error::new(
@@ -198,7 +211,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::AstWalk(_)
+                | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -317,7 +330,7 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
-            Value::List(values) if *reverse => {
+            Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
             Value::List(values) | Value::Tuple(values) => {
@@ -356,8 +369,8 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(!queue.is_empty());
+        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
+            return stdlib::ast::has_item(self, id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -404,7 +417,7 @@ impl Context {
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } => {}
-            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -418,7 +431,13 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
+            Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Zip { .. } => {
+                // A zip input can itself be a zip, so advancing a row can descend many native frames.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_zip_or_map(id)
+                });
+            }
             Value::Generator { code, .. } => {
                 let code = *code;
                 // Delegated generators resume their children on the native stack.
@@ -477,7 +496,7 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::AstWalk(_)
+            Value::AstWalk { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }

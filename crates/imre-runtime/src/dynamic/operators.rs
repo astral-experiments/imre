@@ -30,15 +30,6 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
-        self.index_value_with_bool_result(value, true)
-    }
-
-    /// Some native operations reject a boolean returned by a user-defined index hook.
-    pub(super) fn index_value_with_bool_result(
-        &mut self,
-        value: Id,
-        allow_bool_result: bool,
-    ) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }
@@ -46,12 +37,6 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
-        if !allow_bool_result && matches!(self.heap.get(result), Value::Bool(_)) {
-            return Err(Error::new(
-                "TypeError",
-                "__index__ returned non-int (type bool)",
-            ));
-        }
         self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",
@@ -159,17 +144,118 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
-    /// Compare arbitrary boxed values and surface recursive context comparisons.
-    fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
-        let mut exhausted = false;
-        let result = self.equal_inner(a, b, usize::MAX, &mut exhausted);
-        if exhausted {
-            return Err(Error::new(
-                "RecursionError",
-                "maximum comparison depth exceeded",
-            ));
+    /// Walk arbitrary container pairs without tying their depth to the Rust stack.
+    pub(super) fn checked_equal(&self, a: Id, b: Id) -> Result<bool> {
+        use std::{borrow::Cow, collections::HashSet};
+
+        enum Children<'a> {
+            Sequence(Cow<'a, [Id]>, Cow<'a, [Id]>, usize),
+            Dict(std::slice::Iter<'a, (Id, Id)>, &'a [(Id, Id)]),
+            Context(
+                std::collections::hash_map::Iter<'a, Id, Id>,
+                &'a HashMap<Id, Id>,
+            ),
         }
-        Ok(result)
+        let sequence = |id| match self.heap.get(id) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                Some(Cow::Borrowed(v.as_slice()))
+            }
+            Value::Instance { .. } => self.sequence(id).map(Cow::Owned),
+            _ => None,
+        };
+        let mut active = HashSet::new();
+        let mut frames = Vec::new();
+        let mut pair = Some((a, b));
+        loop {
+            if let Some((a, b)) = pair.take()
+                && a != b
+            {
+                let a = self.dict_storage(a).unwrap_or(a);
+                let b = self.dict_storage(b).unwrap_or(b);
+                let children = match (self.heap.get(a), self.heap.get(b)) {
+                    (Value::List(_), right) if !matches!(right, Value::List(_)) => {
+                        return Ok(false);
+                    }
+                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => return Ok(false),
+                    (
+                        Value::Dict(x) | Value::DefaultDict { entries: x, .. },
+                        Value::Dict(y) | Value::DefaultDict { entries: y, .. },
+                    ) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        Some(Children::Dict(x.iter(), y))
+                    }
+                    (Value::Context(x), Value::Context(y)) => {
+                        if x.len() != y.len() {
+                            return Ok(false);
+                        }
+                        (!std::rc::Rc::ptr_eq(x, y)).then(|| Children::Context(x.iter(), y))
+                    }
+                    _ => match (sequence(a), sequence(b)) {
+                        (Some(x), Some(y)) => {
+                            if x.len() != y.len() {
+                                return Ok(false);
+                            }
+                            Some(Children::Sequence(x, y, 0))
+                        }
+                        _ if self.equal(a, b) => None,
+                        _ => return Ok(false),
+                    },
+                };
+                if let Some(children) = children {
+                    let memory = |_| Error::new("MemoryError", "");
+                    active.try_reserve(1).map_err(memory)?;
+                    if !active.insert((a, b)) {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum comparison depth exceeded",
+                        ));
+                    }
+                    frames.try_reserve(1).map_err(memory)?;
+                    frames.push(((a, b), children));
+                }
+            }
+            while let Some((parents, children)) = frames.last_mut() {
+                pair = match children {
+                    Children::Sequence(x, y, index) => x.get(*index).map(|&left| {
+                        let right = y[*index];
+                        *index += 1;
+                        (left, right)
+                    }),
+                    Children::Dict(items, other) => {
+                        if let Some(&(key, value)) = items.next() {
+                            let Some(&(_, right)) =
+                                other.iter().find(|&&(k, _)| self.equal(key, k))
+                            else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                    Children::Context(items, other) => {
+                        if let Some((key, &value)) = items.next() {
+                            let Some(&right) = other.get(key) else {
+                                return Ok(false);
+                            };
+                            Some((value, right))
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if pair.is_some() {
+                    break;
+                }
+                active.remove(parents);
+                frames.pop();
+            }
+            if pair.is_none() {
+                return Ok(true);
+            }
+        }
     }
 
     /// Compare child values within the caller's remaining recursion budget.
@@ -297,11 +383,134 @@ impl Context {
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        self.format_value(id, false, &mut Vec::new())
+        self.render_containers(id, false)
     }
 
     pub(super) fn repr(&self, id: Id) -> String {
-        self.format_value(id, true, &mut Vec::new())
+        self.render_containers(id, true)
+    }
+
+    /// Render container ancestors iteratively so recursive values do not consume the native stack.
+    fn render_containers(&self, root: Id, quoted: bool) -> String {
+        enum Part<'a> {
+            Value(Id, bool),
+            Text(&'a str),
+            Sequence(&'a [Id], usize),
+            Mapping(&'a [(Id, Id)], usize),
+            Leave(Id, &'static str),
+            ContextEnd(Id),
+        }
+        let mut output = String::new();
+        let mut work = vec![Part::Value(root, quoted)];
+        let mut active = Vec::new();
+        let mut ancestors = std::collections::HashSet::new();
+        while let Some(part) = work.pop() {
+            match part {
+                Part::Text(text) => output.push_str(text),
+                Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::Leave(id, end) => {
+                    ancestors.remove(&id);
+                    let last = active.pop();
+                    debug_assert_eq!(last, Some(id));
+                    output.push_str(end);
+                }
+                Part::Sequence(items, index) => {
+                    if let Some(&item) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Sequence(items, index + 1));
+                        work.push(Part::Value(item, true));
+                    }
+                }
+                Part::Mapping(items, index) => {
+                    if let Some(&(key, value)) = items.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        work.push(Part::Mapping(items, index + 1));
+                        work.push(Part::Value(value, true));
+                        work.push(Part::Text(": "));
+                        work.push(Part::Value(key, true));
+                    }
+                }
+                Part::Value(id, repr) => {
+                    match self.heap.get(id) {
+                        Value::Instance {
+                            scalar: None,
+                            dictionary: Some(backing),
+                            ..
+                        } if self.enum_member(id).is_none() => {
+                            work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::ContextVar { name, default, .. } => {
+                            output.push_str("<ContextVar name=");
+                            work.push(Part::ContextEnd(id));
+                            if let Some(default) = default {
+                                work.push(Part::Value(*default, true));
+                                work.push(Part::Text(" default="));
+                            }
+                            work.push(Part::Value(*name, true));
+                            continue;
+                        }
+                        Value::ContextToken { variable, used, .. } => {
+                            output.push_str(if *used {
+                                "<Token used var="
+                            } else {
+                                "<Token var="
+                            });
+                            work.push(Part::ContextEnd(id));
+                            work.push(Part::Value(*variable, true));
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    let (start, end, placeholder, sequence, mapping) = match self.heap.get(id) {
+                        Value::List(items) => ("[", "]", "[...]", Some(items.as_slice()), None),
+                        Value::Tuple(items) => (
+                            "(",
+                            if items.len() == 1 { ",)" } else { ")" },
+                            "(...)",
+                            Some(items.as_slice()),
+                            None,
+                        ),
+                        Value::Dict(items) => ("{", "}", "{...}", None, Some(items.as_slice())),
+                        Value::Set { items, frozen } => {
+                            if items.is_empty() {
+                                output.push_str(if *frozen { "frozenset()" } else { "set()" });
+                                continue;
+                            }
+                            (
+                                if *frozen { "frozenset({" } else { "{" },
+                                if *frozen { "})" } else { "}" },
+                                "set(...)",
+                                Some(items.as_slice()),
+                                None,
+                            )
+                        }
+                        _ => {
+                            output.push_str(&self.format_value(id, repr, &mut active));
+                            continue;
+                        }
+                    };
+                    if !ancestors.insert(id) {
+                        output.push_str(placeholder);
+                        continue;
+                    }
+                    active.push(id);
+                    output.push_str(start);
+                    work.push(Part::Leave(id, end));
+                    if let Some(items) = sequence {
+                        work.push(Part::Sequence(items, 0));
+                    }
+                    if let Some(items) = mapping {
+                        work.push(Part::Mapping(items, 0));
+                    }
+                }
+            }
+        }
+        output
     }
 
     /// Renders positional values inside tuples and exception representations.
@@ -385,7 +594,7 @@ impl Context {
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
-                let value = self.repr(repeat.value);
+                let value = self.format_value(repeat.value, true, active);
                 match repeat.remaining {
                     Some(n) => format!("repeat({value}, {n})"),
                     None => format!("repeat({value})"),
@@ -748,7 +957,20 @@ impl Context {
         {
             return Err(Error::new("TypeError", "unhashable key"));
         }
-        let iterator = self.iterator(container)?;
+        let iterator = self.iterator(container).map_err(|error| {
+            let ty = self.builtin("TypeError");
+            if self.raised_error_matches(&error, ty) {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "argument of type '{}' is not a container or iterable",
+                        self.type_name(container)
+                    ),
+                )
+            } else {
+                error
+            }
+        })?;
         self.heap.keep(iterator);
         while let Some(value) = self.next_item(iterator)? {
             if value == item {

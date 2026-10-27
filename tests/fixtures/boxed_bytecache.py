@@ -38,3 +38,25 @@ def current():
             marshal.loads(data, allow_code=Flag())
         except (ValueError, TypeError) as error:
             print(type(error).__name__, str(error))
+
+
+    data = bytearray(b"N")
+
+    class ResizingPolicy:
+        def __bool__(self):
+            data.extend(b"x")
+            return True
+
+    try:
+        marshal.loads(data, allow_code=ResizingPolicy())
+    except BufferError as error:
+        print(type(error).__name__, str(error), data)
+
+    data = bytearray(b"F")
+
+    class ReplacingPolicy:
+        def __bool__(self):
+            data[0] = 84
+            return True
+
+    print(marshal.loads(data, allow_code=ReplacingPolicy()), data)
