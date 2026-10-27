@@ -34,6 +34,11 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("unhashable argument accepted")
+    from types import GenericAlias
+    alias = GenericAlias(list, (0,))
+    equal_alias = GenericAlias(list, (0,))
+    assert alias == equal_alias and equal_alias in {alias}
+    assert {alias: "value"}[equal_alias] == "value"
     print("ok")
 
 
