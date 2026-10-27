@@ -687,6 +687,7 @@ def report(text):
             "boxed_struct.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
+            "boxed_heapq.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
             "boxed_string_expandtabs.py",
