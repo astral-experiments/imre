@@ -25,6 +25,8 @@ MAPPED_FD = re.compile(r",\s*(-?\d+)(?:<(.*)>)?,\s*(?:0x[0-9a-fA-F]+|\d+)\)\s+="
 def mapped_python(name, path, cache, identity=None):
     if LIBPYTHON.search(name):
         return True
+    if identity is None:
+        require_stable_trace_path(path)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
         with os.fdopen(fd, "rb") as stream:
@@ -41,13 +43,8 @@ def mapped_python(name, path, cache, identity=None):
         raise ValueError(f"cannot verify mapped file {name}: {error}") from error
 
 
-def require_stable_trace_path(path, binary):
+def require_stable_trace_path(path):
     """Fail if a post-exit pathname does not have a durable identity."""
-    try:
-        if path.samefile(binary):
-            return
-    except OSError as error:
-        raise ValueError(f"cannot establish mapped file identity after exit: {path}: {error}") from error
     # audit_trace runs after the tracee exits, so it cannot compare the live
     # mapped inode with this pathname. Only trust an immutable system path;
     # otherwise the tracee could replace the file before this open.
@@ -261,9 +258,7 @@ def audit_trace(path, binary, pid):
             name = trace_path(descriptor[2])
             if not name.startswith("/"):
                 raise ValueError(f"unverified mapped file path: {name}")
-            mapped_path = Path(name)
-            require_stable_trace_path(mapped_path, binary)
-            if mapped_python(name, mapped_path, image_cache):
+            if mapped_python(name, Path(name), image_cache):
                 raise ValueError(f"mapped libpython in syscall trace: {line}")
     if not images or images[0] != pid:
         raise ValueError("native executable launch evidence is incomplete")

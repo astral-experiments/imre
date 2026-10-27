@@ -22,10 +22,11 @@ class TraceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ptrace permissions"):
                 require_attached(41, Path("events"), "/usr/bin/strace")
 
-    def audit(self, *events):
+    def audit(self, *events, binary=None):
         with tempfile.TemporaryDirectory() as temp:
-            binary = Path(temp) / "server"
-            binary.touch()
+            if binary is None:
+                binary = Path(temp) / "server"
+                binary.touch()
             path = Path(temp) / "events"
             events = [f'41 execve("{binary}", ["server"], 0x1) = 0', *events, "41 +++ killed by SIGTERM +++"]
             path.write_text("\n".join(events) + "\n")
@@ -93,6 +94,17 @@ class TraceTests(unittest.TestCase):
             replacement.replace(path)
             with self.assertRaisesRegex(ValueError, "cannot establish mapped file identity"):
                 self.audit(event)
+
+    def test_mutable_mappings_to_primary_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / "server"
+            binary.touch()
+            alias = Path(temp) / "mapped.so"
+            alias.hardlink_to(binary)
+            for path in (alias, binary):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "mapped file identity"):
+                    self.audit(f"41 mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{path}>, 0) = 0x1000",
+                               binary=binary)
 
     def test_unavailable_file_backed_mapping(self):
         for descriptor in ("3", "3</nonexistent/path/to/an/image>"):
