@@ -50,6 +50,8 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
+    ReversedBytes(&'a [u8]),
+    ReversedText(&'a str),
 }
 
 impl IteratorSlice<'_> {
@@ -57,7 +59,16 @@ impl IteratorSlice<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
-            Self::Bytes(bytes) => bytes.len(),
+            Self::Bytes(bytes) | Self::ReversedBytes(bytes) => bytes.len(),
+            Self::ReversedText(text) => text.chars().count(),
+        }
+    }
+
+    /// Test the byte boundary directly so each character step stays constant time.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::ReversedText(text) => text.is_empty(),
+            _ => self.len() == 0,
         }
     }
 }
@@ -391,6 +402,8 @@ impl Context {
             Value::List(values) | Value::Tuple(values) => {
                 IteratorSlice::Values(values.get(*offset..).unwrap_or_default())
             }
+            Value::Str(text) if *reverse => IteratorSlice::ReversedText(&text[..*offset]),
+            Value::Bytes(bytes) if *reverse => IteratorSlice::ReversedBytes(&bytes[..*offset]),
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
@@ -426,7 +439,7 @@ impl Context {
         if matches!(self.heap.get(id), Value::AstWalk { .. }) {
             return stdlib::ast::has_item(self, id);
         }
-        let more = self.iterator_remaining(id)?.len() != 0;
+        let more = !self.iterator_remaining(id)?.is_empty();
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
             *sequence = None;
         }
@@ -555,17 +568,22 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
-        let item = match self.iterator_remaining(id)? {
-            IteratorSlice::Values(values) => values[0],
-            IteratorSlice::Reversed(values) => values[values.len() - 1],
-            IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
+        let (item, width) = match self.iterator_remaining(id)? {
+            IteratorSlice::Values(values) => (values[0], 1),
+            IteratorSlice::Reversed(values) => (values[values.len() - 1], 1),
+            IteratorSlice::Bytes(bytes) => (self.int(i64::from(bytes[0])), 1),
+            IteratorSlice::ReversedBytes(bytes) => (self.int(i64::from(bytes[bytes.len() - 1])), 1),
+            IteratorSlice::ReversedText(text) => {
+                let ch = text.chars().next_back().expect("nonempty iterator");
+                (self.text(ch.to_string()), ch.len_utf8())
+            }
         };
         if let Value::Iterator {
             offset, reverse, ..
         } = self.heap.get_mut(id)
         {
             if *reverse {
-                *offset -= 1;
+                *offset -= width;
             } else {
                 *offset += 1;
             }
@@ -721,7 +739,9 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ IteratorSlice::Bytes(_) => {
+                    remaining @ (IteratorSlice::Bytes(_)
+                    | IteratorSlice::ReversedBytes(_)
+                    | IteratorSlice::ReversedText(_)) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
                             Error::new("MemoryError", "iterator is too large to materialize")
