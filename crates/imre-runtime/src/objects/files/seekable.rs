@@ -288,6 +288,9 @@ impl FileState {
         if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && self.closed() {
             return Err(Error::new(Kind::ValueError, "I/O operation on closed file"));
         }
+        if let (FileKind::BinaryWrite, Some(Stream::Write(file))) = (self.kind, &mut self.stream) {
+            return file.binary_position().map_err(super::errno_error);
+        }
         if let Some(Stream::Random(file)) = &mut self.stream {
             return file.tell().map_err(super::errno_error);
         }
@@ -299,6 +302,9 @@ impl FileState {
             && self.stream.is_none()
         {
             return Err(Error::new(Kind::ValueError, "seek of closed file"));
+        }
+        if let (FileKind::BinaryWrite, Some(Stream::Write(file))) = (self.kind, &mut self.stream) {
+            return file.binary_seek(at).map_err(super::errno_error);
         }
         match self.stream()? {
             Stream::Read(input) => input.seek(at),

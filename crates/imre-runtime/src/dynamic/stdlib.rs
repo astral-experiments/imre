@@ -475,7 +475,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("subprocess", "PIPE") => ctx.int(-1),
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
-        ("sys", "exit" | "exc_info" | "exception" | "intern" | "_is_interned")
+        (
+            "sys",
+            "exit" | "exc_info" | "exception" | "intern" | "_is_interned" | "getdefaultencoding",
+        )
         | (
             "sysconfig",
             "get_path"
@@ -680,6 +683,24 @@ pub(super) fn call(
         }
         let (heap, roots) = ctx.heap_and_roots();
         return Ok(heap.intern(*value, roots));
+    }
+    if name == "sys.getdefaultencoding" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "sys.getdefaultencoding() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "sys.getdefaultencoding() takes no arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        return Ok(ctx.default_encoding);
     }
     if name == "random.random" {
         if !kwargs.is_empty() {
@@ -1114,6 +1135,10 @@ pub(super) fn call(
         | "functools._cached"
         | "contextlib.contextmanager"
         | "file.close"
+        | "file.readable"
+        | "file.writable"
+        | "file.seekable"
+        | "file.isatty"
         | "file.flush"
         | "file.fileno"
         | "file.tell"

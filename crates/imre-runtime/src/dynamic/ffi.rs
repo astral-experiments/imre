@@ -23,36 +23,12 @@ impl Context {
                 "TypeError",
                 format!(
                     "calling {} should have returned an instance of BaseException, not {}",
-                    self.exception_class_repr(value),
-                    self.exception_class_repr(actual)
+                    self.repr(value),
+                    self.repr(actual)
                 ),
             ));
         }
         Ok(result)
-    }
-
-    /// Format exception-construction diagnostics with the class's Python module.
-    fn exception_class_repr(&self, class: Id) -> String {
-        let Value::Class { name, scope, .. } = self.heap.get(class) else {
-            return self.repr(class);
-        };
-        let scope = self.scope_data(*scope);
-        let attr = |key: &str| {
-            scope
-                .names
-                .get(key)
-                .and_then(|&id| match self.heap.get(id) {
-                    Value::Str(s) => Some(s.as_str()),
-                    _ => None,
-                })
-        };
-        let module = attr("__module__").unwrap_or(&scope.module);
-        let name = attr("__qualname__").unwrap_or(name);
-        if module == "builtins" {
-            format!("<class '{name}'>")
-        } else {
-            format!("<class '{module}.{name}'>")
-        }
     }
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
@@ -394,7 +370,7 @@ impl Context {
                                 "TypeError",
                                 format!(
                                     "calling {} should have returned an instance of BaseException, not {}",
-                                    self.exception_class_repr(a),
+                                    self.repr(a),
                                     self.type_name(normalized)
                                 ),
                             ));
@@ -451,6 +427,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         executable,
         argv: NONE,
         sys_path: NONE,
+        default_encoding: NONE,
         contexts: Vec::new(),
         bytearray_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -483,6 +460,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
     let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
     ctx.sys_path = ctx.alloc(Value::List(paths));
+    ctx.default_encoding = ctx.text(crate::sys::default_encoding().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
@@ -1039,7 +1017,12 @@ impl Context {
                 .chain(self.bytearray_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
-                .chain([self.argv, self.sys_path, self.token_missing]),
+                .chain([
+                    self.argv,
+                    self.sys_path,
+                    self.default_encoding,
+                    self.token_missing,
+                ]),
         )
     }
 

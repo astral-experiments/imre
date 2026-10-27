@@ -472,8 +472,15 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if matches!(name, "list.__init__" | "list.__repr__" | "tuple.__repr__") {
-        return sequence_slot(ctx, name, args, kwargs);
+    if matches!(
+        name,
+        "list.__init__"
+            | "list.__repr__"
+            | "tuple.__repr__"
+            | "set.__repr__"
+            | "frozenset.__repr__"
+    ) {
+        return container_slot(ctx, name, args, kwargs);
     }
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
@@ -914,20 +921,20 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
     Err(Error::new("ValueError", "list.index(x): x not in list"))
 }
 
-/// Render native sequence storage directly, bypassing an override on this receiver.
-fn sequence_slot(
+/// Call a builtin slot on the receiver’s native payload, bypassing its override.
+fn container_slot(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (owner, method) = name.split_once('.').expect("sequence slot");
+    let (owner, method) = name.split_once('.').expect("container slot");
     let Some((&object, rest)) = args.split_first() else {
         return Err(type_error(format!(
             "descriptor '{method}' of '{owner}' object needs an argument"
         )));
     };
-    if !ctx.sequence_slot_accepts(object, owner) {
+    if !ctx.container_slot_accepts(object, owner) {
         return Err(type_error(format!(
             "descriptor '{method}' requires a '{owner}' object but received a '{}'",
             ctx.type_name(object)
@@ -945,7 +952,7 @@ fn sequence_slot(
             )));
         }
         let storage = match ctx.heap.get(storage) {
-            Value::List(_) | Value::Tuple(_) => storage,
+            Value::List(_) | Value::Tuple(_) | Value::Set { .. } => storage,
             _ => {
                 // Named tuple records store their fields directly rather than in a separate tuple.
                 let fields = ctx

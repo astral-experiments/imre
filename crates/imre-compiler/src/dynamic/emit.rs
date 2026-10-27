@@ -82,7 +82,7 @@ enum Body<'a> {
     GeneratorFunction(&'a [ast::Stmt]),
     Annotations(Vec<(&'a str, &'a ast::Expr)>),
     Expression(&'a ast::Expr),
-    Generator(&'a ast::Comprehension, &'a ast::Expr),
+    Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
 
@@ -213,7 +213,7 @@ impl Output {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
             }
-            Body::Generator(generator, element) => f.generator_step(generator, element),
+            Body::Generator(generators, element) => f.generator_step(generators, element),
             Body::Expression(expr) => {
                 f.checkpoint(expr);
                 let value = f.expr(expr);
