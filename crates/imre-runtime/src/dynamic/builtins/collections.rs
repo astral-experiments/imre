@@ -86,6 +86,31 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     }
 }
 
+/// Removes an equal key from the builtin dictionary payload and returns its stored value.
+pub(in super::super) fn remove_dict_item(
+    ctx: &mut Context,
+    dict: Id,
+    key: Id,
+) -> Result<Option<Id>> {
+    if let Some(part) = unhashable_part(ctx, key) {
+        return Err(type_error(format!(
+            "cannot use '{}' as a dict key (unhashable type: '{}')",
+            ctx.type_name(key),
+            ctx.type_name(part),
+        )));
+    }
+    let Some(index) = entries(ctx, dict)?
+        .iter()
+        .position(|&(stored, _)| ctx.equal(stored, key))
+    else {
+        return Ok(None);
+    };
+    let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
+        unreachable!("dictionary payload")
+    };
+    Ok(Some(entries.remove(index).1))
+}
+
 pub(in super::super) fn set_member(
     ctx: &Context,
     set: Id,
@@ -235,6 +260,19 @@ pub(super) fn method(
                 _ => DictViewKind::Items,
             };
             Ok(ctx.alloc(Value::DictView { dict: object, kind }))
+        }
+        "dict.pop" => {
+            arity(name, args, 1, 2)?;
+            let key = args[0];
+            // An empty dictionary takes the missing-key path without hashing the key.
+            if !entries(ctx, receiver)?.is_empty()
+                && let Some(value) = remove_dict_item(ctx, receiver, key)?
+            {
+                return Ok(value);
+            }
+            args.get(1)
+                .copied()
+                .ok_or_else(|| ctx.lookup_error("KeyError", key))
         }
         "dict.get" | "dict.setdefault" => {
             arity(name, args, 1, 2)?;
