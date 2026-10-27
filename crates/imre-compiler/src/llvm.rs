@@ -5455,6 +5455,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsPathsep => self.call("imre_os_pathsep", returns, &[]),
             Builtin::OsSeparator { alternate } => {
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_os_separator(i32 {})",
@@ -9818,6 +9819,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_pathsep()
 declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()
 declare ptr @imre_doctest_capture_take()

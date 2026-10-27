@@ -1325,8 +1325,14 @@ impl Context {
                     };
                     self.bind(scope, name, value);
                 }
+                let pathsep = self.lookup_attr(path, "pathsep")?;
+                self.bind(scope, "pathsep", pathsep);
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
+            }
+            "posixpath" => {
+                let pathsep = self.text(":");
+                self.bind(scope, "pathsep", pathsep);
             }
             "_frozen_importlib" => {
                 let external = self.module("_frozen_importlib_external")?;
