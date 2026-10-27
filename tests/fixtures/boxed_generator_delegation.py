@@ -72,8 +72,20 @@ def unpacked(rows):
         yield left, middle, right
 
 
+def starred(rows):
+    for first, *rest in rows:
+        *middle, last = rest
+        yield first, middle, last
+
+
 def current():
     print(list(unpacked([(1, [2, 3]), (4, (5, 6))])))
+    print(list(starred([[1, 2], [3, 4, 5, 6]])))
+    for target in ('*left, *right', '*left'):
+        try:
+            compile('def split(row):\n    ' + target + ' = row\n    yield left\n', '<split>', 'exec')
+        except SyntaxError:
+            print('invalid star')
     pulls = []
     values = (x + y for x in visited(pulls, "outer", [1, 2])
               for y in visited(pulls, x, range(x)) if y == 0)
