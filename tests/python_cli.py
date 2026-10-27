@@ -514,9 +514,14 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        resource_package = installed / "pkgutil_resource"
+        resource_package.mkdir()
+        (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
+        (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
             "boxed_namedtuple_repr.py",
@@ -529,12 +534,15 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_round.py",
+            "boxed_math_rounding.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
             "boxed_random.py",
+            "boxed_pkgutil.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
@@ -565,6 +573,7 @@ def report(text):
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
+            "boxed_dir.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",

@@ -261,7 +261,7 @@ impl Context {
             Value::Function { .. } => "function",
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
-            Value::Cell { .. } => "cell",
+            Value::Cell(_) => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -355,6 +355,8 @@ pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
     pub annotation_thunks: Option<Id>,
+    /// Slot names consumed when the class is created, independent of later namespace mutations.
+    pub slot_names: Option<std::rc::Rc<[String]>>,
 }
 
 #[derive(Clone)]
@@ -451,10 +453,7 @@ pub(super) enum Value {
         entries: super::dictionary::Entries,
     },
     Scope(Scope),
-    Cell {
-        scope: Id,
-        name: String,
-    },
+    Cell(Option<Id>),
     ClassCell(Option<Id>),
     Super {
         start: Id,
@@ -497,6 +496,7 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
+        property: Option<Box<super::property::Property>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -732,7 +732,7 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(origin);
             }
-            Self::Cell { scope, .. } => visit.push(*scope),
+            Self::Cell(value) => visit.extend(value),
             Self::Function {
                 closure,
                 scope,
@@ -780,7 +780,11 @@ impl Value {
                 dictionary,
                 scalar,
                 memory_stream,
+                property,
             } => {
+                if let Some(property) = property {
+                    property.children(visit);
+                }
                 if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
                     visit.extend(stream.snapshot.get());
                 }

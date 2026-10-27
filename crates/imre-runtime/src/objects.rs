@@ -38,6 +38,7 @@ mod difflib;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
+pub(crate) use files::read_path_text;
 mod text_file;
 pub(crate) use text_file::TextFile;
 pub(crate) mod fnmatch;
@@ -68,7 +69,7 @@ mod os;
 pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
-pub(crate) use paths::is_file;
+pub(crate) use paths::{directory_entries, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
 mod random;
@@ -103,6 +104,7 @@ mod values;
 mod warnings;
 mod words;
 mod zipfile;
+pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{FileState, errno_error, open_file};
@@ -113,6 +115,32 @@ use super::{
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
+
+/// Methods inherited from the native object type.
+pub(crate) const OBJECT_METHODS: &[&str] = &[
+    "__new__",
+    "__repr__",
+    "__getattribute__",
+    "__init__",
+    "__dir__",
+    "__hash__",
+    "__str__",
+    "__setattr__",
+    "__delattr__",
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__reduce_ex__",
+    "__reduce__",
+    "__getstate__",
+    "__subclasshook__",
+    "__init_subclass__",
+    "__format__",
+    "__sizeof__",
+];
 
 /// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
 pub(crate) fn literal_string(text: &str) -> StrOwner {

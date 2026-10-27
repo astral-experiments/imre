@@ -361,7 +361,7 @@ impl Session {
 
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
-    fn diagnostic_copy(&self) -> Result<Self, String> {
+    pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
         let mut copy = Self::new(&self.root, &self.extension_roots)?;
         for &file in &self.files {
             let path = file
@@ -382,6 +382,38 @@ impl Session {
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(expression.inferred_type(&model), Some(Ty::ModuleLiteral(m))
             if m.module(&self.db).name(&self.db).as_str() == "importlib.metadata")
+    }
+
+    /// Only the stdlib function can add a literal dependency, even if a local shares its spelling.
+    pub(crate) fn is_stdlib_function(
+        &self,
+        module: usize,
+        expression: &Expr,
+        owner: &str,
+        name: &str,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let program = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, program);
+        let Some(ty @ Type::FunctionLiteral(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        let Some(TypeDefinition::Function(def)) =
+            ty.definition(&self.db, &ProgramEnvironment::from_file(program))
+        else {
+            return false;
+        };
+        def.name(&self.db).as_deref() == Some(name)
+            && def
+                .file(&self.db)
+                .path(&self.db)
+                .as_vendored_path()
+                .is_some()
+            && model
+                .resolve_module(Some(owner), 0)
+                .and_then(|m| m.file(&self.db))
+                == Some(def.file(&self.db))
     }
 
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
@@ -539,6 +571,27 @@ impl Session {
             value.inferred_type(&model),
             Some(ty_python_semantic::types::Type::Never)
         )
+    }
+
+    /// Check annotated return types when a program leaves the exact native type checker.
+    pub(crate) fn check_return_types(
+        &mut self,
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+    ) -> Result<(), String> {
+        let mut rules = RuleSelection::default();
+        let rule = default_lint_registry()
+            .get("invalid-return-type")
+            .expect("registered ty lint");
+        rules.enable(
+            rule,
+            Severity::Error,
+            ty_python_semantic::lint::LintSource::Default,
+        );
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(Arc::new(rules));
+        self.errors(skipped, overloads)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.

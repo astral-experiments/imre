@@ -29,8 +29,10 @@ pub(super) mod io;
 mod json;
 mod logging;
 mod marshal;
+mod math;
 mod operator;
 mod pickle;
+mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -38,8 +40,12 @@ mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod zipimport;
 
 pub(super) fn is_module(name: &str) -> bool {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
+        return true;
+    }
     matches!(
         name,
         "sys"
@@ -59,6 +65,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posix"
             | "posixpath"
             | "_imre_posixpath"
+            | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -68,6 +75,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "math"
             | "unicodedata"
             | "json"
             | "_imre_logging"
@@ -85,6 +93,10 @@ pub(super) fn is_module(name: &str) -> bool {
             | "re"
             | "importlib"
             | "importlib.machinery"
+            | "importlib.util"
+            | "_frozen_importlib"
+            | "_frozen_importlib_external"
+            | "_imre_importlib"
             | "functools"
             | "_string"
             | "inspect"
@@ -177,6 +189,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
+        property: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -271,10 +284,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
-        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -438,7 +453,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
+        | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -651,14 +668,23 @@ pub(super) fn call(
             },
         );
     }
+    if let Some(operation) = name.strip_prefix("math.") {
+        return math::round(ctx, operation, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
     }
+    if let Some(op) = name.strip_prefix("_imre_zipimport.") {
+        return zipimport::call(ctx, op, args, kwargs);
+    }
     if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);
+    }
+    if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
+        return pkgutil::call(ctx, operation, args, kwargs);
     }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
@@ -680,6 +706,33 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_importlib.") {
+        match (method, args, kwargs) {
+            ("find_spec", [fullname, original], []) => {
+                let fullname = ctx.str_value(*fullname)?.to_owned();
+                let original = ctx.str_value(*original)?.to_owned();
+                return ctx.find_spec(&fullname, &original, false);
+            }
+            ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
+            ("loader_fields", [object], []) => {
+                if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
+                    let fields = fields
+                        .clone()
+                        .into_iter()
+                        .map(|(key, value)| (ctx.text(key), value))
+                        .collect();
+                    return Ok(ctx.dict(fields));
+                }
+                return Err(Error::new("TypeError", "expected a source loader"));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("invalid arguments to {name}"),
+                ));
+            }
+        }
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
@@ -927,6 +980,20 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
+        if name == "file.flush"
+            && let Some((&receiver, positional)) = args.split_first()
+        {
+            let class = ctx.type_name(receiver).trim_start_matches("_io.");
+            let message = if kwargs.is_empty() {
+                format!(
+                    "{class}.flush() takes no arguments ({} given)",
+                    positional.len()
+                )
+            } else {
+                format!("{class}.flush() takes no keyword arguments")
+            };
+            return Err(Error::new("TypeError", message));
+        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),

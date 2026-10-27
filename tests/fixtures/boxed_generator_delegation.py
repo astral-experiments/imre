@@ -50,7 +50,20 @@ def annotated():
     yield pending
 
 
+def visited(trace, label, value):
+    trace.append(label)
+    return value
+
+
+def indexed_values(owner, trace):
+    for word in ['first', 'second']:
+        visited(trace, 'receiver', owner)[visited(trace, 'key', 0)] = visited(trace, 'rhs', word)
+        yield owner[0]
+
+
 def current():
+    owner, trace = ['initial'], []
+    print(list(indexed_values(owner, trace)), owner, trace)
     print(wrapped.__doc__)
     two = wrapped([("a", [1, 2]), ("b", [3])])
     print(two.gi_code is wrapped.__code__, events)

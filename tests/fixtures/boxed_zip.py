@@ -7,6 +7,23 @@ def current():
         if label == "b":
             break
     print(rows, list(zip()), list(zip([1, 2], [3])))
+    class Done(StopIteration):
+        pass
+
+    class Source:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise saved
+
+    saved = Done("end")
+    try:
+        next(zip(Source(), [1]))
+    except StopIteration as caught:
+        print(caught is saved, caught.args)
+    print(list(zip(Source(), [1])), next(zip(Source(), [1]), "done"))
+
     huge = range(-4611686018427387904, 4611686018427387904)
     for first in huge:
         print(first)

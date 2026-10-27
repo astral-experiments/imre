@@ -215,23 +215,51 @@ fn object_fallback<T>(
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
-    let mut runtime_imports = options.runtime_imports;
-    let typed = options
-        .load_graph(path, module_root, filesystem)
-        .and_then(|mut graph| {
-            let result = lower(&mut graph);
-            runtime_imports |= graph.needs_object_runtime.get();
-            result
-        });
-    match typed {
-        Ok(value) => Ok(value),
-        Err(error) if options.entry_profile.is_none() => {
-            match dynamic::compile(path, module_root, options, runtime_imports)? {
-                Some(compilation) => Ok(boxed(compilation)),
-                None => Err(error),
-            }
+    let (error, graph) = match options.load_graph(path, module_root, filesystem) {
+        Ok(mut graph) => match lower(&mut graph) {
+            Ok(value) => return Ok(value),
+            Err(error) => (error, Some(graph)),
+        },
+        Err(error) => (error, None),
+    };
+    // Python invocations and explicit object imports enforce annotated calls in
+    // the boxed runtime, where their TypeError can be caught by the program.
+    let checked_file = options.python_startup().is_none() && !options.runtime_imports;
+    if options.entry_profile.is_some()
+        || (checked_file
+            && graph
+                .as_ref()
+                .is_some_and(|g| g.return_errors.borrow().contains(&error)))
+    {
+        return Err(error);
+    }
+    let runtime_imports =
+        options.runtime_imports || graph.as_ref().is_some_and(|g| g.needs_object_runtime.get());
+    let registered_imports = graph
+        .as_ref()
+        .filter(|_| runtime_imports)
+        .map(dynamic::registered_imports)
+        .unwrap_or_default();
+    let check_returns = || {
+        if checked_file && let Some(graph) = &graph {
+            let (skipped, overloads) = graph.diagnostic_scopes();
+            graph
+                .session
+                .diagnostic_copy()?
+                .check_return_types(skipped.as_deref(), &overloads)?;
         }
-        Err(error) => Err(error),
+        Ok(())
+    };
+    match dynamic::compile(
+        path,
+        module_root,
+        options,
+        runtime_imports,
+        registered_imports,
+        check_returns,
+    )? {
+        Some(compilation) => Ok(boxed(compilation)),
+        None => Err(error),
     }
 }
 

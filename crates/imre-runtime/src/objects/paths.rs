@@ -517,7 +517,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     Ok(resolved)
 }
 
-pub(super) fn path_utf8(path: OsString) -> Result<Str> {
+pub(crate) fn path_utf8(path: OsString) -> Result<Str> {
     path.into_string()
         .map(Str::from)
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
@@ -1102,7 +1102,7 @@ fn check_directory_path(root: &str) -> Result<()> {
 }
 
 /// Snapshot directory entries and close their descriptor before yielding to callers.
-fn directory_entries<T>(
+pub(crate) fn directory_entries<T>(
     root: &str,
     mut visit: impl FnMut(fs::DirEntry) -> T,
 ) -> io::Result<Vec<T>> {

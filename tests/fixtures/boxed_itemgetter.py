@@ -19,7 +19,28 @@ class Lookup:
         return key
 
 
+def index_lifetime():
+    from _weakref import ref
+
+    class Element:
+        def __init__(self, remove):
+            self.remove = remove
+
+        def __eq__(self, other):
+            if self.remove:
+                del items[0]
+                return False
+            for i in range(5500):
+                _ = [i, {}]
+            return watched() is None
+
+    items = [Element(True), None, Element(False)]
+    watched = ref(items[0])
+    print(items.index(None))
+
+
 def current():
+    index_lifetime()
     column = itemgetter(1)
     rows = [("b", 2), ("a", 1), ("c", 2)]
     sorts = ["endpoint", "methods"]

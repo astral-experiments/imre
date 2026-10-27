@@ -299,7 +299,10 @@ impl Checker<'_> {
             }
             _ => unreachable!(),
         };
-        if callables::contains_callable(value.ty, self.types) {
+        // A native frozenset predicate captures only its already-initialized immutable set.
+        let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
+            if set.ty == Type::FrozenStrings);
+        if !frozen_predicate && callables::contains_callable(value.ty, self.types) {
             return Err(error(
                 self.source,
                 statement,
@@ -514,9 +517,15 @@ impl Initialization {
             if module.snapshots.contains_key(&index)
                 || crate::modules::value_name(statement).is_some()
             {
-                body.push(checker.initialize_global(statement, definition)?);
+                match checker.initialize_global(statement, definition) {
+                    Ok(value) => body.push(value),
+                    // Each module binding has one initializer. Leave its layout unknown
+                    // and continue discovering calls that do not read this binding.
+                    Err(error) if checker.defer_object_error(&error) => continue,
+                    Err(error) => return Err(error),
+                }
             } else {
-                body.extend(checker.statement(statement)?.0);
+                body.extend(checker.statement(statement, &[])?.0);
             }
             checkpoints.push(Checkpoint {
                 statement: index,

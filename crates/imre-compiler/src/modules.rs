@@ -28,15 +28,40 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
+const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "zipimport" if cfg!(unix) => Some((
+            "zipimport.py",
+            concat!(
+                include_str!("../stdlib/zipimport_boxed.py"),
+                "\n",
+                include_str!("../stdlib/zipimport.py"),
+                "\n",
+                include_str!("../stdlib/zipimport_source.py"),
+            ),
+        )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "importlib" => Some((
+            "importlib/__init__.py",
+            include_str!("../stdlib/importlib/__init__.py"),
+        )),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
+        "pkgutil" => Some((
+            "pkgutil.py",
+            concat!(
+                include_str!("../stdlib/pkgutil/boxed.py"),
+                "\n",
+                include_str!("../stdlib/pkgutil/iter_modules.py"),
+            ),
+        )),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "collections" => Some((
             "collections/__init__.py",
             include_str!("../stdlib/collections/__init__.py"),
@@ -107,6 +132,24 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
     }
+}
+
+/// Spell filesystem import suffixes in longest-first order for both pkgutil frontends.
+pub(crate) fn pkgutil_suffixes() -> String {
+    let version = crate::PYTHON_VERSION;
+    let abi = if cfg!(target_os = "macos") {
+        "darwin".to_owned()
+    } else {
+        let libc = if cfg!(target_env = "musl") {
+            "musl"
+        } else {
+            "gnu"
+        };
+        format!("{}-linux-{libc}", std::env::consts::ARCH)
+    };
+    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+    let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
+    serde_json::to_string(&[&tagged, ".abi3.so", &archive, ".so", ".py", ".pyc"]).unwrap()
 }
 
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
@@ -422,6 +465,7 @@ pub(crate) enum Intrinsic {
     BinasciiError,
     BinasciiIncomplete,
     PackageNotFoundError,
+    RegisteredImport(&'static str),
     Socket,
     GaiError,
     SocketGetFqdn,
@@ -736,6 +780,7 @@ impl IntrinsicModule {
             (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -752,11 +797,18 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
+            // Execution requests the native loader. Binding the name alone stays on the typed path.
+            (Self::Importlib, "import_module") => {
+                Intrinsic::RegisteredImport("importlib.import_module")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::Declaration("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibUtil, "find_spec") => {
+                Intrinsic::RegisteredImport("importlib.util.find_spec")
+            }
             (Self::ImportlibUtil, "cache_from_source") => Intrinsic::CachePath { reverse: false },
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
@@ -1267,6 +1319,8 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
+    pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -2362,6 +2416,8 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            deferred_object_error: Default::default(),
+            return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -3131,10 +3187,16 @@ impl<'a> Loader<'a> {
             }
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
-            "zipimport" if cfg!(unix) => {
-                Some(("zipimport.py", include_str!("../stdlib/zipimport.py")))
-            }
+            "zipimport" if cfg!(unix) => Some((
+                "zipimport.py",
+                concat!(
+                    include_str!("../stdlib/zipimport.py"),
+                    "\n",
+                    include_str!("../stdlib/zipimport_typed.py"),
+                ),
+            )),
             "platform" => Some((
                 "platform.py",
                 concat!(
@@ -3165,30 +3227,10 @@ impl<'a> Loader<'a> {
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
-                let version = crate::PYTHON_VERSION;
-                let abi = if cfg!(target_os = "macos") {
-                    "darwin".to_owned()
-                } else {
-                    let libc = if cfg!(target_env = "musl") {
-                        "musl"
-                    } else {
-                        "gnu"
-                    };
-                    format!("{}-linux-{libc}", std::env::consts::ARCH)
-                };
-                let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
-                let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
-                let suffixes = serde_json::to_string(&[
-                    tagged.as_str(),
-                    ".abi3.so",
-                    &archive,
-                    ".so",
-                    ".py",
-                    ".pyc",
-                ])
-                .unwrap();
+                let suffixes = pkgutil_suffixes();
+                let discovery = include_str!("../stdlib/pkgutil/iter_modules.py");
                 pkgutil_source = format!(
-                    "{source}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
+                    "{source}\n{discovery}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
                 );
                 &pkgutil_source
             } else {

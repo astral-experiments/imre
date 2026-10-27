@@ -7,6 +7,40 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const CLASS: &str = "_thread._local";
 
+// Names in the two builtin dictionaries, in _thread._local and object MRO order.
+const TYPE_NAMES: &[&str] = &[
+    "__new__",
+    "__getattribute__",
+    "__setattr__",
+    "__delattr__",
+    "__doc__",
+    "__module__",
+    "__new__",
+    "__repr__",
+    "__hash__",
+    "__str__",
+    "__getattribute__",
+    "__setattr__",
+    "__delattr__",
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__init__",
+    "__reduce_ex__",
+    "__reduce__",
+    "__getstate__",
+    "__subclasshook__",
+    "__init_subclass__",
+    "__format__",
+    "__sizeof__",
+    "__dir__",
+    "__class__",
+    "__doc__",
+];
+
 pub(super) fn is_method(name: &str) -> bool {
     matches!(name, "__getattribute__" | "__setattr__" | "__delattr__")
 }
@@ -242,16 +276,36 @@ impl Context {
         dict
     }
 
+    /// Preserve an exception from the lookup separately from an absent key.
+    fn local_dict_value(&mut self, dict: Id, key: Id) -> Result<Option<Id>> {
+        Ok(self
+            .find_dictionary_key(dict, key, None)?
+            .1
+            .map(|index| self.dict_entries(dict).expect("thread-local dictionary")[index].1))
+    }
+
     pub(super) fn local_attribute(&mut self, obj: Id, name: Name<'_>) -> Result<Id> {
         let dict = self.local_dict(obj);
         if name.is_dict(self)? {
             return Ok(dict);
         }
         let key = name.key(self);
-        if let Some(index) = self.find_dictionary_key(dict, key, None)?.1 {
-            return Ok(self.dict_entries(dict).expect("thread-local dictionary")[index].1);
+        if let Some(value) = self.local_dict_value(dict, key)? {
+            return Ok(value);
         }
-        self.default_get_attr(obj, &name.text(self)?)
+        let text = name.text(self)?;
+        let descriptor = self.lookup_builtin_type_name(key, TYPE_NAMES);
+        if descriptor == Some("__class__") {
+            return Ok(self.builtin(CLASS));
+        }
+        // A descriptor lookup can run Python and populate the thread dictionary.
+        if let Some(value) = self.local_dict_value(dict, key)? {
+            return Ok(value);
+        }
+        match descriptor {
+            Some(slot) => self.default_get_attr(obj, slot),
+            None => Err(self.missing_attribute(obj, &text)),
+        }
     }
 
     /// The base object wrappers see the class descriptor, but no instance dictionary.
@@ -311,10 +365,10 @@ impl Context {
             ));
         }
         let text = name.text(self)?;
-        if text == "__class__" {
-            return self.update_base_local_attribute(obj, &text, value);
-        }
         let key = name.key(self);
+        if self.lookup_builtin_type_name(key, TYPE_NAMES) == Some("__class__") {
+            return self.update_base_local_attribute(obj, "__class__", value);
+        }
         let result = match value {
             Some(value) => self.put_item(dict, key, value),
             None => self.delete_item(dict, key),
