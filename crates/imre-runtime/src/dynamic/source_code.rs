@@ -1088,6 +1088,33 @@ impl Context {
         self.source_bool_operand(code, scope, last)
     }
 
+    /// Return the comparison result and whether an earlier comparison already tested false.
+    fn source_comparison(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        comparison: &ast::ExprCompare,
+    ) -> Result<(Id, bool)> {
+        let mut left = self.source_expr(code, scope, &comparison.operands[0])?;
+        for (index, (op, right)) in comparison
+            .ops
+            .iter()
+            .zip(&comparison.operands[1..])
+            .enumerate()
+        {
+            let right = self.source_expr(code, scope, right)?;
+            let result = self.op(op.as_str(), left, right, NONE)?;
+            if index + 1 == comparison.ops.len() {
+                return Ok((result, false));
+            }
+            if !self.truth(result)? {
+                return Ok((result, true));
+            }
+            left = right;
+        }
+        unreachable!("comparison has at least one operator")
+    }
+
     /// Evaluate a branch condition without testing a short-circuited operand twice.
     fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
         if let ast::Expr::UnaryOp(op) = expr
@@ -1095,8 +1122,25 @@ impl Context {
         {
             return Ok(!self.source_condition(code, scope, &op.operand)?);
         }
-        let (value, known) = self.source_bool_operand(code, scope, expr)?;
-        known.map_or_else(|| self.truth(value), Ok)
+        if let ast::Expr::BoolOp(op) = expr {
+            let stop = op.op == ast::BoolOp::Or;
+            for operand in &op.values {
+                if self.source_condition(code, scope, operand)? == stop {
+                    return Ok(stop);
+                }
+            }
+            return Ok(!stop);
+        }
+        if let ast::Expr::Compare(comparison) = expr {
+            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
+            return if stopped {
+                Ok(false)
+            } else {
+                self.truth(value)
+            };
+        }
+        let value = self.source_expr(code, scope, expr)?;
+        self.truth(value)
     }
 
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
@@ -1193,18 +1237,7 @@ impl Context {
                 };
                 self.op(op, value, NONE, NONE)
             }
-            Expr::Compare(v) => {
-                let mut left = eval(self, &v.operands[0])?;
-                for (index, (op, right)) in v.ops.iter().zip(&v.operands[1..]).enumerate() {
-                    let right = eval(self, right)?;
-                    let result = self.op(op.as_str(), left, right, NONE)?;
-                    if index + 1 == v.ops.len() || !self.truth(result)? {
-                        return Ok(result);
-                    }
-                    left = right;
-                }
-                unreachable!("comparison has at least one operator")
-            }
+            Expr::Compare(v) => Ok(self.source_comparison(code, scope, v)?.0),
             Expr::If(v) => {
                 let branch = if self.source_condition(code, scope, &v.test)? {
                     &v.body
