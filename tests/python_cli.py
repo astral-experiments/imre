@@ -10,6 +10,25 @@ import tempfile
 from pathlib import Path
 
 
+def check_raise_site_allocation(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
+    wrapper = root / "refuse_raise_site.o"
+    subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_exception_with_origin,--wrap=malloc",
+    ])
+    source = "try:\n    raise ValueError('original')\nexcept ValueError as error:\n    print(error)\nprint('later')"
+    for ordinal in (0, 1, 2):
+        result = run(imre, "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_RAISE_SITE_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"original\nlater\n", b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -32,6 +51,9 @@ def main():
                 check=False,
                 timeout=60,
             )
+
+        if sys.platform.startswith("linux"):
+            check_raise_site_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -212,6 +234,34 @@ sys.path.append("unused")""",
         assert surrogate in imported.stderr, imported.stderr
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
+
+        imports = root / "import_members"
+        imports.mkdir()
+        (imports / "__init__.py").write_text("")
+        (imports / "child.py").write_text("import missing_child_dependency\n")
+        (imports / "found.py").write_text("value = 37\n")
+        compare(
+            "-B", "-c",
+            """from sys import path
+try:
+    from import_members import absent
+except ModuleNotFoundError:
+    print("missing module")
+except ImportError as error:
+    print(error.args, error.name, error.path, error.name_from)
+try:
+    from sys import missing_export
+except ImportError as error:
+    print(error.msg, error.name, error.path, error.name_from)
+try:
+    from import_members import child
+except ModuleNotFoundError as error:
+    print(error.msg, error.name)
+from import_members import found
+print(found.value)
+""",
+        )
+
         diagnostic = run(imre, "-c", "print(__file__)")
         assert diagnostic.returncode != 0 and b"<string>" in diagnostic.stderr, (
             diagnostic.stderr
@@ -371,14 +421,17 @@ def report(text):
         for fixture in (
             "boxed_ast.py",
             "boxed_code_objects.py",
+            "boxed_recursive_repr.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_float_arithmetic.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
+            "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
@@ -386,6 +439,7 @@ def report(text):
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
+            "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -399,6 +453,8 @@ def report(text):
             "boxed_module_globals.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
+            "boxed_recursion.py",
+            "boxed_function_defaults.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -407,6 +463,7 @@ def report(text):
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
+            "boxed_posixpath.py",
             "boxed_itertools_count.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
@@ -415,12 +472,17 @@ def report(text):
             "boxed_threading_lock.py",
             "boxed_dict_subclasses.py",
             "boxed_dict_pop.py",
+            "boxed_recursive_equality.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
+            "boxed_map.py",
             "boxed_python_iterators.py",
+            "boxed_enumerate_methods.py",
+            "boxed_sorted.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",
             "boxed_binascii.py",
+            "boxed_standard_base64.py",
             "boxed_bytes_separators.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",

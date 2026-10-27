@@ -4,6 +4,8 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use crate::dynamic::builtins::bind;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
+mod quote;
+
 const FIELDS: [&str; 5] = ["scheme", "netloc", "path", "query", "fragment"];
 const SPLIT: &str = "SplitResult";
 const SPLIT_BYTES: &str = "SplitResultBytes";
@@ -35,6 +37,7 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
+        "quote" | "quote_plus" | "quote_from_bytes" => quote::call(ctx, name, args, kwargs),
         "unquote" => {
             let [text, encoding, errors] =
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;

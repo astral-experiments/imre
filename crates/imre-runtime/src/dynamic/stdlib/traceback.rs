@@ -152,6 +152,8 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ctx.lookup_attr(sys, "stderr")?
         }
     };
+    // A write callback can replace sys.stderr and trigger collection before the next line.
+    ctx.heap.keep(file);
     for line in lines {
         let write = ctx.lookup_attr(file, "write")?;
         let line = ctx.text(line);

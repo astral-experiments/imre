@@ -5,6 +5,7 @@ mod abstract_class;
 mod builtins;
 mod calls;
 mod complex;
+mod dictionary;
 mod enums;
 mod ffi;
 mod function_fields;
@@ -25,6 +26,7 @@ mod zip;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::objects::exceptions::string_repr;
 use value::{
     Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
 };
@@ -73,6 +75,7 @@ pub(crate) struct Context {
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
 }
 
@@ -110,7 +113,7 @@ impl Context {
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {
-        self.alloc(Value::Dict(entries))
+        self.alloc(Value::Dict(entries.into()))
     }
 
     fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {
@@ -141,7 +144,7 @@ impl Context {
     }
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(id) {
+        match self.heap.get(self.scalar_value(id)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -151,6 +154,17 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    /// Keep a mutable input exported while Python coerces a buffer API's flag.
+    fn truth_with_buffer_export(&mut self, input: Id, flag: Id) -> Result<bool> {
+        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+            return self.truth(flag);
+        }
+        self.bytearray_exports.push(input);
+        let result = self.truth(flag);
+        self.bytearray_exports.pop();
+        result
     }
 
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
@@ -195,7 +209,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::AstWalk(_)
+                | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -212,6 +226,14 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
+            let closed = match self.heap.get(id) {
+                Value::File(file) => file.closed(),
+                Value::TextFile(file) => file.closed(),
+                _ => false,
+            };
+            if closed {
+                return Err(Error::new("ValueError", "I/O operation on closed file."));
+            }
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
@@ -277,6 +299,7 @@ impl Context {
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
+                | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -305,7 +328,7 @@ impl Context {
             return Ok(IteratorSlice::Values(&[]));
         };
         Ok(match self.heap.get(*sequence) {
-            Value::List(values) if *reverse => {
+            Value::List(values) | Value::Tuple(values) if *reverse => {
                 IteratorSlice::Reversed(values.get(..*offset).unwrap_or_default())
             }
             Value::List(values) | Value::Tuple(values) => {
@@ -344,11 +367,8 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(!queue.is_empty());
-        }
-        if matches!(self.heap.get(id), Value::Zip { .. }) {
-            return self.zip_has_item(id);
+        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
+            return stdlib::ast::has_item(self, id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -367,7 +387,7 @@ impl Context {
 
     fn is_stop_iteration(&mut self, error: &Error) -> bool {
         let stop = self.builtin("StopIteration");
-        self.error_matches(&error.kind, stop)
+        self.raised_error_matches(error, stop)
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
@@ -394,8 +414,8 @@ impl Context {
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
-            Value::Iterator { .. } | Value::Zip { .. } => {}
-            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::Iterator { .. } => {}
+            Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -409,21 +429,24 @@ impl Context {
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
-            Value::Map { function, input } => {
-                let (function, input) = (*function, *input);
-                let Some(item) = self.next_result(input)? else {
-                    return Ok(None);
-                };
-                return self.call(function, vec![item], Vec::new()).map(Some);
+            Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Zip { .. } => {
+                // A zip input can itself be a zip, so advancing a row can descend many native frames.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_zip_or_map(id)
+                });
             }
             Value::Generator { code, .. } => {
                 let code = *code;
-                return match self.code_object(code).body {
-                    value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                        self.resume_source(id)
+                // Delegated generators resume their children on the native stack.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    match self.code_object(code).body {
+                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                            self.resume_source(id)
+                        }
                     }
-                };
+                });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::File(_) | Value::TextFile(_) => {
@@ -449,9 +472,6 @@ impl Context {
         if !self.iterator_has_item(id)? {
             return Ok(None);
         }
-        if let Value::Zip { pending, .. } = self.heap.get_mut(id) {
-            return Ok(pending.take());
-        }
         let item = match self.iterator_remaining(id)? {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
@@ -474,7 +494,7 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::AstWalk(_)
+            Value::AstWalk { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
@@ -738,6 +758,124 @@ impl Context {
         self.pending.take().map_or(Ok(result), Err)
     }
 
+    /// Resolve a named import from a loaded module, including package children.
+    fn import_from(&mut self, object: Id, member: Id) -> Result<Id> {
+        let name = self.str_value(member)?.to_owned();
+        let attribute_error = match self.lookup_attr(object, &name) {
+            Err(error) if error.kind == "AttributeError" => error,
+            value => return value,
+        };
+        let Value::Module {
+            name: module,
+            scope,
+            ..
+        } = self.heap.get(object)
+        else {
+            return Err(attribute_error);
+        };
+        let names = &self.scope_data(*scope).names;
+        let package = if names.contains_key("__path__") {
+            names.get("__name__").map(|id| self.display(*id))
+        } else {
+            None
+        };
+        let child = format!("{}.{name}", package.as_deref().unwrap_or(module));
+        // A child's initializer can raise ModuleNotFoundError for its own dependency.
+        // Only a failure to find the requested child is a missing export.
+        match self.module(&child) {
+            Err(error)
+                if error.kind == "ModuleNotFoundError"
+                    && error
+                        .import
+                        .as_ref()
+                        .and_then(|fields| fields.name.as_deref())
+                        == Some(&child) => {}
+            value => return value,
+        }
+        let Value::Module {
+            scope,
+            origin,
+            initializing,
+            ..
+        } = self.heap.get(object)
+        else {
+            unreachable!()
+        };
+        let names = &self.scope_data(*scope).names;
+        let module = names
+            .get("__name__")
+            .and_then(|id| self.str_value(*id).ok());
+        let quoted_module = string_repr(module.unwrap_or("<unknown module name>"));
+        let origin = origin.or_else(|| names.get("__file__").copied());
+        let path = origin.and_then(|id| self.str_value(id).ok());
+        let prefix = format!(
+            "cannot import name {} from {quoted_module}",
+            self.repr(member)
+        );
+        let shadow = path.filter(|path| self.possibly_shadowing(path));
+        let message = match shadow {
+            Some(path)
+                if module.is_some_and(|module| {
+                    include_str!("../../native/stdlib-module-names.txt")
+                        .lines()
+                        .any(|name| name == module)
+                }) =>
+            {
+                format!(
+                    "{prefix} (consider renaming {} since it has the same name as the standard library module named {quoted_module} and prevents importing that standard library module)",
+                    string_repr(path)
+                )
+            }
+            Some(path) if *initializing => {
+                format!(
+                    "{prefix} (consider renaming {} if it has the same name as a library you intended to import)",
+                    string_repr(path)
+                )
+            }
+            _ if *initializing => {
+                let message = format!(
+                    "cannot import name {} from partially initialized module {quoted_module} (most likely due to a circular import)",
+                    self.repr(member)
+                );
+                match path {
+                    Some(path) => format!("{message} ({path})"),
+                    None => message,
+                }
+            }
+            _ => format!("{prefix} ({})", path.unwrap_or("unknown location")),
+        };
+        Err(Error::new("ImportError", message).with_import(
+            module,
+            path.map(str::to_owned),
+            Some(&name),
+        ))
+    }
+
+    /// Check whether the script's startup search path could shadow an installed module.
+    fn possibly_shadowing(&self, path: &str) -> bool {
+        if self.config["safe_path"].as_bool() == Some(true) {
+            return false;
+        }
+        let path = std::path::Path::new(path);
+        let root = if path.ends_with("__init__.py") {
+            path.parent().and_then(std::path::Path::parent)
+        } else {
+            path.parent()
+        };
+        let first = self.config["paths"]
+            .get(0)
+            .and_then(serde_json::Value::as_str);
+        let Some((root, first)) = root.zip(first) else {
+            return false;
+        };
+        let first = if first.is_empty() {
+            std::env::current_dir()
+        } else {
+            std::path::absolute(first)
+        };
+        first.is_ok_and(|first| first == root)
+    }
+
     fn module(&mut self, name: &str) -> Result<Id> {
         if let Some(value) = self.modules.get(name) {
             return Ok(*value);
@@ -781,8 +919,13 @@ impl Context {
                     self.lookup_attr(parent, "__path__").map_err(|_| {
                         Error::new(
                             "ModuleNotFoundError",
-                            format!("parent of {name:?} is not a package"),
+                            format!(
+                                "No module named {}; {} is not a package",
+                                string_repr(name),
+                                string_repr(name.rsplit_once('.').unwrap().0)
+                            ),
                         )
+                        .with_import(Some(name), None, None)
                     })?,
                     child,
                 )
@@ -833,8 +976,9 @@ impl Context {
         if source.is_none() && !stdlib::is_module(name) {
             return Err(Error::new(
                 "ModuleNotFoundError",
-                format!("no module named {name:?}"),
-            ));
+                format!("No module named {}", string_repr(name)),
+            )
+            .with_import(Some(name), None, None));
         }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
@@ -863,12 +1007,29 @@ impl Context {
             self.text(name.rsplit_once('.').map_or("", |(pkg, _)| pkg))
         };
         self.bind(scope, "__package__", package);
+        let origin = source.as_ref().and_then(|(path, _)| {
+            if locations.contains(path) {
+                self.bind(scope, "__file__", NONE);
+            } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
+                let file = self.text(path.to_string_lossy());
+                self.bind(scope, "__file__", file);
+                return Some(file);
+            }
+            None
+        });
         let module = self.alloc(Value::Module {
             name: name.to_owned(),
             scope,
+            origin,
+            initializing: source.is_some(),
         });
         self.modules.insert(name.to_owned(), module);
         match name {
+            "os" => {
+                let path = self.module("posixpath")?;
+                self.bind(scope, "path", path);
+                self.modules.insert("os.path".to_owned(), path);
+            }
             "io" => stdlib::io::install(self, scope),
             "_io" => {
                 self.module("io")?;
@@ -898,12 +1059,6 @@ impl Context {
             _ => {}
         }
         if let Some((path, entry)) = source {
-            if locations.contains(&path) {
-                self.bind(scope, "__file__", NONE);
-            } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
-                let file = self.text(path.to_string_lossy());
-                self.bind(scope, "__file__", file);
-            }
             let filename = self.text(path.to_string_lossy());
             let name_id = self.text("<module>");
             let code = self.alloc(Value::Code(value::CodeObject {
@@ -916,7 +1071,12 @@ impl Context {
                 module_definition: true,
                 coroutine: false,
             }));
-            if let Err(error) = self.execute(code, scope) {
+            let result = self.execute(code, scope);
+            let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
+                unreachable!()
+            };
+            *initializing = false;
+            if let Err(error) = result {
                 self.modules.remove(name);
                 return Err(error);
             }

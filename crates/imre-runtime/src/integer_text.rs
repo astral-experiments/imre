@@ -139,6 +139,33 @@ pub(super) fn decimal_digits_allowed(count: usize) -> bool {
     limit == 0 || count <= limit as usize
 }
 
+/// Enforces the limit on a validated, unsigned ASCII digit sequence with optional separators.
+pub(super) fn check_input_digits(digits: &str, limit: u32) -> crate::Result<()> {
+    if limit == 0 || digits.len() <= limit as usize {
+        return Ok(());
+    }
+    let count = digits.bytes().filter(u8::is_ascii_digit).count();
+    if count <= limit as usize {
+        return Ok(());
+    }
+    let (mut limit_buf, mut count_buf) = (itoa::Buffer::new(), itoa::Buffer::new());
+    let parts = [
+        "Exceeds the limit (",
+        limit_buf.format(limit),
+        " digits) for integer string conversion: value has ",
+        count_buf.format(count),
+        " digits; use sys.set_int_max_str_digits() to increase the limit",
+    ];
+    let mut detail = String::new();
+    detail
+        .try_reserve_exact(parts.iter().map(|part| part.len()).sum())
+        .map_err(|_| Error::allocation())?;
+    for part in parts {
+        detail.push_str(part);
+    }
+    Err(Error::new(Kind::ValueError, detail))
+}
+
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     let limit = decimal_limit();
@@ -155,13 +182,35 @@ pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     {
         Err(Error::new(
             Kind::ValueError,
-            format!(
-                "Exceeds the limit ({} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit",
-                limit.digits
-            ),
+            output_limit_message(limit.digits)?,
         ))
     } else {
         Ok(())
+    }
+}
+
+fn output_limit_message(limit: u32) -> crate::Result<Str> {
+    const PREFIX: &str = "Exceeds the limit (";
+    const SUFFIX: &str = " digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit";
+    let mut buffer = itoa::Buffer::new();
+    let digits = buffer.format(limit);
+    let mut text = Str::try_with_capacity(PREFIX.len() + digits.len() + SUFFIX.len())
+        .map_err(|_| Error::memory_error())?;
+    text.push_str(PREFIX);
+    text.push_str(digits);
+    text.push_str(SUFFIX);
+    Ok(text)
+}
+
+/// Validate the largest rendered integer in a statically known argparse choices iterable.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_argparse_choice_digits(count: u64) {
+    let limit = decimal_digit_limit();
+    if limit != 0 && count > u64::from(limit) {
+        match output_limit_message(limit) {
+            Ok(message) => Error::return_checked_message(Kind::ValueError, message, ()),
+            Err(error) => error.returning(()),
+        }
     }
 }
 
@@ -175,6 +224,52 @@ pub(super) fn decimal_string(value: &crate::Int) -> crate::Result<Str> {
     Ok(Str::from(big.to_string()))
 }
 
+/// Format the full integer coefficient, ignoring the limit used by str(int).
+pub(super) fn try_decimal_coefficient(value: &crate::Int) -> Option<Str> {
+    let mut buffer = itoa::Buffer::new();
+    if let Some(value) = value.as_small() {
+        return Some(Str::new(buffer.format(value)));
+    }
+
+    const BASE: u64 = 1_000_000_000;
+    let value = value.big();
+    let mut groups = Vec::<u32>::new();
+    // Each nine-digit group holds more than 29 bits.
+    let capacity = usize::try_from(value.bits().div_ceil(29)).ok()?;
+    groups.try_reserve_exact(capacity).ok()?;
+    for limb in value.iter_u32_digits().rev() {
+        let mut carry = u64::from(limb);
+        for group in &mut groups {
+            let word = (u64::from(*group) << 32) + carry;
+            *group = (word % BASE) as u32;
+            carry = word / BASE;
+        }
+        while carry != 0 {
+            groups.push((carry % BASE) as u32);
+            carry /= BASE;
+        }
+    }
+
+    let mut groups = groups.into_iter().rev();
+    let first = buffer.format(groups.next().unwrap_or(0));
+    let negative = value.sign() == num_bigint::Sign::Minus;
+    let length = groups
+        .len()
+        .checked_mul(9)?
+        .checked_add(first.len() + usize::from(negative))?;
+    let mut text = Str::try_with_capacity(length).ok()?;
+    if negative {
+        text.push('-');
+    }
+    text.push_str(first);
+    for group in groups {
+        let digits = buffer.format(group);
+        text.push_str(&"000000000"[digits.len()..]);
+        text.push_str(digits);
+    }
+    Some(text)
+}
+
 /// Builds Python's base-ten conversion diagnostic from the original literal.
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]
@@ -185,11 +280,22 @@ pub(super) fn invalid_literal(value: &str) -> Error {
 /// Render an invalid integer using the base supplied by the caller.
 #[cold]
 pub(super) fn invalid_literal_in_base(value: &str, base: u32) -> Error {
-    let literal = literal_repr_prefix(value);
-    Error::new(
-        Kind::ValueError,
-        compact_str::format_compact!("invalid literal for int() with base {base}: {literal}"),
-    )
+    let mut base_text = itoa::Buffer::new();
+    let header = [
+        "invalid literal for int() with base ",
+        base_text.format(base),
+        ": ",
+    ];
+    let Ok(mut detail) = Str::try_with_capacity(header.iter().map(|part| part.len()).sum()) else {
+        return Error::allocation();
+    };
+    for part in header {
+        detail.push_str(part);
+    }
+    match write_literal_repr_prefix(value, &mut detail) {
+        Ok(()) => Error::new(Kind::ValueError, detail),
+        Err(error) => error,
+    }
 }
 
 /// Returns the decimal value of a Unicode 16.0 digit.
@@ -252,18 +358,21 @@ pub(super) fn newer_printable(value: char) -> bool {
 }
 
 /// Stop the repr writer after the diagnostic's 200 Unicode code points.
-fn literal_repr_prefix(value: &str) -> Str {
-    struct Prefix {
-        text: Str,
+fn write_literal_repr_prefix(value: &str, text: &mut Str) -> crate::Result<()> {
+    struct Prefix<'a> {
+        text: &'a mut Str,
         remaining: usize,
     }
 
-    impl Write for Prefix {
+    impl Write for Prefix<'_> {
         fn write_str(&mut self, text: &str) -> fmt::Result {
             for character in text.chars() {
                 if self.remaining == 0 {
                     return Err(fmt::Error);
                 }
+                self.text
+                    .try_reserve(character.len_utf8())
+                    .map_err(|_| fmt::Error)?;
                 self.text.push(character);
                 self.remaining -= 1;
             }
@@ -272,12 +381,16 @@ fn literal_repr_prefix(value: &str) -> Str {
     }
 
     let mut prefix = Prefix {
-        text: Str::default(),
+        text,
         remaining: 200,
     };
-    // Quote selection still examines the whole source. Only rendering is bounded.
-    let _ = crate::objects::exceptions::write_string_repr(value, &mut prefix);
-    prefix.text
+    // Reaching the precision ends rendering successfully. An earlier write failure is allocation.
+    if crate::objects::exceptions::write_string_repr(value, &mut prefix).is_err()
+        && prefix.remaining != 0
+    {
+        return Err(Error::allocation());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -285,13 +398,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decimal_coefficients_preserve_sign_and_zero_padded_groups() {
+        use num_bigint::BigInt;
+
+        for bits in [0, 1, 30, 62, 63, 64, 127, 257, 16384] {
+            let power = BigInt::from(1u8) << bits;
+            for delta in [-1, 0, 1] {
+                let coefficient: BigInt = &power + delta;
+                for value in [coefficient.clone(), -coefficient] {
+                    let expected = value.to_string();
+                    assert_eq!(
+                        try_decimal_coefficient(&crate::Int::new(value)).as_deref(),
+                        Some(expected.as_str())
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn invalid_literal_prefix_preserves_late_quotes_and_partial_escapes() {
         let nul = "\0".repeat(16_384) + "'";
         let expected = format!("\"{}", "\\x00".repeat(50));
-        assert_eq!(literal_repr_prefix(&nul), &expected[..200]);
+        let mut text = Str::default();
+        assert!(write_literal_repr_prefix(&nul, &mut text).is_ok());
+        assert_eq!(text.as_str(), &expected[..200]);
 
         let unicode = "\u{1ccfa}".repeat(1_024);
         let expected = format!("'{}", "\\U0001ccfa".repeat(20));
-        assert_eq!(literal_repr_prefix(&unicode), &expected[..200]);
+        text.clear();
+        assert!(write_literal_repr_prefix(&unicode, &mut text).is_ok());
+        assert_eq!(text.as_str(), &expected[..200]);
+
+        text.clear();
+        assert!(write_literal_repr_prefix(&"😃".repeat(200), &mut text).is_ok());
+        assert_eq!(text.chars().count(), 200);
     }
 }

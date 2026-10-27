@@ -826,7 +826,7 @@ impl<T: ReleaseEntries + 'static> TableOwner<T> {
         Self(Some(Box::new(table)))
     }
 
-    fn try_new(table: T) -> Result<Self, Error> {
+    pub(super) fn try_new(table: T) -> Result<Self, Error> {
         let table = allocator_api2::boxed::Box::try_new(table).map_err(|_| Error::allocation())?;
         let table = allocator_api2::boxed::Box::into_raw(table);
         // SAFETY: both box types use the global allocator and the same layout for T.
@@ -1912,6 +1912,20 @@ pub extern "C" fn imre_dict_new(key_kind: u32, value_kind: u32) -> *const Object
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
         Storage::Dictionary(TableOwner::new(Mapping::new(key_kind, value_kind))),
     ))))
+}
+
+/// Identify the bound mapping's `OrderedDict` method through a base `dict` view.
+///
+/// # Safety
+/// The caller holds a live mapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_is_ordered(owner: *const Object) -> bool {
+    // SAFETY: the caller roots the mapping during this shared borrow.
+    unsafe {
+        object(owner)
+            .0
+            .with(|s| s.dictionary().order_version.is_some())
+    }
 }
 
 /// Select the bound dictionary's class before consuming the first key.

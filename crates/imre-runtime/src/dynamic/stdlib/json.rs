@@ -61,7 +61,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
                             entries[position] = (key, value);
                         }
                     }
-                    ctx.alloc(Value::Dict(entries))
+                    ctx.dict(entries)
                 }
             })
         },
@@ -153,7 +153,7 @@ impl Encoder {
                         self.output.push(']');
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, entries.clone())?;
+                        self.object(ctx, entries.to_vec())?;
                     }
                     _ => {
                         let default = self.default.ok_or_else(|| {
@@ -186,7 +186,7 @@ impl Encoder {
         if self.sort_keys {
             let mut error = None;
             entries.sort_by(|(a, _), (b, _)| {
-                ctx.compare(*a, *b)
+                ctx.compare("<", *a, *b)
                     .unwrap_or_else(|e| {
                         error.get_or_insert(e);
                         None

@@ -37,7 +37,7 @@ impl Context {
     }
 
     pub(super) fn new_complex(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-        let [real, imag] = bind("complex", args, kwargs, ["real", "imag"])?;
+        let [mut real, imag] = bind("complex", args, kwargs, ["real", "imag"])?;
         let single = args.len() == 1 && kwargs.is_empty();
         if single {
             match self.heap.get(args[0]) {
@@ -51,30 +51,69 @@ impl Context {
                 _ => {}
             }
         }
-        let component = |argument: Option<Id>, name: &str| -> Result<f64> {
-            let Some(value) = argument else {
-                return Ok(0.0);
+        if let Some(value) = real
+            && let Some(method) = self.bound_slot(value, "__complex__")?
+        {
+            let result = self.call(method, Vec::new(), Vec::new())?;
+            let Value::Complex(number) = *self.heap.get(result) else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__complex__ returned non-complex (type {})",
+                        self.type_name(result)
+                    ),
+                ));
             };
-            if let Some(number) = self.real_component(value)? {
-                return Ok(number);
+            if single {
+                return Ok(self.alloc(Value::Complex(number)));
             }
+            real = Some(result);
+        }
+        // Check both component types before invoking either real-number conversion.
+        for (argument, name) in [(real, "real"), (imag, "imag")] {
+            let Some(value) = argument else { continue };
             if matches!(self.heap.get(value), Value::Complex(_)) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "complex-valued real or imag arguments are unsupported",
                 ));
             }
-            let ty = self.type_name(value);
-            let message = if single {
-                format!("complex() argument must be a string or a number, not {ty}")
-            } else {
-                format!("complex() argument '{name}' must be a real number, not {ty}")
+            if !matches!(
+                self.heap.get(value),
+                Value::Float(_) | Value::Int(_) | Value::Bool(_)
+            ) && self.slot(value, "__float__").is_none()
+                && self.slot(value, "__index__").is_none()
+            {
+                let ty = self.type_name(value);
+                let message = if single {
+                    format!("complex() argument must be a string or a number, not {ty}")
+                } else {
+                    format!("complex() argument '{name}' must be a real number, not {ty}")
+                };
+                return Err(Error::new("TypeError", message));
+            }
+        }
+        let mut component = |argument: Option<Id>| -> Result<f64> {
+            let Some(value) = argument else {
+                return Ok(0.0);
             };
-            Err(Error::new("TypeError", message))
+            if let Some(number) = self.real_component(value)? {
+                return Ok(number);
+            }
+            let Some(number) = super::builtins::from_numeric(self, value)? else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("must be real number, not {}", self.type_name(value)),
+                ));
+            };
+            let Value::Float(number) = *self.heap.get(number) else {
+                unreachable!()
+            };
+            Ok(number)
         };
         let number = Complex {
-            real: component(real, "real")?,
-            imag: component(imag, "imag")?,
+            real: component(real)?,
+            imag: component(imag)?,
         };
         Ok(self.alloc(Value::Complex(number)))
     }

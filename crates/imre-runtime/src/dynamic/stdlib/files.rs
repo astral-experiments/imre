@@ -3,7 +3,9 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
 use std::process::{Command, Stdio};
 
-use super::{Context, Error, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error};
+use super::{
+    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
+};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
@@ -296,9 +298,17 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    let reader = slot
-        .as_mut()
-        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"));
+    let reader = slot.as_mut().ok_or_else(|| {
+        let message = match name {
+            "file.read" => "read of closed file",
+            "file.readline" => "readline of closed file",
+            "file.readinto" => "readinto of closed file",
+            "file.seek" => "seek of closed file",
+            "file.__enter__" => "I/O operation on closed file.",
+            _ => "I/O operation on closed file",
+        };
+        Error::new("ValueError", message)
+    });
     if matches!(name, "file.read" | "file.readline") {
         let length = args
             .get(1)
@@ -313,12 +323,28 @@ pub(super) fn call(
         }
         let mut bytes = Vec::new();
         let mut input = reader?.take(u64::try_from(length).unwrap_or(u64::MAX));
+        let requested = if name == "file.read" {
+            usize::try_from(length).ok()
+        } else {
+            None
+        };
+        if let Some(size) = requested {
+            if size > crate::MAX_BYTES_LEN {
+                return Err(Error::new("OverflowError", "byte string is too large"));
+            }
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
         if name == "file.readline" {
             input.read_until(b'\n', &mut bytes)
         } else {
             input.read_to_end(&mut bytes)
         }
         .map_err(os_error)?;
+        if requested.is_some_and(|size| bytes.len() < size) {
+            bytes.shrink_to_fit();
+        }
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
     let f = reader?;
@@ -422,6 +448,7 @@ pub(super) fn text_method(
             file.write(value)?;
             Ok(ctx.int(value.chars().count() as i64))
         }
+        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
         "flush" => {
             file.flush()?;
             Ok(NONE)

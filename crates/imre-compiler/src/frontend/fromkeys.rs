@@ -42,26 +42,43 @@ impl Checker<'_> {
         shape: Option<(Type, Type)>,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        // A base dict view may bind either dict.fromkeys or OrderedDict.fromkeys.
+        // A call the OrderedDict iteration lowering cannot represent may still
+        // be an admitted plain-dict call that raises during argument binding.
+        if let Some(owner) = receiver.as_ref()
+            && (!call.arguments.keywords.is_empty()
+                || !(1..=2).contains(&call.arguments.args.len()))
+            && !matches!(owner.kind, ExprKind::Dict { .. })
+            && self
+                .types
+                .mapping(owner.ty)
+                .is_some_and(|(key, value)| owner.ty == self.types.dict(key, value))
+            && let Ok(bound) = self.bound_fromkeys(call, shape, receiver.clone(), true)
+        {
+            return Ok(bound);
+        }
+        self.bound_fromkeys(call, shape, receiver, false)
+    }
+
+    fn bound_fromkeys(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+        receiver: Option<Expr>,
+        check_ordered: bool,
+    ) -> Result<Expr, String> {
         let mut outer = calls::ArgumentScope::default();
         let receiver = receiver.map(|owner| outer.hold(self, owner));
         let args = call.arguments.args.as_slice();
         let error_type = shape.map_or(Type::None, |(key, value)| self.types.dict(key, value));
-        let ordered = receiver
-            .as_ref()
-            .is_some_and(|owner| self.types.is_ordered_dict(owner.ty));
+        let ordered = check_ordered
+            || receiver
+                .as_ref()
+                .is_some_and(|owner| self.types.is_ordered_dict(owner.ty));
         let binding_error = if ordered {
             ordered_fromkeys_binding_error(call)
-        } else if !call.arguments.keywords.is_empty() {
-            Some("dict.fromkeys() takes no keyword arguments".to_string())
-        } else if args.is_empty() {
-            Some("fromkeys expected at least 1 argument, got 0".to_string())
-        } else if args.len() > 2 {
-            Some(format!(
-                "fromkeys expected at most 2 arguments, got {}",
-                args.len()
-            ))
         } else {
-            None
+            plain_fromkeys_binding_error(call)
         };
         if let Some(reason) = binding_error {
             for arg in args {
@@ -77,25 +94,31 @@ impl Checker<'_> {
                 }
                 outer.discard(self, &kw.value)?;
             }
-            // Counter.fromkeys(iterable, v=None) accepts names and raises its
-            // own exception after the caller has evaluated all arguments.
-            let named = |name| call.arguments.find_keyword(name).is_some();
-            let binds_counter = match (args.len(), call.arguments.keywords.len()) {
-                (0, 1) => named("iterable"),
-                (0, 2) => named("iterable") && named("v"),
-                (1, 1) => named("v"),
-                _ => false,
+            let failure = if ordered {
+                fromkeys_error(reason, error_type)
+            } else {
+                self.plain_fromkeys_error(call, shape, receiver.as_ref(), reason, error_type)
             };
-            if !ordered
-                && binds_counter
-                && let Some(owner) = receiver
-            {
-                let (key, value) = shape.unwrap_or((Type::Int, Type::None));
-                let target = self.fromkeys_target(Some(owner), key, value);
-                outer.hold(self, target);
-            }
-            return Ok(outer.finish(fromkeys_error(reason, error_type)));
+            let failure = if check_ordered {
+                self.ordered_fromkeys_or_error(call, shape, receiver.as_ref().unwrap(), failure)
+            } else {
+                failure
+            };
+            return Ok(outer.finish(failure));
         }
+        // Both methods first evaluate the arguments in source order. Check the
+        // bound method before creating the target or consuming the iterable.
+        let guard = check_ordered.then(|| {
+            self.ordered_fromkeys_or_error(
+                call,
+                shape,
+                receiver.as_ref().unwrap(),
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+            )
+        });
         let named = |name| call.arguments.find_keyword(name).map(|kw| &kw.value);
         let source = args
             .first()
@@ -143,6 +166,9 @@ impl Checker<'_> {
             outer.hold(self, iterable.clone());
             let value_type = value.ty;
             outer.hold(self, value);
+            if let Some(guard) = guard {
+                outer.hold(self, guard);
+            }
             if let Some(owner) = receiver {
                 let target =
                     self.fromkeys_target(Some(owner), hint.unwrap_or(Type::Int), value_type);
@@ -153,30 +179,42 @@ impl Checker<'_> {
         let mut input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, Some(hint.unwrap_or(Type::Int)));
         let key_type = self.locals[input.value];
-        if !self.types.hashable_key(key_type) {
-            return Err(error(
-                self.source,
-                source,
-                "dict.fromkeys requires supported immutable keys",
-            ));
-        }
-        if let Some(key) = hint {
-            self.expect(key, key_type, source)?;
-        }
-        let result = self.fromkeys_target(receiver, key_type, value.ty);
+        // A list key raises only if iteration produces an item. An empty
+        // iterable still needs the ordinary mapping of the requested shape.
+        let list_key = ordered && matches!(key_type, Type::ListInt | Type::List(_));
+        let result_key = if list_key {
+            hint.unwrap_or(Type::Int)
+        } else {
+            if !self.types.hashable_key(key_type) {
+                return Err(error(
+                    self.source,
+                    source,
+                    "dict.fromkeys requires supported immutable keys",
+                ));
+            }
+            if let Some(key) = hint {
+                self.expect(key, key_type, source)?;
+            }
+            key_type
+        };
+        let result = self.fromkeys_target(receiver, result_key, value.ty);
         let ty = result.ty;
         let kept = self.hidden(value.ty);
         let target = self.hidden(ty);
         // Evaluate the iterable expression and the value before asking for the
         // iterator. A generator expression acquires its own outer iterator earlier.
         input.evaluate.push(Statement::Assign(kept, value));
+        if let Some(guard) = guard {
+            input.evaluate.push(Statement::Expr(guard));
+        }
         input.evaluate.push(Statement::Assign(target, result));
         let body = self.expand_items(Iteration::Prepared(input), source, |checker, key| {
-            Ok(vec![Statement::SetItem(
-                checker.local(target),
-                key,
-                checker.local(kept),
-            )])
+            let insert = if list_key {
+                Statement::Expr(fromkeys_error("unhashable type: 'list'".into(), Type::None))
+            } else {
+                Statement::SetItem(checker.local(target), key, checker.local(kept))
+            };
+            Ok(vec![insert])
         })?;
         Ok(outer.finish(Expr {
             ty,
@@ -186,6 +224,56 @@ impl Checker<'_> {
                 clear: vec![target, kept],
             },
         }))
+    }
+
+    fn ordered_fromkeys_or_error(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+        owner: &Expr,
+        ordered: Expr,
+    ) -> Expr {
+        let plain = self.plain_fromkeys_error(
+            call,
+            shape,
+            Some(owner),
+            plain_fromkeys_binding_error(call).unwrap(),
+            ordered.ty,
+        );
+        let test = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::DictIsOrdered, vec![owner.clone()]),
+        };
+        Expr {
+            ty: ordered.ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(ordered), Box::new(plain)),
+        }
+    }
+
+    fn plain_fromkeys_error(
+        &mut self,
+        call: &ast::ExprCall,
+        shape: Option<(Type, Type)>,
+        receiver: Option<&Expr>,
+        reason: String,
+        ty: Type,
+    ) -> Expr {
+        let mut scope = calls::ArgumentScope::default();
+        // Counter.fromkeys(iterable, v=None) accepts names and raises its
+        // own exception after the caller has evaluated all arguments.
+        let named = |name| call.arguments.find_keyword(name).is_some();
+        let binds_counter = match (call.arguments.args.len(), call.arguments.keywords.len()) {
+            (0, 1) => named("iterable"),
+            (0, 2) => named("iterable") && named("v"),
+            (1, 1) => named("v"),
+            _ => false,
+        };
+        if binds_counter && let Some(owner) = receiver {
+            let (key, value) = shape.unwrap_or((Type::Int, Type::None));
+            let target = self.fromkeys_target(Some(owner.clone()), key, value);
+            scope.hold(self, target);
+        }
+        scope.finish(fromkeys_error(reason, ty))
     }
 
     fn fromkeys_target(&self, receiver: Option<Expr>, key: Type, value: Type) -> Expr {
@@ -208,6 +296,18 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::DictFromKeysTarget, vec![owner, empty]),
             },
             None => empty,
+        }
+    }
+}
+
+fn plain_fromkeys_binding_error(call: &ast::ExprCall) -> Option<String> {
+    if !call.arguments.keywords.is_empty() {
+        Some("dict.fromkeys() takes no keyword arguments".into())
+    } else {
+        match call.arguments.args.len() {
+            0 => Some("fromkeys expected at least 1 argument, got 0".into()),
+            1 | 2 => None,
+            n => Some(format!("fromkeys expected at most 2 arguments, got {n}")),
         }
     }
 }

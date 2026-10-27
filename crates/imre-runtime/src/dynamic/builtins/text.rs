@@ -25,15 +25,32 @@ fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
 }
 
 fn decode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<String> {
-    let Value::Bytes(bytes) = ctx.heap.get(id) else {
+    let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(id)) else {
         return Err(type_error("decoding requires bytes"));
     };
-    strict(ctx, errors)?;
     let encoding = encoding_id
         .map(|id| ctx.str_value(id))
         .transpose()?
         .unwrap_or("utf-8");
-    Ok(crate::objects::Codec::lookup(encoding)?.decode(bytes, None)?)
+    let codec = crate::objects::Codec::lookup(encoding)?;
+    if matches!(codec, crate::objects::Codec::Utf8 { signature: false })
+        && errors.is_some_and(|id| {
+            ctx.str_value(id)
+                .is_ok_and(|value| value == "surrogateescape")
+        })
+    {
+        return crate::objects::interpreter_stdlib::fsdecode(bytes)
+            .map(char::from_u32)
+            .collect::<Option<String>>()
+            .ok_or_else(|| {
+                Error::new(
+                    "UnicodeError",
+                    "surrogate-escaped filenames are not representable as Imre strings",
+                )
+            });
+    }
+    strict(ctx, errors)?;
+    Ok(codec.decode(bytes, None)?)
 }
 
 fn encode(ctx: &Context, id: Id, encoding_id: Option<Id>, errors: Option<Id>) -> Result<Vec<u8>> {
@@ -647,7 +664,7 @@ pub(super) fn method(
         }
     })?;
     if name == "__new__" {
-        return ctx.new_str(receiver, args, kwargs);
+        return ctx.new_string(owner, receiver, args, kwargs);
     }
     if owner == "str" && ctx.str_value(receiver).is_err() {
         return Err(type_error(format!(
@@ -670,14 +687,12 @@ pub(super) fn method(
         let width = match tabsize {
             None => 8,
             Some(id) => {
-                let index = ctx
-                    .index_value_with_bool_result(id, false)?
-                    .ok_or_else(|| {
-                        type_error(format!(
-                            "'{}' object cannot be interpreted as an integer",
-                            ctx.type_name(id)
-                        ))
-                    })?;
+                let index = ctx.index_value(id)?.ok_or_else(|| {
+                    type_error(format!(
+                        "'{}' object cannot be interpreted as an integer",
+                        ctx.type_name(id)
+                    ))
+                })?;
                 index
                     .to_i64()
                     .and_then(|n| i32::try_from(n).ok())
@@ -693,27 +708,31 @@ pub(super) fn method(
             },
         );
     }
-    if name == "find" {
+    if matches!(name, "find" | "rfind") {
         if !kwargs.is_empty() {
-            return Err(type_error("str.find() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "{owner}.{name}() takes no keyword arguments"
+            )));
         }
         let Some(&needle) = args.first() else {
-            return Err(type_error("find expected at least 1 argument, got 0"));
+            return Err(type_error(format!(
+                "{name} expected at least 1 argument, got 0"
+            )));
         };
         if args.len() > 3 {
             return Err(type_error(format!(
-                "find expected at most 3 arguments, got {}",
+                "{name} expected at most 3 arguments, got {}",
                 args.len()
             )));
         }
-        if ctx.str_value(needle).is_err() {
+        if owner == "str" && ctx.str_value(needle).is_err() {
             let kind = if needle == NONE {
                 "None"
             } else {
                 ctx.type_name(needle)
             };
             return Err(type_error(format!(
-                "find() argument 1 must be str, not {kind}"
+                "{name}() argument 1 must be str, not {kind}"
             )));
         }
         let mut bound = |arg: Option<&Id>| match arg {
@@ -724,19 +743,59 @@ pub(super) fn method(
         };
         let start = bound(args.get(1))?;
         let end = bound(args.get(2))?;
+        if owner == "bytes" {
+            let needle = if let Some(index) = ctx.index_value(needle)? {
+                vec![
+                    index
+                        .to_i64()
+                        .and_then(|n| u8::try_from(n).ok())
+                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
+                ]
+            } else {
+                ctx.bytes_like(needle)?.to_vec()
+            };
+            let value = ctx.bytes_like(receiver)?;
+            let len = value.len() as i64;
+            let index = |n: &crate::Int| {
+                let n = n.to_i64().unwrap_or(if n.big().is_negative() {
+                    i64::MIN
+                } else {
+                    i64::MAX
+                });
+                if n < 0 {
+                    len.saturating_add(n).max(0)
+                } else {
+                    n
+                }
+            };
+            let start = start.as_ref().map_or(0, index) as usize;
+            let end = end.as_ref().map_or(len, index).min(len) as usize;
+            let offset = value
+                .get(start..end)
+                .and_then(|v| memchr::memmem::rfind(v, &needle));
+            return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
+        }
         let found = crate::objects::find_text(
             ctx.str_value(receiver)?,
             ctx.str_value(needle)?,
             start.as_ref(),
             end.as_ref(),
+            name == "rfind",
         );
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
         && let Value::Bytes(data) = ctx.heap.get(receiver)
     {
-        positional(name, kwargs)?;
-        arity(name, args, 0, 1)?;
+        if !kwargs.is_empty() {
+            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+        }
+        if args.len() > 1 {
+            return Err(type_error(format!(
+                "rstrip expected at most 1 argument, got {}",
+                args.len()
+            )));
+        }
         let chars = args
             .first()
             .copied()
