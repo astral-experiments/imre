@@ -1,7 +1,7 @@
 """Dictionary subclasses for the runtime collections module."""
 
 import operator as _operator
-from _collections import _count_elements, _ordered_dict_view
+from _collections import _count_elements, _ordered_dict_repr, _ordered_dict_view
 from itertools import repeat as _repeat
 
 
@@ -34,8 +34,7 @@ class OrderedDict(dict):
         return _ordered_dict_view(self, "values")
 
     def __repr__(self):
-        name = type(self).__name__
-        return name + "(" + (dict.__repr__(self) if self else "") + ")"
+        return _ordered_dict_repr(self)
 
     def __eq__(self, other):
         if not isinstance(other, dict):

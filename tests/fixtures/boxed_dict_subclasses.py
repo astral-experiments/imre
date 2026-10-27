@@ -20,6 +20,9 @@ def ordered_dictionary():
     else:
         raise AssertionError("cursor missed a deletion and reinsertion")
     assert next(cursor, None) is None
+    source.clear()
+    source["self"] = source
+    assert repr(source) == "OrderedDict({'self': ...})"
 
 
 def inherited_deletion():

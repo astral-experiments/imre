@@ -317,6 +317,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
+        ("_collections", "_ordered_dict_repr") => ctx.builtin("_collections._ordered_dict_repr"),
         ("_collections", "_ordered_dict_view") => ctx.builtin("_collections._ordered_dict_view"),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
@@ -755,6 +756,25 @@ pub(super) fn call(
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
+    }
+    if name == "_collections._ordered_dict_repr" {
+        let [object] = args else {
+            return Err(Error::new("TypeError", "expected a dictionary"));
+        };
+        let storage = ctx
+            .dict_storage(*object)
+            .filter(|_| kwargs.is_empty())
+            .ok_or_else(|| Error::new("TypeError", "expected a dictionary"))?;
+        if ctx.repr_ancestors.contains(object) {
+            return Ok(ctx.text("..."));
+        }
+        let items = if ctx.stored_entries(storage).is_empty() {
+            String::new()
+        } else {
+            ctx.checked_dict_repr(*object, storage)?
+        };
+        let class = ctx.exact_type(*object)?;
+        return Ok(ctx.text(format!("{}({items})", ctx.class_name(class))));
     }
     if name == "_collections._ordered_dict_view" {
         let [dict, kind] = args else {
