@@ -230,6 +230,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "format",
     "isalnum",
     "isspace",
+    "isupper",
     "join",
     "lower",
     "lstrip",
