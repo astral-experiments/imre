@@ -90,7 +90,20 @@ def current():
     methods_proxy |= proxy(additions)
     print(methods_proxy is methods, methods == {"GET", "OPTIONS"})
     print(type(observer) is ProxyType, not callable(observer), ref(other)() is other)
-    for value in (1, None, [], object(), Slots(), TupleChild()):
+    class PlainError(ValueError):
+        pass
+
+    class WeakError(ValueError):
+        __slots__ = ('__weakref__',)
+
+    class ClosedError(ValueError):
+        __slots__ = ()
+
+    for error in (PlainError('plain'), WeakError('slots')):
+        observation = ref(error)
+        print(observation() is error)
+
+    for value in (1, None, [], object(), Slots(), TupleChild(), ValueError(), ClosedError()):
         try:
             ref(value)
         except TypeError as error:
