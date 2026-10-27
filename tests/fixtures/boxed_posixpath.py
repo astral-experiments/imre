@@ -2,7 +2,8 @@ import os
 import os.path
 import posix
 import posixpath
-from os import fspath
+from os import altsep, fspath, sep
+from os.path import altsep as path_altsep, sep as path_sep
 
 
 class Path:
@@ -39,6 +40,8 @@ class Raises:
 
 def current():
     assert os.path is posixpath and os.path.__name__ == "posixpath"
+    assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
+    assert altsep is os.altsep is path_altsep is posixpath.altsep is None
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
     assert fspath is os.fspath is posix.fspath
     assert fspath.__self__ is posix and fspath.__module__ == "posix"
