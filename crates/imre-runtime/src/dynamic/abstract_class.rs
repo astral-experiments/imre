@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::Context;
-use super::value::{Error, Id, NONE, Result, Value};
+use super::value::{Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 impl Context {
     fn module_class(&self, module: &str, name: &str) -> Option<Id> {
@@ -11,6 +11,50 @@ impl Context {
             return None;
         };
         self.scope_name(*scope, name)
+    }
+
+    /// Look up raw method declarations in C3 order, without binding a descriptor.
+    pub(super) fn abc_check_methods(&mut self, class: Id, methods: &[Id]) -> Result<Id> {
+        if !matches!(
+            self.builtin_type_name(class),
+            Some("type" | "typing._AnyMeta")
+        ) {
+            self.lookup_attr(class, "__mro__")?;
+        }
+        for &method in methods {
+            let name = self.str_value(method)?;
+            let value = self
+                .class_attr(class, name)
+                .or_else(|| self.own_class_attr(class, name));
+            if value.is_none_or(|value| value == NONE) {
+                return Ok(NOT_IMPLEMENTED);
+            }
+        }
+        Ok(TRUE)
+    }
+
+    /// Recognize the bundled ABC and its nominal subclasses, which inherit its metaclass.
+    pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
+        self.module_class("abc", "ABC")
+            .is_some_and(|abc| self.direct_subclass(class, abc))
+    }
+
+    /// Only ABC classes use a Python subclass hook for public instance and subclass checks.
+    pub(super) fn has_abc_subclass_hook(&self, class: Id) -> bool {
+        self.class_attr(class, "__subclasshook__").is_some() && self.is_bundled_abc(class)
+    }
+
+    pub(super) fn abc_hook_result(&mut self, child: Id, parent: Id) -> Result<Option<bool>> {
+        let hook = self.lookup_attr(parent, "__subclasshook__")?;
+        match self.call(hook, vec![child], Vec::new())? {
+            TRUE => Ok(Some(true)),
+            FALSE => Ok(Some(false)),
+            NOT_IMPLEMENTED => Ok(None),
+            _ => Err(Error::new(
+                "AssertionError",
+                "__subclasshook__ must return either False, True, or NotImplemented",
+            )),
+        }
     }
 
     pub(super) fn structural_context_manager(&self, class: Id, target: Id) -> bool {
@@ -25,9 +69,7 @@ impl Context {
     pub(super) fn init_abstract_class(&mut self, class: Id, name: &str, scope: Id) -> Result<()> {
         if !super::mapping_abc::is_abc_class(self, class)
             && !(name == "ABC" && self.scope_data(scope).module == "abc")
-            && !self
-                .module_class("abc", "ABC")
-                .is_some_and(|abc| self.subclass(class, abc))
+            && !self.is_bundled_abc(class)
             && !self
                 .classes
                 .get("typing.Protocol")

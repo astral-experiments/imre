@@ -522,6 +522,11 @@ impl Context {
             ));
         }
         self.require_checkable_protocol(parent)?;
+        if self.has_abc_subclass_hook(parent)
+            && let Some(result) = self.abc_hook_result(child, parent)?
+        {
+            return Ok(result);
+        }
         Ok(self.subclass(child, parent))
     }
 
@@ -1744,7 +1749,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "register" && super::mapping_abc::is_abc_class(self, obj) {
+                if name == "register"
+                    && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
+                {
                     let callable = self.builtin("abc.register");
                     return Ok(self.alloc(Value::Method {
                         callable,

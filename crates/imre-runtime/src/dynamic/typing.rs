@@ -851,6 +851,15 @@ impl Context {
                     return self.truth(result);
                 }
                 self.require_checkable_protocol(class)?;
+                if self.has_abc_subclass_hook(class) {
+                    let actual = self.exact_type(value)?;
+                    if actual == class {
+                        return Ok(true);
+                    }
+                    if let Some(result) = self.abc_hook_result(actual, class)? {
+                        return Ok(result);
+                    }
+                }
                 Ok(self.instance_of(value, class))
             }
         }
