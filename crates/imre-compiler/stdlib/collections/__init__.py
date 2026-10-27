@@ -21,6 +21,23 @@ def _compare_counts(left, right, compare):
     return True
 
 
+def _combine_counts(left, right, combine):
+    if not isinstance(right, Counter):
+        return NotImplemented
+    result = Counter()
+    for key, count in left.items():
+        value = combine(count, right[key])
+        if value > 0:
+            result[key] = value
+    if combine is not min:
+        for key, count in right.items():
+            if key not in left:
+                value = 0 - count if combine is _operator.sub else count
+                if value > 0:
+                    result[key] = value
+    return result
+
+
 class OrderedDict(dict):
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))
@@ -200,3 +217,49 @@ class Counter(dict):
         if not isinstance(other, Counter):
             return NotImplemented
         return self >= other and self != other
+
+    def __pos__(self):
+        return Counter({key: count for key, count in self.items() if count > 0})
+
+    def __neg__(self):
+        return Counter({key: 0 - count for key, count in self.items() if count < 0})
+
+    def __add__(self, other):
+        return _combine_counts(self, other, _operator.add)
+
+    def __sub__(self, other):
+        return _combine_counts(self, other, _operator.sub)
+
+    def __or__(self, other):
+        return _combine_counts(self, other, max)
+
+    def __and__(self, other):
+        return _combine_counts(self, other, min)
+
+    def _keep_positive(self):
+        for key in [key for key, count in self.items() if not count > 0]:
+            del self[key]
+        return self
+
+    def __iadd__(self, other):
+        for key, count in other.items():
+            self[key] += count
+        return self._keep_positive()
+
+    def __isub__(self, other):
+        for key, count in other.items():
+            self[key] -= count
+        return self._keep_positive()
+
+    def __ior__(self, other):
+        for key, count in other.items():
+            if count > self[key]:
+                self[key] = count
+        return self._keep_positive()
+
+    def __iand__(self, other):
+        for key, count in self.items():
+            value = other[key]
+            if value < count:
+                self[key] = value
+        return self._keep_positive()
