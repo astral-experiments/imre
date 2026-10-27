@@ -583,6 +583,9 @@ pub(super) fn call(
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
+    if let Some(method) = name.strip_prefix("_thread._local.") {
+        return super::thread_local::method(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("_thread.lock.") {
         return super::thread_lock::method(ctx, method, args, kwargs);
     }
