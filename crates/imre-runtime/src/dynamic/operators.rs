@@ -10,10 +10,6 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
         .map(|i| i as usize)
 }
 
-pub(super) fn quoted(text: &str) -> String {
-    crate::objects::exceptions::string_repr(text).into_string()
-}
-
 impl Context {
     fn sequence(&self, id: Id) -> Option<Vec<Id>> {
         match self.heap.get(id) {
@@ -410,7 +406,7 @@ impl Context {
                     .join(", ");
                 format!("{class}({fields})")
             }
-            Value::Str(s) if repr => quoted(s),
+            Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
             Value::Instance {
                 scalar: Some(payload),

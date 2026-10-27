@@ -24,6 +24,7 @@ mod zip;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::objects::exceptions::string_repr;
 use value::{
     Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
 };
@@ -714,6 +715,7 @@ impl Context {
         self.pending.take().map_or(Ok(result), Err)
     }
 
+    /// Resolve a named import from a loaded module, including package children.
     fn import_from(&mut self, object: Id, member: Id) -> Result<Id> {
         let name = self.str_value(member)?.to_owned();
         let attribute_error = match self.lookup_attr(object, &name) {
@@ -760,7 +762,7 @@ impl Context {
         let module = names
             .get("__name__")
             .and_then(|id| self.str_value(*id).ok());
-        let quoted_module = operators::quoted(module.unwrap_or("<unknown module name>"));
+        let quoted_module = string_repr(module.unwrap_or("<unknown module name>"));
         let origin = origin.or_else(|| names.get("__file__").copied());
         let path = origin.and_then(|id| self.str_value(id).ok());
         let prefix = format!(
@@ -778,13 +780,13 @@ impl Context {
             {
                 format!(
                     "{prefix} (consider renaming {} since it has the same name as the standard library module named {quoted_module} and prevents importing that standard library module)",
-                    operators::quoted(path)
+                    string_repr(path)
                 )
             }
             Some(path) if *initializing => {
                 format!(
                     "{prefix} (consider renaming {} if it has the same name as a library you intended to import)",
-                    operators::quoted(path)
+                    string_repr(path)
                 )
             }
             _ if *initializing => {
@@ -806,6 +808,7 @@ impl Context {
         ))
     }
 
+    /// Check whether the script's startup search path could shadow an installed module.
     fn possibly_shadowing(&self, path: &str) -> bool {
         if self.config["safe_path"].as_bool() == Some(true) {
             return false;
@@ -875,8 +878,8 @@ impl Context {
                             "ModuleNotFoundError",
                             format!(
                                 "No module named {}; {} is not a package",
-                                operators::quoted(name),
-                                operators::quoted(name.rsplit_once('.').unwrap().0)
+                                string_repr(name),
+                                string_repr(name.rsplit_once('.').unwrap().0)
                             ),
                         )
                         .with_import(Some(name), None, None)
@@ -930,7 +933,7 @@ impl Context {
         if source.is_none() && !stdlib::is_module(name) {
             return Err(Error::new(
                 "ModuleNotFoundError",
-                format!("No module named {}", operators::quoted(name)),
+                format!("No module named {}", string_repr(name)),
             )
             .with_import(Some(name), None, None));
         }
