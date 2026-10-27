@@ -7,6 +7,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod float;
+pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
@@ -77,6 +78,7 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "sorted",
     "ord",
     "chr",
     "callable",
@@ -91,6 +93,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "sum",
     "__import__",
     "repr",
     "format",
@@ -192,6 +195,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removeprefix",
     "removesuffix",
     "replace",
+    "rfind",
     "rpartition",
     "rsplit",
     "rstrip",
@@ -211,7 +215,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
@@ -306,6 +310,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -602,6 +607,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
+            "map" => ctx.map_method(method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -776,6 +782,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
             let iterable = iterable
@@ -808,6 +815,26 @@ pub(super) fn call(
                 "'{}' object is not reversible",
                 ctx.type_name(object)
             )))
+        }
+        "sum" => {
+            let Some((&source, rest)) = args.split_first() else {
+                return Err(type_error("sum requires a positional iterable"));
+            };
+            let [start] = bind(name, rest, kwargs, ["start"])?;
+            let iterator = ctx.iterator(source)?;
+            let mut total = start
+                .map(|id| ctx.as_int(id))
+                .transpose()?
+                .unwrap_or_else(|| crate::Int::from(0));
+            let mut item = ctx.next_item(iterator)?;
+            if item.is_none() {
+                return Ok(start.unwrap_or_else(|| ctx.int(0)));
+            }
+            while let Some(value) = item {
+                total = crate::integer_binary(&total, &ctx.as_int(value)?, 0)?;
+                item = ctx.next_item(iterator)?;
+            }
+            Ok(ctx.alloc(Value::Int(total)))
         }
         "len" => {
             positional(name, kwargs)?;
@@ -842,28 +869,7 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(size))
         }
-        "map" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 2)?;
-            let input = ctx.iterator(args[1])?;
-            Ok(ctx.alloc(Value::Map {
-                function: args[0],
-                input,
-            }))
-        }
-        "zip" => {
-            let [strict] = bind(name, &[], kwargs, ["strict"])?;
-            let strict = ctx.truth(strict.unwrap_or(FALSE))?;
-            let inputs = args
-                .iter()
-                .map(|&argument| ctx.iterator(argument))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(ctx.alloc(Value::Zip {
-                inputs: inputs.into(),
-                strict,
-                pending: None,
-            }))
-        }
+        "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;

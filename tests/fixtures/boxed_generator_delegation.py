@@ -37,6 +37,11 @@ def stopped(cause):
     yield fail(cause)
 
 
+def raise_after_yield(error, cause):
+    yield -1, +1, ~1, not 1
+    raise error from cause
+
+
 def annotated():
     item: missing_annotation = 7
     yield item
@@ -73,6 +78,14 @@ def current():
         print(str(error), error.__cause__ is cause, error.__context__ is cause)
         print(error.__suppress_context__, next(g, "closed"))
 
+    for error, explicit in ((ValueError("bad row"), cause), (cause, None)):
+        g = raise_after_yield(error, explicit)
+        print(next(g))
+        try:
+            next(g)
+        except (ValueError, RuntimeError) as caught:
+            print(type(caught).__name__, caught.__cause__ is cause, next(g, "closed"))
+
     paused = wrapped([("gc", [1, 2])])
     print(next(paused))
     # Collect temporary objects while both generators are suspended.
@@ -95,3 +108,11 @@ def current():
         next(values)
     except UnboundLocalError as error:
         print(str(error), next(values, "closed"))
+
+    def relay(values):
+        yield from values
+
+    nested = [42]
+    for _ in range(6000):
+        nested = relay(nested)
+    print(next(nested), list(nested))

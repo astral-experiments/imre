@@ -213,20 +213,30 @@ pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id
     let Some(node) = queue.pop_front() else {
         return Ok(None);
     };
+    ctx.heap.keep(node);
     let fields = ctx.lookup_attr(node, "_fields")?;
+    let fields = ctx.items(fields)?;
+    for &field in &fields {
+        ctx.heap.keep(field);
+    }
     let mut children = Vec::new();
     let ast = ctx.builtins["ast.AST"];
-    for field in ctx.items(fields)? {
+    for field in fields {
         let name = ctx.str_value(field)?.to_owned();
         let value = match ctx.lookup_attr(node, &name) {
             Ok(value) => value,
             Err(error) if error.kind == "AttributeError" => continue,
             Err(error) => return Err(error),
         };
+        let first = children.len();
         if ctx.instance_of(value, ast) {
             children.push(value);
         } else if let Value::List(values) = ctx.heap.get(value) {
             children.extend(values.iter().copied().filter(|&v| ctx.instance_of(v, ast)));
+        }
+        // A later field getter can detach children before they reach the walker's queue.
+        for &child in &children[first..] {
+            ctx.heap.keep(child);
         }
     }
     let Value::AstWalk(queue) = ctx.heap.get_mut(iter) else {

@@ -296,9 +296,17 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    let reader = slot
-        .as_mut()
-        .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"));
+    let reader = slot.as_mut().ok_or_else(|| {
+        let message = match name {
+            "file.read" => "read of closed file",
+            "file.readline" => "readline of closed file",
+            "file.readinto" => "readinto of closed file",
+            "file.seek" => "seek of closed file",
+            "file.__enter__" => "I/O operation on closed file.",
+            _ => "I/O operation on closed file",
+        };
+        Error::new("ValueError", message)
+    });
     if matches!(name, "file.read" | "file.readline") {
         let length = args
             .get(1)

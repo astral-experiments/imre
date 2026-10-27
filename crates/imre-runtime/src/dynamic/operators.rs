@@ -228,7 +228,17 @@ impl Context {
             },
         }
     }
-    pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+    pub(super) fn compare(&self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let unsupported = || {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{op}' not supported between instances of '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            )
+        };
         let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let int_float = |integer, float| {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
@@ -256,17 +266,17 @@ impl Context {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
                 {
-                    return Err(Error::new("TypeError", "incomparable sequence types"));
+                    return Err(unsupported());
                 }
                 if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
                     for (&i, &j) in x.iter().zip(&y) {
                         if !self.checked_equal(i, j)? {
-                            return self.compare(i, j);
+                            return self.compare(op, i, j);
                         }
                     }
                     Ok(Some(x.len().cmp(&y.len())))
                 } else {
-                    Err(Error::new("TypeError", "objects do not support ordering"))
+                    Err(unsupported())
                 }
             }
         }
@@ -396,7 +406,7 @@ impl Context {
             Value::Instance {
                 scalar: Some(payload),
                 ..
-            } => self.display(*payload),
+            } => self.format_value(*payload, repr, active),
             Value::Bytes(bytes) => {
                 let mut output = String::new();
                 crate::objects::write_bytes_repr(&mut output, bytes);
@@ -656,7 +666,9 @@ impl Context {
         {
             return Err(Error::new("TypeError", "unhashable key"));
         }
-        for value in self.items(container)? {
+        let iterator = self.iterator(container)?;
+        self.heap.keep(iterator);
+        while let Some(value) = self.next_item(iterator)? {
             if self.checked_equal(value, item)? {
                 return Ok(true);
             }
@@ -664,7 +676,7 @@ impl Context {
         Ok(false)
     }
     fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
-        let obj = self.string_storage(obj).unwrap_or(obj);
+        let obj = self.scalar_value(obj);
         if let Value::Range { start, stop, step } = *self.heap.get(obj) {
             return super::slice::range(self, parts, start, stop, step);
         }
@@ -832,7 +844,7 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(a, b)? else {
+                let Some(c) = self.compare(op, a, b)? else {
                     return Ok(FALSE);
                 };
                 return Ok(truth(match op {
@@ -909,6 +921,105 @@ impl Context {
                     self.type_name(b)
                 ),
             ));
+        }
+        let (left, right) = (self.scalar_value(a), self.scalar_value(b));
+        if matches!(self.heap.get(left), Value::Float(_))
+            || matches!(self.heap.get(right), Value::Float(_))
+        {
+            let number = |value| -> Result<Option<f64>> {
+                match self.heap.get(value) {
+                    Value::Float(number) => Ok(Some(*number)),
+                    Value::Int(_) | Value::Bool(_) => {
+                        Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
+                    }
+                    _ => Ok(None),
+                }
+            };
+            if let (Some(x), Some(y)) = (number(left)?, number(right)?) {
+                let result = match op {
+                    "+" => Some(x + y),
+                    "-" => Some(x - y),
+                    "*" => Some(x * y),
+                    "**" => {
+                        if y == 0.0 {
+                            Some(1.0)
+                        } else if x.is_nan() {
+                            Some(x)
+                        } else if y.is_nan() {
+                            Some(if x == 1.0 { 1.0 } else { y })
+                        } else if y.is_infinite() {
+                            let magnitude = x.abs();
+                            Some(if magnitude == 1.0 {
+                                1.0
+                            } else if (y > 0.0) == (magnitude > 1.0) {
+                                f64::INFINITY
+                            } else {
+                                0.0
+                            })
+                        } else {
+                            let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
+                            if x.is_infinite() {
+                                Some(if y > 0.0 {
+                                    if odd { x } else { x.abs() }
+                                } else if odd {
+                                    0.0_f64.copysign(x)
+                                } else {
+                                    0.0
+                                })
+                            } else if x == 0.0 {
+                                if y < 0.0 {
+                                    return Err(Error::new(
+                                        "ZeroDivisionError",
+                                        "zero to a negative power",
+                                    ));
+                                }
+                                Some(if odd { x } else { 0.0 })
+                            } else if x < 0.0 && y.fract() != 0.0 {
+                                let magnitude = (-x).powf(y);
+                                if magnitude.is_infinite() {
+                                    return Err(Error::new(
+                                        "OverflowError",
+                                        "complex exponentiation",
+                                    ));
+                                }
+                                let phase = std::f64::consts::PI * y;
+                                return Ok(self.alloc(Value::Complex(super::complex::Complex {
+                                    real: magnitude * phase.cos(),
+                                    imag: magnitude * phase.sin(),
+                                })));
+                            } else {
+                                let magnitude = x.abs().powf(y);
+                                if magnitude.is_infinite() {
+                                    return Err(Error::new(
+                                        "OverflowError",
+                                        "(34, 'Numerical result out of range')",
+                                    ));
+                                }
+                                Some(if x < 0.0 && odd {
+                                    -magnitude
+                                } else {
+                                    magnitude
+                                })
+                            }
+                        }
+                    }
+                    "/" | "//" | "%" => {
+                        if y == 0.0 {
+                            return Err(Error::new("ZeroDivisionError", "division by zero"));
+                        }
+                        let operation = match op {
+                            "/" => 0,
+                            "//" => 1,
+                            _ => 2,
+                        };
+                        Some(crate::floats::imre_float_divide(x, y, operation))
+                    }
+                    _ => None,
+                };
+                if let Some(result) = result {
+                    return Ok(self.alloc(Value::Float(result)));
+                }
+            }
         }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {

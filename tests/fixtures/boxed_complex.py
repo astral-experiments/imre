@@ -1,6 +1,31 @@
 def current():
     assert callable(complex) and type(complex) is type
     assert complex.__name__ == complex.__qualname__ == "complex" and complex.__module__ == "builtins"
+    events = []
+    saved = complex(1, 2)
+
+    class Number:
+        def __complex__(self):
+            events.append("complex")
+            return saved
+
+        def __float__(self):
+            raise AssertionError("unexpected __float__")
+
+    class Real:
+        def __float__(self):
+            events.append("float")
+            return -0.0
+
+    class Index:
+        def __index__(self):
+            events.append("index")
+            return 17
+
+    result = complex(Number())
+    assert result == saved and result is not saved
+    assert repr(complex(Real(), Index())) == "(-0+17j)"
+    assert events == ["complex", "float", "index"]
     z = complex(real=1.5, imag=-2)
     assert type(z) is complex and isinstance(z, complex) and not isinstance(1, complex)
     assert type(z.real) is type(0.0) and type(z.imag) is type(0.0)

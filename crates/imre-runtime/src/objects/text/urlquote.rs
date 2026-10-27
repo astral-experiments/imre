@@ -10,7 +10,7 @@ fn check_option(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn quoted(input: &[u8], safe: &[u8], plus: bool) -> Result<*const Str> {
+fn quoted(input: &[u8], safe: &[u8], plus: bool) -> Result<String> {
     let mut allowed = [false; 128];
     for &byte in safe.iter().filter(|b| b.is_ascii()) {
         allowed[usize::from(byte)] = true;
@@ -41,7 +41,7 @@ fn quoted(input: &[u8], safe: &[u8], plus: bool) -> Result<*const Str> {
             out.push(char::from(HEX[usize::from(b & 15)]));
         }
     }
-    crate::checked_owned_str(out.into())
+    Ok(out)
 }
 
 /// Escape a URL component with an ASCII safe set and the requested text codec.
@@ -91,39 +91,84 @@ unsafe fn quote(
     let result = (|| {
         // SAFETY: the typed caller retains safe and provides its layout.
         let safe = unsafe { url_data(safe, safe_bytes != 0) };
-        if bytes != 0 {
-            for (option, message) in [
-                (encoding, "quote() doesn't support 'encoding' for bytes"),
-                (errors, "quote() doesn't support 'errors' for bytes"),
-            ] {
-                if !option.is_null() {
-                    return Err(Error::new(Kind::TypeError, message));
-                }
-            }
-            // SAFETY: the byte flag selects byte storage.
-            return quoted(unsafe { url_data(source, true) }, safe, plus);
-        }
-        // SAFETY: this branch selects a rooted scalar string.
-        let text = unsafe { &*source.cast::<Str>() };
-        if text.is_empty() {
-            // SAFETY: the original owner is retained for the result.
+        // SAFETY: The source and optional strings remain rooted with their declared layouts.
+        let (source_value, encoding, errors) = unsafe {
+            (
+                if bytes != 0 {
+                    UrlInput::Bytes(url_data(source, true))
+                } else {
+                    UrlInput::Text(&*source.cast::<Str>())
+                },
+                encoding.as_ref().map(Str::as_str),
+                errors.as_ref().map(Str::as_str),
+            )
+        };
+        if matches!(source_value, UrlInput::Text("")) {
+            // SAFETY: Retain the original empty string.
             return Ok(StrOwner::into_raw(unsafe {
                 StrOwner::acquire_word(source as usize)
             }));
         }
-        // SAFETY: non-null options select live scalar string owners.
-        let (encoding, errors) = unsafe { (encoding.as_ref(), errors.as_ref()) };
-        let encoding = encoding.map_or("utf-8", Str::as_str);
-        let errors = errors.map_or("strict", Str::as_str);
-        check_option(encoding)?;
-        check_option(errors)?;
-        let data = Codec::lookup(encoding)?.encode(text, Some(errors), || {
-            // SAFETY: any UnicodeEncodeError owns a share of its source.
+        let value = quote_with_owner(source_value, safe, encoding, errors, plus, |_| {
+            // SAFETY: Only encoding a text argument can request an error owner.
             Ok(unsafe { StrOwner::acquire_word(source as usize) })
         })?;
-        quoted(&data, safe, plus && text.contains(' '))
+        crate::checked_owned_str(value.into())
     })();
     finish(result, std::ptr::null())
+}
+
+/// Quote text or octets, sharing the codec and safe-set rules with runtime imports.
+pub(crate) fn quote_component(
+    source: UrlInput<'_>,
+    safe: &[u8],
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    plus: bool,
+) -> Result<String> {
+    quote_with_owner(
+        source,
+        safe,
+        encoding,
+        errors,
+        plus,
+        super::try_owned_string,
+    )
+}
+
+fn quote_with_owner(
+    source: UrlInput<'_>,
+    safe: &[u8],
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    plus: bool,
+    owner: impl FnOnce(&str) -> Result<StrOwner>,
+) -> Result<String> {
+    match source {
+        UrlInput::Bytes(bytes) => {
+            if encoding.is_some() {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "quote() doesn't support 'encoding' for bytes",
+                ));
+            }
+            if errors.is_some() {
+                return Err(Error::new(
+                    Kind::TypeError,
+                    "quote() doesn't support 'errors' for bytes",
+                ));
+            }
+            quoted(bytes, safe, plus)
+        }
+        UrlInput::Text("") => Ok(String::new()),
+        UrlInput::Text(text) => {
+            let encoding = encoding.unwrap_or("utf-8");
+            let errors = errors.unwrap_or("strict");
+            let codec = Codec::for_encode(encoding, errors)?;
+            let data = codec.encode(text, Some(errors), || owner(text))?;
+            quoted(&data, safe, plus && text.contains(' '))
+        }
+    }
 }
 
 fn unquoted(input: &[u8]) -> Result<Cow<'_, [u8]>> {
