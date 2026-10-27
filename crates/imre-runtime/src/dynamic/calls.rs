@@ -522,6 +522,11 @@ impl Context {
             ));
         }
         self.require_checkable_protocol(parent)?;
+        if self.has_abc_subclass_hook(parent)
+            && let Some(result) = self.abc_hook_result(child, parent)?
+        {
+            return Ok(result);
+        }
         Ok(self.subclass(child, parent))
     }
 
@@ -707,6 +712,7 @@ impl Context {
                             | "binascii.b2a_base64"
                             | "posix.fspath"
                             | "posix._path_normpath"
+                            | "zlib.adler32"
                     )
                     || name.starts_with("_weakref.")
                 {
@@ -1236,7 +1242,10 @@ impl Context {
                 }
             }
             Value::Native(symbol)
-                if matches!(symbol.as_str(), "posix.fspath" | "posix._path_normpath") =>
+                if matches!(
+                    symbol.as_str(),
+                    "posix.fspath" | "posix._path_normpath" | "zlib.adler32"
+                ) =>
             {
                 let (module, function) = symbol.split_once('.').unwrap();
                 match name {
@@ -1744,7 +1753,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "register" && super::mapping_abc::is_abc_class(self, obj) {
+                if name == "register"
+                    && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
+                {
                     let callable = self.builtin("abc.register");
                     return Ok(self.alloc(Value::Method {
                         callable,
@@ -3058,6 +3069,7 @@ impl Context {
         self.bind_local(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.globals.clear();
             frame.closure.nonlocals.clear();
         }
         if self.scope_name(scope, "__qualname__").is_none() {

@@ -105,6 +105,9 @@ def current():
     counts.update("ba", a=1 << 100)
     counts.subtract({"a": 1 << 100, "b": 9}, c=1)
     copied = counts.copy()
+    print(repr(counts), str(Counter()), [counts])
+    print(counts.most_common(1), Counter.most_common(counts, n=0))
+    print(Counter("bacab").most_common(1 << 100))
     del counts["c"]
     del counts["absent"]
     print(list(counts.items()), copied.total(), copied["absent"])

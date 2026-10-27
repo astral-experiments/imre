@@ -29,6 +29,16 @@ pub extern "C" fn imre_os_separator(alternate: u32) -> *const Str {
     let Some(sep) = os_separator(alternate != 0) else {
         return std::ptr::null();
     };
+    separator_string(sep)
+}
+
+/// Return the target search-path separator as an interned one-character string.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_pathsep() -> *const Str {
+    separator_string(if cfg!(windows) { ";" } else { ":" })
+}
+
+fn separator_string(sep: &str) -> *const Str {
     finish(
         super::text::try_owned_string(sep).map(StrOwner::into_raw),
         std::ptr::null(),

@@ -1,7 +1,8 @@
-"""Dictionary subclasses for the runtime collections module."""
+"""Dictionary and mapping classes for the runtime collections module."""
 
 import operator as _operator
 from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_repr, _ordered_dict_view
+from _collections_abc import MutableMapping as _MutableMapping
 from itertools import repeat as _repeat
 
 
@@ -54,6 +55,62 @@ class OrderedDict(dict):
         return result
 
 
+_chainmap_repr_stack = []
+
+
+class ChainMap(_MutableMapping):
+    def __init__(self, *maps):
+        self.maps = list(maps) or [{}]
+
+    def __getitem__(self, key):
+        for mapping in self.maps:
+            try:
+                return mapping[key]
+            except KeyError:
+                pass
+        return self.__missing__(key)
+
+    def __missing__(self, key):
+        raise KeyError(key)
+
+    def __contains__(self, key):
+        return any(key in mapping for mapping in self.maps)
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
+    def __setitem__(self, key, value):
+        self.maps[0][key] = value
+
+    def __delitem__(self, key):
+        try:
+            del self.maps[0][key]
+        except KeyError:
+            raise KeyError(f"Key not found in the first mapping: {key!r}")
+
+    def __iter__(self):
+        keys = {}
+        for mapping in reversed(self.maps):
+            keys.update(dict.fromkeys(mapping))
+        return iter(keys)
+
+    def __len__(self):
+        return len(set(iter(self)))
+
+    def __bool__(self):
+        return any(self.maps)
+
+    def __repr__(self):
+        for owner in _chainmap_repr_stack:
+            if owner is self:
+                return "..."
+        _chainmap_repr_stack.append(self)
+        try:
+            return f"{type(self).__name__}({', '.join(map(repr, self.maps))})"
+        finally:
+            _chainmap_repr_stack.pop()
+
+
 class Counter(dict):
     def __init__(self, iterable=None, /, **counts):
         super().__init__()
@@ -90,6 +147,23 @@ class Counter(dict):
                     self[key] = get(key, 0) - 1
         if counts:
             self.subtract(counts)
+
+    def most_common(self, n=None):
+        items = self.items()
+        if n is not None and n <= 0:
+            return []
+        ranked = sorted(items, key=_operator.itemgetter(1), reverse=True)
+        return ranked if n is None or n >= len(ranked) else ranked[:n]
+
+    def __repr__(self):
+        name = type(self).__name__
+        if not self:
+            return f"{name}()"
+        try:
+            entries = dict(self.most_common())
+        except TypeError:
+            entries = dict(self)
+        return f"{name}({entries!r})"
 
     def total(self):
         return sum(self.values())

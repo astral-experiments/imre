@@ -87,6 +87,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_imre_dataclasses"
             | "marshal"
             | "pickle"
+            | "zlib"
             | "datetime"
             | "email"
             | "email.utils"
@@ -331,6 +332,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             abc
             @ ("Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"),
         ) => super::mapping_abc::class(ctx, abc)?,
+        ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
@@ -373,6 +375,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
         ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
             ctx.builtin(&format!("binascii.{name}"))
         }
@@ -676,6 +679,21 @@ pub(super) fn call(
     if name == "secrets.choice" {
         return secrets::choice(ctx, args, kwargs);
     }
+    if name == "_collections_abc._check_methods" {
+        if let Some((key, _)) = kwargs.iter().find(|(key, _)| key != "C") {
+            return Err(Error::new(
+                "TypeError",
+                format!("_check_methods() got an unexpected keyword argument '{key}'"),
+            ));
+        }
+        let class = option(args, 0, kwargs, "C")?.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "_check_methods() missing required argument: 'C'",
+            )
+        })?;
+        return ctx.abc_check_methods(class, args.get(1..).unwrap_or_default());
+    }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
     }
@@ -738,6 +756,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
+    }
+    if name == "zlib.adler32" {
+        return binascii::adler32(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);

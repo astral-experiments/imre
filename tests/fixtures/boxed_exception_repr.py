@@ -7,6 +7,16 @@ class MissingKey(KeyError):
 
 
 def current():
+    class Returned(str):
+        pass
+
+    returned = Returned("rendered")
+
+    class Argument:
+        def __str__(self):
+            return returned
+
+    assert str(ValueError(Argument())) is returned
     for error in (ZeroDivisionError("divide"), UnicodeError("decode")):
         try:
             raise error

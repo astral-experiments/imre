@@ -119,7 +119,12 @@ pub(super) fn method(
             format!("descriptor '{name}' of '{owner}' object needs an argument"),
         ));
     };
-    if ctx.type_name(receiver) != owner {
+    let applies = match ctx.heap.get(receiver) {
+        Value::Range(_) => owner == "range",
+        Value::RangeIterator(cursor) => owner == cursor.kind,
+        _ => false,
+    };
+    if !applies {
         return Err(Error::new(
             "TypeError",
             format!(
