@@ -79,7 +79,7 @@ pub(super) struct Error {
     pub kind: String,
     pub class: Option<Id>,
     pub message: String,
-    pub args: Option<Vec<Id>>,
+    pub args: Option<Id>,
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
@@ -135,9 +135,7 @@ impl Error {
 
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
-            .iter()
-            .flatten()
-            .copied()
+            .into_iter()
             .chain(self.class)
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
@@ -291,19 +289,27 @@ impl Context {
         }
     }
 
-    pub(super) fn lookup_error(&self, kind: &str, key: Id) -> Error {
+    /// Return the exact arguments retained by a Python exception.
+    pub(super) fn exception_arguments(&self, error: &Error) -> Option<&[Id]> {
+        let Value::Tuple(args) = self.heap.get(error.args?) else {
+            unreachable!("exception arguments must be an exact tuple")
+        };
+        Some(args)
+    }
+
+    pub(super) fn lookup_error(&mut self, kind: &str, key: Id) -> Error {
         let mut error = Error::new(kind, self.repr(key));
-        error.args = Some(vec![key]);
+        error.args = Some(self.alloc(Value::Tuple(vec![key])));
         error
     }
 
     pub(super) fn exception(&mut self, kind: &str, args: &[Id]) -> Error {
         let mut error = Error::new(kind, "");
-        error.args = Some(args.to_vec());
+        error.args = Some(self.alloc(Value::Tuple(args.to_vec())));
         if kind == "StopIteration" {
             error.set_stop_value(args.first().copied().unwrap_or(NONE));
         }
-        error.message = self.exception_message(&error, &mut Vec::new());
+        error.message = self.exception_message(&error);
         if kind == "SystemExit" {
             error.exit_status = match args {
                 [] | [NONE] => Some(ExitStatus::Code(0)),
@@ -343,7 +349,11 @@ impl fmt::Display for Error {
                 writeln!(f, "  File {:?}, line {}", loc.file, loc.line)?;
             }
         }
-        write!(f, "{}: {}", self.kind, self.message)
+        if self.message.is_empty() {
+            f.write_str(&self.kind)
+        } else {
+            write!(f, "{}: {}", self.kind, self.message)
+        }
     }
 }
 

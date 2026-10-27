@@ -198,3 +198,35 @@ for target, cause in ((Unrelated, None), (ValueError, Unrelated), (ValueError, p
         raise target from cause
     except TypeError as error:
         print(type(error).__name__, str(error))
+
+
+args_error = RuntimeError("before")
+original = args_error.args
+print(original is args_error.args)
+new_args = ([], 2)
+args_error.args = new_args
+print(args_error.args is new_args, str(args_error))
+args_error.args = ["after"]
+print(args_error.args, repr(args_error))
+try:
+    del args_error.args
+except TypeError as error:
+    print(str(error))
+
+recursive = RuntimeError()
+recursive.args = (recursive,)
+for render in (str, repr):
+    try:
+        render(recursive)
+    except RecursionError:
+        print("recursive exception arguments")
+recursive.args = ("recovered",)
+print(str(recursive))
+
+# Each list retains the next exception through its args tuple.
+deep_argument_error = ValueError("leaf")
+for _ in range(1500):
+    outer_error = ValueError()
+    outer_error.args = ([deep_argument_error],)
+    deep_argument_error = outer_error
+print(len(str(deep_argument_error)), len(repr(deep_argument_error)))

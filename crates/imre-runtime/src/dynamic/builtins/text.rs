@@ -267,7 +267,7 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         if let Value::Int(number) = ctx.heap.get(value) {
             return Ok(crate::integer_text::decimal_string(number)?.into_string());
         }
-        return Ok(ctx.display(value));
+        return ctx.checked_format(value, false);
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));

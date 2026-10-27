@@ -1232,13 +1232,9 @@ impl Context {
             Value::Raised(Error {
                 os_args: Some(args),
                 ..
-            }) => match name {
+            }) if name != "args" => match name {
                 "errno" => return Ok(self.int(args.errno)),
                 "strerror" => return Ok(self.text(args.description)),
-                "args" => {
-                    let fields = vec![self.int(args.errno), self.text(args.description)];
-                    return Ok(self.alloc(Value::Tuple(fields)));
-                }
                 "filename" | "filename2" => {
                     if let Some([first, second]) = args.text_paths {
                         let path = if name == "filename" { first } else { second };
@@ -1269,14 +1265,22 @@ impl Context {
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
             Value::Raised(error) if name == "args" => {
-                let args = error.args.unwrap_or_else(|| {
-                    if error.message.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![self.text(error.message)]
-                    }
-                });
-                return Ok(self.alloc(Value::Tuple(args)));
+                if let Some(args) = error.args {
+                    return Ok(args);
+                }
+                let fields = if let Some(os) = error.os_args {
+                    vec![self.int(os.errno), self.text(os.description)]
+                } else if error.message.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![self.text(error.message)]
+                };
+                let tuple = self.alloc(Value::Tuple(fields));
+                let Value::Raised(error) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                error.args = Some(tuple);
+                return Ok(tuple);
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -1625,6 +1629,9 @@ impl Context {
             error.set_stop_value(NONE);
             return Ok(());
         }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "args may not be deleted"));
+        }
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
@@ -1900,6 +1907,25 @@ impl Context {
                 }
                 _ => {}
             }
+        }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            let tuple = if matches!(self.heap.get(value), Value::Tuple(_)) {
+                value
+            } else {
+                let iter = self.iterator(value)?;
+                self.heap.keep(iter);
+                let mut items = Vec::new();
+                while let Some(item) = self.next_item(iter)? {
+                    self.heap.keep(item);
+                    items.push(item);
+                }
+                self.alloc(Value::Tuple(items))
+            };
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.args = Some(tuple);
+            return Ok(());
         }
         if let Value::Raised(error) = self.heap.get(obj)
             && !self.native_exception_descriptor(error, name)
