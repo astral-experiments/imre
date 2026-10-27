@@ -33,6 +33,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
     match name {
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "importlib" => Some((
+            "importlib/__init__.py",
+            include_str!("../stdlib/importlib/__init__.py"),
+        )),
         "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
         "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
@@ -422,6 +426,7 @@ pub(crate) enum Intrinsic {
     BinasciiError,
     BinasciiIncomplete,
     PackageNotFoundError,
+    ImportModule,
     Socket,
     GaiError,
     SocketGetFqdn,
@@ -752,6 +757,8 @@ impl IntrinsicModule {
             (Self::AnnotationFormat, "VALUE_WITH_FAKE_GLOBALS") => Intrinsic::AnnotationFormat(2),
             (Self::AnnotationFormat, "FORWARDREF") => Intrinsic::AnnotationFormat(3),
             (Self::AnnotationFormat, "STRING") => Intrinsic::AnnotationFormat(4),
+            // Execution requests the native loader. Binding the name alone stays on the typed path.
+            (Self::Importlib, "import_module") => Intrinsic::ImportModule,
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::Declaration("importlib.metadata.entry_points")

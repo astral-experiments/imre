@@ -1,6 +1,8 @@
 //! Collects Python source modules from explicit startup search paths for native lowering.
 
 mod emit;
+mod import_module;
+pub(super) use import_module::literal_targets;
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -283,6 +285,7 @@ pub(crate) fn compile(
     module_root: Option<&Path>,
     options: &CompileOptions,
     runtime_imports: bool,
+    literal_modules: Vec<String>,
 ) -> Result<Option<Compilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -313,7 +316,7 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let first = match imports(
+    let mut first = match imports(
         &src,
         if command.is_some() {
             SourceKind::Command
@@ -324,6 +327,9 @@ pub(crate) fn compile(
         Ok(i) if i.runtime_imports || (runtime_imports && !i.names.is_empty()) => i,
         _ => return Ok(None),
     };
+    first
+        .names
+        .extend(literal_modules.into_iter().map(|name| (0, name)));
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
