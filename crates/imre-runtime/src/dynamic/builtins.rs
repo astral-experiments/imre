@@ -1059,20 +1059,7 @@ pub(super) fn call(
                 return Err(type_error("sum requires a positional iterable"));
             };
             let [start] = bind(name, rest, kwargs, ["start"])?;
-            let iterator = ctx.iterator(source)?;
-            let mut total = start
-                .map(|id| ctx.as_int(id))
-                .transpose()?
-                .unwrap_or_else(|| crate::Int::from(0));
-            let mut item = ctx.next_item(iterator)?;
-            if item.is_none() {
-                return Ok(start.unwrap_or_else(|| ctx.int(0)));
-            }
-            while let Some(value) = item {
-                total = crate::integer_binary(&total, &ctx.as_int(value)?, 0)?;
-                item = ctx.next_item(iterator)?;
-            }
-            Ok(ctx.alloc(Value::Int(total)))
+            float::sum(ctx, source, start)
         }
         "len" => {
             positional(name, kwargs)?;
