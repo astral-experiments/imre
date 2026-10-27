@@ -193,6 +193,14 @@ pub(super) fn sequence_components(ctx: &mut Context, parts: [Id; 3]) -> Result<[
     }))
 }
 
-pub(super) fn sequence_bounds(ctx: &mut Context, parts: [Id; 3], len: usize) -> Result<[i64; 3]> {
-    Ok(normalize(sequence_components(ctx, parts)?, len as i64))
+/// Read a bytearray's length after its slice bounds have run Python.
+pub(super) fn bytearray_bounds(ctx: &mut Context, parts: [Id; 3], obj: Id) -> Result<[i64; 3]> {
+    let bounds = sequence_components(ctx, parts)?;
+    let Value::ByteArray(target) = ctx.heap.get(obj) else {
+        return Err(Error::new(
+            "TypeError",
+            "object does not support slice assignment",
+        ));
+    };
+    Ok(normalize(bounds, target.len() as i64))
 }

@@ -730,14 +730,14 @@ impl Context {
     }
 
     fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Id) -> Result<()> {
-        let Value::ByteArray(target) = self.heap.get(obj) else {
-            return Err(Error::new(
-                "TypeError",
-                "object does not support slice assignment",
-            ));
-        };
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, target.len())?;
+        let mut bounds = super::slice::bytearray_bounds(self, parts, obj)?;
+        let copy_source = source == obj || !matches!(self.heap.get(source), Value::ByteArray(_));
         let data = builtins::bytes_from_iterable(self, source)?;
+        if copy_source {
+            // CPython reapplies the slice after converting the replacement to a bytearray.
+            bounds = super::slice::bytearray_bounds(self, parts, obj)?;
+        }
+        let [start, end, step] = bounds;
         let Value::ByteArray(target) = self.heap.get_mut(obj) else {
             unreachable!()
         };

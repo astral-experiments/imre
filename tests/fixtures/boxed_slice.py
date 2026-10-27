@@ -27,6 +27,24 @@ class Index:
         return self.value
 
 
+class ShrinkingIndex:
+    def __init__(self, target):
+        self.target = target
+
+    def __index__(self):
+        self.target[:] = b""
+        return 1
+
+
+class ShrinkingBytes:
+    def __init__(self, target):
+        self.target = target
+
+    def __iter__(self):
+        self.target[:] = b""
+        return iter([88])
+
+
 def current():
     values = [str(430508) + "-old"]
     print(values[ReplacingIndex(values):], values)
@@ -37,6 +55,13 @@ def current():
     print(slice in {type(part)}, part.__reduce__()[0] is slice)
     cut = slice(-2, None, -2)
     print(repr(cut), "abcdef"[cut], (1, 2, 3, 4)[cut], list(range(6)[cut]))
+    for replacement in (False, True):
+        target = bytearray(b"abcd")
+        if replacement:
+            target[1:] = ShrinkingBytes(target)
+        else:
+            target[ShrinkingIndex(target):] = bytearray(b"X")
+        print(bytes(target))
     source = bytearray(b"abcd")
     source[slice(1, 3)] = b"X"
     print(bytes(source))
