@@ -32,10 +32,10 @@ impl Context {
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
                     .copied(),
-                "__init__" if kind == "StopIteration" => {
-                    self.builtins.get("StopIteration.__init__").copied()
-                }
-                "__init__" => self.builtins.get("BaseException.__init__").copied(),
+                "__init__" => self
+                    .builtins
+                    .get(builtins::exception_initializer(kind))
+                    .copied(),
                 _ => None,
             },
             Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
@@ -359,6 +359,7 @@ impl Context {
                             | "object.__delattr__"
                             | "object.__init__"
                             | "BaseException.__init__"
+                            | "ImportError.__init__"
                             | "StopIteration.__init__"
                             | "int.to_bytes"
                             | "list.index"
@@ -822,7 +823,7 @@ impl Context {
     }
 
     /// Preserve ImportError's original message when its arguments are replaced.
-    fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
+    pub(super) fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
         let Value::Raised(error) = self.heap.get(obj) else {
             return None;
         };
@@ -926,6 +927,12 @@ impl Context {
             && let Some(error) = self.stop_iteration_error(obj)
         {
             return Ok(error.stop_value());
+        }
+        if matches!(name, "__new__" | "__init__")
+            && matches!(self.heap.get(obj), Value::Raised(_))
+        {
+            let class = self.exact_type(obj)?;
+            return self.instance_attribute(obj, class, None, name);
         }
         if name == "__class__" {
             return self.exact_type(obj);
@@ -1276,11 +1283,17 @@ impl Context {
                 _ => {}
             },
             Value::Raised(error)
-                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
-                    && matches!(name, "name" | "path" | "name_from") =>
+                if let Some(index) = builtins::IMPORT_KEYWORDS
+                    .iter()
+                    .position(|&key| key == name)
+                    && self.is_builtin_error(&error, "ImportError") =>
             {
                 let Some(fields) = error.import else {
-                    return Ok(NONE);
+                    return Ok(error
+                        .trace
+                        .as_ref()
+                        .and_then(|trace| trace.import_names)
+                        .map_or(NONE, |names| names[index]));
                 };
                 let value = match name {
                     "name" => fields.name.as_deref(),
@@ -2167,7 +2180,9 @@ impl Context {
                     || builtins::constructor_owner(&name).is_some()
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__" | "StopIteration.__init__"
+                        "BaseException.__init__"
+                            | "ImportError.__init__"
+                            | "StopIteration.__init__"
                     )
                     || !name.contains('.')
                     || matches!(

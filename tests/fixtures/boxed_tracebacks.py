@@ -238,3 +238,12 @@ for initial in ("before", ["marker"]):
     replacement = ("after",)
     imported.args = replacement
     print(imported.msg is initial, imported.args is replacement, str(imported), repr(imported))
+
+imported = ImportError.__new__(ImportError, "allocation")
+print(imported.msg, imported.args)
+module_name = ["module"]
+ImportError.__init__(imported, "initial", name=module_name)
+BaseException.__init__(imported, "replacement")
+print(imported.msg, imported.args, str(imported), imported.name is module_name)
+imported.__init__("bound")
+print(imported.msg, imported.args, imported.name)

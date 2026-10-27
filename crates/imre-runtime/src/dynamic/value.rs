@@ -63,6 +63,7 @@ pub(super) struct Trace {
     pub context: Option<Id>,
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
+    pub import_names: Option<[Id; 3]>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     cached: Option<(usize, Id)>,
@@ -148,6 +149,7 @@ impl Error {
                     .chain(trace.context)
                     .chain(trace.cause)
                     .chain(trace.import_message)
+                    .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))

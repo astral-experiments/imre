@@ -822,10 +822,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
-            self.builtin("BaseException.__init__");
-            if name == "StopIteration" {
-                self.builtin("StopIteration.__init__");
-            }
+            self.builtin(builtins::exception_initializer(name));
         }
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
