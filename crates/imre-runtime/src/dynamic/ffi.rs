@@ -91,8 +91,33 @@ impl Context {
         Ok(self.alloc(Value::Tuple(values)))
     }
 
+    /// Fetch keyword fields in source order before evaluating their nested patterns.
+    fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
+        if !self.instance_of(subject, class) {
+            return Ok(NONE);
+        }
+        let Value::List(names) = self.heap.get(names) else {
+            unreachable!("compiled class pattern keywords")
+        };
+        let names = names.clone();
+        let mut fields = Vec::with_capacity(names.len());
+        for name in names {
+            let name = self.str_value(name)?.to_owned();
+            match self.lookup_attr(subject, &name) {
+                Ok(field) => {
+                    self.heap.keep(field);
+                    fields.push(field);
+                }
+                Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(self.alloc(Value::Tuple(fields)))
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
             "match_sequence_length"
