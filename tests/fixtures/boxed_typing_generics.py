@@ -1,9 +1,13 @@
 from sys import path
 from types import GenericAlias
 import typing as t
+from typing import BinaryIO, TextIO
 
 
 K = t.TypeVar("K")
+print(TextIO is t.TextIO, BinaryIO is t.BinaryIO)
+print(TextIO.__bases__ == (t.IO,), BinaryIO.__orig_bases__ == (t.IO[bytes],))
+print(t.IO.__parameters__ == (t.AnyStr,), TextIO.__parameters__, BinaryIO.__parameters__)
 V = t.TypeVar("V")
 T = t.TypeVar("T", bound=str, covariant=True)
 print(K.__name__, K.__module__, K.__bound__ is None, K.__constraints__)
