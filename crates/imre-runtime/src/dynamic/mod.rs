@@ -774,7 +774,10 @@ impl Context {
         let methods = match name {
             "dict" => builtins::DICT_METHODS,
             "int" => &["to_bytes"],
-            "str" => builtins::STR_METHODS,
+            "str" => {
+                self.builtin("str.maketrans");
+                builtins::STR_METHODS
+            }
             _ => &[],
         };
         for method in methods {
