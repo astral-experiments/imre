@@ -43,5 +43,12 @@ def current():
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
+    pairs = [("k", ["first", "second"])]
+    def detach(value, *options):
+        if value == "k":
+            pairs.clear()
+            [[n] for n in range(4800)]
+        return value
+    print(urlencode(pairs, doseq=True, quote_via=detach))
     print(urlencode([("suffix", "a b"), ("suffix", "Málaga/+")]))
     print(parse.urlencode({b"q": [b"a/", b"\xff"]}, doseq=True, safe="/", quote_via=quote))
