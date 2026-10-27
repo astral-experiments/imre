@@ -25,8 +25,6 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     Assign(ast::Expr, ast::Expr),
-    AssignItem(ast::ExprSubscript, ast::Expr),
-    AssignAttr(ast::ExprAttribute, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -162,16 +160,6 @@ impl Program {
                     strings.visit_expr(target);
                     strings.visit_expr(e);
                 }
-                Instruction::AssignItem(target, e) => {
-                    strings.visit_expr(&target.value);
-                    strings.visit_expr(&target.slice);
-                    strings.visit_expr(e);
-                }
-                Instruction::AssignAttr(target, e) => {
-                    strings.heap.code_name(target.attr.as_str());
-                    strings.visit_expr(&target.value);
-                    strings.visit_expr(e);
-                }
                 Instruction::From(module, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
@@ -251,22 +239,9 @@ impl Program {
                     e => Instruction::Eval(e.clone()),
                 },
                 Stmt::Assign(s) => match s.targets.as_slice() {
-                    [
-                        target @ (ast::Expr::Name(_)
-                        | ast::Expr::Tuple(_)
-                        | ast::Expr::List(_)
-                        | ast::Expr::Starred(_)),
-                    ] => {
+                    [target] => {
                         self.declare_target(target)?;
                         Instruction::Assign(target.clone(), (*s.value).clone())
-                    }
-                    [ast::Expr::Attribute(target)] => {
-                        Instruction::AssignAttr(target.clone(), (*s.value).clone())
-                    }
-                    [ast::Expr::Subscript(target)]
-                        if !matches!(*target.slice, ast::Expr::Slice(_)) =>
-                    {
-                        Instruction::AssignItem(target.clone(), (*s.value).clone())
                     }
                     _ => return Err(unsupported("assignment target")),
                 },
@@ -367,6 +342,8 @@ impl Program {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
+            ast::Expr::Attribute(_) => {}
+            ast::Expr::Subscript(item) if !matches!(*item.slice, ast::Expr::Slice(_)) => {}
             ast::Expr::Starred(_) => {
                 return Err(Error::new(
                     "SyntaxError",
@@ -1192,18 +1169,7 @@ impl Context {
             }
             Instruction::Assign(target, e) => {
                 let value = eval(self, e)?;
-                self.bind_target(scope, target, value)?;
-            }
-            Instruction::AssignAttr(target, e) => {
-                let value = eval(self, e)?;
-                let object = eval(self, &target.value)?;
-                self.set_attr(object, target.attr.as_str(), value)?;
-            }
-            Instruction::AssignItem(target, e) => {
-                let value = eval(self, e)?;
-                let object = eval(self, &target.value)?;
-                let key = eval(self, &target.slice)?;
-                self.put_item(object, key, value)?;
+                self.bind_target(code, scope, target, value)?;
             }
             Instruction::Unless(e, destination) => {
                 if !self.source_condition(code, scope, e)? {
@@ -1220,7 +1186,7 @@ impl Context {
                 match self.next_item(iter)? {
                     Some(v) => {
                         if let Some(target) = target {
-                            self.bind_target(scope, target, v)?;
+                            self.bind_target(code, scope, target, v)?;
                         } else {
                             return Ok(Some(Step::Yield(v, *ip - 1)));
                         }
@@ -1331,10 +1297,25 @@ impl Context {
     }
 
     /// Unpack each level before binding its component targets from left to right.
-    fn bind_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
+    fn bind_target(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        target: &ast::Expr,
+        value: Id,
+    ) -> Result<()> {
         match target {
             ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
-            ast::Expr::Starred(star) => self.bind_target(scope, &star.value, value)?,
+            ast::Expr::Attribute(field) => {
+                let object = self.source_expr(code, scope, &field.value)?;
+                self.set_attr(object, field.attr.as_str(), value)?;
+            }
+            ast::Expr::Subscript(item) => {
+                let object = self.source_expr(code, scope, &item.value)?;
+                let key = self.source_expr(code, scope, &item.slice)?;
+                self.put_item(object, key, value)?;
+            }
+            ast::Expr::Starred(star) => self.bind_target(code, scope, &star.value, value)?,
             ast::Expr::Tuple(ast::ExprTuple { elts, .. })
             | ast::Expr::List(ast::ExprList { elts, .. }) => {
                 let count = elts.len();
@@ -1371,7 +1352,7 @@ impl Context {
                     ));
                 }
                 for (element, item) in elts.iter().zip(unpacked) {
-                    self.bind_target(scope, element, item)?;
+                    self.bind_target(code, scope, element, item)?;
                 }
             }
             _ => unreachable!("validated unpacking target"),
