@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 
+use num_traits::ToPrimitive;
+
 use super::*;
 
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
@@ -96,6 +98,7 @@ impl Context {
     }
 
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
+        let id = self.weak_proxy_target(id)?;
         Ok(match self.heap.get(id) {
             Value::None => false,
             Value::NotImplemented => {
@@ -153,6 +156,34 @@ impl Context {
             _ => true,
         })
     }
+    /// Unwrap nested method bindings and retain the identity comparison of their receivers.
+    fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
+        let mut same_receivers = true;
+        while a != b {
+            let (
+                Value::Method {
+                    callable: left,
+                    receiver: x,
+                    ..
+                },
+                Value::Method {
+                    callable: right,
+                    receiver: y,
+                    ..
+                },
+            ) = (self.heap.get(a), self.heap.get(b))
+            else {
+                break;
+            };
+            if self.builtin_type_name(a) != self.builtin_type_name(b) {
+                return None;
+            }
+            same_receivers &= x == y;
+            (a, b) = (*left, *right);
+        }
+        Some((a, b, same_receivers))
+    }
+
     pub(super) fn equal(&self, a: Id, b: Id) -> bool {
         // Hashable dictionary, set and cache keys cannot contain cyclic containers.
         self.equal_inner(a, b, usize::MAX, &mut false)
@@ -188,6 +219,25 @@ impl Context {
                 }
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
                     if !self.truth(result)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                if matches!(self.heap.get(a), Value::Method { .. })
+                    && matches!(self.heap.get(b), Value::Method { .. })
+                {
+                    let Some((left, right, same_receivers)) = self.method_equality_operands(a, b)
+                    else {
+                        return Ok(false);
+                    };
+                    if left != right {
+                        self.heap.keep(a);
+                        self.heap.keep(b);
+                        if !self.checked_equal(left, right)? {
+                            return Ok(false);
+                        }
+                    }
+                    if !same_receivers {
                         return Ok(false);
                     }
                     continue;
@@ -317,6 +367,15 @@ impl Context {
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
         match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Weak(left), Value::Weak(right))
+                if left.kind == weakref::Kind::Reference
+                    && right.kind == weakref::Kind::Reference =>
+            {
+                match (left.target, right.target) {
+                    (Some(left), Some(right)) => equal(left, right),
+                    _ => false,
+                }
+            }
             (Value::None, Value::None) => true,
             (Value::Int(_) | Value::Bool(_), Value::Int(_) | Value::Bool(_)) => self
                 .as_int(a)
@@ -337,6 +396,9 @@ impl Context {
             (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
                 a == b
             }
+            (Value::Method { .. }, Value::Method { .. }) => self
+                .method_equality_operands(a, b)
+                .is_some_and(|(x, y, same)| same && equal(x, y)),
             (Value::Native(a), Value::Native(b)) => a == b,
             (Value::GenericAlias(a), Value::GenericAlias(b)) => {
                 a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
@@ -699,6 +761,7 @@ impl Context {
             Value::List(_) => Some("[...]"),
             Value::Tuple(_) => Some("(...)"),
             Value::Dict(_) => Some("{...}"),
+            Value::ItemGetter(_) => Some("operator.itemgetter(...)"),
             _ => None,
         };
         if let Some(placeholder) = recursive {
@@ -895,6 +958,10 @@ impl Context {
                     .join(", ");
                 format!("operator.attrgetter({arguments})")
             }
+            Value::ItemGetter(keys) => format!(
+                "operator.itemgetter({})",
+                self.format_elements(self.itemgetter_keys(*keys), active)
+            ),
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
@@ -903,6 +970,7 @@ impl Context {
         result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        let obj = self.weak_proxy_target(obj)?;
         if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
@@ -943,26 +1011,89 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
-        if matches!(self.heap.get(obj), Value::Set { .. }) {
-            return Err(Error::new(
-                "TypeError",
-                format!("'{}' object is not subscriptable", self.type_name(obj)),
-            ));
-        }
-        if matches!(self.heap.get(obj), Value::DictView { .. }) {
-            return Err(Error::new("TypeError", "object is not subscriptable"));
-        }
+        let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
         }
-        let i = self.as_integer(key)?;
-        let vals = self.items(obj)?;
-        let i = if i < 0 { vals.len() as i64 + i } else { i };
-        vals.get(i as usize)
-            .copied()
-            .ok_or_else(|| Error::new("IndexError", "index out of range"))
+        let kind = match self.heap.get(storage) {
+            Value::List(_) => "list",
+            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => "tuple",
+            Value::Str(_) => "string",
+            Value::Bytes(_) => "byte",
+            Value::ByteArray(_) => "bytearray",
+            Value::Range { .. } => "range",
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not subscriptable", self.type_name(obj)),
+                ));
+            }
+        };
+        let index = self.index_value(key)?.ok_or_else(|| {
+            let key_type = self.type_name(key);
+            let message = if kind == "string" {
+                format!("string indices must be integers, not '{key_type}'")
+            } else {
+                format!("{kind} indices must be integers or slices, not {key_type}")
+            };
+            Error::new("TypeError", message)
+        })?;
+        let bounds_error = || {
+            let message = match kind {
+                "byte" => "index out of range".to_owned(),
+                "range" => "range object index out of range".to_owned(),
+                _ => format!("{kind} index out of range"),
+            };
+            Error::new("IndexError", message)
+        };
+        let offset = if kind == "range" {
+            index.big().to_i128().ok_or_else(bounds_error)?
+        } else {
+            i128::from(index.to_i64().ok_or_else(|| {
+                Error::new(
+                    "IndexError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(key)
+                    ),
+                )
+            })?)
+        };
+        // __index__ can resize a list or bytearray. Read its current storage after the call.
+        let position = |len: usize| {
+            let i = if offset < 0 {
+                len as i128 + offset
+            } else {
+                offset
+            };
+            usize::try_from(i)
+                .ok()
+                .filter(|&i| i < len)
+                .ok_or_else(bounds_error)
+        };
+        Ok(match self.heap.get(storage) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                v[position(v.len())?]
+            }
+            Value::Instance { .. } => {
+                let v = self.sequence(storage).unwrap();
+                v[position(v.len())?]
+            }
+            Value::Str(s) => {
+                let c = s.chars().nth(position(s.chars().count())?).unwrap();
+                self.text(c.to_string())
+            }
+            Value::Bytes(v) | Value::ByteArray(v) => self.int(i64::from(v[position(v.len())?])),
+            Value::Range { start, stop, step } => {
+                let i = position(builtins::range_len(*start, *stop, *step)?)? as i128;
+                self.int((i128::from(*start) + i * i128::from(*step)) as i64)
+            }
+            _ => unreachable!(),
+        })
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if matches!(
             self.heap.get(obj),
             Value::Dict(_) | Value::DefaultDict { .. }
@@ -988,10 +1119,13 @@ impl Context {
             let Value::List(items) = self.heap.get_mut(obj) else {
                 unreachable!()
             };
-            *items
+            let entry = items
                 .get_mut(i as usize)
-                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))? =
-                val;
+                .ok_or_else(|| Error::new("IndexError", "list assignment index out of range"))?;
+            let previous = std::mem::replace(entry, val);
+            if previous != val {
+                self.heap.weak_edge_removed(previous);
+            }
         } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
             self.call(setter, vec![key, val], Vec::new())?;
         } else {
@@ -1230,6 +1364,11 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        let (a, b) = if !self.heap.has_weak_values || matches!(op, "is" | "is not") {
+            (a, b)
+        } else {
+            (self.weak_proxy_target(a)?, self.weak_proxy_target(b)?)
+        };
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }
@@ -1577,6 +1716,24 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if self.heap.has_weak_values
+            && matches!(op, "==" | "!=")
+            && let (Value::Weak(left), Value::Weak(right)) = (self.heap.get(a), self.heap.get(b))
+            && left.kind == weakref::Kind::Reference
+            && right.kind == weakref::Kind::Reference
+            && let (Some(left), Some(right)) = (left.target, right.target)
+        {
+            self.heap.keep(left);
+            self.heap.keep(right);
+            if op == "!="
+                && self.slot(left, "__ne__").is_none()
+                && self.slot(right, "__ne__").is_none()
+            {
+                let equal = self.binary("==", left, right)?;
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
+            return self.binary(op, left, right).map(Some);
+        }
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
@@ -1608,6 +1765,10 @@ impl Context {
     }
 
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
+        let target = self.weak_proxy_target(a)?;
+        if target != a {
+            return self.inplace(op, target, self.weak_proxy_target(b)?);
+        }
         if let Some((_, _, slot)) = binary_slots(op)
             && let Some(result) = self.operator_slot(a, slot, b)?
         {
@@ -1655,6 +1816,7 @@ impl Context {
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        let obj = self.weak_proxy_target(obj)?;
         if let Some(method) = self.bound_slot(obj, "__delitem__")? {
             self.call(method, vec![key], vec![])?;
             return Ok(());
@@ -1710,7 +1872,8 @@ impl Context {
                 let Value::List(entries) = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                entries.remove(i as usize);
+                let value = entries.remove(i as usize);
+                self.heap.weak_edge_removed(value);
             }
             _ => {
                 return Err(Error::new(
