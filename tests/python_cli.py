@@ -536,6 +536,7 @@ def report(text):
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
+            "boxed_dir.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",

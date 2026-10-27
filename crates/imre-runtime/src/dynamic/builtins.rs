@@ -4,6 +4,7 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod dir;
 mod exceptions;
 mod float;
 pub(super) use float::from_numeric;
@@ -81,6 +82,7 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "dir",
     "sorted",
     "ord",
     "chr",
@@ -970,6 +972,7 @@ pub(super) fn call(
             }
         }
         "pow" => power(ctx, args, kwargs),
+        "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
