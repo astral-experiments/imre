@@ -640,7 +640,6 @@ impl Context {
                     let item = match ctx.heap.get(id) {
                         Value::Slice(v) => v.get(index),
                         Value::List(v) | Value::Tuple(v) => v.get(index),
-                        Value::ItemGetter(keys) => ctx.itemgetter_keys(*keys).get(index),
                         _ => unreachable!("active sequence"),
                     };
                     if let Some(&item) = item {
@@ -772,21 +771,28 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, entries) = match ctx.heap.get(id) {
-                        Value::List(_) => ("[", "]", "[...]", None),
-                        Value::ItemGetter(_) => (
-                            "operator.itemgetter(",
-                            ")",
-                            "operator.itemgetter(...)",
-                            None,
-                        ),
+                    let (start, end, placeholder, contents) = match ctx.heap.get(id) {
+                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(id, 0)),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            None,
+                            Part::Sequence(id, 0),
                         ),
-                        Value::Dict(_) => ("{", "}", "{...}", Some(true)),
+                        Value::ItemGetter(keys) => {
+                            // Multi-key getters expose this same tuple through __reduce__.
+                            let (argument, start, end) = match *ctx.itemgetter_keys(*keys) {
+                                [key] => (key, "operator.itemgetter(", ")"),
+                                _ => (*keys, "operator.itemgetter", ""),
+                            };
+                            (
+                                start,
+                                end,
+                                "operator.itemgetter(...)",
+                                Part::Value(argument, true),
+                            )
+                        }
+                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -800,7 +806,7 @@ impl Context {
                                 } else {
                                     "set(...)"
                                 },
-                                Some(false),
+                                Part::Entries(id, 0, false),
                             )
                         }
                         _ => {
@@ -815,8 +821,8 @@ impl Context {
                     active.push(id);
                     output.push_str(start);
                     work.push(Part::Leave(id, end));
-                    match entries {
-                        Some(false) if checked => {
+                    match contents {
+                        Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
                             let Value::Set { entries, .. } = ctx.heap.get(id) else {
                                 unreachable!()
@@ -828,8 +834,7 @@ impl Context {
                             members.extend(entries.iter().map(|&(key, _)| key));
                             work.push(Part::SetMembers(members, 0));
                         }
-                        Some(include_values) => work.push(Part::Entries(id, 0, include_values)),
-                        None => work.push(Part::Sequence(id, 0)),
+                        part => work.push(part),
                     }
                 }
             }
