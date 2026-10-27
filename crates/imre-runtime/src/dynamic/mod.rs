@@ -765,7 +765,32 @@ impl Context {
             self.heap.weak_edge_removed(previous);
         }
     }
+    /// Describe a missing binding in the scope that owns it.
+    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+        let frame = self.scope_data(scope);
+        let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
+        if declared && origin == scope {
+            Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            )
+        } else if declared || frame.closure.cells.contains_key(name) {
+            Error::new(
+                "NameError",
+                format!(
+                    "cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+                ),
+            )
+        } else {
+            Error::new("NameError", format!("name '{name}' is not defined"))
+        }
+    }
+
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
+        let origin = scope;
+        let function_lookup = self.scope_data(origin).class_body.is_none();
         loop {
             scope = self.binding_scope(scope, name);
             if let Some(locals) = self.scope_data(scope).exec_locals {
@@ -776,18 +801,18 @@ impl Context {
             }
             let s = self.scope_data(scope);
             if s.closure.cells.contains_key(name) {
-                return self.scope_name(scope, name).ok_or_else(|| {
-                    Error::new(
-                        "NameError",
-                        format!("free variable '{name}' is not associated with a value"),
-                    )
-                });
+                return self
+                    .scope_name(scope, name)
+                    .ok_or_else(|| self.missing_binding(origin, scope, name));
             }
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
             if let Some(id) = self.scope_name(scope, name) {
                 return Ok(id);
+            }
+            if function_lookup && s.class_body.is_none() && s.closure.declared.contains(name) {
+                return Err(self.missing_binding(origin, scope, name));
             }
             if name == "__class__"
                 && s.class_body.is_none()
@@ -811,10 +836,7 @@ impl Context {
         if builtins::is_builtin(name) {
             return Ok(self.builtin(name));
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(self.missing_binding(origin, scope, name))
     }
     fn builtin(&mut self, name: &str) -> Id {
         if let Some(&value) = self.builtins.get(name) {
