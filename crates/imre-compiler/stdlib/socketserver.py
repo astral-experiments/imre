@@ -71,13 +71,15 @@ class StreamRequestHandler(BaseRequestHandler):
     rbufsize = -1
     wbufsize = 0
     disable_nagle_algorithm = False
-    _connection: socket.socket | None
+    _has_connection: bool
+    _connection: socket.socket
     # A populated slot can hold None in runtime-loaded Python.
     _reader: tuple[_SocketReader] | None
     _writer: tuple[_SocketWriter] | None
 
     def __init__(self, request: socket.socket, client_address: tuple[str, int], server: TCPServer) -> None:
-        self._connection = None
+        self._has_connection = False
+        self._connection = request
         self._reader = None
         self._writer = None
         super().__init__(request, client_address, server)
@@ -95,14 +97,14 @@ class StreamRequestHandler(BaseRequestHandler):
 
     @property
     def connection(self) -> socket.socket:
-        connection = self._connection
-        if connection is None:
+        if not self._has_connection:
             raise AttributeError("connection")
-        return connection
+        return self._connection
 
     @connection.setter
     def connection(self, value: socket.socket) -> None:
         self._connection = value
+        self._has_connection = True
 
     @property
     def rfile(self) -> _SocketReader:
