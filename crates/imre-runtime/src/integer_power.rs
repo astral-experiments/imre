@@ -9,6 +9,11 @@ use num_traits::Pow;
 pub unsafe extern "C" fn imre_int_pow(base: usize, exponent: usize) -> usize {
     // SAFETY: the generated call roots both handles until it returns.
     let (base, exponent) = unsafe { (Int::borrow(base), Int::borrow(exponent)) };
+    finish(power(&base, &exponent).map(Int::into_raw), 1)
+}
+
+/// Raises an integer to a nonnegative exponent of arbitrary size.
+pub(super) fn power(base: &Int, exponent: &Int) -> Result<Int> {
     let (base, exponent) = (base.big(), exponent.big());
     debug_assert!(!exponent.is_negative());
     // Even the lower bound on the bit count must fit the native integer storage.
@@ -18,9 +23,12 @@ pub unsafe extern "C" fn imre_int_pow(base: usize, exponent: usize) -> usize {
             .to_u64()
             .is_none_or(|n| n > (i64::MAX as u64 - 1) / (base.bits() - 1))
     {
-        return Error::new(Kind::OverflowError, "too many digits in integer").returning(1);
+        return Err(Error::new(
+            Kind::OverflowError,
+            "too many digits in integer",
+        ));
     }
-    Int::new(Pow::pow(base.as_ref(), exponent.magnitude())).into_raw()
+    Ok(Int::new(Pow::pow(base.as_ref(), exponent.magnitude())))
 }
 
 /// # Safety
@@ -29,18 +37,20 @@ pub unsafe extern "C" fn imre_int_pow(base: usize, exponent: usize) -> usize {
 pub unsafe extern "C" fn imre_int_negative_pow(base: usize, exponent: usize) -> f64 {
     // SAFETY: both arguments remain live across the conversion.
     let (base, exponent) = unsafe { (Int::borrow(base), Int::borrow(exponent)) };
-    let power = || {
-        let base = floats::int_to_float(&base)?;
-        let exponent = floats::int_to_float(&exponent)?;
-        if base == 0.0 {
-            return Err(Error::new(
-                Kind::ZeroDivisionError,
-                "zero to a negative power",
-            ));
-        }
-        Ok(base.powf(exponent))
-    };
-    finish(power(), 0.0)
+    finish(negative_power(&base, &exponent), 0.0)
+}
+
+/// Converts integer operands to binary64 for a negative exponent.
+pub(super) fn negative_power(base: &Int, exponent: &Int) -> Result<f64> {
+    let base = floats::int_to_float(base)?;
+    let exponent = floats::int_to_float(exponent)?;
+    if base == 0.0 {
+        return Err(Error::new(
+            Kind::ZeroDivisionError,
+            "zero to a negative power",
+        ));
+    }
+    Ok(base.powf(exponent))
 }
 
 /// # Safety
@@ -55,24 +65,34 @@ pub unsafe extern "C" fn imre_int_modpow(base: usize, exponent: usize, modulus: 
             Int::borrow(modulus),
         )
     };
+    finish(
+        modular_power(&base, &exponent, &modulus).map(Int::into_raw),
+        1,
+    )
+}
+
+/// Handles either sign of modulus and inverts the base for negative exponents.
+pub(super) fn modular_power(base: &Int, exponent: &Int, modulus: &Int) -> Result<Int> {
     let (base, exponent, modulus) = (base.big(), exponent.big(), modulus.big());
     if modulus.is_zero() {
-        return Error::new(Kind::ValueError, "pow() 3rd argument cannot be 0").returning(1);
+        return Err(Error::new(
+            Kind::ValueError,
+            "pow() 3rd argument cannot be 0",
+        ));
     }
     if modulus.bits() == 1 {
-        return 1; // Tagged zero for either sign of unit modulus.
+        return Ok(Int::from(0));
     }
     let result = if exponent.is_negative() {
         let Some(inverse) = base.modinv(&modulus) else {
-            return Error::new(
+            return Err(Error::new(
                 Kind::ValueError,
                 "base is not invertible for the given modulus",
-            )
-            .returning(1);
+            ));
         };
         inverse.modpow(&-exponent.as_ref(), &modulus)
     } else {
         base.modpow(&exponent, &modulus)
     };
-    Int::new(result).into_raw()
+    Ok(Int::new(result))
 }

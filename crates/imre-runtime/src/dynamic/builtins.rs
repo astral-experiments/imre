@@ -94,6 +94,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "pow",
     "sum",
     "__import__",
     "repr",
@@ -799,6 +800,22 @@ pub(super) fn call(
                     args.len()
                 ))),
             }
+        }
+        "pow" => {
+            let [base, exp, modulus] = bind(name, args, kwargs, ["base", "exp", "mod"])?;
+            let base =
+                base.ok_or_else(|| type_error("pow() missing required argument 'base' (pos 1)"))?;
+            let exp =
+                exp.ok_or_else(|| type_error("pow() missing required argument 'exp' (pos 2)"))?;
+            if let Some(modulus) = modulus.filter(|&id| id != NONE) {
+                let result = crate::integer_power::modular_power(
+                    &ctx.as_int(base)?,
+                    &ctx.as_int(exp)?,
+                    &ctx.as_int(modulus)?,
+                )?;
+                return Ok(ctx.alloc(Value::Int(result)));
+            }
+            ctx.binary("**", base, exp)
         }
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {

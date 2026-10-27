@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 
-use num_traits::{Signed, ToPrimitive, Zero};
-
 use super::*;
 
 fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
@@ -1060,32 +1058,11 @@ impl Context {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
         }
         let result = if op == "**" {
-            let (x, y) = (x.big(), y.big());
-            if y.is_negative() {
-                if x.is_zero() {
-                    return Err(Error::new(
-                        "ZeroDivisionError",
-                        "0.0 cannot be raised to a negative power",
-                    ));
-                }
-                return Err(Error::new(
-                    "TypeError",
-                    "negative powers require floating-point results",
-                ));
+            if y.cmp(&crate::Int::from(0)).is_lt() {
+                let result = crate::integer_power::negative_power(&x, &y)?;
+                return Ok(self.alloc(Value::Float(result)));
             }
-            if let Some(exp) = y.to_u32() {
-                crate::Int::new(x.pow(exp))
-            } else if x.is_zero() || x.magnitude().bits() == 1 {
-                crate::Int::from(if x.is_zero() {
-                    0
-                } else if x.is_negative() && y.bit(0) {
-                    -1
-                } else {
-                    1
-                })
-            } else {
-                return Err(Error::new("OverflowError", "exponent is too large"));
-            }
+            crate::integer_power::power(&x, &y)?
         } else {
             let code = match op {
                 "+" => 0,
