@@ -34,6 +34,30 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("unhashable argument accepted")
+    class ComparedKey:
+        def __init__(self, fail=False):
+            self.fail = fail
+
+        def __hash__(self):
+            return 11
+
+        def __eq__(self, other):
+            compared.append("equal")
+            if self.fail:
+                raise LookupError("set comparison")
+            return True
+
+    compared = []
+    left = {ComparedKey()}
+    right = frozenset([ComparedKey()])
+    assert left == right and not right != left
+    assert compared == ["equal", "equal"]
+    try:
+        {ComparedKey()} == frozenset([ComparedKey(True)])
+    except LookupError as error:
+        assert error.args == ("set comparison",)
+    else:
+        raise AssertionError("missing element comparison")
     print("ok")
 
 
