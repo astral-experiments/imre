@@ -1,18 +1,15 @@
 """Version lookup in unpacked distribution metadata on the executable's import path."""
 import re
-from importlib.metadata import PackageNotFoundError
-from pathlib import Path
-from textwrap import dedent
 
 
 def _normalize(name: str) -> str:
-    return re.sub(r'[-_.]+', '_', name).lower()
+    return _normalize_separators(name).lower()
 
 
-def _version(path: Path) -> str:
-    if not path.is_file():
+def _version(path: str) -> str:
+    if not _is_file(path):
         raise NotImplementedError('distribution metadata without a METADATA file')
-    lines = path.read_text(encoding='utf-8').split('\n')
+    lines = _read_text(path).split('\n')
     for i, line in enumerate(lines):
         if not line:
             break
@@ -36,24 +33,24 @@ def version(distribution_name: str) -> str:
     if not distribution_name:
         raise ValueError('A distribution name is required.')
     name = _normalize(distribution_name)
-    for root in _search_path:
-        directory = Path(root)
-        if directory.is_file():
+    for root in _paths():
+        directory = root or '.'
+        if _is_file(directory):
             raise NotImplementedError('distribution lookup in archive import roots')
         try:
-            entries = directory.iterdir()
+            entries = _filenames(directory)
         except OSError:
             continue
-        for metadata in entries:
-            filename = metadata.name.lower()
+        for entry in entries:
+            filename = entry.lower()
             if filename.endswith('.dist-info') or filename.endswith('.egg-info'):
                 stem = filename.rsplit('.', 1)[0].split('-', 1)[0]
                 if _normalize(stem) == name:
                     if filename.endswith('.egg-info'):
                         raise NotImplementedError('legacy egg distribution metadata')
-                    return _version(metadata / 'METADATA')
-        dirname = directory.name.lower()
-        if dirname.endswith('.egg') and (directory / 'EGG-INFO').exists():
+                    return _version(_join(_join(directory, entry), 'METADATA'))
+        dirname = _basename(directory).lower()
+        if dirname.endswith('.egg') and _exists(_join(directory, 'EGG-INFO')):
             if dirname[:-4].split('-', 1)[0] == distribution_name.lower().replace('-', '_'):
                 raise NotImplementedError('legacy egg distribution metadata')
     raise PackageNotFoundError(distribution_name)
