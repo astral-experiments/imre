@@ -1,4 +1,5 @@
 use super::*;
+use crate::dynamic::complex::Complex;
 
 /// Construct a boxed binary64 using Python's numeric slots or decimal text grammar.
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -65,7 +66,7 @@ pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<O
     Ok(None)
 }
 
-/// Sum a boxed iterable, retaining low-order bits while adding real numbers to a float.
+/// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
 pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id> {
     let iterator = ctx.iterator(source)?;
     let mut total = start.unwrap_or_else(|| ctx.int(0));
@@ -114,8 +115,8 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
         item = next;
     }
 
-    if let Value::Float(mut high) = *ctx.heap.get(total) {
-        let mut low = 0.0_f64;
+    if let Value::Float(initial) = *ctx.heap.get(total) {
+        let mut real = CompensatedSum::new(initial);
         loop {
             let value = match ctx.heap.get(item) {
                 Value::Float(value) => Some(*value),
@@ -126,19 +127,44 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
                 },
             };
             let Some(value) = value else {
-                total = ctx.alloc(Value::Float(compensated_value(high, low)));
+                let rounded = ctx.alloc(Value::Float(real.value()));
+                total = ctx.binary("+", rounded, item)?;
                 break;
             };
-            let rounded = high + value;
-            low += if high.abs() >= value.abs() {
-                (high - rounded) + value
-            } else {
-                (value - rounded) + high
-            };
-            high = rounded;
+            real.add(value);
             ctx.heap.release_temporaries_since(mark);
             let Some(next) = ctx.next_item(iterator)? else {
-                return Ok(ctx.alloc(Value::Float(compensated_value(high, low))));
+                return Ok(ctx.alloc(Value::Float(real.value())));
+            };
+            item = next;
+        }
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(total);
+        let Some(next) = ctx.next_item(iterator)? else {
+            return Ok(total);
+        };
+        item = next;
+    }
+
+    if let Value::Complex(initial) = *ctx.heap.get(total) {
+        let mut real = CompensatedSum::new(initial.real);
+        let mut imag = CompensatedSum::new(initial.imag);
+        loop {
+            let component = match ctx.heap.get(item) {
+                Value::Complex(value) => {
+                    imag.add(value.imag);
+                    Some(value.real)
+                }
+                _ => ctx.real_component(ctx.scalar_value(item))?,
+            };
+            let Some(component) = component else {
+                total = ctx.alloc(complex_total(real, imag));
+                break;
+            };
+            real.add(component);
+            ctx.heap.release_temporaries_since(mark);
+            let Some(next) = ctx.next_item(iterator)? else {
+                return Ok(ctx.alloc(complex_total(real, imag)));
             };
             item = next;
         }
@@ -155,11 +181,43 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
     }
 }
 
-/// Avoid changing the sign of zero or turning an infinite result into a NaN.
-fn compensated_value(high: f64, low: f64) -> f64 {
-    if low != 0.0 && low.is_finite() {
-        high + low
-    } else {
-        high
+/// Neumaier summation keeps the low-order contribution lost by binary64 addition.
+struct CompensatedSum {
+    high: f64,
+    low: f64,
+}
+
+impl CompensatedSum {
+    fn new(initial: f64) -> Self {
+        Self {
+            high: initial,
+            low: 0.0,
+        }
     }
+
+    fn add(&mut self, value: f64) {
+        let rounded = self.high + value;
+        self.low += if self.high.abs() >= value.abs() {
+            (self.high - rounded) + value
+        } else {
+            (value - rounded) + self.high
+        };
+        self.high = rounded;
+    }
+
+    /// Preserve signed zero and avoid turning an infinite sum into a NaN.
+    fn value(self) -> f64 {
+        if self.low != 0.0 && self.low.is_finite() {
+            self.high + self.low
+        } else {
+            self.high
+        }
+    }
+}
+
+fn complex_total(real: CompensatedSum, imag: CompensatedSum) -> Value {
+    Value::Complex(Complex {
+        real: real.value(),
+        imag: imag.value(),
+    })
 }

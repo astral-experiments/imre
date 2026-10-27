@@ -679,6 +679,7 @@ def report(text):
             "boxed_map.py",
             "boxed_python_iterators.py",
             "boxed_float_sum.py",
+            "boxed_complex_sum.py",
             "boxed_enumerate_methods.py",
             "boxed_enumerate_metadata.py",
             "boxed_sorted.py",
