@@ -1,0 +1,56 @@
+import os
+import os.path
+import posixpath
+from os import fspath
+
+
+class Path:
+    def __init__(self, value):
+        self.value = value
+
+    def __fspath__(self):
+        return self.value
+
+
+class Text(str):
+    def __fspath__(self):
+        raise AssertionError("string paths bypass __fspath__")
+
+
+class Raw(bytes):
+    def __fspath__(self):
+        raise AssertionError("byte paths bypass __fspath__")
+
+
+class Descriptor:
+    def __get__(self, obj, owner):
+        raise RuntimeError("descriptor lookup")
+
+
+class NoMethod:
+    __fspath__ = Descriptor()
+
+
+class Raises:
+    def __fspath__(self):
+        raise RuntimeError("method call")
+
+
+def current():
+    assert os.path is posixpath and os.path.__name__ == "posixpath"
+    assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
+    assert fspath is os.fspath
+    for value in ("", ".profile", "a.b/.c", "a/.a.b", "/résumé.☃", "r/", b"a.\xff", Text("a.tar.gz"), Raw(b"a.tar.gz")):
+        path = Path(value)
+        assert fspath(path) is value and fspath(value) is value
+        assert os.path.normcase(path) is value
+        drive, tail = os.path.splitdrive(path)
+        assert tail is value
+        print(drive, os.path.basename(path), os.path.splitext(path))
+    for value in (NoMethod(), Raises(), Path(42), None):
+        try:
+            fspath(value)
+        except (TypeError, RuntimeError) as error:
+            print(type(error).__name__, str(error))
+    assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
+    assert not os.path.isfile(Path("missing\0file"))

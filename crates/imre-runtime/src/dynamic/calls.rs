@@ -921,7 +921,7 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
-        let base = self.string_storage(obj).unwrap_or(obj);
+        let base = self.scalar_value(obj);
         if name == "__new__" {
             match self.heap.get(base) {
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
@@ -1240,34 +1240,35 @@ impl Context {
         })
     }
 
-    /// Allocate the immutable str payload while retaining the actual Python class.
-    pub(super) fn new_str(
+    /// Allocate the immutable string or bytes payload while retaining the Python class.
+    pub(super) fn new_string(
         &mut self,
+        kind: &str,
         class: Id,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let base = self.builtin("str");
+        let base = self.builtin(kind);
         if !self.subclass(class, base) {
             let message = match self.heap.get(class) {
                 Value::Class { name, .. } => {
-                    format!("str.__new__({name}): {name} is not a subtype of str")
+                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
                 }
                 Value::Native(name) if builtins::is_builtin_type(name) => {
-                    format!("str.__new__({name}): {name} is not a subtype of str")
+                    format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
                 }
                 _ => format!(
-                    "str.__new__(X): X is not a type object ({})",
+                    "{kind}.__new__(X): X is not a type object ({})",
                     self.type_name(class)
                 ),
             };
             return Err(Error::new("TypeError", message));
         }
-        let text = builtins::call(self, "str", args, kwargs)?;
+        let text = builtins::call(self, kind, args, kwargs)?;
         if class == base {
             return Ok(text);
         }
-        let text = self.string_storage(text).expect("str() returns a string");
+        let text = self.scalar_value(text);
         Ok(self.alloc(Value::Instance {
             class,
             fields: HashMap::new(),
@@ -1452,7 +1453,9 @@ impl Context {
                     }));
                 }
                 let new = self.class_attr(callable, "__new__");
-                let str_subclass = self.has_base(callable, "str");
+                let string_base = ["str", "bytes"]
+                    .into_iter()
+                    .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -1463,8 +1466,8 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
-                } else if str_subclass {
-                    self.new_str(callable, &args, &kwargs)?
+                } else if let Some(kind) = string_base {
+                    self.new_string(kind, callable, &args, &kwargs)?
                 } else {
                     let dictionary = self
                         .has_base(callable, "dict")
@@ -1475,7 +1478,9 @@ impl Context {
                     if self.call(init, args, kwargs)? != NONE {
                         return Err(Error::new("TypeError", "__init__ must return None"));
                     }
-                } else if new.is_none() && !str_subclass && (!args.is_empty() || !kwargs.is_empty())
+                } else if new.is_none()
+                    && string_base.is_none()
+                    && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(
                         "TypeError",

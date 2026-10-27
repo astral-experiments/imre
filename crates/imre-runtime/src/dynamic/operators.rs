@@ -679,7 +679,7 @@ impl Context {
         Ok(false)
     }
     fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
-        let obj = self.string_storage(obj).unwrap_or(obj);
+        let obj = self.scalar_value(obj);
         if let Value::Range { start, stop, step } = *self.heap.get(obj) {
             return super::slice::range(self, parts, start, stop, step);
         }

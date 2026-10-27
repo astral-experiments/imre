@@ -178,6 +178,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "endswith",
     "expandtabs",
     "find",
+    "rfind",
     "format",
     "isspace",
     "join",
@@ -204,7 +205,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
+        Value::Bytes(_) if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip") => "bytes",
         Value::ByteArray(_) if attr == "extend" => "bytearray",
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),

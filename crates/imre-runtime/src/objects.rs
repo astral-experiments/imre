@@ -65,6 +65,7 @@ mod namespaces;
 mod os;
 mod patchset;
 mod paths;
+pub(crate) use paths::is_file;
 pub(crate) mod posixpath;
 mod processes;
 mod random;
