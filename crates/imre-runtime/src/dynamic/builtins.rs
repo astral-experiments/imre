@@ -81,6 +81,7 @@ const FUNCTIONS: &[&str] = &[
     "sorted",
     "ord",
     "chr",
+    "divmod",
     "callable",
     "all",
     "any",
@@ -735,6 +736,14 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
+        }
+        "divmod" => {
+            positional(name, kwargs)?;
+            arity(name, args, 2, 2)?;
+            let (left, right) = (ctx.as_int(args[0])?, ctx.as_int(args[1])?);
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
+            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
         }
         "chr" | "ord" => {
             if !kwargs.is_empty() {

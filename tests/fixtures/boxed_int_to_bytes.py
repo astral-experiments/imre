@@ -2,6 +2,15 @@ import sys
 
 
 def current():
+    assert bytes(divmod(65535, 256)) == b"\xff\xff"
+    for a, b in ((7, -3), (-7, 3), (1 << 150, -17)):
+        assert divmod(a, b) == (a // b, a % b)
+    try:
+        divmod(1, 0)
+    except ZeroDivisionError:
+        pass
+    else:
+        raise AssertionError("divmod accepted zero divisor")
     for n in range(256):
         byte = bytes([n])
         assert n.to_bytes() == byte
