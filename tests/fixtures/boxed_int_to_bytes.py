@@ -3,6 +3,13 @@ import sys
 
 def current():
     assert bytes(divmod(65535, 256)) == b"\xff\xff"
+    for value in (1 << 65, -(1 << 65)):
+        try:
+            bytes([1, value])
+        except ValueError as error:
+            assert str(error) == "bytes must be in range(0, 256)"
+        else:
+            raise AssertionError("out-of-range byte accepted")
     for a, b in ((7, -3), (-7, 3), (1 << 150, -17)):
         assert divmod(a, b) == (a // b, a % b)
     for call in (lambda: divmod(1, 0), lambda: divmod(1), lambda: divmod(1, 2, 3),
