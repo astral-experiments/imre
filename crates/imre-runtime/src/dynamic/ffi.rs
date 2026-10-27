@@ -121,8 +121,8 @@ impl Context {
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
             "match_sequence_length"
-                if self.container_slot_accepts(a, "list")
-                    || self.container_slot_accepts(a, "tuple") =>
+                if self.builtin_slot_accepts(a, "list")
+                    || self.builtin_slot_accepts(a, "tuple") =>
             {
                 builtins::call(self, "len", &[a], &[])
             }
