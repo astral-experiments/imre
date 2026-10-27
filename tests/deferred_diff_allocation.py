@@ -15,11 +15,19 @@ def check(args, directory):
     if args.lto_linker is not None:
         link += ["--lto-linker", args.lto_linker.resolve()]
     source = fixtures / "retry.py"
+    oracle = (
+        "import runpy, sys\n"
+        f"sys.path.insert(0, {str(fixtures.parents[2] / 'stdlib')!r})\n"
+        "sys.argv.pop(0)\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
     modes = ("len", "copy", "copy-during", "index", "tee-first", "tee-second", "reverse", "project", "repr", "boxed", "union", "frozen")
     cases = [(m, "short", "A", other) for other in ("A", "B") for m in modes]
     cases.append(("join-owner", "short", "A", "B"))
     cases += [(m, "sparse", "A", "B") for m in ("tee-boundary", "tee-cached", "pack-project", "restore")]
     cases.append(("slice-owner", "short", "A", "B"))
+    cases += [(mode, shape, "A", "B") for mode in ("packed-slice", "packed-repeat")
+              for shape in ("empty", "short")]
     passed = 0
     for level in args.opt_levels:
         exe = directory / f"deferred-diff-O{level}"
@@ -27,14 +35,17 @@ def check(args, directory):
                         "--runtime", args.runtime.resolve(), "--clang", args.clang,
                         "--opt-level", level, "-o", exe, *link], check=True)
         for argv in cases:
-            expected = subprocess.check_output([args.python, "-I", source, *argv])
+            expected = subprocess.check_output([args.python, "-I", "-c", oracle, source, *argv])
             env = os.environ | {"IMRE_DIFF_FAIL_N": "0"}
             control = subprocess.run([exe, *argv], env=env, capture_output=True, check=True)
             assert control.stdout == expected, (level, argv, control)
             count = int(re.fullmatch(rb"observed (\d+)\n", control.stderr)[1])
             assert count > 0, (level, argv, "no allocations observed")
             # repr's output buffer is covered separately; target its first row allocation.
-            if argv[0] == "slice-owner":
+            if argv[0] in ("packed-slice", "packed-repeat"):
+                # Packed storage is allocated just before the enclosing list owner.
+                indices = (count - 1,)
+            elif argv[0] == "slice-owner":
                 indices = (count,)
             elif argv[0] in ("repr", "frozen"):
                 indices = (1,)

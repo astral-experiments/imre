@@ -74,6 +74,7 @@ pub(crate) struct Context {
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
+    call_depth: usize,
     pending: Option<Error>,
 }
 
@@ -213,6 +214,14 @@ impl Context {
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
         if self.is_native_iterator(id) {
+            let closed = match self.heap.get(id) {
+                Value::File(file) => file.closed(),
+                Value::TextFile(file) => file.closed(),
+                _ => false,
+            };
+            if closed {
+                return Err(Error::new("ValueError", "I/O operation on closed file."));
+            }
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
@@ -366,7 +375,7 @@ impl Context {
 
     fn is_stop_iteration(&mut self, error: &Error) -> bool {
         let stop = self.builtin("StopIteration");
-        self.error_matches(&error.kind, stop)
+        self.raised_error_matches(error, stop)
     }
 
     fn next_callable_item(&mut self, id: Id, callable: Id, sentinel: Id) -> Result<Option<Id>> {
@@ -411,12 +420,15 @@ impl Context {
             Value::Map { .. } | Value::Zip { .. } => return self.next_zip_or_map(id),
             Value::Generator { code, .. } => {
                 let code = *code;
-                return match self.code_object(code).body {
-                    value::Body::Native(_) => self.next_generator_item(id),
-                    value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                        self.resume_source(id)
+                // Delegated generators resume their children on the native stack.
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    match self.code_object(code).body {
+                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+                            self.resume_source(id)
+                        }
                     }
-                };
+                });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
             Value::File(_) | Value::TextFile(_) => {
