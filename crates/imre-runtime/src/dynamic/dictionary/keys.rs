@@ -169,6 +169,14 @@ impl Index {
 }
 
 impl Entries {
+    /// Identify changes to insertion positions even when the live size is restored.
+    pub(in super::super) fn order_state(&self) -> (usize, usize) {
+        (
+            self.next,
+            self.index.as_ref().map_or(0, |index| index.generation),
+        )
+    }
+
     /// Remove all pairs and invalidate lookups suspended in a key comparison.
     pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
         let old = std::mem::take(self);
@@ -257,7 +265,7 @@ fn data_hash(bytes: &[u8]) -> i64 {
 }
 
 impl Context {
-    fn stored_entries(&self, dict: Id) -> &Entries {
+    pub(in super::super) fn stored_entries(&self, dict: Id) -> &Entries {
         match self.heap.get(dict) {
             Value::Set { entries, .. }
             | Value::Dict(entries)

@@ -500,7 +500,11 @@ pub(super) fn method(
                 "dict.values" => DictViewKind::Values,
                 _ => DictViewKind::Items,
             };
-            Ok(ctx.alloc(Value::DictView { dict: object, kind }))
+            Ok(ctx.alloc(Value::DictView {
+                dict: object,
+                kind,
+                ordered: false,
+            }))
         }
         "dict.pop" => {
             let (key, default) = match args {

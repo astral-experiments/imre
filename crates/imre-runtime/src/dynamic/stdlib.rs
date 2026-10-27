@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     Context,
-    value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
+    value::{DictViewKind, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
 
@@ -317,6 +317,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
+        ("_collections", "_ordered_dict_view") => ctx.builtin("_collections._ordered_dict_view"),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -754,6 +755,31 @@ pub(super) fn call(
     }
     if name == "_collections._count_elements" {
         return count_elements(ctx, args, kwargs);
+    }
+    if name == "_collections._ordered_dict_view" {
+        let [dict, kind] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "expected a dictionary and view kind",
+            ));
+        };
+        if !kwargs.is_empty() || ctx.dict_storage(*dict).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                "expected a dictionary and view kind",
+            ));
+        }
+        let kind = match ctx.str_value(*kind)? {
+            "keys" => DictViewKind::Keys,
+            "items" => DictViewKind::Items,
+            "values" => DictViewKind::Values,
+            _ => return Err(Error::new("ValueError", "unknown dictionary view")),
+        };
+        return Ok(ctx.alloc(Value::DictView {
+            dict: *dict,
+            kind,
+            ordered: true,
+        }));
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);

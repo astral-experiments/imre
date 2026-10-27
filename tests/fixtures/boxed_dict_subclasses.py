@@ -1,6 +1,27 @@
 """Compare dict subclass storage, inherited methods, and explicit base dispatch."""
 
 
+def ordered_dictionary():
+    from collections import OrderedDict
+
+    source = OrderedDict(b=[2], a=[1])
+    assert source != OrderedDict(a=[1], b=[2])
+    assert source == {"a": [1], "b": [2]}
+    shallow = source.copy()
+    assert type(shallow) is OrderedDict and shallow["b"] is source["b"]
+    cursor = iter(source.items())
+    assert next(cursor) == ("b", [2])
+    del source["a"]
+    source["a"] = [3]
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        assert str(error) == "OrderedDict mutated during iteration"
+    else:
+        raise AssertionError("cursor missed a deletion and reinsertion")
+    assert next(cursor, None) is None
+
+
 def inherited_deletion():
     from operator import delitem
 
@@ -62,6 +83,7 @@ def current():
     from collections import _count_elements
     from _collections import _count_elements as native_count
 
+    ordered_dictionary()
     counted = {"a": 4}
     print(native_count is _count_elements, native_count(counted, "aba"), counted)
     try:
