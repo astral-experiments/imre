@@ -423,8 +423,9 @@ def report(text):
             "    raise ValueError('from plugin')\n"
         )
         plugin.write_text(source)
-        imports = f"import sys\nsys.path = [{str(installed)!r}] + sys.path\nimport arithmetic\n"
-        compare("-IB", "-c", imports + "print(arithmetic.total())")
+        roots = [str(installed), str(installed)]
+        imports = f"import sys\nsys.path = {roots!r} + sys.path\nimport arithmetic\n"
+        compare("-IB", "-c", imports + f"print(arithmetic.total())\nprint(sys.path[:2] == {roots!r})")
         plugin.write_text(source.replace("n = 0", "n = 7"))
         compare("-IB", "-c", imports + "print(arithmetic.total())")
         error = run(imre, "-IB", "-c", imports + "arithmetic.fail()")
