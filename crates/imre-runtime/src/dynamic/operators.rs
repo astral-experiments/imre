@@ -166,7 +166,7 @@ impl Context {
         })
     }
     /// Unwrap nested method bindings and retain the identity comparison of their receivers.
-    fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
+    pub(super) fn method_equality_operands(&self, mut a: Id, mut b: Id) -> Option<(Id, Id, bool)> {
         let mut same_receivers = true;
         while a != b {
             let (
@@ -256,6 +256,15 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if matches!(
+                    (self.heap.get(a), self.heap.get(b)),
+                    (Value::Set { .. }, Value::Set { .. })
+                ) {
+                    if !self.dictionary_equal(a, b)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
                 if let (Value::Union(left), Value::Union(right)) =
                     (self.heap.get(a), self.heap.get(b))
                 {

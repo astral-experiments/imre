@@ -24,10 +24,24 @@ class EqualSeventeen:
         return other == 17
 
 
+class RaisesEquality(EqualSeventeen):
+    __hash__ = EqualSeventeen.__hash__
+
+    def __eq__(self, other):
+        raise ValueError("union member equality")
+
+
 def current():
     left = list[EqualSeventeen()] | str
     right = str | list[17]
     assert left == right and {left: 42}[right] == 42
+    assert frozenset(((left,),)) == frozenset(((right,),))
+    try:
+        frozenset(((list[RaisesEquality()] | str,),)) == frozenset(((right,),))
+    except ValueError as error:
+        assert str(error) == "union member equality"
+    else:
+        raise AssertionError("nested union comparison suppressed the member exception")
     union = int | str
     reverse = str | int
     print(type(union) is UnionType is Union, get_origin(union) is Union)
