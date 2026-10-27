@@ -2722,7 +2722,10 @@ impl Context {
                         memory_stream: None,
                     }));
                 }
-                let new = self.class_attr(callable, "__new__");
+                let new = self.class_attr(callable, "__new__").or_else(|| {
+                    self.has_base(callable, "int")
+                        .then(|| self.builtin("int.__new__"))
+                });
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
