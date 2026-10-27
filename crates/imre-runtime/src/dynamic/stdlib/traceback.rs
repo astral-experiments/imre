@@ -65,6 +65,53 @@ impl FrameLine<'_> {
     }
 }
 
+pub(super) fn print_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    // This is a Python function with three optional positional-or-keyword parameters.
+    let names = ["limit", "file", "chain"];
+    let mut bound = [NONE, NONE, super::super::TRUE];
+    for (slot, arg) in bound.iter_mut().zip(args) {
+        *slot = *arg;
+    }
+    for (key, argument) in kwargs {
+        let Some(index) = names.iter().position(|name| name == key) else {
+            return Err(Error::new(
+                "TypeError",
+                format!("print_exc() got an unexpected keyword argument '{key}'"),
+            ));
+        };
+        if index < args.len() {
+            return Err(Error::new(
+                "TypeError",
+                format!("print_exc() got multiple values for argument '{key}'"),
+            ));
+        }
+        bound[index] = *argument;
+    }
+    if args.len() > names.len() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "print_exc() takes from 0 to 3 positional arguments but {} were given",
+                args.len()
+            ),
+        ));
+    }
+    let traceback = ctx.module("traceback")?;
+    let printer = ctx.lookup_attr(traceback, "print_exception")?;
+    // Looking up the current exception can replace the printer and trigger collection.
+    ctx.heap.keep(printer);
+    let sys = ctx.module("sys")?;
+    let current = ctx.lookup_attr(sys, "exception")?;
+    let exception = ctx.call(current, Vec::new(), Vec::new())?;
+    let options = names
+        .into_iter()
+        .zip(bound)
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect();
+    ctx.call(printer, vec![exception], options)?;
+    Ok(NONE)
+}
+
 pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if let Some(colorize) = option(args, 6, kwargs, "colorize")?
         && ctx.truth(colorize)?
