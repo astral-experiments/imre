@@ -9174,6 +9174,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::UrlSplit)) => return self.url_split(call),
             Some(Binding::Intrinsic(Intrinsic::UrlUnsplit)) => return self.url_unsplit(call),
             Some(Binding::Intrinsic(Intrinsic::UrlEncode)) => return self.url_encode(call),
+            Some(Binding::Intrinsic(Intrinsic::QuoteFromBytes)) => {
+                return self.url_quote_from_bytes(call);
+            }
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::Quote | Intrinsic::QuotePlus | Intrinsic::Unquote),
             )) => {
