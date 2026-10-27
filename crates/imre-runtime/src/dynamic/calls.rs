@@ -950,7 +950,9 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
-                "__func__" if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
+                "__func__"
+                    if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
+                {
                     return Ok(callable);
                 }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {

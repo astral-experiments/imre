@@ -33,9 +33,9 @@ pub(super) fn adapters(
                 enum_receiver |= receiver.as_ref().is_some_and(|r| {
                     matches!(r.ty, Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_))
                 });
-                object_receiver |= receiver
-                    .as_ref()
-                    .is_some_and(|r| matches!(r.ty, Type::Deque(_) | Type::List(_) | Type::FrozenStrings));
+                object_receiver |= receiver.as_ref().is_some_and(|r| {
+                    matches!(r.ty, Type::Deque(_) | Type::List(_) | Type::FrozenStrings)
+                });
                 int_list_receiver |= receiver.as_ref().is_some_and(|r| r.ty == Type::ListInt);
             }
             invoked |= matches!(
