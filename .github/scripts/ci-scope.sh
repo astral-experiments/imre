@@ -31,7 +31,8 @@ if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
     case "$path" in
       crates/imre-compiler/src/frontend.rs|crates/imre-compiler/src/frontend/*) ;;
       crates/imre-compiler/src/*|crates/imre-runtime*/*|crates/imre-regex/*|\
-      tests/run_suites.py|tests/differential.py|tests/extension_wheel.py|tests/wheel_record.py)
+      tests/run_suites.py|tests/assignments.py|tests/containers.py|tests/differential.py|\
+      tests/extension_wheel.py|tests/wheel_record.py)
         FULL_ASAN=true ;;
     esac
   done < "$RUNNER_TEMP/ci-paths"
