@@ -157,6 +157,16 @@ def current():
 
     from operator import delitem
 
+    source = {"first": 1}
+    cursor = iter(source)
+    key = next(cursor)
+    delitem(source, key)
+    source[key] = 2
+    try:
+        next(cursor)
+    except RuntimeError as error:
+        print(error, length_hint(cursor))
+
     source = {"a": 1, "b": 2, "c": 3}
     cursor = dict.__iter__(source)
     for first in cursor:

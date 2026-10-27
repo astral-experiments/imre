@@ -118,7 +118,7 @@ mod tests {
             let payload: Rc<[Vec<String>]> = Rc::from([]);
             let probe = Rc::downgrade(&payload);
             let value = heap.alloc(Value::AttrGetter(payload));
-            (heap.alloc(Value::Dict(vec![(NONE, value)])), probe)
+            (heap.alloc(Value::Dict(vec![(NONE, value)].into())), probe)
         };
         let (parent, parent_probe) = dictionary();
         let (worker, worker_probe) = dictionary();
