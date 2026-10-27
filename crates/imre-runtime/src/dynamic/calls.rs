@@ -3044,6 +3044,7 @@ impl Context {
         self.bind_local(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.globals.clear();
             frame.closure.nonlocals.clear();
         }
         if self.scope_name(scope, "__qualname__").is_none() {
