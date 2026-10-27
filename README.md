@@ -2,6 +2,11 @@
 
 An ahead-of-time compiler for typed Python, written in Rust.
 
+> [!WARNING]
+> This README includes human edits; all code changes, PR summaries, and additional
+> documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
+> Use at your own risk.
+
 ## Benchmarks
 
 <p align="center">
@@ -43,11 +48,6 @@ $ uv python find imre
 $ uv run --python imre hello.py
 Hello, world!
 ```
-
-> [!WARNING]
-> This README includes human edits; all code changes, PR summaries, and additional
-> documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
-> Use at your own risk.
 
 ## Language support
 
@@ -191,15 +191,6 @@ progress. [Build cache and code generation](docs/subset.md#incremental-builds)
 imre build totals.py
 ./totals 10 20 12
 ```
-
-## Releasing
-
-These workflows are restricted to `astral-sh/imre` because they publish to Astral Labs.
-In `viarius-experiments/imre`, use the CI `release_artifacts` input to build and test the archives and installer.
-
-Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.
-Then run **Release** on `main` to publish the Linux and macOS archives and their checksums to GitHub Releases.
-Select **dry-run** to build the archives without publishing.
 
 ## License
 
