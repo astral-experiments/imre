@@ -243,7 +243,7 @@ impl Codec {
         Self::by_key(&normalize(value)?, value)
     }
 
-    fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
+    pub(super) fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
         if encoding.contains('\0') || errors.contains('\0') {
             return Err(Error::new(Kind::ValueError, "embedded null character"));
         }

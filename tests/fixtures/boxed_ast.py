@@ -1,6 +1,17 @@
 import ast
 
 
+class DroppingChild(ast.AST):
+    _fields = ("first", "second")
+
+    @property
+    def second(self):
+        self.first = None
+        for i in range(9000):
+            unused = [{"n": i}, (i, i)]
+        return None
+
+
 def current():
     tree = ast.parse("if ready:\n    value = source.method('X')\n")
     for node in ast.walk(tree):
@@ -43,3 +54,7 @@ def current():
     second = ast.Module(body=[], type_ignores=[])
     first.body.append(ast.Return(ast.Constant("one")))
     print(len(first.body), len(second.body), first.body[0].value.value)
+
+    root = DroppingChild()
+    root.first = ast.Name("retained", ast.Load())
+    assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["retained"]

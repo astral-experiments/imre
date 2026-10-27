@@ -10,6 +10,25 @@ import tempfile
 from pathlib import Path
 
 
+def check_raise_site_allocation(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "exceptions" / "refuse_raise_site.c"
+    wrapper = root / "refuse_raise_site.o"
+    subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_exception_with_origin,--wrap=malloc",
+    ])
+    source = "try:\n    raise ValueError('original')\nexcept ValueError as error:\n    print(error)\nprint('later')"
+    for ordinal in (0, 1, 2):
+        result = run(imre, "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_RAISE_SITE_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"original\nlater\n", b"refused\n" if ordinal else b"",
+        ), (ordinal, result)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -32,6 +51,9 @@ def main():
                 check=False,
                 timeout=60,
             )
+
+        if sys.platform.startswith("linux"):
+            check_raise_site_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -405,6 +427,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_float_arithmetic.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_typing_protocol.py",
@@ -429,6 +452,7 @@ def report(text):
             "boxed_module_globals.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
+            "boxed_recursion.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
@@ -437,6 +461,7 @@ def report(text):
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
+            "boxed_posixpath.py",
             "boxed_itertools_count.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",

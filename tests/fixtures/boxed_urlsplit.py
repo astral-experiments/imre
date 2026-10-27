@@ -31,3 +31,8 @@ def current():
             unquote(invalid)
         except (TypeError, AttributeError) as error:
             print(str(error))
+
+    from urllib.parse import quote, quote_from_bytes, quote_plus
+
+    print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
+    print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))

@@ -67,7 +67,20 @@ fn update(ctx: &mut Context, dict: Id, input: Option<Id>, kwargs: &[(String, Id)
             let Some(pair) = ctx.next_item(iterator)? else {
                 break;
             };
-            let pair = ctx.items(pair)?;
+            let pair = if matches!(ctx.heap.get(pair), Value::List(_) | Value::Tuple(_)) {
+                ctx.items(pair)?
+            } else {
+                // PySequence_Fast replaces TypeError only while obtaining the iterator.
+                let iterator = ctx.iterator(pair).map_err(|error| {
+                    let class = ctx.builtin("TypeError");
+                    if ctx.error_matches(&error.kind, class) {
+                        type_error("object is not iterable")
+                    } else {
+                        error
+                    }
+                })?;
+                ctx.items(iterator)?
+            };
             let [key, value] = pair.as_slice() else {
                 return Err(Error::new(
                     "ValueError",

@@ -42,3 +42,25 @@ except KeyError as original:
 
 print_exception(None, file=Writer())
 print(sys.exception() is None)
+
+
+# A static write method can remove the last Python reference to the default file.
+previous_stderr = sys.stderr
+chunks = []
+
+
+class ReplacingWriter:
+    @staticmethod
+    def write(text):
+        chunks.append(text)
+        sys.stderr = previous_stderr
+        for item in range(12000):
+            temporary = [item, item]
+
+
+sys.stderr = ReplacingWriter()
+try:
+    print_exception(ValueError("retained writer"))
+finally:
+    sys.stderr = previous_stderr
+assert chunks == ["ValueError: retained writer\n", ""]
