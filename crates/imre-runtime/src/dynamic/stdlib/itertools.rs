@@ -48,8 +48,10 @@ fn number(ctx: &Context, id: Id) -> Result<()> {
         "__float__",
         "__index__",
     ];
-    if matches!(ctx.heap.get(id), Value::Int(_) | Value::Float(_) | Value::Bool(_))
-        || SLOTS.iter().any(|name| ctx.slot(id, name).is_some())
+    if matches!(
+        ctx.heap.get(id),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_)
+    ) || SLOTS.iter().any(|name| ctx.slot(id, name).is_some())
     {
         Ok(())
     } else {
