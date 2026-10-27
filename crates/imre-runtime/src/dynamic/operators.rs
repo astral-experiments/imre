@@ -6,7 +6,7 @@ use super::*;
 
 enum RenderRoot<'a> {
     Object(Id),
-    Dictionary { object: Id, storage: Id },
+    BuiltinContainer { object: Id, storage: Id },
     Exception(&'a Error),
 }
 
@@ -58,7 +58,7 @@ fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usiz
 }
 
 impl Context {
-    fn sequence(&self, id: Id) -> Option<Vec<Id>> {
+    pub(super) fn sequence(&self, id: Id) -> Option<Vec<Id>> {
         match self.heap.get(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some(v.clone())
@@ -124,8 +124,12 @@ impl Context {
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
             return Ok(self
-                .string_storage(id)
-                .map(|text| self.str_value(text).unwrap().chars().count()));
+                .sequence_payload(id)
+                .map(|(_, items)| items.len())
+                .or_else(|| {
+                    self.string_storage(id)
+                        .map(|text| self.str_value(text).unwrap().chars().count())
+                }));
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
         let length = self.index_integer(value)?;
@@ -291,8 +295,12 @@ impl Context {
                     }
                     continue;
                 }
-                let a = self.dict_storage(a).unwrap_or(a);
-                let b = self.dict_storage(b).unwrap_or(b);
+                let storage = |id| {
+                    self.dict_storage(id)
+                        .or_else(|| self.sequence_payload(id).map(|(storage, _)| storage))
+                        .unwrap_or(id)
+                };
+                let (a, b) = (storage(a), storage(b));
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
@@ -799,10 +807,13 @@ impl Context {
         self.checked_render(RenderRoot::Object(root), quoted)
     }
 
-    /// Bypass the receiver's repr override for an explicit dict slot. Its keys and values
-    /// still use their own hooks, including when one refers back to the receiver.
-    pub(super) fn checked_dict_repr(&mut self, object: Id, storage: Id) -> Result<String> {
-        self.checked_render(RenderRoot::Dictionary { object, storage }, true)
+    /// Explicit builtin repr slots use their receiver's storage while children retain their hooks.
+    pub(super) fn checked_container_slot_repr(
+        &mut self,
+        object: Id,
+        storage: Id,
+    ) -> Result<String> {
+        self.checked_render(RenderRoot::BuiltinContainer { object, storage }, true)
     }
 
     fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
@@ -990,14 +1001,27 @@ impl Context {
         };
         match root {
             RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
-            RenderRoot::Dictionary { object, storage } => {
+            RenderRoot::BuiltinContainer { object, storage } => {
+                let (open, end, cycle, contents) = match ctx.heap.get(storage) {
+                    Value::List(_) => ('[', "]", "[...]", Part::Sequence(storage, 0)),
+                    Value::Tuple(items) => (
+                        '(',
+                        if items.len() == 1 { ",)" } else { ")" },
+                        "(...)",
+                        Part::Sequence(storage, 0),
+                    ),
+                    Value::Dict(_) | Value::DefaultDict { .. } => {
+                        ('{', "}", "{...}", Part::Entries(storage, 0, true))
+                    }
+                    _ => unreachable!("native container repr slot"),
+                };
                 if !ancestors.insert(object) {
-                    return Ok("{...}".to_owned());
+                    return Ok(cycle.to_owned());
                 }
-                output.push('{');
+                output.push(open);
                 active.push(object);
-                work.push(Part::Leave(object, "}"));
-                work.push(Part::Entries(storage, 0, true));
+                work.push(Part::Leave(object, end));
+                work.push(contents);
             }
             RenderRoot::Exception(error) => {
                 ctx.render_exception(error, quoted, &mut output, &mut work)?;
@@ -1007,15 +1031,15 @@ impl Context {
         // The pinned x86-64 Linux reference build uses 624 bytes per slice
         // and keeps two native-stack margins before raising RecursionError.
         const SLICE_FRAME_WORDS: usize = 78;
+        // Nested list and tuple repr use 128 bytes per level in CPython 3.14 on x86-64.
+        const SEQUENCE_FRAME_WORDS: usize = 16;
         const STACK_MARGIN_WORDS: usize = 2048;
-        let slice_budget = if checked {
-            stacker::remaining_stack().map(|bytes| {
-                (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS)
-                    / SLICE_FRAME_WORDS
-            })
-        } else {
-            None
-        };
+        let stack_words = checked
+            .then(stacker::remaining_stack)
+            .flatten()
+            .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
+        let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
+        let sequence_budget = stack_words.map(|words| words / SEQUENCE_FRAME_WORDS);
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
@@ -1299,6 +1323,14 @@ impl Context {
                     if !ancestors.insert(id) {
                         output.push_str(placeholder);
                         continue;
+                    }
+                    if matches!(ctx.heap.get(id), Value::List(_) | Value::Tuple(_))
+                        && sequence_budget.is_some_and(|limit| active.len() >= limit)
+                    {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum recursion depth exceeded while getting the repr of an object",
+                        ));
                     }
                     active.push(id);
                     output.push_str(start);
@@ -1803,6 +1835,10 @@ impl Context {
             }
         } else if let Some(setter) = self.bound_slot(obj, "__setitem__")? {
             self.call(setter, vec![key, val], Vec::new())?;
+        } else if let Some((storage, _)) = self.sequence_payload(obj)
+            && matches!(self.heap.get(storage), Value::List(_))
+        {
+            return self.put_item(storage, key, val);
         } else {
             return Err(Error::new(
                 "TypeError",
@@ -2523,6 +2559,11 @@ impl Context {
         if let Some(method) = self.bound_slot(obj, "__delitem__")? {
             self.call(method, vec![key], vec![])?;
             return Ok(());
+        }
+        if let Some((storage, _)) = self.sequence_payload(obj)
+            && matches!(self.heap.get(storage), Value::List(_))
+        {
+            return self.delete_item(storage, key);
         }
         if let Some(dict) = self.dict_storage(obj) {
             builtins::remove_dict_item(self, dict, key)?
