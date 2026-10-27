@@ -449,9 +449,15 @@ impl Context {
             Text(&'a str),
             Sequence(&'a [Id], usize),
             Mapping(&'a [(Id, Id)], usize),
+            Fields(
+                &'a [String],
+                &'a std::collections::HashMap<String, Id>,
+                usize,
+            ),
             Leave(Id, &'static str),
             ContextEnd(Id),
             SliceEnd,
+            NamedTupleEnd,
         }
         let mut output = String::new();
         let mut work = vec![Part::Value(root, quoted)];
@@ -471,10 +477,15 @@ impl Context {
             None
         };
         let mut slice_depth = 0usize;
+        let mut namedtuple_depth = 0usize;
         while let Some(part) = work.pop() {
             match part {
                 Part::Text(text) => output.push_str(text),
                 Part::ContextEnd(id) => output.push_str(&format!(" at {id:#x}>")),
+                Part::NamedTupleEnd => {
+                    namedtuple_depth -= 1;
+                    output.push(')');
+                }
                 Part::SliceEnd => {
                     slice_depth -= 1;
                     output.push(')');
@@ -492,6 +503,17 @@ impl Context {
                         }
                         work.push(Part::Sequence(items, index + 1));
                         work.push(Part::Value(item, true));
+                    }
+                }
+                Part::Fields(names, fields, index) => {
+                    if let Some(name) = names.get(index) {
+                        if index != 0 {
+                            output.push_str(", ");
+                        }
+                        output.push_str(name);
+                        output.push('=');
+                        work.push(Part::Fields(names, fields, index + 1));
+                        work.push(Part::Value(fields[name], true));
                     }
                 }
                 Part::Mapping(items, index) => {
@@ -526,6 +548,24 @@ impl Context {
                             ..
                         } if self.enum_member(id).is_none() => {
                             work.push(Part::Value(*backing, repr));
+                            continue;
+                        }
+                        Value::Instance { class, fields, .. }
+                            if let Value::Class {
+                                name,
+                                namedtuple_fields: Some(names),
+                                ..
+                            } = self.heap.get(*class)
+                                && names.iter().all(|field| fields.contains_key(field)) =>
+                        {
+                            if checked {
+                                self.check_call_depth(namedtuple_depth)?;
+                            }
+                            namedtuple_depth += 1;
+                            output.push_str(name);
+                            output.push('(');
+                            work.push(Part::NamedTupleEnd);
+                            work.push(Part::Fields(names, fields, 0));
                             continue;
                         }
                         Value::ContextVar { name, default, .. } => {

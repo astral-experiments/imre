@@ -457,6 +457,7 @@ pub(super) enum Value {
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
+        namedtuple_fields: Option<std::rc::Rc<[String]>>,
     },
     TypeVar(super::typing::TypeVariable),
     GenericAlias(super::typing::Alias),
