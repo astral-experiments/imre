@@ -48,3 +48,35 @@ wrapper.__annotate__ = alternate
 print(wrapper.__annotations__, wrapper.__annotations__ is wrapper.__annotations__)
 wrapper.__annotations__ = {"cached": True}
 print(wrapper.__annotate__, wrapper.__annotations__)
+
+
+class Annotations(dict):
+    pass
+
+
+annotations = Annotations({"value": int})
+wrapper.__annotations__ = annotations
+print(wrapper.__annotations__ is annotations, isinstance(wrapper.__annotations__, Annotations))
+
+
+def subclass_annotations(fmt):
+    return Annotations({"format": fmt})
+
+
+wrapper.__annotate__ = subclass_annotations
+lazy_annotations = wrapper.__annotations__
+print(isinstance(lazy_annotations, Annotations), lazy_annotations["format"])
+
+
+class FunctionNamespace(dict):
+    def __getitem__(self, key):
+        raise AssertionError("attribute lookup called __getitem__")
+
+    def __setitem__(self, key, value):
+        raise AssertionError("attribute assignment called __setitem__")
+
+
+namespace = FunctionNamespace(existing=7)
+wrapper.__dict__ = namespace
+wrapper.added = 8
+print(wrapper.__dict__ is namespace, wrapper.existing, dict.__getitem__(namespace, "added"))

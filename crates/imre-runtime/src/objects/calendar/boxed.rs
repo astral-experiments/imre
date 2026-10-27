@@ -42,6 +42,7 @@ impl Calendar {
     pub(crate) fn class(&self) -> &'static str {
         with(&self.0, |value| match value {
             Value::DateOnly(_) => "date",
+            Value::Time { .. } => "time",
             Value::Date { .. } => "datetime",
             Value::Delta(_) => "timedelta",
             Value::Zone { .. } => "timezone",
@@ -50,6 +51,28 @@ impl Calendar {
 
     pub(crate) fn utc() -> Self {
         Self(utc())
+    }
+
+    /// Keep a parsed date's native timezone alive in the boxed datetime as well.
+    pub(crate) fn parse_mail_date(text: &str) -> Result<(Self, Option<Self>), Error> {
+        let day = maildates::parse(text)?;
+        let tz = with(&day, |value| match value {
+            Value::Date { zone, .. } => zone.clone().map(Self),
+            _ => unreachable!(),
+        });
+        Ok((Self(day), tz))
+    }
+
+    pub(crate) fn format_mail_date(&self, usegmt: bool) -> Result<Str, Error> {
+        maildates::format_datetime(&self.0, usegmt)
+    }
+
+    pub(crate) fn format_mail_timestamp(
+        number: Option<&CalendarNumber>,
+        local: bool,
+        usegmt: bool,
+    ) -> Result<Str, Error> {
+        maildates::formatdate(number, local, usegmt)
     }
 
     pub(crate) fn duration(units: &[CalendarNumber; 7]) -> Result<Self, Error> {
@@ -78,6 +101,36 @@ impl Calendar {
 
     pub(crate) fn date(year: i32, month: i32, day: i32) -> Result<Self, Error> {
         try_owner(Value::DateOnly(checked_ordinal(year, month, day)?)).map(Self)
+    }
+
+    pub(crate) fn time_micros(fields: [i32; 5]) -> Result<i128, Error> {
+        time_micros(fields)
+    }
+
+    pub(crate) fn time(local: i128, fold: i32, zone: Option<&Self>) -> Result<Self, Error> {
+        try_owner(Value::Time {
+            local,
+            fold,
+            zone: zone.map(|z| z.0.clone()),
+        })
+        .map(Self)
+    }
+
+    pub(crate) fn clock_parts(&self) -> [i64; 5] {
+        clock_parts(&self.0)
+    }
+
+    pub(crate) fn clock_order(&self, other: &Self) -> Result<std::cmp::Ordering, Error> {
+        with(&self.0, |a| with(&other.0, |b| clock::order(a, b))).ok_or_else(|| {
+            Error::new(
+                Kind::TypeError,
+                "can't compare offset-naive and offset-aware times",
+            )
+        })
+    }
+
+    pub(crate) fn combine(&self, time: &Self, zone: Option<&Self>) -> Result<Self, Error> {
+        combine(&self.0, &time.0, zone.map(|z| z.0.clone())).map(Self)
     }
 
     pub(crate) fn datetime(fields: [i32; 8], zone: Option<&Self>) -> Result<Self, Error> {

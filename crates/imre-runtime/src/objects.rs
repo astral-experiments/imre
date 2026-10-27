@@ -16,7 +16,10 @@ pub(crate) use binascii::{urlsafe_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
-pub(crate) use bytes::{concat_bytes, repeat_bytes, rstrip_bytes};
+pub(crate) use bytes::write_repr as write_bytes_repr;
+pub(crate) use bytes::{
+    bytes_contains, bytes_contains_int, concat_bytes, repeat_bytes, rsplit_bytes, rstrip_bytes,
+};
 mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
@@ -36,7 +39,7 @@ pub(crate) mod exceptions;
 mod files;
 mod text_file;
 pub(crate) use text_file::TextFile;
-mod fnmatch;
+pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
@@ -45,6 +48,7 @@ pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
 mod itertools;
+pub(crate) use itertools::{CountValue, Repeat};
 mod join_buffer;
 mod joined_lines;
 mod json;
@@ -53,7 +57,8 @@ pub(crate) use json::{
     write_string as write_json_string,
 };
 mod linecache;
-mod logging;
+pub(crate) mod logging;
+pub(crate) use logging::record::percent_integer_field;
 mod mappings;
 mod module_specs;
 mod namespaces;
@@ -77,10 +82,13 @@ mod structs;
 mod tempdirs;
 mod text;
 pub(crate) mod time;
-pub(crate) use text::split_parts;
 pub(crate) use text::{UrlInput, urlquote, urlsplit};
+pub(crate) use text::{
+    expand_tabs, find_text, ord_byte, ord_char, partition_text, python_isspace, split_parts,
+};
 mod typing;
 pub(crate) use text::short_string;
+pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 mod warnings;
@@ -88,7 +96,7 @@ mod words;
 mod zipfile;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
-pub(crate) use files::errno_error;
+pub(crate) use files::{FileState, errno_error, open_file};
 
 use super::{
     Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
@@ -122,6 +130,7 @@ pub struct Object(StorageCell<Storage>);
 
 enum Storage {
     Plain,
+    WeakProxy(records::weak::WeakRecord, bool),
     FunctoolsPlaceholder {
         class: bool,
     },
@@ -142,7 +151,7 @@ enum Storage {
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
-    Repeat(itertools::Repeat),
+    Repeat(Repeat<OwnedWord>),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
@@ -193,7 +202,6 @@ enum Storage {
     LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
-    ClockTime(logging::timed::Clock),
     Calendar(allocator_api2::boxed::Box<calendar::Value>),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
@@ -754,24 +762,27 @@ pub unsafe extern "C" fn imre_str_concat(a: *const Str, b: *const Str) -> *const
 pub unsafe extern "C" fn imre_str_repeat(value: *const Str, count: usize) -> *const Str {
     // SAFETY: both arguments remain rooted for this non-reentrant operation.
     let (text, count) = unsafe { (&*value, Int::borrow(count)) };
-    let result = (|| {
-        let count = bytes::native_size(&count)?.max(0) as usize;
-        if text.is_empty() || count == 0 {
-            return Ok(StrOwner::into_raw(StrOwner::new(Str::default())));
-        }
-        let length = text
-            .len()
-            .checked_mul(count)
-            .filter(|length| *length <= isize::MAX as usize)
-            .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
-        let mut result =
-            Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
-        for _ in 0..count {
-            result.push_str(text);
-        }
-        Ok(StrOwner::into_raw(StrOwner::new(result)))
-    })();
+    let result = repeat_str(text, &count).map(|result| StrOwner::into_raw(StrOwner::new(result)));
     finish(result, std::ptr::null())
+}
+
+/// Repeats UTF-8 text with the native sequence length and allocation checks.
+pub(crate) fn repeat_str(text: &str, count: &Int) -> Result<Str, Error> {
+    let count = bytes::native_size(count)?.max(0) as usize;
+    if text.is_empty() || count == 0 {
+        return Ok(Str::default());
+    }
+    let length = text
+        .len()
+        .checked_mul(count)
+        .filter(|length| *length <= isize::MAX as usize)
+        .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
+    let mut result =
+        Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
+    for _ in 0..count {
+        result.push_str(text);
+    }
+    Ok(result)
 }
 
 /// One borrowed concatenation fragment. `usize::MAX` identifies a rooted Str

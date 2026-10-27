@@ -305,8 +305,11 @@ impl Checker<'_> {
                 } else {
                     (right, left)
                 };
+                let proxy_class = matches!(other, ast::Expr::Attribute(attr) if attr.attr.as_str() == "__class__");
                 let other = self.expr(other)?;
-                let value = if let Some(base) = self.types.constructor_base(other.ty) {
+                let value = if proxy_class && other.ty == Type::BuiltinClass {
+                    self.record_class_object(class)
+                } else if let Some(base) = self.types.constructor_base(other.ty) {
                     self.record_constructor_value(class, base, other.ty, literal)?
                 } else {
                     self.expr(literal)?
@@ -372,6 +375,16 @@ impl Checker<'_> {
         op: ast::CmpOp,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if matches!(
+            (left.ty, right.ty),
+            (Type::WeakProxy(_), Type::WeakProxy(_) | Type::Class(_))
+                | (Type::Class(_), Type::WeakProxy(_))
+        ) {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
+        }
         if left.ty == Type::SourceModule && right.ty == Type::SourceModule {
             return Ok(Self::identity_result(
                 vec![left, right],

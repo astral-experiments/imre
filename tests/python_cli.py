@@ -48,6 +48,35 @@ def main():
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
+        streams = root / "streams.py"
+        streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
+        expected = run(sys.executable, "-B", streams)
+        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout == "stdout π\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+
+        string_io = root / "string_io.py"
+        string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
+        expected = run(sys.executable, "-B", string_io)
+        actual = run(imre, "run", string_io, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack = Path(__file__).with_name("fixtures") / "boxed_exit_stack.py"
+        expected = run(sys.executable, "-B", exit_stack)
+        actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+        exit_stack_import = root / "stack.py"
+        exit_stack_import.write_text("from contextlib import ExitStack\n"
+                                     "s = ExitStack()\nprint(isinstance(s, ExitStack))\n"
+                                     "print(s.__enter__() is s)\n")
+        for mode in ([], ["--reachable-only"]):
+            actual = run(imre, "run", exit_stack_import, *mode, "--quiet")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, b"True\nTrue\n", b""), actual.stderr
+
         # Use the native build pipeline to check the target's named version tuples.
         identity = root / "identity.py"
         identity.write_text(
@@ -73,9 +102,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0):
+        def compare(*args, extra=None, status=0, native_args=None):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *args, extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -96,8 +125,15 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
+        (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
+        inspect_entry = root / "inspect_views.py"
+        inspect_entry.write_text("import view_inspection\n")
+        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
         compare("-IB", "-c", "import operator as op\nprint(op.attrgetter('upper')('method')())")
 
         args_code = (
@@ -132,6 +168,20 @@ def main():
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
+        compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
+
+        # Bundled children must respect the selected package's __path__.
+        shadow = root / "shadow"
+        (shadow / "http").mkdir(parents=True)
+        (shadow / "http" / "__init__.py").write_text("marker = 17\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys, http\nsys.path\nassert http.marker == 17\n"
+            "try:\n    import http.client\nexcept ModuleNotFoundError:\n    print('local package')\n"
+        )
+        compare("-B", shadow_entry)
+
         # Accept genuine U+FFFD, raw text, and literal backslashes on the boxed path.
         compare(
             "-c",
@@ -272,6 +322,12 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        (helpers / "uuid").mkdir()
+        uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
+        compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
+        (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
+        compare("-IB", "-c", uuid_import + "print(uuid.marker)")
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -313,28 +369,84 @@ def report(text):
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
-            "boxed_bytes_add.py",
-            "boxed_contextvars.py",
+            "boxed_ast.py",
+            "boxed_code_objects.py",
             "boxed_recursive_repr.py",
+            "boxed_source_exec.py",
+            "boxed_bytes_add.py",
+            "boxed_int_to_bytes.py",
+            "boxed_complex.py",
+            "boxed_float.py",
+            "boxed_bytes_octal.py",
+            "boxed_contextvars.py",
+            "boxed_formatter.py",
+            "boxed_re_ascii.py",
+            "boxed_re_verbose.py",
             "boxed_datetime.py",
+            "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
+            "boxed_exception_repr.py",
             "boxed_type_identity.py",
+            "boxed_any_generator.py",
+            "boxed_global.py",
+            "boxed_logging.py",
             "boxed_class_attribute.py",
+            "boxed_request_strings.py",
+            "boxed_module_globals.py",
+            "boxed_frozenset.py",
+            "boxed_attribute_deletion.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
+            "boxed_staticmethod.py",
             "boxed_item_assignment.py",
+            "boxed_bytecache.py",
+            "boxed_fnmatch.py",
+            "boxed_itertools_count.py",
+            "boxed_print_streams.py",
+            "boxed_itertools_repeat.py",
             "boxed_dict_subclasses.py",
+            "boxed_dict_pop.py",
+            "boxed_list_pop.py",
+            "boxed_zip.py",
+            "boxed_python_iterators.py",
+            "boxed_generator_delegation.py",
+            "boxed_slice.py",
+            "boxed_bytes_separators.py",
+            "boxed_struct.py",
+            "boxed_reversed_list.py",
+            "boxed_string_new.py",
+            "boxed_string_repeat.py",
+            "boxed_string_expandtabs.py",
         ):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        plugin.write_bytes((fixtures / "boxed_typing_generics.py").read_bytes())
+        compare("-IB", "-c", imports)
         plugin.write_bytes((fixtures / "boxed_class_docstrings.py").read_bytes())
         for flags in ("-IB", "-IBOO"):
             compare(flags, "-c", imports + "arithmetic.current()")
+        for first_import in ("import collections", "import _collections_abc"):
+            plugin.write_text(f"""{first_import}
+import collections
+print(collections.abc.__name__, collections.__package__, bool(collections.__path__))
+import collections.abc as dotted
+from collections import abc
+import _collections_abc
+print(abc is dotted, abc is _collections_abc, repr(abc.__package__))
+try:
+    import collections.unknown_child
+except ImportError:
+    print('missing child')
+""")
+            compare("-IB", "-c", imports)
+        http = fixtures.parents[1] / "crates/imre-compiler/stdlib/http/__init__.py"
+        plugin.write_bytes(http.read_bytes())
+        compare("-IB", "-c", imports + (fixtures / "boxed_http_enums.py").read_text())
         errno_names = [name for name, value in vars(errno).items() if type(value) is int]
         compare(
             "-IB",

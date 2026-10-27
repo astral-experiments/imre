@@ -16,9 +16,11 @@ declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_op(ptr, ptr, i64, i64, i64)
-declare i64 @imre_dyn_def_with_metadata(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
+declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
+declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
 declare i1 @imre_dyn_failed(ptr)
-declare void @imre_dyn_statement(ptr, ptr, i64, ptr, i32)
+declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
 /// All module source has already been resolved. Import execution remains conditional.
@@ -49,6 +51,7 @@ pub(crate) fn emit(
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
         let location = SourceMap {
             package,
+            text: source,
             string_annotations: parsed.syntax().body.iter().any(|s| {
                 matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
                 && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
@@ -81,28 +84,58 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
+    GeneratorFunction(&'a [ast::Stmt]),
     Annotations(Vec<(&'a str, &'a ast::Expr)>),
     Expression(&'a ast::Expr),
+    Generator(&'a ast::Comprehension, &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
 
 struct SourceMap<'a> {
+    text: &'a str,
     package: &'a str,
     string_annotations: bool,
     file: &'a str,
     newlines: Vec<usize>,
 }
 
+impl SourceMap<'_> {
+    fn line(&self, offset: ruff_text_size::TextSize) -> usize {
+        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
+    }
+}
+
 #[derive(Default)]
 struct Output {
     keep_docstrings: bool,
     strings: HashMap<Vec<u8>, u32>,
+    positions: HashMap<[usize; 4], usize>,
     constants: String,
     functions: String,
     count: u32,
 }
 
 impl Output {
+    /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
+    fn definition(
+        &mut self,
+        source: &SourceMap<'_>,
+        prefix: String,
+        body: Body<'_>,
+        start: ruff_text_size::TextSize,
+    ) -> String {
+        let site = format!("@code_site{}", self.count);
+        let code = self.code(source, prefix, body);
+        writeln!(
+            self.constants,
+            "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
+            source.file,
+            source.line(start)
+        )
+        .unwrap();
+        site
+    }
+
     fn data(&mut self, bytes: &[u8]) -> String {
         let count = self.strings.len() as u32;
         let index = *self.strings.entry(bytes.to_vec()).or_insert(count);
@@ -125,6 +158,16 @@ impl Output {
         format!("@str{index}")
     }
 
+    fn position(&mut self, span: [usize; 4]) -> String {
+        let next = self.positions.len();
+        let index = *self.positions.entry(span).or_insert(next);
+        if index == next {
+            let [line, start, split, end] = span;
+            writeln!(self.constants, "@pos{index} = private unnamed_addr constant [4 x i32] [i32 {line}, i32 {start}, i32 {split}, i32 {end}]").unwrap();
+        }
+        format!("@pos{index}")
+    }
+
     fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
@@ -143,6 +186,7 @@ impl Output {
             loops: Vec::new(),
             exits: Vec::new(),
             caught: Vec::new(),
+            simple_call: None,
         };
         match body {
             Body::Namespace(stmts) => {
@@ -152,14 +196,20 @@ impl Output {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
                 }
+                f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::Statements(stmts) => f.statements(stmts),
+            Body::Statements(stmts) => {
+                f.declare_globals(stmts);
+                f.statements(stmts);
+            }
+            Body::GeneratorFunction(_) => {}
             Body::Annotations(entries) => f.annotations(&entries),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
             }
+            Body::Generator(generator, element) => f.generator_step(generator, element),
             Body::Expression(expr) => {
                 f.checkpoint(expr);
                 let value = f.expr(expr);
@@ -194,14 +244,21 @@ struct Function<'a, 'p> {
     live: Vec<String>,
     max_live: usize,
     loops: Vec<LoopTarget>,
-    exits: Vec<(String, String)>,
+    exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
+    simple_call: Option<ruff_text_size::TextRange>,
+}
+
+#[derive(Clone)]
+enum Cleanup {
+    With(String),
+    Finally(std::rc::Rc<[ast::Stmt]>),
 }
 
 struct LoopTarget {
     step: String,
     done: String,
-    with_depth: usize,
+    cleanup_depth: usize,
 }
 
 impl Function<'_, '_> {
@@ -252,14 +309,25 @@ impl Function<'_, '_> {
     }
 
     fn op(&mut self, name: &str, args: &[&str]) -> String {
+        self.op_at(name, args, None)
+    }
+
+    fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
-        self.checked(&format!(
-            "call i64 @imre_dyn_op(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {})",
+        let fixed = format!(
+            "ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}",
             arg(0),
             arg(1),
             arg(2)
-        ))
+        );
+        let invocation = if let Some(span) = span {
+            let position = self.output.position(span);
+            format!("call i64 @imre_dyn_op_at({fixed}, ptr {position})")
+        } else {
+            format!("call i64 @imre_dyn_op({fixed})")
+        };
+        self.checked(&invocation)
     }
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
@@ -326,6 +394,37 @@ impl Function<'_, '_> {
         self.op("unsupported", &[&what])
     }
 
+    fn expression_span(
+        &self,
+        expr: &ast::Expr,
+        prefix: &ast::Expr,
+        opener: u8,
+    ) -> Option<[usize; 4]> {
+        let range = expr.range();
+        if self.simple_call == Some(range) {
+            return None;
+        }
+        let start = range.start().to_usize();
+        let end = range.end().to_usize();
+        let prefix_end = prefix.end().to_usize();
+        let text = self.source.text.as_bytes();
+        if text.get(start..end)?.contains(&b'\n') {
+            return None;
+        }
+        let split = prefix_end
+            + text
+                .get(prefix_end..end)?
+                .iter()
+                .position(|&b| b == opener)?;
+        let line = self.source.line(range.start());
+        let beginning = if line == 1 {
+            0
+        } else {
+            self.source.newlines[line - 2] + 1
+        };
+        Some([line, start - beginning, split - beginning, end - beginning])
+    }
+
     fn checkpoint(&mut self, node: &impl Ranged) {
         let count = self.live.len();
         self.max_live = self.max_live.max(count);
@@ -334,15 +433,10 @@ impl Function<'_, '_> {
             self.line(&format!("store i64 {value}, ptr {ptr}"));
         }
         let ptr = if count == 0 { "null" } else { "%live" };
-        let offset = usize::from(node.start());
-        let line = self
-            .source
-            .newlines
-            .partition_point(|&newline| newline < offset)
-            + 1;
+        let line = self.source.line(node.start());
         self.line(&format!(
-            "call void @imre_dyn_statement(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line})",
-            self.source.file
+            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
+            self.source.file, self.caught.last().map_or("0", String::as_str)
         ));
     }
 

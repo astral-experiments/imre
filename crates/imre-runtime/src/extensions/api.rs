@@ -85,8 +85,7 @@ unsafe extern "C" fn imre_py_bytes_from_string_and_size(data: *const c_char, siz
             Py::NULL,
         );
     };
-    // CPython's bytes object also needs its variable header, cached hash and trailing NUL.
-    if size > isize::MAX as usize - (4 * size_of::<usize>() + 1) {
+    if size > crate::MAX_BYTES_LEN {
         return Error::return_static_message(
             Kind::OverflowError,
             "byte string is too large",

@@ -76,7 +76,7 @@ fn parsed_zone(word: &str) -> Result<Option<crate::ObjectOwner>, Error> {
 
 // Mirror _parsedate_tz's obsolete RFC 850 and asctime forms, including its
 // two-digit year pivot and the distinction between a known UTC and -0000.
-fn parse(text: &str) -> Result<crate::ObjectOwner, Error> {
+pub(super) fn parse(text: &str) -> Result<crate::ObjectOwner, Error> {
     let invalid = || {
         Error::new(
             Kind::ValueError,
@@ -177,13 +177,13 @@ pub unsafe extern "C" fn imre_email_parsedate(input: *const Str) -> *const Objec
     rc_result(parse(unsafe { &*input }))
 }
 
-fn formatted(fields: [i128; 8], weekday: usize, zone: &str) -> Result<*const Str, Error> {
+fn formatted(fields: [i128; 8], weekday: usize, zone: &str) -> Str {
     let [y, m, d, h, min, sec, ..] = fields;
-    crate::checked_owned_str(compact_str::format_compact!(
+    compact_str::format_compact!(
         "{}, {d:02} {} {y:04} {h:02}:{min:02}:{sec:02} {zone}",
         DAYS[weekday],
         &MONTHS[m as usize - 1][..3]
-    ))
+    )
 }
 
 /// # Safety
@@ -193,30 +193,34 @@ pub unsafe extern "C" fn imre_email_format_datetime(dt: *const Object, usegmt: b
     // SAFETY: only an exact immutable native datetime can reach this operation.
     let dt = unsafe { object(dt) };
     finish(
-        with(dt, |value| {
-            let Value::Date { local, zone, .. } = value else {
-                unreachable!()
-            };
-            let offset = zone.as_ref().map(|z| offset(z));
-            let zone = if usegmt {
-                if offset != Some(0) {
-                    return Err(Error::new(
-                        Kind::ValueError,
-                        "usegmt option requires a UTC datetime",
-                    ));
-                }
-                "GMT".to_owned()
-            } else {
-                offset.map_or_else(|| "-0000".to_owned(), |us| offset_text(us).replace(':', ""))
-            };
-            formatted(
-                date_fields(*local, 0),
-                (local.div_euclid(DAY) % 7) as usize,
-                &zone,
-            )
-        }),
+        format_datetime(dt, usegmt).and_then(crate::checked_owned_str),
         std::ptr::null(),
     )
+}
+
+pub(super) fn format_datetime(dt: &Object, usegmt: bool) -> Result<Str, Error> {
+    with(dt, |value| {
+        let Value::Date { local, zone, .. } = value else {
+            unreachable!()
+        };
+        let offset = zone.as_ref().map(|z| offset(z));
+        let zone = if usegmt {
+            if offset != Some(0) {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "usegmt option requires a UTC datetime",
+                ));
+            }
+            "GMT".to_owned()
+        } else {
+            offset.map_or_else(|| "-0000".to_owned(), |us| offset_text(us).replace(':', ""))
+        };
+        Ok(formatted(
+            date_fields(*local, 0),
+            (local.div_euclid(DAY) % 7) as usize,
+            &zone,
+        ))
+    })
 }
 
 // datetime.fromtimestamp rounds the signed fraction before normalizing whole seconds.
@@ -237,66 +241,71 @@ pub unsafe extern "C" fn imre_email_formatdate(
     local: bool,
     usegmt: bool,
 ) -> *const Str {
+    use boxed::CalendarNumber;
+    let number = match (kind, word) {
+        // Raw binary64 positive zero denotes the epoch. Only optional words use zero for None.
+        (0, _) | (3 | 4, 0) => None,
+        // SAFETY: the caller roots the tagged integer for the duration of the clone.
+        (1 | 3, _) => Some(CalendarNumber::Int(unsafe { (*Int::borrow(word)).clone() })),
+        (2, _) => Some(CalendarNumber::Float(f64::from_bits(word as u64))),
+        // SAFETY: the optional-float arm keeps the present float rooted.
+        (4, _) => Some(CalendarNumber::Float(unsafe {
+            crate::floats::imre_float_unbox(word)
+        })),
+        _ => unreachable!(),
+    };
     finish(
-        (|| {
-            // None is the zero word in each optional calendar input. Raw binary64
-            // positive zero also has zero bits, but denotes the Unix epoch.
-            let present_kind = if matches!(kind, 3 | 4) && word == 0 {
-                0
-            } else {
-                kind
-            };
-            let sec = match present_kind {
-                0 => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_err(|_| timed::overflow())?;
-                    timestamp(now.as_secs_f64())?
-                }
-                // SAFETY: the generated integer arm keeps its tagged word rooted.
-                1 | 3 => unsafe { Int::borrow(word) }
-                    .big()
-                    .to_i64()
-                    .ok_or_else(timed::overflow)?,
-                2 => timestamp(f64::from_bits(word as u64))?,
-                // SAFETY: the optional-float arm keeps a present payload rooted.
-                4 => timestamp(unsafe { crate::floats::imre_float_unbox(word) })?,
-                _ => unreachable!(),
-            };
-            let utc = timed::civil(sec, true)?;
-            let year = i64::from(utc.tm_year) + 1900;
-            if !(1..=9999).contains(&year) {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    format!("year must be in 1..9999, not {year}"),
-                ));
-            }
-            let (civil, zone) = if local {
-                let t = timed::civil(sec, false)?;
-                let zone = offset_text(i128::from(t.tm_gmtoff) * 1_000_000).replace(':', "");
-                (t, zone)
-            } else {
-                (utc, if usegmt { "GMT" } else { "-0000" }.to_owned())
-            };
-            let y = i128::from(civil.tm_year) + 1900;
-            if !(1..=9999).contains(&y) {
-                return Err(Error::new(Kind::OverflowError, "date value out of range"));
-            }
-            formatted(
-                [
-                    y,
-                    i128::from(civil.tm_mon) + 1,
-                    i128::from(civil.tm_mday),
-                    i128::from(civil.tm_hour),
-                    i128::from(civil.tm_min),
-                    i128::from(civil.tm_sec),
-                    0,
-                    0,
-                ],
-                ((civil.tm_wday + 6) % 7) as usize,
-                &zone,
-            )
-        })(),
+        formatdate(number.as_ref(), local, usegmt).and_then(crate::checked_owned_str),
         std::ptr::null(),
     )
+}
+
+pub(super) fn formatdate(
+    number: Option<&boxed::CalendarNumber>,
+    local: bool,
+    usegmt: bool,
+) -> Result<Str, Error> {
+    let sec = match number {
+        None => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| timed::overflow())?;
+            timestamp(now.as_secs_f64())?
+        }
+        Some(boxed::CalendarNumber::Int(n)) => n.to_i64().ok_or_else(timed::overflow)?,
+        Some(boxed::CalendarNumber::Float(n)) => timestamp(*n)?,
+    };
+    let utc = timed::civil(sec, true)?;
+    let year = i64::from(utc.tm_year) + 1900;
+    if !(1..=9999).contains(&year) {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("year must be in 1..9999, not {year}"),
+        ));
+    }
+    let (civil, zone) = if local {
+        let t = timed::civil(sec, false)?;
+        let zone = offset_text(i128::from(t.tm_gmtoff) * 1_000_000).replace(':', "");
+        (t, zone)
+    } else {
+        (utc, if usegmt { "GMT" } else { "-0000" }.to_owned())
+    };
+    let y = i128::from(civil.tm_year) + 1900;
+    if !(1..=9999).contains(&y) {
+        return Err(Error::new(Kind::OverflowError, "date value out of range"));
+    }
+    Ok(formatted(
+        [
+            y,
+            i128::from(civil.tm_mon) + 1,
+            i128::from(civil.tm_mday),
+            i128::from(civil.tm_hour),
+            i128::from(civil.tm_min),
+            i128::from(civil.tm_sec),
+            0,
+            0,
+        ],
+        ((civil.tm_wday + 6) % 7) as usize,
+        &zone,
+    ))
 }

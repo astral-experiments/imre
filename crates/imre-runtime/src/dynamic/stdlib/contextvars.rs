@@ -96,6 +96,7 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::ContextVar {
                 name: *var_name,
                 default,
+                repr_active: Default::default(),
             }))
         }
         ("ContextVar.get", [variable] | [variable, _], []) => {

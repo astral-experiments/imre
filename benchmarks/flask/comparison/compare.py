@@ -160,6 +160,7 @@ def main():
     candidate.add_argument("--imre-binary", type=Path, help="verify and time a supplied standalone ELF")
     parser.add_argument("--runtime", type=Path)
     parser.add_argument("--runtime-imports", action="store_true", help="build the unchanged entry with native runtime imports")
+    gate.add_build_timeout(parser)
     parser.add_argument("--wsgi-pair", action="store_true",
                         help="compare CPython/Werkzeug with CPython/Waitress using the extra pinned wheel")
     parser.add_argument("--hosted-launcher", type=Path,
@@ -249,13 +250,10 @@ def main():
         binary = work / "imre-server"
         if args.compiler:
             inventory.update(compiler=executable(args.compiler), runtime=executable(args.runtime))
-            command = [args.compiler.resolve(), "build", site / "serve.py", "--module-root", site,
-                       "--runtime", args.runtime.resolve(), "--opt-level", "3", "-o", binary]
-            if args.runtime_imports:
-                command.append("--runtime-imports")
-            result = subprocess.run(command, text=True, capture_output=True, timeout=120)
-            report["imre_build"] = {"status": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
-                                    "runtime_imports": args.runtime_imports}
+            flags = ["--runtime-imports"] if args.runtime_imports else []
+            report["imre_build"] = gate.native_build(args.compiler.resolve(), args.runtime.resolve(), site,
+                                                     binary, 3, flags, args.build_timeout)
+            report["imre_build"]["runtime_imports"] = args.runtime_imports
         elif args.imre_binary:
             inventory["imre_input"] = executable(args.imre_binary)
             shutil.copy2(args.imre_binary, binary)

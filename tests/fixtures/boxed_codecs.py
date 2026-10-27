@@ -41,3 +41,19 @@ def current():
                        ("cp424", b"\x4a")):
         print(codecs.lookup(name).decode(data))
     print(codecs.lookup("utf-8").decode(input=b"\xff", errors="replace"))
+
+    wire = bytes(range(256))
+    text = entry.decode(wire)[0]
+    for name in ("latin-1", "LATIN_1", "iso-8859-1", "cp819"):
+        print(text.encode(name) == wire, text.encode(name, "strict") == wire)
+    print("HTTP/1.0 200 OK\r\n".encode("latin-1"), "X-Test: café ÿ\r\n".encode("latin-1"))
+    print("".encode("latin-1"), "\x00".encode("latin-1"), "€ÿ".encode("latin-1", "replace"))
+    for value in ("a€b", "a€☃b", "東京"):
+        try:
+            value.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            print(str(exc))
+        try:
+            value.encode("latin-1", "strict")
+        except UnicodeEncodeError as exc:
+            print(str(exc))
