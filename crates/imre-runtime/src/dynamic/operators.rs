@@ -194,7 +194,7 @@ impl Context {
         self.checked_equal_impl(a, b, true)
     }
 
-    fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
+    pub(super) fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
         use std::collections::HashSet;
 
         enum Children {

@@ -323,3 +323,26 @@ def current():
     once = Once()
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
+    declined_key_equality()
+
+
+def declined_key_equality():
+    calls = []
+
+    class Key:
+        def __init__(self, name):
+            self.name = name
+
+        def __hash__(self):
+            return 7
+
+        def __eq__(self, other):
+            calls.append((self.name, other.name))
+            return NotImplemented
+
+    left, right = Key("left"), Key("right")
+    for container in ({left: 1}, {left}):
+        assert right not in container
+        assert calls == [("left", "right"), ("right", "left")]
+        calls.clear()
+

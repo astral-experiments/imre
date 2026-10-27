@@ -477,7 +477,7 @@ impl Context {
             }
             return Ok(true);
         }
-        self.checked_equal(left, right)
+        self.checked_equal_impl(left, right, false)
     }
 
     pub(in super::super) fn dictionary_pair(
