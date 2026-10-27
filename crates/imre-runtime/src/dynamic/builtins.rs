@@ -96,6 +96,7 @@ const FUNCTIONS: &[&str] = &[
     "divmod",
     "round",
     "callable",
+    "id",
     "abs",
     "all",
     "any",
@@ -924,6 +925,11 @@ pub(super) fn call(
             }
         }
         "round" => round::call(ctx, args, kwargs),
+        "id" => {
+            positional(name, kwargs)?;
+            arity(name, args, 1, 1)?;
+            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(args[0] as usize))))
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
