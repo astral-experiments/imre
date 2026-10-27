@@ -59,6 +59,9 @@ def current():
         left = frozenset((GenericAlias(list, (left,)),))
         right = frozenset((GenericAlias(list, (right,)),))
     assert left == right
+    values = {1, 2}
+    assert values.discard(1) is None and values == {2}
+    assert values.discard(3) is None and values == {2}
     print("ok")
 
 
