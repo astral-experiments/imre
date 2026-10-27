@@ -121,7 +121,7 @@ jobs:
   sys-source:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' && !inputs.unittest_source }}
     runs-on: *linux-x64
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       SYS_SOURCE: ${{ inputs.sys_source }}
     steps:
@@ -133,6 +133,7 @@ jobs:
         run: |
           [[ "$SYS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
           cp benchmarks/cpython_stdlib/full/sys/ci.sh "$RUNNER_TEMP/sys-gate.sh"
+          cp -R benchmarks/cpython_stdlib/full/sys/hosted-2404 "$RUNNER_TEMP/textio-controls"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.sys_source }}
@@ -150,11 +151,24 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
-      - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 strace
       - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
       - name: Check sys at O0 and O3
         id: sys_evidence
         run: bash "$RUNNER_TEMP/sys-gate.sh"
+      - name: Measure original TextIOWrapper methods and Click factories at O0 and O3
+        if: ${{ !cancelled() && (steps.sys_evidence.outcome == 'success' || steps.sys_evidence.outcome == 'failure') }}
+        run: bash "$RUNNER_TEMP/textio-controls/run.sh"
+      - name: Retain the original inputs and public I/O observations
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: textio-2404-components
+          path: |
+            ${{ runner.temp }}/textio-controls/*.json
+            ${{ runner.temp }}/textio-controls/*.log
+            ${{ runner.temp }}/textio-controls/inputs
+          if-no-files-found: error
       - name: Retain the Linux sys reports and tested source
         if: ${{ !cancelled() && (steps.sys_evidence.outcome == 'success' || steps.sys_evidence.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
