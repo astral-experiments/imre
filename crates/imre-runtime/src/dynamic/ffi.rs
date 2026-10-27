@@ -323,7 +323,7 @@ impl Context {
             "more" | "more_else" => {
                 let more = self.iterator_has_item(a)?;
                 if !more && op == "more_else" {
-                    self.heap.release_loop_files();
+                    self.heap.release_unbound_writers();
                 }
                 Ok(flag(more))
             }
@@ -410,6 +410,7 @@ impl Context {
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
+                self.heap.release_unbound_writers();
                 Ok(self.raised_instance(error))
             }
             "matches" => {

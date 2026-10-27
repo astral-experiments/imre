@@ -1660,8 +1660,8 @@ impl Heap {
         reachable
     }
 
-    /// Collect an unbound writer after its exhausted loop drops the iterator root.
-    pub fn release_loop_files(&mut self) {
+    /// Recheck unbound writers after control flow discards temporary roots.
+    pub fn release_unbound_writers(&mut self) {
         if self
             .file_writers
             .iter()
