@@ -213,7 +213,7 @@ impl Context {
         )
     }
 
-    fn dictionary_hash_error(&self, key: Id, error: Error) -> Error {
+    pub(in super::super) fn key_hash_error(&self, key: Id, error: Error, role: &str) -> Error {
         if error.kind != "TypeError" {
             return error;
         }
@@ -235,7 +235,7 @@ impl Context {
         };
         Error::new(
             "TypeError",
-            format!("cannot use '{name}' as a dict key ({})", error.message),
+            format!("cannot use '{name}' as a {role} ({})", error.message),
         )
     }
 
@@ -264,7 +264,7 @@ impl Context {
         }
     }
 
-    fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+    pub(in super::super) fn hash_key(&mut self, key: Id) -> Result<i64> {
         if let Value::Instance { class, .. } = *self.heap.get(key)
             && let Some(slot) = self.hash_slot(class)
         {
@@ -293,7 +293,7 @@ impl Context {
         let hash = if let Some(values) = self.tuple_keys(key) {
             let mut acc = TUPLE_START;
             for &value in &values {
-                acc = tuple_lane(acc, self.dictionary_hash(value)?);
+                acc = tuple_lane(acc, self.hash_key(value)?);
             }
             let hash = finish_tuple(acc, values.len());
             self.heap.immutable_hashes.insert(key, hash);
@@ -302,7 +302,7 @@ impl Context {
             // Slice components are hashed again on each lookup, in start/stop/step order.
             let mut hash = TUPLE_START;
             for part in parts {
-                hash = tuple_lane(hash, self.dictionary_hash(part)?);
+                hash = tuple_lane(hash, self.hash_key(part)?);
             }
             if hash == u64::MAX {
                 1_546_275_796
@@ -310,27 +310,12 @@ impl Context {
                 hash as i64
             }
         } else if let Value::Set {
-            items,
+            index,
             frozen: true,
+            ..
         } = self.heap.get(key)
         {
-            // Frozenset hashes are independent of item order. Cache the successful
-            // result so repeated dictionary probes leave the members untouched.
-            let items = items.clone();
-            let size = items.len();
-            let mut hash = 0_u64;
-            for item in items {
-                let lane = self.dictionary_hash(item)? as u64;
-                hash ^= ((lane ^ 89_869_747) ^ (lane << 16)).wrapping_mul(3_644_798_167);
-            }
-            hash ^= (size as u64 + 1).wrapping_mul(1_927_868_237);
-            hash ^= (hash >> 11) ^ (hash >> 25);
-            hash = hash.wrapping_mul(69_069).wrapping_add(907_133_923);
-            let hash = if hash == u64::MAX {
-                590_923_713
-            } else {
-                hash as i64
-            };
+            let hash = index.frozen_hash();
             self.heap.immutable_hashes.insert(key, hash);
             hash
         } else {
@@ -401,7 +386,7 @@ impl Context {
         Ok(normalized(hash))
     }
 
-    fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
+    pub(in super::super) fn keys_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
         }
@@ -412,12 +397,15 @@ impl Context {
             let answer = super::super::slice::compare(self, "==", *a, *b)?;
             return self.truth(answer);
         }
+        if let Some(equal) = self.set_is_subset(left, right, true)? {
+            return Ok(equal);
+        }
         if let (Some(left), Some(right)) = (self.tuple_keys(left), self.tuple_keys(right)) {
             if left.len() != right.len() {
                 return Ok(false);
             }
             for (a, b) in left.into_iter().zip(right) {
-                if !self.dictionary_equal(a, b)? {
+                if !self.keys_equal(a, b)? {
                     return Ok(false);
                 }
             }
@@ -449,7 +437,7 @@ impl Context {
             .collect();
         let hashes = keys
             .into_iter()
-            .map(|key| self.dictionary_hash(key))
+            .map(|key| self.hash_key(key))
             .collect::<Result<Vec<_>>>()?;
         let entries = self.stored_entries_mut(dict);
         let size = (entries.usable + 1).next_power_of_two();
@@ -468,8 +456,8 @@ impl Context {
         let hash = match known_hash {
             Some(hash) => hash,
             None => self
-                .dictionary_hash(key)
-                .map_err(|error| self.dictionary_hash_error(key, error))?,
+                .hash_key(key)
+                .map_err(|error| self.key_hash_error(key, error, "dict key"))?,
         };
         self.index_dictionary(dict)?;
         'restart: loop {
@@ -498,7 +486,7 @@ impl Context {
                     continue;
                 }
                 self.heap.keep(candidate);
-                let equal = self.dictionary_equal(candidate, key)?;
+                let equal = self.keys_equal(candidate, key)?;
                 let entries = self.stored_entries(dict);
                 let index = entries.index.as_ref().expect("indexed dictionary");
                 let dense = entries.dense(position);

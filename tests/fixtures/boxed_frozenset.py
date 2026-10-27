@@ -1,4 +1,36 @@
+def key_callbacks():
+    events = []
+
+    class Key:
+        def __init__(self, value):
+            self.value = value
+
+        def __hash__(self):
+            events.append(("hash", self.value))
+            if self.value == "bad":
+                raise LookupError("from hash")
+            return 42
+
+        def __eq__(self, other):
+            events.append(("eq", self.value, other.value))
+            if other.value == "boom":
+                raise ValueError("from equality")
+            return self.value == other.value
+
+    for make in (set, frozenset):
+        for keys in ([Key("bad")], [Key("a"), Key("boom")], [Key("a"), Key("a")]):
+            try:
+                print("size", len(make(keys)))
+            except (LookupError, ValueError) as error:
+                print(type(error).__name__, str(error))
+    one = Key("copy")
+    mutable = set([one])
+    frozen = frozenset(mutable)
+    print(len(set(frozen)), {frozen: 7}[frozen], events)
+
+
 def current():
+    key_callbacks()
     value = frozenset("aβaaa")
     assert type(value) is frozenset and isinstance(value, frozenset)
     assert not isinstance(value, set)

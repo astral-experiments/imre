@@ -86,10 +86,7 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
-            "set" => Ok(self.alloc(Value::Set {
-                items: Vec::new(),
-                frozen: false,
-            })),
+            "set" => Ok(self.empty_set(false)),
             "dict" => Ok(self.dict(Vec::new())),
             "tuple" => {
                 let vs = self.items(a)?;

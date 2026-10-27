@@ -105,35 +105,16 @@ pub(in super::super) fn remove_dict_item(
 }
 
 pub(in super::super) fn set_member(
-    ctx: &Context,
+    ctx: &mut Context,
     set: Id,
     value: Id,
     allow_mutable_key: bool,
 ) -> Result<bool> {
-    let Value::Set { items, .. } = ctx.heap.get(set) else {
-        return Err(type_error("expected set"));
-    };
-    // Membership accepts a mutable set as an equivalent frozen key. Insertion and
-    // issuperset(iterable) require each element itself to be hashable.
-    if !(allow_mutable_key && matches!(ctx.heap.get(value), Value::Set { frozen: false, .. }))
-        && let Some(part) = unhashable_part(ctx, value)
-    {
-        return Err(type_error(format!(
-            "cannot use '{}' as a set element (unhashable type: '{}')",
-            ctx.type_name(value),
-            ctx.type_name(part),
-        )));
-    }
-    Ok(items.iter().any(|&entry| ctx.equal(entry, value)))
+    ctx.contains_set_key(set, value, allow_mutable_key)
 }
 
 pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result<()> {
-    if !set_member(ctx, set, value, false)?
-        && let Value::Set { items, .. } = ctx.heap.get_mut(set)
-    {
-        items.push(value);
-    }
-    Ok(())
+    ctx.insert_set_key(set, value, None)
 }
 
 pub(super) fn construct(
@@ -159,15 +140,9 @@ pub(super) fn construct(
         {
             return Ok(*one);
         }
-        let set = ctx.alloc(Value::Set {
-            items: Vec::new(),
-            frozen,
-        });
+        let set = ctx.empty_set(frozen);
         if let [source] = args {
-            let iterator = ctx.iterator(*source)?;
-            while let Some(item) = ctx.next_item(iterator)? {
-                set_add(ctx, set, item)?;
-            }
+            ctx.update_set(set, *source)?;
         }
         return Ok(set);
     }
@@ -356,6 +331,9 @@ pub(super) fn method(
                     args.len()
                 )));
             };
+            if let Some(answer) = ctx.set_is_subset(*source, receiver, false)? {
+                return Ok(boolean(answer));
+            }
             let iterator = ctx.iterator(*source)?;
             while let Some(item) = ctx.next_item(iterator)? {
                 if !set_member(ctx, receiver, item, false)? {
@@ -371,9 +349,7 @@ pub(super) fn method(
         }
         "set.update" => {
             for &input in args {
-                for item in ctx.items(input)? {
-                    set_add(ctx, receiver, item)?;
-                }
+                ctx.update_set(receiver, input)?;
             }
             Ok(NONE)
         }

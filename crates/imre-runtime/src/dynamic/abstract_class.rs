@@ -50,16 +50,17 @@ impl Context {
                 continue;
             };
             match self.lookup_attr(value, "__isabstractmethod__") {
-                Ok(value) if self.truth(value)? => items.push(self.text(name)),
+                Ok(value) if self.truth(value)? => items.push(name),
                 Ok(_) => {}
                 Err(err) if err.kind == "AttributeError" => {}
                 Err(err) => return Err(err),
             }
         }
-        let methods = self.alloc(Value::Set {
-            items,
-            frozen: true,
-        });
+        let methods = self.empty_set(true);
+        for name in items {
+            let key = self.text(name);
+            self.insert_set_key(methods, key, None)?;
+        }
         self.set_abstract_methods(scope, methods)
     }
 
