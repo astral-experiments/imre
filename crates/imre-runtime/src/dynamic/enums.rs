@@ -59,6 +59,7 @@ impl Context {
             fields: HashMap::new(),
             scalar: Some(value),
             dictionary: None,
+            property: None,
             memory_stream: None,
         }))
     }

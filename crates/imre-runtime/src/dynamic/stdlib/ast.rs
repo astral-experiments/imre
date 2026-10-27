@@ -203,6 +203,7 @@ fn parsed_instance(
         fields,
         dictionary: None,
         scalar: None,
+        property: None,
         memory_stream: None,
     })
 }
