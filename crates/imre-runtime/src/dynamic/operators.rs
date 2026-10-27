@@ -541,6 +541,25 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { class, .. } = value
+            && self.classes.get("re.RegexFlag") == Some(class)
+            && let Some((_, name, bits)) = self.enum_member(id)
+        {
+            return match self.str_value(name) {
+                Ok(names) => names
+                    .split('|')
+                    .map(|name| {
+                        if name.starts_with("0x") {
+                            name.to_owned()
+                        } else {
+                            format!("re.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                Err(_) => format!("re.RegexFlag({})", self.repr(bits)),
+            };
+        }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
             && let Some((class, name, member_value)) = self.enum_member(id)
@@ -595,6 +614,7 @@ impl Context {
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
@@ -1321,7 +1341,12 @@ impl Context {
             };
             crate::integer_binary(&x, &y, code)?
         };
-        Ok(self.alloc(Value::Int(result)))
+        let class = if matches!(op, "&" | "|" | "^") {
+            self.flag_class(a).or_else(|| self.flag_class(b))
+        } else {
+            None
+        };
+        self.flag_or_integer(class, result)
     }
 }
 

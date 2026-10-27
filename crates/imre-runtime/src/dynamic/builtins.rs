@@ -164,7 +164,10 @@ pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || is_exception(name)
-        || matches!(name, "enum.Enum" | "enum.IntEnum" | "enum.StrEnum")
+        || matches!(
+            name,
+            "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+        )
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -327,7 +330,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+        Value::RegexPattern(_)
+            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+        {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",

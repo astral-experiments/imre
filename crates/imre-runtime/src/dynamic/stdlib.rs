@@ -267,18 +267,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
-        ("re", "ASCII") => ctx.int(regex::ASCII),
-        ("re", "UNICODE") => ctx.int(regex::UNICODE),
-        ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
-        ("re", "A" | "U" | "X") => {
-            let module = ctx.module("re")?;
-            let flag = match name {
-                "A" => "ASCII",
-                "U" => "UNICODE",
-                _ => "VERBOSE",
-            };
-            ctx.lookup_attr(module, flag)?
-        }
+        ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
@@ -459,9 +448,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "sha1")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile")
+        | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "Enum" | "IntEnum" | "StrEnum" | "_simple_enum")
+        | ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum" | "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
@@ -713,6 +702,9 @@ pub(super) fn call(
     }
     if name == "pattern.search" {
         return regex::search(ctx, args, kwargs);
+    }
+    if name == "pattern.split" {
+        return regex::pattern_split(ctx, args, kwargs);
     }
     if name.starts_with("re.") {
         return regex::module_call(ctx, name, args, kwargs);

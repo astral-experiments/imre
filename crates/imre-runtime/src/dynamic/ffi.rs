@@ -204,7 +204,8 @@ impl Context {
                     "~" => crate::integer_binary(&crate::Int::from(-1), &v, 7)?,
                     _ => v,
                 };
-                Ok(self.alloc(Value::Int(result)))
+                let class = (op == "~").then(|| self.flag_class(a)).flatten();
+                self.flag_or_integer(class, result)
             }
             "format" => {
                 let mut value = a;
