@@ -974,6 +974,29 @@ impl Context {
                 };
                 return self.instance_attribute(obj, class, field, name);
             }
+            if let Some([filename, original_args]) =
+                error.trace.as_ref().and_then(|trace| trace.source_syntax)
+                && let Value::Tuple(args) = self.heap.get(original_args)
+            {
+                match name {
+                    "msg" => return Ok(args[0]),
+                    "filename" => return Ok(filename),
+                    _ => {
+                        if let Some(index) =
+                            ["lineno", "offset", "text", "end_lineno", "end_offset"]
+                                .iter()
+                                .position(|&field| field == name)
+                        {
+                            if let Some(&location) = args.get(1)
+                                && let Value::Tuple(fields) = self.heap.get(location)
+                            {
+                                return Ok(fields.get(index + 1).copied().unwrap_or(NONE));
+                            }
+                            return Ok(NONE);
+                        }
+                    }
+                }
+            }
             if name == "__dict__" {
                 return Ok(self.exception_dictionary(obj));
             }

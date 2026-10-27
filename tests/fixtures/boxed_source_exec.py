@@ -45,6 +45,15 @@ class Comparable:
 
 
 def current():
+    for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
+        config = {}
+        exec(compile(data, "settings.py", "exec"), config)
+        print(config["VALUE"])
+    for data in (b"# coding: missing-codec", b"\xef\xbb\xbf# coding: latin-1", b"VALUE = '\xff'", b"x=1\0", b"\xef\xbb\xbf\xef\xbb\xbfX=1"):
+        try:
+            compile(data, "settings.py", "exec")
+        except SyntaxError as error:
+            print(str(error), error.args, error.msg, error.filename, error.lineno, error.offset, error.text, error.end_lineno, error.end_offset)
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     namespace["left"] = Comparable()
     namespace["right"] = object()

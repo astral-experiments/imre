@@ -590,7 +590,12 @@ impl Context {
                             output.push_str(text);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
-                        } else if error.os_args.is_some() {
+                        } else if error.os_args.is_some()
+                            || error
+                                .trace
+                                .as_ref()
+                                .is_some_and(|trace| trace.source_syntax.is_some())
+                        {
                             output.push_str(&error.message);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
