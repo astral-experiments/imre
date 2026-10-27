@@ -191,8 +191,8 @@ pub(super) fn call(
         let raw = super::ReadSource::Socket(native::SocketInput::new(s));
         let reader = std::io::BufReader::with_capacity(128 * 1024, raw);
         return Ok(
-            ctx.alloc(Value::File(std::rc::Rc::new(std::cell::RefCell::new(
-                Some(reader),
+            ctx.alloc(Value::File(std::rc::Rc::new(super::BinaryFile::reader(
+                reader,
             )))),
         );
     }

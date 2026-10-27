@@ -24,7 +24,7 @@ use buffered::{Input, Output};
 
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
 
-pub(super) struct FileState {
+pub(crate) struct FileState {
     fd: Option<RawFd>,
     // Closing a stream releases its descriptor, not its original I/O class.
     raw: bool,
@@ -96,11 +96,16 @@ impl Drop for FileState {
 }
 
 impl FileState {
-    pub(super) fn closed(&self) -> bool {
+    /// Opens a buffered binary writer with the same ownership and errors as typed files.
+    pub(crate) fn binary_writer(path: &str, mode: u32) -> Result<Self> {
+        open_state(&super::text::try_owned_string(path)?, mode, true, false)
+    }
+
+    pub(crate) fn closed(&self) -> bool {
         self.stream.is_none()
     }
 
-    pub(super) fn fileno(&self) -> Result<RawFd> {
+    pub(crate) fn fileno(&self) -> Result<RawFd> {
         let Some(fd) = self.fd else {
             return Err(Error::new(Kind::UnsupportedOperation, "fileno"));
         };
@@ -111,7 +116,7 @@ impl FileState {
         }
     }
 
-    pub(super) fn close(&mut self) -> io::Result<()> {
+    pub(crate) fn close(&mut self) -> io::Result<()> {
         self.stream.take().map_or(Ok(()), Stream::close)
     }
 
@@ -265,16 +270,11 @@ impl FileState {
         if self.kind == FileKind::GzipBinaryRead {
             self.stream()?;
         }
-        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::BinaryWrite {
-            i32::try_from(size).map_err(|_| {
-                Error::new(
-                    Kind::OverflowError,
-                    "Python int too large to convert to C int",
-                )
-            })?;
+            Self::check_writer_read_size(value)?;
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
+        let size = super::bytes::native_size(value)?;
         if self.kind == FileKind::Memory {
             return self.read_bytes(usize::try_from(size).ok());
         }
@@ -293,7 +293,19 @@ impl FileState {
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
-    pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+    /// BufferedWriter.read converts its count to a C int before rejecting the access mode.
+    pub(crate) fn check_writer_read_size(value: &Int) -> Result<()> {
+        i32::try_from(super::bytes::native_size(value)?)
+            .map(|_| ())
+            .map_err(|_| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })
+    }
+
+    pub(crate) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.kind == FileKind::BinaryRandom {
             let Some(Stream::Random(file)) = self.stream.as_mut() else {
                 return Err(Error::new(Kind::ValueError, "write to closed file"));
@@ -383,7 +395,7 @@ impl FileState {
         }
     }
 
-    pub(super) fn flush(&mut self) -> Result<()> {
+    pub(crate) fn flush(&mut self) -> Result<()> {
         if self.kind == FileKind::TextMemory {
             return Ok(());
         }
@@ -734,7 +746,7 @@ fn open_state_with_encoding(
 }
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
-pub(super) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
+pub(crate) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
     open_file_with(path, mode, |error| errno_with_filename(error, Some(path)))
 }
 

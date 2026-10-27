@@ -9,6 +9,7 @@ def render():
     group = parser.add_argument_group("format")
     group.add_argument("-m", "--mode", help="output mode")
     print(repr(parser.format_usage()))
+    print(repr(parser.format_usage().strip()))
     print(repr(parser.format_help()))
     parser.print_usage(file=sys.stderr)
     print(repr(parser.print_help(None)))

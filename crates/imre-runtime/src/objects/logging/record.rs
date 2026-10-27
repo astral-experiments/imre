@@ -552,6 +552,16 @@ pub(super) fn percent_value<'a>(fmt: &'a str, value: &OwnedWord) -> Result<(Stri
     percent_value_in(fmt, &mut std::iter::once(value.clone()), None)
 }
 
+/// Render a statically sized integer conversion from the original percent field.
+/// The dynamic caller has already looked up any mapping key.
+pub(crate) fn percent_integer_field(field: &str, value: Int) -> Result<String> {
+    let field = match field.strip_prefix('(') {
+        Some(mapping) => mapping_key(mapping)?.1,
+        None => field,
+    };
+    percent_value(field, &owned(value.into_raw(), 2)).map(|(text, _)| text)
+}
+
 fn unpack_object(value: OwnedWord) -> OwnedWord {
     if value.kind.raw() == 5 && value.word != 0 {
         // SAFETY: a kind-five owner roots this object; clone a boxed field inside the borrow.

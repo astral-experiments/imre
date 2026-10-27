@@ -30,6 +30,15 @@ impl Context {
     }
 
     pub(super) fn index_value(&mut self, value: Id) -> Result<Option<crate::Int>> {
+        self.index_value_with_bool_result(value, true)
+    }
+
+    /// Some native operations reject a boolean returned by a user-defined index hook.
+    pub(super) fn index_value_with_bool_result(
+        &mut self,
+        value: Id,
+        allow_bool_result: bool,
+    ) -> Result<Option<crate::Int>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some(integer));
         }
@@ -37,6 +46,12 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
+        if !allow_bool_result && matches!(self.heap.get(result), Value::Bool(_)) {
+            return Err(Error::new(
+                "TypeError",
+                "__index__ returned non-int (type bool)",
+            ));
+        }
         self.as_int(result).map(Some).map_err(|_| {
             Error::new(
                 "TypeError",
@@ -63,7 +78,9 @@ impl Context {
 
     pub(super) fn instance_len(&mut self, id: Id) -> Result<Option<usize>> {
         let Some(hook) = self.bound_slot(id, "__len__")? else {
-            return Ok(None);
+            return Ok(self
+                .string_storage(id)
+                .map(|text| self.str_value(text).unwrap().chars().count()));
         };
         let value = self.call(hook, Vec::new(), Vec::new())?;
         let length = self.index_integer(value)?;
@@ -94,6 +111,7 @@ impl Context {
             Value::Bool(b) => *b,
             Value::Int(i) => i.as_small() != Some(0),
             Value::Float(f) => *f != 0.0,
+            Value::Complex(z) => z.real != 0.0 || z.imag != 0.0,
             Value::Calendar { value, .. } => {
                 value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
             }
@@ -163,6 +181,7 @@ impl Context {
             *exhausted = true;
             return false;
         }
+        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let mut equal = |x, y| self.equal_inner(x, y, remaining - 1, exhausted);
         let left = self.dict_storage(a).unwrap_or(a);
         let right = self.dict_storage(b).unwrap_or(b);
@@ -174,6 +193,8 @@ impl Context {
                 .cmp(&self.as_int(b).unwrap())
                 .is_eq(),
             (Value::Float(x), Value::Float(y)) => x == y,
+            (Value::Complex(z), _) => self.complex_equal(*z, right),
+            (_, Value::Complex(z)) => self.complex_equal(*z, left),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. }) => a.equal(b),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
                 crate::floats::compare(&self.as_int(b).unwrap(), *f) == 0
@@ -186,6 +207,10 @@ impl Context {
                 a == b
             }
             (Value::Native(a), Value::Native(b)) => a == b,
+            (Value::GenericAlias(a), Value::GenericAlias(b)) => {
+                a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
+            }
+            (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
@@ -218,7 +243,18 @@ impl Context {
             },
         }
     }
-    pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+    pub(super) fn compare(&self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let unsupported = || {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{op}' not supported between instances of '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            )
+        };
+        let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let int_float = |integer, float| {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
             Ok((order != 2).then(|| order.cmp(&0)))
@@ -245,23 +281,80 @@ impl Context {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
                 {
-                    return Err(Error::new("TypeError", "incomparable sequence types"));
+                    return Err(unsupported());
                 }
                 if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
                     for (&i, &j) in x.iter().zip(&y) {
                         if !self.checked_equal(i, j)? {
-                            return self.compare(i, j);
+                            return self.compare(op, i, j);
                         }
                     }
                     Ok(Some(x.len().cmp(&y.len())))
                 } else {
-                    Err(Error::new("TypeError", "objects do not support ordering"))
+                    Err(unsupported())
                 }
             }
         }
     }
     pub(super) fn display(&self, id: Id) -> String {
-        match self.heap.get(id) {
+        self.format_value(id, false, &mut Vec::new())
+    }
+
+    pub(super) fn repr(&self, id: Id) -> String {
+        self.format_value(id, true, &mut Vec::new())
+    }
+
+    /// Renders positional values inside tuples and exception representations.
+    fn format_elements(&self, values: &[Id], active: &mut Vec<Id>) -> String {
+        values
+            .iter()
+            .map(|&arg| self.format_value(arg, true, active))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Formats the current arguments, preserving native diagnostic text when present.
+    pub(super) fn exception_message(&self, error: &Error, active: &mut Vec<Id>) -> String {
+        match error.args.as_deref() {
+            None => error.message.clone(),
+            Some([]) => String::new(),
+            Some([arg]) => {
+                self.format_value(*arg, self.is_builtin_error(error, "KeyError"), active)
+            }
+            Some(args) => format!("({})", self.format_elements(args, active)),
+        }
+    }
+
+    /// Keeps recursive container arguments on the same formatting stack.
+    fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
+        let value = self.heap.get(id);
+        if let Value::Instance { scalar, .. } = value
+            && (repr || scalar.is_none())
+            && let Some((class, name, member_value)) = self.enum_member(id)
+        {
+            let name = self.format_value(name, false, active);
+            return if repr {
+                format!(
+                    "<{class}.{name}: {}>",
+                    self.format_value(member_value, true, active)
+                )
+            } else {
+                format!("{class}.{name}")
+            };
+        }
+        let recursive = match value {
+            Value::List(_) => Some("[...]"),
+            Value::Tuple(_) => Some("(...)"),
+            Value::Dict(_) => Some("{...}"),
+            _ => None,
+        };
+        if let Some(placeholder) = recursive {
+            if active.contains(&id) {
+                return placeholder.to_owned();
+            }
+            active.push(id);
+        }
+        let result = match value {
             Value::ContextVar {
                 name,
                 default,
@@ -289,6 +382,25 @@ impl Context {
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
             Value::Float(n) => crate::floats::render(*n).to_string(),
+            Value::Complex(z) => z.repr(),
+            Value::Repeat(repeat) => {
+                let value = self.repr(repeat.value);
+                match repeat.remaining {
+                    Some(n) => format!("repeat({value}, {n})"),
+                    None => format!("repeat({value})"),
+                }
+            }
+            Value::Count { current, step } => {
+                let current = self.repr(*current);
+                if matches!(self.heap.get(*step), Value::Bool(true))
+                    || matches!(self.heap.get(*step), Value::Int(n) if n.as_small() == Some(1))
+                {
+                    format!("count({current})")
+                } else {
+                    format!("count({current}, {})", self.repr(*step))
+                }
+            }
+            Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
                 class: Some(class),
@@ -299,20 +411,22 @@ impl Context {
                 let fields = names
                     .iter()
                     .zip(values)
-                    .map(|(k, v)| format!("{k}={}", self.repr(*v)))
+                    .map(|(k, v)| format!("{k}={}", self.format_value(*v, true, active)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{class}({fields})")
             }
+            Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
-            Value::Bytes(bytes) => format!(
-                "b'{}'",
-                bytes
-                    .iter()
-                    .flat_map(|&x| std::ascii::escape_default(x))
-                    .map(char::from)
-                    .collect::<String>()
-            ),
+            Value::Instance {
+                scalar: Some(payload),
+                ..
+            } => self.display(*payload),
+            Value::Bytes(bytes) => {
+                let mut output = String::new();
+                crate::objects::write_bytes_repr(&mut output, bytes);
+                output
+            }
             Value::ByteArray(bytes) => {
                 let quote = if bytes.contains(&b'\'') && !bytes.contains(&b'"') {
                     '"'
@@ -334,21 +448,22 @@ impl Context {
             Value::Instance {
                 dictionary: Some(backing),
                 ..
-            } => self.display(*backing),
+            } => self.format_value(*backing, repr, active),
             Value::Dict(entries) => format!(
                 "{{{}}}",
                 entries
                     .iter()
-                    .map(|(k, v)| format!("{}: {}", self.repr(*k), self.repr(*v)))
+                    .map(|(k, v)| format!(
+                        "{}: {}",
+                        self.format_value(*k, true, active),
+                        self.format_value(*v, true, active)
+                    ))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Value::Slice(parts) => format!("slice({})", self.format_elements(parts, active)),
             Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => {
-                let body = v
-                    .iter()
-                    .map(|&v| self.repr(v))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let body = self.format_elements(v, active);
                 match self.heap.get(id) {
                     Value::List(_) => format!("[{body}]"),
                     Value::Set { frozen: true, .. } if v.is_empty() => "frozenset()".into(),
@@ -359,7 +474,40 @@ impl Context {
                     _ => format!("({body})"),
                 }
             }
-            Value::Raised(Error { message, .. }) => message.clone(),
+            Value::Raised(error) if repr => {
+                let kind = error.kind.rsplit('.').next().unwrap_or(&error.kind);
+                let args = if let Some(os) = &error.os_args {
+                    format!(
+                        "{}, {}",
+                        os.errno,
+                        crate::objects::exceptions::string_repr(&os.description)
+                    )
+                } else if let Some(args) = &error.args {
+                    self.format_elements(args, active)
+                } else if error.message.is_empty() {
+                    String::new()
+                } else {
+                    crate::objects::exceptions::string_repr(&error.message).into_string()
+                };
+                format!("{kind}({args})")
+            }
+            Value::Raised(error) => self.exception_message(error, active),
+            Value::GenericAlias(alias) => alias.repr(self),
+            Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
+                name.clone()
+            }
+            Value::TypeVar(var) => {
+                let variance = if var.covariant {
+                    "+"
+                } else if var.contravariant {
+                    "-"
+                } else if var.infer_variance {
+                    ""
+                } else {
+                    "~"
+                };
+                format!("{variance}{}", self.display(var.name))
+            }
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {
@@ -382,24 +530,28 @@ impl Context {
                 format!("operator.attrgetter({arguments})")
             }
             _ => "<object>".to_owned(),
+        };
+        if recursive.is_some() {
+            active.pop();
         }
-    }
-    pub(super) fn repr(&self, id: Id) -> String {
-        if let Value::Calendar { value, .. } = self.heap.get(id) {
-            return value.repr();
-        }
-        if let Value::Str(s) = self.heap.get(id) {
-            let mut quoted = String::new();
-            crate::objects::exceptions::write_string_repr(s, &mut quoted)
-                .expect("writing into a string cannot fail");
-            quoted
-        } else {
-            self.display(id)
-        }
+        result
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Some(value) = super::typing::subscribe(self, obj, key) {
+            return value;
+        }
         if let Some(getter) = self.bound_slot(obj, "__getitem__")? {
             return self.call(getter, vec![key], Vec::new());
+        }
+        if self.enum_values(obj).is_some() {
+            let names = self
+                .class_attr(obj, "_member_map_")
+                .filter(|&names| matches!(self.heap.get(names), Value::Dict(_)))
+                .ok_or_else(|| Error::new("TypeError", "enum member names must be a dictionary"))?;
+            return self.get_item(names, key);
+        }
+        if let Value::MappingProxy(dict) = *self.heap.get(obj) {
+            return self.get_item(dict, key);
         }
         if let Value::Context(bindings) = self.heap.get(obj) {
             self.context_key(key)?;
@@ -433,6 +585,9 @@ impl Context {
         if matches!(self.heap.get(obj), Value::DictView { .. }) {
             return Err(Error::new("TypeError", "object is not subscriptable"));
         }
+        if let Value::Slice(parts) = *self.heap.get(key) {
+            return self.slice(obj, parts);
+        }
         let i = self.as_integer(key)?;
         let vals = self.items(obj)?;
         let i = if i < 0 { vals.len() as i64 + i } else { i };
@@ -457,6 +612,9 @@ impl Context {
                 entries.push((key, val));
             }
         } else if let Value::ByteArray(data) = self.heap.get(obj) {
+            if let Value::Slice(parts) = *self.heap.get(key) {
+                return self.set_slice(obj, parts, Some(val));
+            }
             let i = self.as_integer(key)?;
             let i = if i < 0 { data.len() as i64 + i } else { i };
             let byte = u8::try_from(self.as_integer(val)?)
@@ -530,43 +688,28 @@ impl Context {
         }
         Ok(false)
     }
-    fn slice_bounds(&self, spec: Id, len: usize) -> Result<(i64, i64, i64)> {
-        let Value::List(indices) = self.heap.get(spec) else {
-            unreachable!("compiled slice bounds")
-        };
-        let len = len as i64;
-        let index = |at: usize| -> Result<Option<i64>> {
-            indices
-                .get(at)
-                .copied()
-                .filter(|&v| v != NONE)
-                .map(|v| self.as_integer(v))
-                .transpose()
-        };
-        let step = index(2)?.unwrap_or(1);
-        if step == 0 {
-            return Err(Error::new("ValueError", "slice step cannot be zero"));
+    fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
+        let obj = self.string_storage(obj).unwrap_or(obj);
+        if let Value::Range { start, stop, step } = *self.heap.get(obj) {
+            return super::slice::range(self, parts, start, stop, step);
         }
-        let norm = |v: i64| {
-            let v = if v < 0 { len.saturating_add(v) } else { v };
-            if step > 0 {
-                v.clamp(0, len)
-            } else {
-                v.clamp(-1, len - 1)
-            }
-        };
-        let start = index(0)?
-            .map(norm)
-            .unwrap_or(if step > 0 { 0 } else { len - 1 });
-        let end = index(1)?
-            .map(norm)
-            .unwrap_or(if step > 0 { len } else { -1 });
-        Ok((start, end, step))
-    }
-
-    pub(super) fn slice(&mut self, obj: Id, spec: Id) -> Result<Id> {
+        if !matches!(
+            self.heap.get(obj),
+            Value::Str(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::List(_)
+                | Value::Tuple(_)
+                | Value::NamedTuple { .. }
+        ) {
+            return Err(Error::new(
+                "TypeError",
+                format!("'{}' object is not subscriptable", self.type_name(obj)),
+            ));
+        }
+        let bounds = super::slice::sequence_components(self, parts)?;
         let vals = self.items(obj)?;
-        let (start, end, step) = self.slice_bounds(spec, vals.len())?;
+        let [start, end, step] = super::slice::normalize(bounds, vals.len() as i64);
         let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
         match self.heap.get(obj) {
             Value::Str(_) => {
@@ -595,15 +738,26 @@ impl Context {
         }
     }
 
-    pub(super) fn set_slice(&mut self, obj: Id, spec: Id, source: Id) -> Result<()> {
-        let Value::ByteArray(target) = self.heap.get(obj) else {
-            return Err(Error::new(
-                "TypeError",
-                "object does not support slice assignment",
-            ));
+    fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
+        let mut bounds = super::slice::sequence_components(self, parts)?;
+        let data = match source {
+            Some(source) => {
+                let data = builtins::bytes_from_iterable(self, source)?;
+                // CPython retries the assignment with a converted or aliased bytearray.
+                if source == obj || !matches!(self.heap.get(source), Value::ByteArray(_)) {
+                    bounds = super::slice::sequence_components(self, parts)?;
+                }
+                data
+            }
+            None => Vec::new(),
         };
-        let (start, end, step) = self.slice_bounds(spec, target.len())?;
-        let data = builtins::bytes_from_iterable(self, source)?;
+        let len = self.bytes_like(obj)?.len() as i64;
+        let [start, end, step] = super::slice::normalize(bounds, len);
+        if (step == 1 && data.len() != (end - start).max(0) as usize)
+            || (step != 1 && data.is_empty() && slice_positions(start, end, step).next().is_some())
+        {
+            self.check_bytearray_resize(obj)?;
+        }
         let Value::ByteArray(target) = self.heap.get_mut(obj) else {
             unreachable!()
         };
@@ -644,7 +798,17 @@ impl Context {
         Ok(())
     }
 
-    fn repeat_bytes(&mut self, bytes: Id, multiplier: Id) -> Result<Id> {
+    /// Returns the immutable sequence payload used by builtin repetition.
+    fn repeat_storage(&self, id: Id) -> Option<Id> {
+        if matches!(self.heap.get(id), Value::Bytes(_)) {
+            Some(id)
+        } else {
+            self.string_storage(id)
+        }
+    }
+
+    /// Uses the index protocol for either operand order.
+    fn repeat_immutable(&mut self, sequence: Id, multiplier: Id) -> Result<Id> {
         let count = self.index_value(multiplier)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
@@ -654,12 +818,14 @@ impl Context {
                 ),
             )
         })?;
-        let Value::Bytes(data) = self.heap.get(bytes) else {
-            unreachable!()
-        };
-        Ok(match crate::objects::repeat_bytes(data, &count)? {
-            Some(repeated) => self.alloc(Value::Bytes(repeated)),
-            None => bytes,
+        Ok(match self.heap.get(sequence) {
+            Value::Bytes(data) => match crate::objects::repeat_bytes(data, &count)? {
+                Some(repeated) => self.alloc(Value::Bytes(repeated)),
+                None => sequence,
+            },
+            Value::Str(_) if count.as_small() == Some(1) => sequence,
+            Value::Str(text) => self.text(crate::objects::repeat_str(text, &count)?.into_string()),
+            _ => unreachable!("immutable repetition payload"),
         })
     }
 
@@ -667,14 +833,23 @@ impl Context {
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
         }
+        if let (Value::Slice(left), Value::Slice(right)) = (self.heap.get(a), self.heap.get(b))
+            && matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+        {
+            return super::slice::compare(self, op, *left, *right);
+        }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
             "%" if let Value::Str(text) = self.heap.get(a) => {
                 return builtins::percent(self, &text.clone(), b);
             }
+            "%" if let Value::Bytes(bytes) = self.heap.get(a) => {
+                return builtins::bytes_percent(self, &bytes.clone(), b);
+            }
             "==" | "!=" => {
                 let equal = self.checked_equal(a, b)?
-                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan());
+                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
+                    && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
             "is" => return Ok(truth(a == b)),
@@ -682,7 +857,7 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(a, b)? else {
+                let Some(c) = self.compare(op, a, b)? else {
                     return Ok(FALSE);
                 };
                 return Ok(truth(match op {
@@ -691,6 +866,12 @@ impl Context {
                     ">" => c.is_gt(),
                     _ => c.is_ge(),
                 }));
+            }
+            "+" | "-"
+                if matches!(self.heap.get(a), Value::Complex(_))
+                    || matches!(self.heap.get(b), Value::Complex(_)) =>
+            {
+                return self.complex_sum(op == "+", a, b);
             }
             "+" => match (self.heap.get(a), self.heap.get(b)) {
                 (Value::Str(x), Value::Str(y)) => return Ok(self.text(format!("{x}{y}"))),
@@ -718,8 +899,12 @@ impl Context {
                 }
                 _ => {}
             },
-            "*" if matches!(self.heap.get(a), Value::Bytes(_)) => return self.repeat_bytes(a, b),
-            "*" if matches!(self.heap.get(b), Value::Bytes(_)) => return self.repeat_bytes(b, a),
+            "*" if let Some(sequence) = self.repeat_storage(a) => {
+                return self.repeat_immutable(sequence, b);
+            }
+            "*" if let Some(sequence) = self.repeat_storage(b) => {
+                return self.repeat_immutable(sequence, a);
+            }
             _ => {}
         }
         if op == "*" {
@@ -904,24 +1089,44 @@ impl Context {
             self.call(method, vec![key], vec![])?;
             return Ok(());
         }
+        if let Some(dict) = self.dict_storage(obj) {
+            builtins::remove_dict_item(self, dict, key)?
+                .ok_or_else(|| self.lookup_error("KeyError", key))?;
+            return Ok(());
+        }
         match self.heap.get(obj) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                if !builtins::hashable(self, key) {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("unhashable type: '{}'", self.type_name(key)),
-                    ));
+            Value::ByteArray(_) => {
+                if let Value::Slice(parts) = *self.heap.get(key) {
+                    return self.set_slice(obj, parts, None);
                 }
-                let i = entries
-                    .iter()
-                    .position(|(k, _)| self.equal(*k, key))
-                    .ok_or_else(|| Error::new("KeyError", self.repr(key)))?;
-                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                    self.heap.get_mut(obj)
-                else {
+                let index = self.index_value(key)?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "bytearray indices must be integers or slices, not {}",
+                            self.type_name(key)
+                        ),
+                    )
+                })?;
+                let i = index.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "IndexError",
+                        format!(
+                            "cannot fit '{}' into an index-sized integer",
+                            self.type_name(key)
+                        ),
+                    )
+                })?;
+                let len = self.bytes_like(obj)?.len() as i64;
+                let i = if i < 0 { i + len } else { i };
+                if !(0..len).contains(&i) {
+                    return Err(Error::new("IndexError", "bytearray index out of range"));
+                }
+                self.check_bytearray_resize(obj)?;
+                let Value::ByteArray(data) = self.heap.get_mut(obj) else {
                     unreachable!()
                 };
-                entries.remove(i);
+                data.remove(i as usize);
             }
             Value::List(entries) => {
                 let i = self.as_integer(key)?;

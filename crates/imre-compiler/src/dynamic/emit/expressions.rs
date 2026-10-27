@@ -9,17 +9,6 @@ enum Element<'a> {
 }
 
 impl Function<'_, '_> {
-    pub(super) fn slice_bounds(&mut self, slice: &ast::ExprSlice) -> String {
-        let indices = self.op("list", &[]);
-        for bound in [&slice.lower, &slice.upper, &slice.step] {
-            let value = bound
-                .as_deref()
-                .map_or_else(|| "0".into(), |e| self.expr(e));
-            self.op("append", &[&indices, &value]);
-        }
-        indices
-    }
-
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         match expr {
             ast::Expr::NoneLiteral(_) => "0".into(),
@@ -28,7 +17,9 @@ impl Function<'_, '_> {
             ast::Expr::NumberLiteral(v) => match &v.value {
                 ast::Number::Int(n) => self.integer(n),
                 ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
-                _ => self.unsupported("complex numeric literal"),
+                ast::Number::Complex { real, imag } => {
+                    self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
+                }
             },
             ast::Expr::StringLiteral(v) => self.text(&v.value.to_string()),
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
@@ -39,14 +30,14 @@ impl Function<'_, '_> {
             }
             ast::Expr::Subscript(v) => {
                 let object = self.expr(&v.value);
-                if let ast::Expr::Slice(s) = &*v.slice {
-                    let indices = self.slice_bounds(s);
-                    self.op("slice", &[&object, &indices])
-                } else {
-                    let key = self.expr(&v.slice);
-                    let span = self.expression_span(expr, &v.value, b'[');
-                    self.op_at("get", &[&object, &key], span)
-                }
+                let key = self.expr(&v.slice);
+                let span = self.expression_span(expr, &v.value, b'[');
+                self.op_at("get", &[&object, &key], span)
+            }
+            ast::Expr::Slice(slice) => {
+                let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
+                    .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
+                self.op("slice_object", &[&start, &stop, &step])
             }
             ast::Expr::List(v) => self.display("list", &v.elts),
             ast::Expr::Set(v) => self.display("set", &v.elts),
@@ -123,6 +114,24 @@ impl Function<'_, '_> {
                     result = self.op("+", &[&result, &part]);
                 }
                 result
+            }
+            ast::Expr::Generator(v) => {
+                let [generator] = v.generators.as_slice() else {
+                    return self.unsupported("generator expression with multiple for clauses");
+                };
+                if generator.is_async {
+                    return self.unsupported("async generator expression");
+                }
+                let iterable = self.expr(&generator.iter);
+                let iter = self.op("iter", &[&iterable]);
+                let step = self.define(
+                    v.start(),
+                    "<genexpr>",
+                    None,
+                    None,
+                    Body::Generator(generator, &v.elt),
+                );
+                self.op("generator", &[&step, &iter])
             }
             ast::Expr::ListComp(v) => {
                 self.comprehension("list", &v.generators, Element::Value(&v.elt))
@@ -253,6 +262,35 @@ impl Function<'_, '_> {
             out = self.op("+", &[&out, &value]);
         }
         out
+    }
+
+    /// Each resume uses the same lexical scope and advances the outer iterator before
+    /// evaluating filters or the yielded expression. None marks natural exhaustion.
+    pub(super) fn generator_step(&mut self, generator: &ast::Comprehension, element: &ast::Expr) {
+        let iter = self.lookup(".iterator");
+        let step = self.name("b");
+        let body = self.name("b");
+        let done = self.name("b");
+        self.jump(&step);
+        self.label(&step);
+        let more = self.op("more", &[&iter]);
+        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
+        self.branch(&cond, &body, &done);
+        self.label(&body);
+        self.checkpoint(element);
+        let item = self.op("next", &[&iter]);
+        self.assign(&generator.target, &item);
+        for filter in &generator.ifs {
+            let value = self.expr(filter);
+            let yes = self.truth(&value);
+            let keep = self.name("b");
+            self.branch(&yes, &keep, &step);
+            self.label(&keep);
+        }
+        let item = self.expr(element);
+        let yielded = self.op("yielded", &[&item]);
+        self.end(&format!("ret i64 {yielded}"));
+        self.label(&done);
     }
 
     fn comprehension(

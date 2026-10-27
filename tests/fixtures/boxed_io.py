@@ -36,6 +36,49 @@ class ReadCount(RawIOBase):
 
 
 def exercise(path):
+    from io import UnsupportedOperation
+
+    target_path = path + ".output"
+    with open(target_path, "wb") as output:
+        alias = output
+        print(output.write(b"\x00\xff"), alias.closed)
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+        alias.flush()
+        with open(target_path, "rb") as reader:
+            print(reader.read())
+    with open(target_path, "ab") as output:
+        print(output.write(bytearray(b"x")))
+    with open(target_path, "rb") as reader:
+        print(reader.read())
+    try:
+        open(target_path, "xb")
+    except FileExistsError:
+        print("exclusive create")
+    try:
+        alias.read()
+    except UnsupportedOperation as error:
+        print(alias.closed, isinstance(error, OSError), isinstance(error, ValueError))
+    for operation, argument in ((alias.read, 1 << 40), (alias.readline, 1 << 100),
+                                (alias.readinto, b""), (alias.read, -2)):
+        try:
+            operation(argument)
+        except (OverflowError, TypeError, OSError) as error:
+            print(type(error).__name__)
+    try:
+        alias.write(b"x")
+    except ValueError:
+        print("closed writer")
+
+    for invalid in ("./missing-binary-input/file", path + "/child", "."):
+        try:
+            open(invalid, "rb")
+        except OSError as error:
+            print(type(error).__name__, error.errno, error.strerror, error.filename, error.args)
+    try:
+        open("nul\x00path", "rb")
+    except ValueError as error:
+        print(str(error))
     with open(path, "rb") as stream:
         reader = ChunkReader(stream)
         with reader as entered:
@@ -51,6 +94,14 @@ def exercise(path):
             print(stream.read(1), stream.readline(), stream.readline())
         reader.close()
         print(reader.closed, reader.flushes, stream.seek(0), stream.read(2))
+        try:
+            stream.read(-2)
+        except ValueError:
+            print(stream.tell(), stream.readline(-2))
+    try:
+        stream.read(1 << 100)
+    except OverflowError:
+        print("closed read validates the size")
     raw = RawIOBase()
     try:
         raw.readinto(b"")
@@ -106,3 +157,15 @@ def exercise(path):
         return item
 
     print([truncate(item) for item in target], bytes(target))
+
+    lines = path + ".lines"
+    with open(lines, "w") as output:
+        output.write("first\r\n\nthird\rlast")
+    for mode in ("r", "rb"):
+        with open(lines, mode) as stream:
+            for line in stream:
+                print(line)
+                break
+            print(stream.readline(), [line for line in stream], stream.readline())
+        with open(lines, mode) as stream:
+            print(iter(stream) is stream, list(zip(stream, stream)), next(stream, "done"))
