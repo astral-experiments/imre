@@ -511,11 +511,13 @@ fn count_elements(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     let get = ctx.lookup_attr(receiver, "get")?;
     let zero = ctx.int(0);
     let one = ctx.int(1);
+    let roots = ctx.heap.temporary_mark();
     while let Some(key) = ctx.next_item(iterator)? {
         ctx.heap.keep(key);
         let previous = ctx.call(get, vec![key, zero], vec![])?;
         let count = ctx.binary("+", previous, one)?;
         ctx.put_item(receiver, key, count)?;
+        ctx.heap.release_temporaries_since(roots);
     }
     Ok(NONE)
 }
@@ -1035,4 +1037,30 @@ pub(super) fn call(
         }
     };
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_elements_keeps_a_bounded_number_of_temporary_roots() {
+        let roots = [1, 256].map(|length| {
+            // SAFETY: the empty argv is valid for zero arguments, and the config is NUL-terminated.
+            let mut ctx = unsafe {
+                Box::from_raw(super::super::ffi::imre_dyn_new(
+                    0,
+                    [].as_ptr(),
+                    c"{\"paths\":[]}".as_ptr(),
+                ))
+            };
+            let mapping = ctx.alloc(Value::Dict(Default::default()));
+            let key = ctx.text("key");
+            let values = ctx.alloc(Value::List(vec![key; length]));
+            let before = ctx.heap.temporary_mark();
+            count_elements(&mut ctx, &[mapping, values], &[]).unwrap();
+            ctx.heap.temporary_mark() - before
+        });
+        assert_eq!(roots[0], roots[1]);
+    }
 }
