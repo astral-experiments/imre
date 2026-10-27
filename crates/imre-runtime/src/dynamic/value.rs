@@ -204,6 +204,7 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
+            Value::ThreadLocal(_) => super::thread_local::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
@@ -402,6 +403,7 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    ThreadLocal(super::thread_local::Dictionaries),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -515,6 +517,7 @@ impl Value {
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
+            Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {

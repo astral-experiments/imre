@@ -706,6 +706,13 @@ impl Context {
         mut bases: Vec<Id>,
     ) -> Result<Id> {
         for &base in &bases {
+            if matches!(self.heap.get(base), Value::Native(name) if name == super::thread_local::CLASS)
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "thread-local subclasses require per-thread initialization",
+                ));
+            }
             if let Value::Native(name) = self.heap.get(base)
                 && matches!(name.as_str(), "typing.TypeVar" | "slice")
             {

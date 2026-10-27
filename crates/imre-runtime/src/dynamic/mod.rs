@@ -16,6 +16,7 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod thread_local;
 mod typing;
 mod value;
 mod zip;
