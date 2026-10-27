@@ -88,6 +88,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/pkgutil/iter_modules.py"),
             ),
         )),
+        "_collections_abc" => Some((
+            "_collections_abc.py",
+            include_str!("../stdlib/_collections_abc.py"),
+        )),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),

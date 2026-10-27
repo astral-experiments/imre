@@ -371,6 +371,7 @@ impl Context {
                             | weakref::REFERENCE_HASH
                     ) || name.starts_with("property.")
                         || name.starts_with("dict.")
+                        || name.starts_with("abc.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -450,6 +451,12 @@ impl Context {
     }
 
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
+        self.direct_subclass(class, target)
+            || super::mapping_abc::registered_subclass(self, class, target)
+    }
+
+    /// Test native or C3 inheritance without traversing the ABC registry.
+    pub(super) fn direct_subclass(&self, class: Id, target: Id) -> bool {
         if self.equal_class(class, target) || self.structural_context_manager(class, target) {
             return true;
         }
@@ -457,7 +464,7 @@ impl Context {
             return ancestors.iter().any(|&base| {
                 self.equal_class(base, target)
                     || (matches!(self.heap.get(base), Value::Native(_))
-                        && self.subclass(base, target))
+                        && self.direct_subclass(base, target))
             });
         }
         if let (Value::Native(child), Value::Native(parent)) =
@@ -670,6 +677,13 @@ impl Context {
         }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
+        }
+        if let Some(actual) = self
+            .builtin_type_name(value)
+            .and_then(|name| self.builtins.get(name))
+            && super::mapping_abc::registered_subclass(self, *actual, class)
+        {
+            return true;
         }
         if let Value::Instance { class: actual, .. } = self.heap.get(value)
             && self.subclass(*actual, class)
@@ -1365,6 +1379,11 @@ impl Context {
             {
                 return Ok(self.text(builtin.rsplit('.').next().unwrap_or(&builtin)));
             }
+            Value::Native(method)
+                if method.starts_with("abc.abstract.") && name == "__isabstractmethod__" =>
+            {
+                return Ok(TRUE);
+            }
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
@@ -1479,6 +1498,14 @@ impl Context {
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
+                }
+                if name == "register" && super::mapping_abc::is_abc_class(self, obj) {
+                    let callable = self.builtin("abc.register");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
                 }
                 if name == "__new__" && self.has_base(obj, "str") {
                     return Ok(self.builtin("str.__new__"));
