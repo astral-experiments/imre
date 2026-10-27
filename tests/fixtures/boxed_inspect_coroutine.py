@@ -1,5 +1,11 @@
+import inspect
 from functools import partial, update_wrapper
-from inspect import iscoroutinefunction, markcoroutinefunction
+from inspect import cleandoc, iscoroutinefunction, markcoroutinefunction
+
+
+assert inspect.cleandoc is cleandoc
+assert cleandoc(doc="\n\tTitle\n\t  body\0 \r\n") == "Title\n  body\0 \r"
+assert cleandoc("  first  \n  \u00a0second") == "first  \n\u00a0second"
 
 
 async def view():
