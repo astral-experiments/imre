@@ -1,5 +1,5 @@
 from dataclasses import KW_ONLY, FrozenInstanceError, asdict, dataclass, field, fields
-from sys import path
+
 
 @dataclass
 class Entry:
@@ -11,12 +11,14 @@ class Entry:
     def label(self):
         return self.name.upper()
 
+
 @dataclass(frozen=True)
 class Key:
     part: int
     value: str = field(compare=False, repr=False, default="unused")
 
-def main():
+
+def current():
     a = Entry("root")
     b = Entry(name="root")
     assert a == b and not (a != b) and a.label() == "ROOT"
@@ -45,6 +47,3 @@ def main():
     except FrozenInstanceError as exc:
         print(str(exc))
     print("boxed dataclasses")
-
-if path:
-    main()
