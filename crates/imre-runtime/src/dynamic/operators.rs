@@ -239,6 +239,14 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
+    /// Unwrap proxy layers before the existing mapping comparison or reflected Python slot.
+    fn mapping_comparison_target(&self, mut value: Id) -> Id {
+        while let Value::MappingProxy(mapping) = *self.heap.get(value) {
+            value = mapping;
+        }
+        value
+    }
+
     /// Walk arbitrary container pairs without tying their depth to the Rust stack.
     pub(super) fn checked_equal(&mut self, a: Id, b: Id) -> Result<bool> {
         self.checked_equal_impl(a, b, true)
@@ -293,6 +301,12 @@ impl Context {
                     if !same_receivers {
                         return Ok(false);
                     }
+                    continue;
+                }
+                let left = self.mapping_comparison_target(a);
+                let right = self.mapping_comparison_target(b);
+                let (a, b) = if right != b { (right, left) } else { (left, b) };
+                if a == b {
                     continue;
                 }
                 let storage = |id| {
@@ -2623,6 +2637,29 @@ impl Context {
         {
             return deque::compare(self, op, a, b).map(|result| Some(builtins::boolean(result)));
         }
+        let (a, b) = if matches!(op, "==" | "!=") {
+            let left = self.mapping_comparison_target(a);
+            let right = self.mapping_comparison_target(b);
+            if left != a || right != b {
+                // A mapping hook can drop the containers that own either original proxy.
+                self.heap.reserve_temporaries(2)?;
+                self.heap.keep(a);
+                self.heap.keep(b);
+            }
+            if right != b {
+                // A left-hand mapping or Python hook first sees the right proxy itself.
+                let slot = if op == "==" { "__eq__" } else { "__ne__" };
+                if let Some(result) = self.operator_slot(left, slot, b)? {
+                    return Ok(Some(result));
+                }
+                // Reflected mappingproxy comparison starts from its own backing mapping.
+                (right, left)
+            } else {
+                (left, b)
+            }
+        } else {
+            (a, b)
+        };
         if self.heap.has_weak_values
             && matches!(op, "==" | "!=")
             && let (Value::Weak(left), Value::Weak(right)) = (self.heap.get(a), self.heap.get(b))
