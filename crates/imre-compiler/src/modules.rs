@@ -1115,6 +1115,10 @@ impl IntrinsicModule {
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }
+            (Self::WeakRef, "WeakKeyDictionary") => {
+                Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
+            }
+            (Self::WeakRef, "ref") => Intrinsic::ObjectRuntimeExport("weakref.ref"),
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
@@ -1419,6 +1423,19 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// The native value-struct decorator has no corresponding Python object runtime export.
+    pub(crate) fn imports_struct_decorator(&self) -> bool {
+        self.modules.iter().any(|module| {
+            module.bindings.values().any(|binding| {
+                matches!(
+                    binding,
+                    Binding::Intrinsic(Intrinsic::Struct)
+                        | Binding::IntrinsicModule(IntrinsicModule::Imre)
+                )
+            })
+        })
+    }
+
     pub(crate) fn is_abstract_context_manager(&self, definition: DefinitionId) -> bool {
         let source = &self.modules[definition.module];
         source.is_bundled(CONTEXTLIB_ABSTRACT)
