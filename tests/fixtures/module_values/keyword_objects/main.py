@@ -1,5 +1,6 @@
 import keyword
 from keyword import iskeyword, issoftkeyword
+from keys import Nested
 
 
 class MissingHash:
@@ -28,7 +29,7 @@ assert iskeyword("class") and not iskeyword("ordinary")
 assert issoftkeyword("match") and not issoftkeyword(None)
 assert not iskeyword(set()) and not issoftkeyword("λ")
 for test in (iskeyword, issoftkeyword):
-    for value in ([], {}, bytearray(b"abc"), ([],), MissingHash(), BrokenHash()):
+    for value in ([], {}, bytearray(b"abc"), ([],), MissingHash(), Nested.MissingHash(), BrokenHash()):
         try:
             test(value)
         except (TypeError, ValueError) as error:
