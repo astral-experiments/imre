@@ -431,10 +431,10 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk(_)
-                | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
+                | Value::Map { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
