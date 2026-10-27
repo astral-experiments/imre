@@ -137,6 +137,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
+        "itertools" => Some(("itertools.py", include_str!("../stdlib/itertools.py"))),
         "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",

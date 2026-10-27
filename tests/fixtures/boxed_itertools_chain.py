@@ -1,0 +1,25 @@
+from itertools import chain
+
+
+def current():
+    calls = []
+
+    class Later:
+        def __iter__(self):
+            calls.append("opened")
+            return iter([2])
+
+    cursor = chain([], [1], Later())
+    assert iter(cursor) is cursor and next(cursor) == 1 and not calls
+    assert next(cursor) == 2 and calls == ["opened"]
+    assert next(cursor, None) is None and next(cursor, None) is None
+
+    cursor = chain([1], None, [2])
+    assert next(cursor) == 1
+    try:
+        next(cursor)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a non-iterable")
+    assert next(cursor, None) is None
