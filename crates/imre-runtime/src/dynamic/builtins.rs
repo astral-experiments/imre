@@ -7,6 +7,7 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
 mod float;
+pub(super) use float::from_numeric;
 mod integer;
 mod print;
 mod text;
