@@ -976,7 +976,7 @@ pub(super) fn method(
         return Ok(ctx.alloc(Value::Int(found)));
     }
     if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(receiver)
+        && let Value::Bytes(data) = ctx.heap.get(ctx.scalar_value(receiver))
     {
         if !kwargs.is_empty() {
             return Err(type_error("bytes.rstrip() takes no keyword arguments"));
@@ -996,7 +996,7 @@ pub(super) fn method(
             .unwrap_or(b" \t\n\x0b\x0c\r");
         return Ok(match crate::objects::rstrip_bytes(data, chars)? {
             Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
-            None => receiver,
+            None => ctx.scalar_value(receiver),
         });
     }
     if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
