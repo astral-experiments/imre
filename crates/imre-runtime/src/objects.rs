@@ -81,6 +81,7 @@ mod string_enums;
 mod structs;
 mod tempdirs;
 mod text;
+pub(crate) use text::translate;
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, urlquote, urlsplit};
 pub(crate) use text::{
