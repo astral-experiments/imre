@@ -128,6 +128,8 @@ def main():
     if sys.implementation.name != "cpython" or sys.version_info[:3] != (3, 14, 5):
         p.error("test-enabled CPython 3.14.5 required")
     verify_files(HERE / "upstream", manifest["files"])
+    verify_files(HERE.parents[3] / "crates/imre-compiler/stdlib",
+                 {"keyword.py": manifest["files"]["Lib/keyword.py"]})
     if args.cpython_source:
         verify_files(args.cpython_source, manifest["files"])
     verify_interpreter_tests(manifest)

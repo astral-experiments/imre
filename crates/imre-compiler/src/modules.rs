@@ -28,8 +28,7 @@ mod type_aliases;
 
 pub(crate) type ModuleId = usize;
 
-const KEYWORD_SOURCE: &str =
-    include_str!("../../../benchmarks/cpython_stdlib/full/keyword/upstream/Lib/keyword.py");
+const KEYWORD_SOURCE: &str = include_str!("../stdlib/keyword.py");
 
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
