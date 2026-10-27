@@ -47,7 +47,7 @@ class IndexOnly:
         return 5
 
 
-def main():
+def current():
     big = (1 << 200) + 1
     obj = Number()
     obj.marker = []
@@ -83,4 +83,5 @@ def main():
     assert ceil(integer) is integer and floor(real) is real
 
 
-main()
+if __name__ == "__main__":
+    current()
