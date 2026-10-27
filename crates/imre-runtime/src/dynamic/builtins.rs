@@ -209,6 +209,40 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name) || is_exception(name) || is_enum_base(name)
 }
 
+/// Native iterator classes implement both iterator slots in the runtime.
+pub(super) fn is_iterator_type(name: &str) -> bool {
+    matches!(
+        name,
+        "iterator"
+            | "generator"
+            | "list_iterator"
+            | "list_reverseiterator"
+            | "tuple_iterator"
+            | "bytes_iterator"
+            | "bytearray_iterator"
+            | "range_iterator"
+            | "longrange_iterator"
+            | "dict_keyiterator"
+            | "dict_valueiterator"
+            | "dict_itemiterator"
+            | "callable_iterator"
+            | "fieldnameiterator"
+            | "formatteriterator"
+            | "keys"
+            | "values"
+            | "items"
+            | "reversed"
+            | "enumerate"
+            | "map"
+            | "filter"
+            | "zip"
+            | "itertools.count"
+            | "itertools.repeat"
+            | super::deque::ITERATOR
+            | super::deque::REVERSE_ITERATOR
+    )
+}
+
 /// Recognize the native classes that provide Enum's member methods.
 pub(super) fn is_enum_base(name: &str) -> bool {
     matches!(
