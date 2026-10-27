@@ -573,11 +573,24 @@ impl Context {
         )
     }
 
+    /// Resolve repr on heap instances and exceptions that retain their Python class.
+    fn repr_slot(&self, id: Id) -> Option<(Id, Id)> {
+        let class = match self.heap.get(id) {
+            Value::Instance { class, .. }
+            | Value::Raised(Error {
+                class: Some(class), ..
+            }) => *class,
+            _ => return None,
+        };
+        self.class_attr(class, "__repr__").map(|slot| (class, slot))
+    }
+
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
-        let Some(hook) = self.bound_slot(id, "__repr__")? else {
+        let Some((class, slot)) = self.repr_slot(id) else {
             return Ok(None);
         };
+        let hook = self.bind_attribute(slot, id, class)?;
         let result = self.call(hook, Vec::new(), Vec::new())?;
         if self.str_value(result).is_err() {
             return Err(Error::new(
@@ -598,10 +611,7 @@ impl Context {
         work: &mut [FormatPart],
         ancestors: &[Id],
     ) -> Result<Option<String>> {
-        let Value::Instance { class, .. } = self.heap.get(id) else {
-            return Ok(None);
-        };
-        if self.class_attr(*class, "__repr__").is_none() {
+        if self.repr_slot(id).is_none() {
             return Ok(None);
         }
         let mark = self.heap.temporary_mark();
