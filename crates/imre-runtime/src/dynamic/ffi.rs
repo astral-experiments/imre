@@ -251,11 +251,7 @@ impl Context {
                 } else {
                     self.str_value(c)?.to_owned()
                 };
-                let s = if spec.is_empty() {
-                    self.display(value)
-                } else {
-                    builtins::format_value(self, value, &spec)?
-                };
+                let s = builtins::format_value(self, value, &spec)?;
                 Ok(self.text(s))
             }
             "take_error" => {
