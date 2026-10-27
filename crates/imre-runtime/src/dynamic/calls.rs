@@ -9,6 +9,18 @@ pub(super) enum MappingOperation {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if name == "__hash__" {
+            if matches!(self.heap.get(class), Value::Native(_)) {
+                return self.own_class_attr(class, name);
+            }
+            return self
+                .find_in_mro(class, |base| {
+                    let slot = self.own_class_attr(base, name);
+                    (slot.is_some() || matches!(self.heap.get(base), Value::Native(_)))
+                        .then_some(slot)
+                })
+                .flatten();
+        }
         self.find_in_mro(class, |base| self.own_class_attr(base, name))
     }
 
@@ -29,6 +41,15 @@ impl Context {
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Native(kind) if name == "__hash__" && kind == "object" => {
+                self.builtins.get("object.__hash__").copied()
+            }
+            Value::Native(kind)
+                if name == "__hash__"
+                    && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
+            {
+                Some(NONE)
+            }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 "__new__" => self
                     .builtins
@@ -1620,7 +1641,11 @@ impl Context {
                 if class == "object"
                     && matches!(
                         name,
-                        "__getattribute__" | "__setattr__" | "__delattr__" | "__init__"
+                        "__hash__"
+                            | "__getattribute__"
+                            | "__setattr__"
+                            | "__delattr__"
+                            | "__init__"
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
