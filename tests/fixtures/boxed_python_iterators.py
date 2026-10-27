@@ -40,10 +40,29 @@ class Broken(Cursor):
         raise ValueError("broken")
 
 
+class FailedIterable:
+    def __iter__(self):
+        raise TypeError("from iter")
+
+
+class FailedCursor:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise TypeError("from next")
+
+
 def current():
     values = iter([1, 0, 7])
     print(all([]), all(values), next(values))
 
+
+    for source in (FailedIterable(), FailedCursor()):
+        try:
+            print(1 in source)
+        except TypeError as error:
+            print(error.args)
     cursor = Cursor()
     cursor.__iter__ = lambda: []
     print(iter(cursor) is cursor)
