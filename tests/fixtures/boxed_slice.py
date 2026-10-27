@@ -1,3 +1,15 @@
+class ReplacingIndex:
+    def __init__(self, source):
+        self.source = source
+
+    def __index__(self):
+        self.source.pop()
+        self.source.append("updated")
+        for i in range(12000):
+            scratch = [i]
+        return 0
+
+
 class Recorder:
     def __getitem__(self, key):
         return key
@@ -16,6 +28,8 @@ class Index:
 
 
 def current():
+    values = [str(430508) + "-old"]
+    print(values[ReplacingIndex(values):], values)
     holder = []
     part = slice(holder)
     print(type(part) is slice, isinstance(part, slice), isinstance(slice, type))

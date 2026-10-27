@@ -697,8 +697,10 @@ impl Context {
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
             ));
         }
+        // Bound conversions can replace or collect the original elements.
+        let bounds = super::slice::sequence_components(self, parts)?;
         let vals = self.items(obj)?;
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, vals.len())?;
+        let [start, end, step] = super::slice::normalize(bounds, vals.len() as i64);
         let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
         match self.heap.get(obj) {
             Value::Str(_) => {
