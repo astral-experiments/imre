@@ -324,7 +324,9 @@ impl Function<'_, '_> {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) if self.output.keep_docstrings => {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts)
+                if self.output.keep_docstrings =>
+            {
                 crate::frontend::docstring(stmts)
             }
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
