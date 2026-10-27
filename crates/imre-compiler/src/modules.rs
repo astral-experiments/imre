@@ -744,6 +744,7 @@ impl IntrinsicModule {
             (Self::Numbers, "Number") => Intrinsic::Number,
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
+            (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }

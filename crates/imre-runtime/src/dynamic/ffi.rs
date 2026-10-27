@@ -434,6 +434,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
+    crate::integer_text::imre_integer_digits_init(u32::from(
+        config["isolated"].as_bool().unwrap_or(false),
+    ));
     let executable = config["executable"]
         .as_str()
         .map(PathBuf::from)
