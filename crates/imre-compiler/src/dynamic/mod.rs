@@ -487,6 +487,10 @@ pub(crate) fn compile(
                     } else {
                         inputs.missing.extend([init, file]);
                         if stem.is_dir() {
+                            inputs.directories.push((
+                                stem.clone(),
+                                stem.canonicalize().map_err(|e| e.to_string())?,
+                            ));
                             sources.push((prefix.clone(), stem, String::new()));
                         } else {
                             inputs.missing.push(stem);

@@ -6147,6 +6147,9 @@ impl<'a> Checker<'a> {
                 return Ok(module);
             }
             if let Binding::Module(id) = target {
+                if self.graph.modules[id].is_namespace() {
+                    return Err(self.object_runtime_export("a namespace package value", expression));
+                }
                 return Ok(Expr {
                     ty: Type::SourceModule,
                     kind: ExprKind::Builtin(

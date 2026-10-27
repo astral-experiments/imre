@@ -1282,12 +1282,30 @@ pub(crate) struct SourceModule {
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
-    root_index: usize,
+    search_roots: SearchRoots,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
     pub(crate) archive: Option<PathBuf>,
 }
 
+enum SearchRoots {
+    Single(usize),
+    Namespace(Vec<usize>),
+}
+
+impl SearchRoots {
+    fn contains(&self, index: usize) -> bool {
+        match self {
+            Self::Single(root) => *root == index,
+            Self::Namespace(roots) => roots.contains(&index),
+        }
+    }
+}
+
 impl SourceModule {
+    pub(crate) fn is_namespace(&self) -> bool {
+        matches!(self.search_roots, SearchRoots::Namespace(_))
+    }
+
     /// Bundled contexts whose enter returns the receiver and whose exit closes it.
     pub(crate) fn closes_context(&self, class: &str) -> bool {
         (self.is_bundled("selectors") && class == "PollSelector")
@@ -1379,7 +1397,7 @@ impl SourceGraph {
         let mut modules = self.modules.iter().enumerate();
         inputs.files.retain(|_| {
             let (id, module) = modules.next().expect("one input per module");
-            !module.bundled && !(id == self.entry && self.virtual_command)
+            !module.bundled && !module.is_namespace() && !(id == self.entry && self.virtual_command)
         });
         let paths = inputs
             .files
@@ -2304,7 +2322,7 @@ impl<'a> Loader<'a> {
             bundled: false,
             parsed,
             is_package,
-            root_index: 0,
+            search_roots: SearchRoots::Single(0),
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
@@ -3314,17 +3332,17 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
-        // A package owns its entire subtree, even when another search root contains
-        // a directory with the same name. Only top-level imports search all roots.
+        // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
-        let parent_root = parent.map(|(id, _)| self.modules[id].root_index);
+        let parent_roots = parent.map(|(id, _)| &self.modules[id].search_roots);
         let roots = std::iter::once(&self.root).chain(&self.extension_roots);
         let mut resolved = None;
+        let mut portions = Vec::new();
         for (root_index, root) in roots.enumerate() {
             if root_index == 0 && self.skip_current_root {
                 continue;
             }
-            if parent_root.is_some_and(|index| index != root_index) {
+            if parent_roots.is_some_and(|roots| !roots.contains(root_index)) {
                 continue;
             }
             let base = root.join(&relative);
@@ -3360,6 +3378,14 @@ impl<'a> Loader<'a> {
                     ));
                 } else {
                     self.inputs.missing.push(source);
+                    if installed {
+                        self.inputs.missing.extend([archive, stub]);
+                    }
+                    if self.fs.is_dir(&base) {
+                        portions.push((root_index, root.clone(), base));
+                    } else {
+                        self.inputs.missing.push(base);
+                    }
                     continue;
                 }
             };
@@ -3376,10 +3402,31 @@ impl<'a> Loader<'a> {
             break;
         }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
-            return Err(format!(
-                "cannot resolve first-party module {name:?} under {}; external and namespace-package imports are unsupported",
-                self.root.display()
-            ));
+            if portions.is_empty() {
+                return Err(format!(
+                    "cannot resolve first-party module {name:?} under {}",
+                    self.root.display()
+                ));
+            }
+            let path = portions[0].2.clone();
+            let mut indices = Vec::with_capacity(portions.len());
+            for (index, root, dir) in portions {
+                let identity = self.fs.canonicalize(&dir).map_err(|e| e.to_string())?;
+                if !identity.starts_with(&root) {
+                    return Err(format!(
+                        "namespace {name:?} resolves outside its module root"
+                    ));
+                }
+                self.inputs.directories.push((dir, identity));
+                indices.push(index);
+            }
+            // Give the semantic database an empty module without creating an initializer
+            // that would hide portions from later roots.
+            let id = self.add(path.join("<namespace>.py"), path, name.into(), true, "")?;
+            self.modules[id].search_roots = SearchRoots::Namespace(indices);
+            self.scan(id)?;
+            self.bind_child(name, id, parent)?;
+            return Ok(id);
         };
         if archive.is_some() {
             let leaf = name.rsplit('.').next().unwrap();
@@ -3410,7 +3457,7 @@ impl<'a> Loader<'a> {
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
         let id = self.add(path, identity, name.to_owned(), is_package, &source)?;
-        self.modules[id].root_index = root_index;
+        self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
         self.scan(id)?;
         self.bind_child(name, id, parent)?;
@@ -3569,6 +3616,7 @@ fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
 
 #[cfg(test)]
 mod native_tests {
+    use super::SourceGraph;
     use std::fs;
 
     #[test]
@@ -3663,6 +3711,43 @@ mod native_tests {
                 .unwrap()
                 .contains("cannot resolve first-party module")
         );
+    }
+
+    #[test]
+    fn namespace_portions_track_directory_changes_and_concrete_module_precedence() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let extension = root.join("extension");
+        let namespace = root.join("space");
+        let other_portion = extension.join("space");
+        fs::create_dir(&namespace).unwrap();
+        fs::create_dir_all(&other_portion).unwrap();
+        let entry = root.join("program.py");
+        fs::write(&entry, "import space\n").unwrap();
+        let load =
+            || SourceGraph::load(&entry, Some(&root), std::slice::from_ref(&extension)).unwrap();
+
+        let mut graph = load();
+        let (inputs, _) = graph.disk_inputs(None);
+        assert!(inputs.fresh());
+        fs::remove_dir(&other_portion).unwrap();
+        assert!(!inputs.fresh());
+        fs::create_dir(&other_portion).unwrap();
+        assert!(inputs.fresh());
+
+        let stub = extension.join("space.pyi");
+        fs::write(&stub, "def read() -> int: ...\n").unwrap();
+        assert!(!inputs.fresh());
+        fs::remove_file(stub).unwrap();
+        assert!(inputs.fresh());
+
+        let module = extension.join("space.py");
+        fs::write(&module, "value = 42\n").unwrap();
+        assert!(!inputs.fresh());
+        let mut graph = load();
+        let (_, paths) = graph.disk_inputs(None);
+        assert!(paths.contains(&module));
+        assert!(!paths.contains(&namespace.join("__init__.py")));
     }
 
     #[test]
