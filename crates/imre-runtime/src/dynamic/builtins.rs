@@ -360,13 +360,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
-                "add" | "copy" | "discard" | "update" | "issuperset" | "__contains__"
+                "add" | "copy" | "discard" | "update" | "issuperset" | "__contains__" | "__repr__"
             ) =>
         {
             "set"
         }
         Value::Set { frozen: true, .. }
-            if matches!(attr, "copy" | "issuperset" | "__contains__") =>
+            if matches!(attr, "copy" | "issuperset" | "__contains__" | "__repr__") =>
         {
             "frozenset"
         }

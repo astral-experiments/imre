@@ -79,6 +79,45 @@ def current():
     assert keys & [1, 3] == {3} and [1, 3] - keys == {1}
     left -= keys
     assert left == set() and alias == {2}
+    for kind, empty, one in ((set, "set()", "{1}"), (frozenset, "frozenset()", "frozenset({1})")):
+        slot = kind.__repr__
+        value = kind([1])
+        assert type(slot).__name__ == "wrapper_descriptor"
+        assert slot.__objclass__ is kind and slot is kind.__repr__
+        assert slot(kind()) == empty and slot(value) == one
+        assert slot.__get__(value)() == one and value.__repr__() == one
+
+    class Mutable(set):
+        def __repr__(self):
+            return "override"
+
+    class Frozen(frozenset):
+        pass
+
+    assert set.__repr__(Mutable([1])) == "Mutable({1})"
+    assert repr(Mutable([1])) == "override"
+    assert frozenset.__repr__(Frozen([1])) == "Frozen({1})"
+    assert Frozen.__repr__ is frozenset.__repr__
+
+    from weakref import proxy
+
+    for owner, target in ((set, Mutable()), (frozenset, Frozen())):
+        receiver = proxy(target)
+        assert isinstance(receiver, owner)
+        name = owner.__name__
+        for operation, message in (
+            (lambda: owner.__repr__(receiver),
+             f"descriptor '__repr__' requires a '{name}' object but received a 'weakref.ProxyType'"),
+            (lambda: owner.__repr__.__get__(receiver, owner),
+             f"descriptor '__repr__' for '{name}' objects doesn't apply to a 'weakref.ProxyType' object"),
+        ):
+            try:
+                operation()
+            except TypeError as error:
+                assert str(error) == message
+            else:
+                raise AssertionError("set repr descriptor accepted a weak proxy")
+
     print("ok")
 
 
