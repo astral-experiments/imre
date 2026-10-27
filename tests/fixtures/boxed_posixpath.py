@@ -100,3 +100,42 @@ def current():
 
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))
+
+    from os import PathLike
+    from types import GenericAlias
+
+    assert PathLike is os.PathLike and PathLike.__module__ == "os"
+    assert PathLike.__abstractmethods__ == frozenset(("__fspath__",))
+    alias = PathLike[str]
+    assert type(alias) is GenericAlias and alias.__origin__ is PathLike
+    assert alias.__args__ == (str,)
+    assert (str | bytes | alias).__args__ == (str, bytes, alias)
+
+    class Slotted(PathLike):
+        __slots__ = ()
+
+        def __fspath__(self):
+            return b"native"
+
+    class RefusesSubclasses(Slotted):
+        @classmethod
+        def __subclasshook__(cls, child):
+            return False
+
+    assert isinstance(RefusesSubclasses(), RefusesSubclasses)
+    assert not issubclass(RefusesSubclasses, RefusesSubclasses)
+
+    class Disabled(Path):
+        __fspath__ = None
+
+    assert issubclass(Path, PathLike) and isinstance(Path("x"), PathLike)
+    assert PathLike.__subclasshook__(NoMethod) is True
+    assert PathLike.__subclasshook__(Disabled) is NotImplemented
+    assert not issubclass(Disabled, PathLike) and not issubclass(Path, Slotted)
+    assert not hasattr(Slotted(), "__dict__") and os.fspath(Slotted()) == b"native"
+
+    class Virtual:
+        pass
+
+    assert PathLike.register(Virtual) is Virtual
+    assert issubclass(Virtual, PathLike) and isinstance(Virtual(), PathLike)
