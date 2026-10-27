@@ -530,7 +530,11 @@ impl Context {
                     Ok(Some(step)) => return Ok(step),
                     Ok(None) => (),
                     Err(mut e) => {
-                        self.record_exception_frame(&mut e, None);
+                        let reraising = matches!(op, Instruction::Raise(s) if s.exc.is_none())
+                            && self.heap.active_exception() != NONE;
+                        if !reraising {
+                            self.record_exception_frame(&mut e, None);
+                        }
                         return Err(e);
                     }
                 }
