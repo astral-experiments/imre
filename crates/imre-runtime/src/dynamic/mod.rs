@@ -17,6 +17,7 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod thread_local;
 mod typing;
 mod value;
 mod zip;
@@ -24,7 +25,9 @@ mod zip;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use value::{Code, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value};
+use value::{
+    Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
+};
 
 struct SourceModule {
     path: PathBuf,
@@ -177,8 +180,8 @@ impl Context {
     fn is_native_iterator(&self, id: Id) -> bool {
         matches!(
             self.heap.get(id),
-            Value::DictionaryIterator(_)
-                | Value::Iterator { .. }
+            Value::Iterator { .. }
+                | Value::DictIterator(_)
                 | Value::AstWalk(_)
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -197,15 +200,15 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
-            Value::DictView { dict, kind } => return Ok(self.dictionary_iterator(dict, kind)),
-            Value::Dict(_) | Value::DefaultDict { .. } => {
-                return Ok(self.dictionary_iterator(id, value::DictViewKind::Keys));
-            }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
             Value::ByteArray(_) => (id, "bytearray_iterator"),
             Value::Range { .. } => (id, "range_iterator"),
+            Value::Dict(_) | Value::DefaultDict { .. } => {
+                return Ok(self.dict_iterator(id, DictViewKind::Keys));
+            }
+            Value::DictView { dict, kind } => return Ok(self.dict_iterator(dict, kind)),
             Value::Instance { class, .. }
                 if let Some(slot) = self.class_attr(class, "__iter__") =>
             {
@@ -241,12 +244,22 @@ impl Context {
         }))
     }
 
+    /// Start a cursor at the first entry without copying keys or values.
+    fn dict_iterator(&mut self, dict: Id, kind: DictViewKind) -> Id {
+        let size = self
+            .dict_entries(dict)
+            .expect("dictionary iterator source")
+            .len();
+        self.alloc(Value::DictIterator(DictIterator::new(dict, kind, size)))
+    }
+
     /// Compiled loops test for an item before consuming it. User code must advance only once.
     fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
         let source = self.iterator(iterable)?;
         if matches!(
             self.heap.get(source),
             Value::Instance { .. }
+                | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Generator { .. }
                 | Value::File(_)
@@ -314,9 +327,6 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if matches!(self.heap.get(id), Value::DictionaryIterator(_)) {
-            return Ok(self.dictionary_entry(id)?.is_some());
-        }
         if let Value::AstWalk(queue) = self.heap.get(id) {
             return Ok(!queue.is_empty());
         }
@@ -368,8 +378,13 @@ impl Context {
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } | Value::Zip { .. } => {}
-            Value::DictionaryIterator(_) => return self.next_dictionary_item(id),
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::DictIterator(iter) => {
+                let mut iter = *iter;
+                let item = iter.next(self);
+                *self.heap.get_mut(id) = Value::DictIterator(iter);
+                return item;
+            }
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
             Value::Repeat(repeat) => return Ok(repeat.next()),
@@ -431,8 +446,9 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::DictionaryIterator(_)
-                | Value::AstWalk(_)
+            Value::AstWalk(_)
+                | Value::DictIterator(_)
+                | Value::DictView { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -469,7 +485,6 @@ impl Context {
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
             Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
-            Value::DictView { dict, kind } => builtins::view_items(self, dict, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())

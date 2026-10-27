@@ -205,9 +205,6 @@ impl Context {
             Err(error) if error.kind == "TypeError" => {}
             Err(error) => return Err(error),
         }
-        if let Value::DictionaryIterator(cursor) = self.heap.get(value) {
-            return Ok(self.int(self.dictionary_hint(cursor) as i64));
-        }
         if matches!(self.heap.get(value), Value::Iterator { .. }) {
             let length = i64::try_from(self.iterator_remaining(value)?.len()).map_err(|_| {
                 Error::new(
@@ -216,6 +213,9 @@ impl Context {
                 )
             })?;
             return Ok(self.int(length));
+        }
+        if let Value::DictIterator(iter) = self.heap.get(value) {
+            return Ok(self.int(iter.length_hint(self) as i64));
         }
         if let Value::Repeat(repeat) = self.heap.get(value) {
             return Ok(self.int(repeat.remaining.map_or(default, |n| n as i64)));
