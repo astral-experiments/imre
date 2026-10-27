@@ -1,6 +1,13 @@
 """POSIX lexical operations shared by os.path and posixpath."""
 import os
-from _imre_posixpath import extension_start, isfile as _isfile
+from _imre_posixpath import exists as _exists, extension_start, isfile as _isfile
+
+
+def exists(path):
+    try:
+        return _exists(path)
+    except (OSError, ValueError):
+        return False
 
 
 def isfile(path):

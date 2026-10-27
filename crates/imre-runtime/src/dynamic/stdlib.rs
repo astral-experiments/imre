@@ -32,6 +32,7 @@ mod marshal;
 mod math;
 mod operator;
 mod ordered_dict;
+mod os;
 mod pickle;
 mod pkgutil;
 mod posixpath;
@@ -445,6 +446,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
         }
+        ("posix", "environ") => os::environment(ctx),
+        ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
@@ -480,7 +483,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
-        | ("_imre_posixpath", "extension_start" | "isfile")
+        | ("_imre_posixpath", "exists" | "extension_start" | "isfile")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
@@ -770,6 +773,9 @@ pub(super) fn call(
         || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
+    }
+    if matches!(name, "posix.putenv" | "posix.unsetenv") {
+        return os::change_environment(ctx, name, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
         return pkgutil::call(ctx, operation, args, kwargs);
