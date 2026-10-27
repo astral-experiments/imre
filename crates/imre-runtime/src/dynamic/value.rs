@@ -659,6 +659,8 @@ pub(super) enum Value {
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
+        table: Id,
+        marker: Id,
     },
     Yielded(Id),
     AstWalk {
@@ -736,9 +738,8 @@ pub(super) enum FormatKind {
 
 #[derive(Clone)]
 pub(super) struct CachedCall {
-    pub args: Vec<Id>,
-    pub kwargs: Vec<(String, Id)>,
-    pub result: Id,
+    pub key: Id,
+    pub hash: i64,
 }
 
 impl Value {
@@ -962,13 +963,14 @@ impl Value {
                 visit.extend([*function, *args, *keywords]);
                 visit.extend(coroutine_marker);
             }
-            Self::Cached { function, entries } => {
-                visit.push(*function);
-                for call in entries {
-                    visit.extend(&call.args);
-                    visit.extend(call.kwargs.iter().map(|(_, id)| *id));
-                    visit.push(call.result);
-                }
+            Self::Cached {
+                function,
+                entries,
+                table,
+                marker,
+            } => {
+                visit.extend([*function, *table, *marker]);
+                visit.extend(entries.iter().map(|call| call.key));
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
