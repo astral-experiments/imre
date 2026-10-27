@@ -1278,10 +1278,7 @@ pub(super) fn call(
                 && matches!(ctx.heap.get(args[0]), Value::Function { .. })
                 && kwargs.is_empty()
             {
-                ctx.alloc(Value::Cached {
-                    function: args[0],
-                    entries: Vec::new(),
-                })
+                ctx.cached_function(args[0])
             } else {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -1289,10 +1286,7 @@ pub(super) fn call(
                 ));
             }
         }
-        "functools._cached" => ctx.alloc(Value::Cached {
-            function: argument(args, 0)?,
-            entries: Vec::new(),
-        }),
+        "functools._cached" => ctx.cached_function(argument(args, 0)?),
         "collections.defaultdict" => ctx.alloc(Value::DefaultDict {
             factory: args.first().copied().unwrap_or(NONE),
             entries: Default::default(),

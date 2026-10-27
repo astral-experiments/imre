@@ -763,6 +763,30 @@ impl Context {
         }
     }
 
+    /// Insert a cache entry and identify the actual resident after reentrant comparison.
+    pub(in super::super) fn set_cache_key(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+        hash: i64,
+    ) -> Result<Id> {
+        self.heap.keep(value);
+        let (_, index) = self.find_dictionary_key(dict, key, Some(hash))?;
+        let entries = self.stored_entries_mut(dict);
+        if let Some(index) = index {
+            let resident = entries[index].0;
+            let previous = std::mem::replace(&mut entries[index].1, value);
+            if previous != value {
+                self.heap.weak_edge_removed(previous);
+            }
+            Ok(resident)
+        } else {
+            entries.push((key, value), hash);
+            Ok(key)
+        }
+    }
+
     pub(in super::super) fn set_dictionary_key(
         &mut self,
         dict: Id,
