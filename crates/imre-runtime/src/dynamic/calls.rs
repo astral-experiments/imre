@@ -70,6 +70,23 @@ impl Context {
         self.class_attr(error.class?, name)
     }
 
+    /// Bind an override only if it precedes the built-in numeric method in the MRO.
+    pub(super) fn bound_numeric_slot(&mut self, value: Id, slot: &str) -> Result<Option<Id>> {
+        let class = match *self.heap.get(value) {
+            Value::Instance { class, .. } => class,
+            Value::Raised(_) => self.exact_type(value)?,
+            _ => return Ok(None),
+        };
+        let method = self.find_in_mro(class, |base| match self.heap.get(base) {
+            Value::Native(name) if matches!(name.as_str(), "int" | "float") => Some(None),
+            _ => self.own_class_attr(base, slot).map(Some),
+        });
+        method
+            .flatten()
+            .map(|method| self.bind_attribute(method, value, class))
+            .transpose()
+    }
+
     /// Special methods are looked up on the type, even if the instance shadows them.
     pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
         let Value::Instance { class, .. } = self.heap.get(object) else {
