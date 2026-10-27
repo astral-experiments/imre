@@ -457,7 +457,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("subprocess", "PIPE") => ctx.int(-1),
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
-        ("sys", "exit" | "exc_info" | "exception")
+        ("sys", "exit" | "exc_info" | "exception" | "intern" | "_is_interned")
         | (
             "sysconfig",
             "get_path"
@@ -485,7 +485,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "urllib.parse",
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
-            | "quote_plus" | "quote_from_bytes",
+            | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
         | ("hashlib", "sha1" | "sha256")
         | ("hmac", "new" | "HMAC" | "compare_digest")
@@ -614,6 +614,46 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "sys.intern" | "sys._is_interned") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
+        }
+        let [value] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes exactly one argument ({} given)", args.len()),
+            ));
+        };
+        let operation = name.trim_start_matches("sys.");
+        let query = operation == "_is_interned";
+        let Some(storage) = ctx.string_storage(*value) else {
+            let class = if *value == NONE {
+                "None"
+            } else {
+                ctx.type_name(*value)
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("{operation}() argument must be str, not {class}"),
+            ));
+        };
+        if query {
+            return Ok(super::builtins::boolean(
+                storage == *value && ctx.heap.is_interned(*value),
+            ));
+        }
+        if storage != *value {
+            return Err(Error::new(
+                "TypeError",
+                format!("can't intern {}", ctx.type_name(*value)),
+            ));
+        }
+        let (heap, roots) = ctx.heap_and_roots();
+        return Ok(heap.intern(*value, roots));
+    }
     if name == "random.random" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -717,6 +757,12 @@ pub(super) fn call(
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == super::deque::CLASS {
+        return super::deque::construct(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("collections.deque.") {
+        return super::deque::method(ctx, method, args, kwargs);
     }
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);

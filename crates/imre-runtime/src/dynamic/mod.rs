@@ -5,6 +5,7 @@ mod abstract_class;
 mod builtins;
 mod calls;
 mod complex;
+mod deque;
 mod dictionary;
 mod enums;
 mod ffi;
@@ -15,6 +16,7 @@ mod mapping_abc;
 mod module_type;
 mod operators;
 mod property;
+mod range;
 mod slice;
 mod source_code;
 mod static_method;
@@ -26,6 +28,7 @@ mod typing;
 mod union;
 mod value;
 mod weakref;
+mod wrapper_descriptor;
 mod zip;
 
 use std::collections::HashMap;
@@ -46,7 +49,6 @@ enum IteratorSlice<'a> {
     Values(&'a [Id]),
     Reversed(&'a [Id]),
     Bytes(&'a [u8]),
-    Range { value: i128, len: usize },
 }
 
 impl IteratorSlice<'_> {
@@ -55,7 +57,6 @@ impl IteratorSlice<'_> {
         match self {
             Self::Values(values) | Self::Reversed(values) => values.len(),
             Self::Bytes(bytes) => bytes.len(),
-            Self::Range { len, .. } => *len,
         }
     }
 }
@@ -234,6 +235,8 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::RangeIterator(_)
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
@@ -264,11 +267,21 @@ impl Context {
         }
         let (sequence, kind) = match *self.heap.get(id) {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
+            Value::Deque(ref ring) => {
+                let cursor = Value::DequeIterator {
+                    deque: id,
+                    state: ring.state,
+                    remaining: ring.items.len(),
+                };
+                return Ok(self.alloc(cursor));
+            }
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
             Value::ByteArray(_) => (id, "bytearray_iterator"),
-            Value::Range { .. } => (id, "range_iterator"),
+            Value::Range(ref range) => {
+                return Ok(self.alloc(Value::RangeIterator(range.iter(false))));
+            }
             Value::Dict(_) | Value::DefaultDict { .. } => {
                 return Ok(self.dict_iterator(id, DictViewKind::Keys));
             }
@@ -324,6 +337,7 @@ impl Context {
         if matches!(
             self.heap.get(source),
             Value::Instance { .. }
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
@@ -365,10 +379,6 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => {
                 IteratorSlice::Bytes(bytes.get(*offset..).unwrap_or_default())
             }
-            Value::Range { start, stop, step } => IteratorSlice::Range {
-                value: i128::from(*start) + i128::from(*step) * *offset as i128,
-                len: builtins::range_len(*start, *stop, *step)?.saturating_sub(*offset),
-            },
             _ => unreachable!("iterator sequence"),
         })
     }
@@ -380,6 +390,9 @@ impl Context {
         }
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
+        }
+        if let Value::RangeIterator(iter) = self.heap.get(id) {
+            return Ok(iter.remaining.as_small() != Some(0));
         }
         if let Value::Repeat(repeat) = self.heap.get(id) {
             return Ok(repeat.remaining != Some(0));
@@ -442,6 +455,24 @@ impl Context {
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
+            Value::DequeIterator {
+                deque,
+                state,
+                remaining,
+            } => {
+                let (deque, state, remaining) = (*deque, *state, *remaining);
+                let Value::Deque(ring) = self.heap.get(deque) else {
+                    unreachable!()
+                };
+                let item = ring.cursor_item(state, remaining, false)?.copied();
+                if item.is_some() {
+                    let Value::DequeIterator { remaining, .. } = self.heap.get_mut(id) else {
+                        unreachable!()
+                    };
+                    *remaining -= 1;
+                }
+                return Ok(item);
+            }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
@@ -456,6 +487,10 @@ impl Context {
                 return self.next_enumerated(id, input);
             }
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::RangeIterator(iter) => {
+                let item = iter.next()?;
+                return Ok(item.map(|n| self.alloc(Value::Int(n))));
+            }
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Map { .. } => return self.next_zip_or_map(id),
             Value::Zip { .. } => {
@@ -504,7 +539,6 @@ impl Context {
             IteratorSlice::Values(values) => values[0],
             IteratorSlice::Reversed(values) => values[values.len() - 1],
             IteratorSlice::Bytes(bytes) => self.int(i64::from(bytes[0])),
-            IteratorSlice::Range { value, .. } => self.int(value as i64),
         };
         if let Value::Iterator {
             offset, reverse, ..
@@ -523,6 +557,7 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::DequeIterator { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
@@ -543,6 +578,14 @@ impl Context {
                 items.push(item);
             }
             return Ok(items);
+        }
+        if let Value::Deque(ring) = self.heap.get(id) {
+            let mut values = Vec::new();
+            values
+                .try_reserve(ring.items.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            values.extend(&ring.items);
+            return Ok(values);
         }
         if let Some(values) = self.enum_values(id) {
             let Value::Dict(entries) = self.heap.get(values) else {
@@ -565,7 +608,26 @@ impl Context {
                 Ok(entries.into_iter().map(|(key, _)| key).collect())
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
-            Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
+            Value::Range(_) | Value::RangeIterator(_) => {
+                let iter = self.iterator(id)?;
+                let Value::RangeIterator(cursor) = self.heap.get(iter) else {
+                    unreachable!()
+                };
+                let size = cursor.remaining.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+                let mut items = Vec::new();
+                items
+                    .try_reserve_exact(size as usize)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                while let Some(item) = self.next_item(iter)? {
+                    items.push(item);
+                }
+                Ok(items)
+            }
             Value::MappingView { mapping, kind } => mapping_abc::view_items(self, mapping, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
@@ -575,7 +637,7 @@ impl Context {
                 let values = match self.iterator_remaining(id)? {
                     IteratorSlice::Values(values) => values.to_vec(),
                     IteratorSlice::Reversed(values) => values.iter().rev().copied().collect(),
-                    remaining @ (IteratorSlice::Bytes(_) | IteratorSlice::Range { .. }) => {
+                    remaining @ IteratorSlice::Bytes(_) => {
                         let mut values = Vec::new();
                         values.try_reserve_exact(remaining.len()).map_err(|_| {
                             Error::new("MemoryError", "iterator is too large to materialize")
@@ -713,10 +775,8 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get_mut(cell)
-        {
-            return Ok(contents.take().is_some());
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+            return Ok(self.heap.replace_cell(cell, None).is_some());
         }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
@@ -744,10 +804,8 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get_mut(cell)
-        {
-            *contents = Some(value);
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+            self.heap.replace_cell(cell, Some(value));
             return;
         }
         if let Some(namespace) = self.scope_data(scope).namespace {
@@ -1178,6 +1236,8 @@ impl Context {
                 }
             }
             "collections" => {
+                let deque = self.builtin(deque::CLASS);
+                self.bind(scope, "deque", deque);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);
                 self.modules.insert("collections.abc".to_owned(), abc);

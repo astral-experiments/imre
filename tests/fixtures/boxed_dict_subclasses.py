@@ -25,8 +25,40 @@ def inherited_deletion():
     print(dict.__delitem__(override, "x"), dict(override))
 
 
+def representation_descriptor():
+    class Inherited(dict):
+        pass
+
+    class Override(Inherited):
+        def __repr__(self):
+            return "custom mapping"
+
+    from collections import defaultdict
+
+    slot = dict.__repr__
+    print(type(slot).__name__, slot.__name__, slot.__qualname__, slot.__objclass__ is dict)
+    print({slot: "dictionary"}[Inherited.__repr__], slot.__get__(None, Inherited) is slot)
+    data = Override(a=1)
+    bound = slot.__get__(data, Override)
+    print(type(bound).__name__, bound.__self__ is data, bound(), repr(data))
+    data["a"] = 2
+    print(slot(data), Inherited(a=3).__repr__())
+    default = defaultdict(list)
+    default["value"] = 12
+    print(slot(default))
+    recursive = {}
+    recursive["again"] = recursive
+    print(slot(recursive))
+    for call in (lambda: slot(), lambda: slot(1), lambda: slot({}, 2),
+                 lambda: slot({}, key=2), lambda: slot.__get__(1, dict)):
+        try:
+            call()
+        except TypeError as exc:
+            print(str(exc))
+
+
 def current():
-    from collections import Counter
+    from collections import Counter, defaultdict
     from collections import _count_elements
     from _collections import _count_elements as native_count
 
@@ -56,7 +88,29 @@ def current():
     counts["b"] = 2
     print(list(elements))
 
+    order = counts.keys()
+    print(Counter.clear(counts), list(order), counts["absent"])
+    groups = defaultdict(list)
+    saved = groups["key"]
+    saved.append(7)
+    print(groups.clear(), groups["key"], saved)
+    print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
+
+    class ClearOnCompare:
+        def __hash__(self):
+            return 1
+
+        def __eq__(self, other):
+            collision.clear()
+            return False
+
+    collision = {}
+    for _ in range(3):
+        collision[ClearOnCompare()] = 0
+    print(len(collision))
+
     inherited_deletion()
+    representation_descriptor()
     class Data(dict):
         pass
 

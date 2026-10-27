@@ -1,6 +1,6 @@
 //! First-class slice objects for runtime-loaded Python.
 use num_bigint::BigInt;
-use num_traits::{Signed, ToPrimitive};
+use num_traits::Signed;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::Int;
@@ -203,24 +203,14 @@ fn indices(ctx: &mut Context, parts: [Id; 3], length: BigInt) -> Result<[BigInt;
 }
 
 /// Slicing a range returns its actual new endpoints and step, even for an empty range.
-pub(super) fn range(
-    ctx: &mut Context,
-    parts: [Id; 3],
-    start: i64,
-    stop: i64,
-    step: i64,
-) -> Result<Id> {
-    let len = super::builtins::range_len(start, stop, step)?;
-    let [first, last, stride] = indices(ctx, parts, BigInt::from(len))?;
-    let narrow = |n: BigInt| {
-        n.to_i64()
-            .ok_or_else(|| Error::new("OverflowError", "range bound is too large"))
-    };
-    Ok(ctx.alloc(Value::Range {
-        start: narrow(first * step + start)?,
-        stop: narrow(last * step + start)?,
-        step: narrow(stride * step)?,
-    }))
+pub(super) fn range(ctx: &mut Context, parts: [Id; 3], range: super::range::Range) -> Result<Id> {
+    let [first, last, stride] = indices(ctx, parts, range.len.big().into_owned())?;
+    let step = Int::new(stride * range.step.big().as_ref());
+    Ok(ctx.alloc(Value::Range(super::range::Range::new(
+        range.at(&first),
+        range.at(&last),
+        step,
+    )?)))
 }
 
 /// Convert Python slice indices before a caller measures potentially mutable storage.

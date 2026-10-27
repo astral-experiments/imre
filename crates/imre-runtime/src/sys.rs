@@ -4,7 +4,7 @@ use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
-pub(crate) use intern::canonical;
+pub(crate) use intern::{canonical, intern_owner};
 use std::io::{self, Write};
 mod encoding;
 pub(crate) use encoding::file_encoding;

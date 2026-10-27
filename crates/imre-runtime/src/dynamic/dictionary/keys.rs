@@ -169,6 +169,16 @@ impl Index {
 }
 
 impl Entries {
+    /// Remove all pairs and invalidate lookups suspended in a key comparison.
+    pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
+        let old = std::mem::take(self);
+        if let Some(index) = old.index {
+            let size = (self.usable + 1).next_power_of_two();
+            self.index = Some(Index::new(Vec::new(), None, size, index.generation + 1));
+        }
+        old.values
+    }
+
     fn dense(&self, position: usize) -> Option<usize> {
         if let Some(positions) = &self.positions {
             positions.binary_search(&position).ok()
@@ -478,22 +488,22 @@ impl Context {
                         })
                     }
                 }
-                Value::Range { start, stop, step } => {
-                    let n = super::super::builtins::range_len(*start, *stop, *step)?;
-                    let a = if n == 0 {
+                Value::Range(range) => {
+                    let len = range.len.as_small();
+                    let a = if len == Some(0) {
                         0xfca8_6420
                     } else {
-                        *start % MODULUS
+                        integer_hash(&range.start)
                     };
-                    let b = if n <= 1 { 0xfca8_6420 } else { *step % MODULUS };
+                    let b = if matches!(len, Some(0 | 1)) {
+                        0xfca8_6420
+                    } else {
+                        integer_hash(&range.step)
+                    };
                     finish_tuple(
-                        [
-                            (n as u64 % MODULUS as u64) as i64,
-                            normalized(a),
-                            normalized(b),
-                        ]
-                        .into_iter()
-                        .fold(TUPLE_START, tuple_lane),
+                        [integer_hash(&range.len), normalized(a), normalized(b)]
+                            .into_iter()
+                            .fold(TUPLE_START, tuple_lane),
                         3,
                     )
                 }

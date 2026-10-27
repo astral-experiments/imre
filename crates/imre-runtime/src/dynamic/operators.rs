@@ -1,11 +1,12 @@
 use std::cmp::Ordering;
 
-use num_traits::ToPrimitive;
+use num_traits::Signed;
 
 use super::*;
 
 enum RenderRoot<'a> {
     Object(Id),
+    Dictionary { object: Id, storage: Id },
     Exception(&'a Error),
 }
 
@@ -153,6 +154,7 @@ impl Context {
             Value::Calendar { value, .. } => {
                 value.class() != "timedelta" || value.delta_parts() != (0, 0, 0)
             }
+            Value::Deque(ring) => !ring.items.is_empty(),
             Value::Str(s) => !s.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
@@ -172,13 +174,7 @@ impl Context {
                 context: Some(bindings),
                 ..
             } => !bindings.is_empty(),
-            Value::Range { start, stop, step } => {
-                if *step > 0 {
-                    start < stop
-                } else {
-                    start > stop
-                }
-            }
+            Value::Range(range) => range.len.as_small() != Some(0),
             Value::Instance { .. } => {
                 if let Some(hook) = self.bound_slot(id, "__bool__")? {
                     let value = self.call(hook, Vec::new(), Vec::new())?;
@@ -726,13 +722,19 @@ impl Context {
 
     /// Render container ancestors iteratively so recursive values do not consume the native stack.
     pub(super) fn checked_format(&mut self, root: Id, quoted: bool) -> Result<String> {
-        Self::render_containers(
-            self,
-            RenderRoot::Object(root),
-            quoted,
-            true,
-            |ctx, id, work, ancestors| ctx.element_repr(id, work, ancestors),
-        )
+        self.checked_render(RenderRoot::Object(root), quoted)
+    }
+
+    /// Bypass the receiver's repr override for an explicit dict slot. Its keys and values
+    /// still use their own hooks, including when one refers back to the receiver.
+    pub(super) fn checked_dict_repr(&mut self, object: Id, storage: Id) -> Result<String> {
+        self.checked_render(RenderRoot::Dictionary { object, storage }, true)
+    }
+
+    fn checked_render(&mut self, root: RenderRoot<'_>, quoted: bool) -> Result<String> {
+        Self::render_containers(self, root, quoted, true, |ctx, id, work, ancestors| {
+            ctx.element_repr(id, work, ancestors)
+        })
     }
 
     /// Invoke the special method once and preserve an accepted string subclass.
@@ -875,18 +877,27 @@ impl Context {
         use FormatPart as Part;
         let mut output = String::new();
         let mut work = Vec::new();
-        match root {
-            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
-            RenderRoot::Exception(error) => {
-                ctx.render_exception(error, quoted, &mut output, &mut work)?;
-            }
-        }
         let mut active = Vec::new();
         let mut ancestors: std::collections::HashSet<Id> = if checked {
             ctx.repr_ancestors.iter().copied().collect()
         } else {
             Default::default()
         };
+        match root {
+            RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
+            RenderRoot::Dictionary { object, storage } => {
+                if !ancestors.insert(object) {
+                    return Ok("{...}".to_owned());
+                }
+                output.push('{');
+                active.push(object);
+                work.push(Part::Leave(object, "}"));
+                work.push(Part::Entries(storage, 0, true));
+            }
+            RenderRoot::Exception(error) => {
+                ctx.render_exception(error, quoted, &mut output, &mut work)?;
+            }
+        }
         // CPython guards nested slice formatting against the thread's native stack.
         // The pinned x86-64 Linux reference build uses 624 bytes per slice
         // and keeps two native-stack margins before raising RecursionError.
@@ -968,7 +979,9 @@ impl Context {
                 }
                 Part::Entries(id, index, include_values) => {
                     let entry = match ctx.heap.get(id) {
-                        Value::Dict(entries) => entries.at(index),
+                        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+                            entries.at(index)
+                        }
                         Value::Set { entries, .. } => {
                             entries.get(index).map(|&(k, v)| (index, k, v))
                         }
@@ -1098,15 +1111,28 @@ impl Context {
                         }
                         _ => {}
                     }
-                    let (start, end, placeholder, entries) = match ctx.heap.get(id) {
-                        Value::List(_) => ("[", "]", "[...]", None),
+                    let (start, end, placeholder, contents) = match ctx.heap.get(id) {
+                        Value::List(_) => ("[", "]", "[...]", Part::Sequence(id, 0)),
                         Value::Tuple(items) => (
                             "(",
                             if items.len() == 1 { ",)" } else { ")" },
                             "(...)",
-                            None,
+                            Part::Sequence(id, 0),
                         ),
-                        Value::Dict(_) => ("{", "}", "{...}", Some(true)),
+                        Value::ItemGetter(keys) => {
+                            // Multi-key getters expose this same tuple through __reduce__.
+                            let (argument, start, end) = match *ctx.itemgetter_keys(*keys) {
+                                [key] => (key, "operator.itemgetter(", ")"),
+                                _ => (*keys, "operator.itemgetter", ""),
+                            };
+                            (
+                                start,
+                                end,
+                                "operator.itemgetter(...)",
+                                Part::Value(argument, true),
+                            )
+                        }
+                        Value::Dict(_) => ("{", "}", "{...}", Part::Entries(id, 0, true)),
                         Value::Set { entries, frozen } => {
                             if entries.is_empty() {
                                 output.push_str(if *frozen { "frozenset()" } else { "set()" });
@@ -1120,7 +1146,7 @@ impl Context {
                                 } else {
                                     "set(...)"
                                 },
-                                Some(false),
+                                Part::Entries(id, 0, false),
                             )
                         }
                         _ => {
@@ -1135,8 +1161,8 @@ impl Context {
                     active.push(id);
                     output.push_str(start);
                     work.push(Part::Leave(id, end));
-                    match entries {
-                        Some(false) if checked => {
+                    match contents {
+                        Part::Entries(_, _, false) if checked => {
                             // CPython renders a snapshot so a hook can mutate the original set.
                             let Value::Set { entries, .. } = ctx.heap.get(id) else {
                                 unreachable!()
@@ -1148,8 +1174,7 @@ impl Context {
                             members.extend(entries.iter().map(|&(key, _)| key));
                             work.push(Part::SetMembers(members, 0));
                         }
-                        Some(include_values) => work.push(Part::Entries(id, 0, include_values)),
-                        None => work.push(Part::Sequence(id, 0)),
+                        part => work.push(part),
                     }
                 }
             }
@@ -1503,7 +1528,7 @@ impl Context {
             Value::Str(_) => "string",
             Value::Bytes(_) => "byte",
             Value::ByteArray(_) => "bytearray",
-            Value::Range { .. } => "range",
+            Value::Range(_) => "range",
             _ => {
                 return Err(Error::new(
                     "TypeError",
@@ -1528,19 +1553,28 @@ impl Context {
             };
             Error::new("IndexError", message)
         };
-        let offset = if kind == "range" {
-            index.big().to_i128().ok_or_else(bounds_error)?
-        } else {
-            i128::from(index.to_i64().ok_or_else(|| {
-                Error::new(
-                    "IndexError",
-                    format!(
-                        "cannot fit '{}' into an index-sized integer",
-                        self.type_name(key)
-                    ),
-                )
-            })?)
-        };
+        if let Value::Range(range) = self.heap.get(storage) {
+            let index = index.big();
+            let len = range.len.big();
+            let offset = if index.is_negative() {
+                index.as_ref() + len.as_ref()
+            } else {
+                index.into_owned()
+            };
+            if offset.is_negative() || offset >= *len {
+                return Err(bounds_error());
+            }
+            return Ok(self.alloc(Value::Int(range.at(&offset))));
+        }
+        let offset = i128::from(index.to_i64().ok_or_else(|| {
+            Error::new(
+                "IndexError",
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    self.type_name(key)
+                ),
+            )
+        })?);
         // __index__ can resize a list or bytearray. Read its current storage after the call.
         let position = |len: usize| {
             let i = if offset < 0 {
@@ -1566,10 +1600,6 @@ impl Context {
                 self.text(c.to_string())
             }
             Value::Bytes(v) | Value::ByteArray(v) => self.int(i64::from(v[position(v.len())?])),
-            Value::Range { start, stop, step } => {
-                let i = position(builtins::range_len(*start, *stop, *step)?)? as i128;
-                self.int((i128::from(*start) + i * i128::from(*step)) as i64)
-            }
             _ => unreachable!(),
         })
     }
@@ -1682,8 +1712,8 @@ impl Context {
     }
     fn slice(&mut self, obj: Id, parts: [Id; 3]) -> Result<Id> {
         let obj = self.scalar_value(obj);
-        if let Value::Range { start, stop, step } = *self.heap.get(obj) {
-            return super::slice::range(self, parts, start, stop, step);
+        if let Value::Range(range) = self.heap.get(obj) {
+            return super::slice::range(self, parts, range.clone());
         }
         if !matches!(
             self.heap.get(obj),

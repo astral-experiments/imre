@@ -109,6 +109,7 @@ impl SourceMap<'_> {
 struct Output {
     keep_docstrings: bool,
     strings: HashMap<Vec<u8>, u32>,
+    interned_identifiers: BTreeSet<String>,
     positions: HashMap<[usize; 4], usize>,
     constants: String,
     functions: String,
@@ -171,6 +172,7 @@ impl Output {
     fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
+        let module = matches!(body, Body::Namespace(_)) && prefix.is_empty();
         let mut f = Function {
             output: self,
             source,
@@ -225,11 +227,25 @@ impl Output {
         if !f.terminated {
             f.end("ret i64 0");
         }
-        let entry = if f.max_live == 0 {
+        let mut entry = if f.max_live == 0 {
             String::new()
         } else {
             format!("  %live = alloca [{} x i64]\n", f.max_live)
         };
+        // A loaded code object owns its identifier-like strings before any statement runs.
+        if module && !f.output.interned_identifiers.is_empty() {
+            let names = std::mem::take(&mut f.output.interned_identifiers)
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join("\0");
+            let data = f.output.data(names.as_bytes());
+            writeln!(
+                entry,
+                "  call i64 @imre_dyn_lit(ptr %ctx, i32 5, ptr {data}, i64 {})",
+                names.len()
+            )
+            .unwrap();
+        }
         writeln!(f.output.functions,
             "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
         name
@@ -346,6 +362,13 @@ impl Function<'_, '_> {
     }
 
     fn text(&mut self, value: &str) -> String {
+        if !value.is_empty()
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            self.output.interned_identifiers.insert(value.to_owned());
+        }
         self.lit(1, value.as_bytes())
     }
     fn integer(&mut self, n: impl ToString) -> String {

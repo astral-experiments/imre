@@ -41,18 +41,25 @@ fn trim_space(line: &[u8]) -> &[u8] {
 }
 
 fn normal_name(name: &str) -> &str {
-    let first = &name[..name.len().min(12)];
-    let simple = first.to_ascii_lowercase().replace('_', "-");
+    let mut prefix = [0; 12];
+    for (out, byte) in prefix.iter_mut().zip(name.bytes()) {
+        *out = if byte == b'_' {
+            b'-'
+        } else {
+            byte.to_ascii_lowercase()
+        };
+    }
+    let simple = &prefix[..name.len().min(prefix.len())];
     for (prefix, canonical) in [
         ("utf-8", "utf-8"),
         ("latin-1", "iso-8859-1"),
         ("iso-8859-1", "iso-8859-1"),
         ("iso-latin-1", "iso-8859-1"),
     ] {
-        if simple == prefix
+        if simple == prefix.as_bytes()
             || simple
-                .strip_prefix(prefix)
-                .is_some_and(|s| s.starts_with('-'))
+                .strip_prefix(prefix.as_bytes())
+                .is_some_and(|s| s.starts_with(b"-"))
         {
             return canonical;
         }
@@ -60,8 +67,9 @@ fn normal_name(name: &str) -> &str {
     name
 }
 
-fn registry_name(name: &str) -> String {
+fn registry_name(name: &str) -> Result<String, SourceDecodeError> {
     let mut out = String::new();
+    out.try_reserve_exact(name.len())?;
     let mut separator = false;
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '.' {
@@ -74,7 +82,7 @@ fn registry_name(name: &str) -> String {
             separator = true;
         }
     }
-    out
+    Ok(out)
 }
 
 // CPython registers the OS code pages in addition to the portable registry.
@@ -102,10 +110,17 @@ fn platform_codec(_name: &str) -> bool {
 
 /// The file reader drops malformed source; compile reports the reason to Python.
 pub(crate) enum SourceDecodeError {
+    Allocation,
     Null,
     Invalid(String, Option<SourceRange>),
     NonText(String),
     Unsupported(String),
+}
+
+impl From<std::collections::TryReserveError> for SourceDecodeError {
+    fn from(_: std::collections::TryReserveError) -> Self {
+        Self::Allocation
+    }
 }
 
 pub(crate) struct SourceRange {
@@ -115,6 +130,20 @@ pub(crate) struct SourceRange {
     pub text: String,
     // The tokenizer constructs its location before compile attaches the filename.
     pub tokenizer: bool,
+}
+
+fn decode_single_byte(
+    bytes: &[u8],
+    decode: impl Fn(usize, u8) -> Result<char, SourceDecodeError>,
+) -> Result<Cow<'_, str>, SourceDecodeError> {
+    let mut text = String::new();
+    text.try_reserve_exact(bytes.len())?;
+    for (pos, &byte) in bytes.iter().enumerate() {
+        let ch = decode(pos, byte)?;
+        text.try_reserve(ch.len_utf8())?;
+        text.push(ch);
+    }
+    Ok(Cow::Owned(text))
 }
 
 fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
@@ -160,7 +189,7 @@ fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
     let mode = match name {
         "utf-8" | "iso-8859-1" => name,
         _ => {
-            normalized = registry_name(name);
+            normalized = registry_name(name)?;
             match NAMES
                 .lines()
                 .filter_map(|l| l.split_once(' '))
@@ -199,17 +228,19 @@ fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
             }
             Ok(Cow::Borrowed(std::str::from_utf8(bytes).unwrap()))
         }
-        "iso8859-1" | "iso-8859-1" => Ok(Cow::Owned(bytes.iter().map(|b| char::from(*b)).collect())),
+        "iso8859-1" | "iso-8859-1" => decode_single_byte(bytes, |_, byte| Ok(char::from(byte))),
         "nontext" => Err(SourceDecodeError::NonText(format!("'{name}' is not a text encoding; use codecs.decode() to handle arbitrary codecs"))),
         "unsupported" => Err(SourceDecodeError::Unsupported(name.to_owned())),
         index => {
             let table = Charmap::at(index.parse().unwrap());
-            let mut text = String::with_capacity(bytes.len());
-            for (pos, &b) in bytes.iter().enumerate() {
-                let ch = table.decode(b).ok_or_else(|| SourceDecodeError::Invalid(format!("'charmap' codec can't decode byte 0x{b:02x} in position {pos}: character maps to <undefined>"), None))?;
-                text.push(ch);
-            }
-            Ok(Cow::Owned(text))
+            decode_single_byte(bytes, |pos, byte| {
+                table.decode(byte).ok_or_else(|| {
+                    let message = format!(
+                        "'charmap' codec can't decode byte 0x{byte:02x} in position {pos}: character maps to <undefined>"
+                    );
+                    SourceDecodeError::Invalid(message, None)
+                })
+            })
         }
     }
 }
@@ -217,6 +248,7 @@ fn decode_source(bytes: &[u8]) -> Result<Cow<'_, str>, SourceDecodeError> {
 pub(super) fn decode(bytes: &[u8]) -> Result<Option<Cow<'_, str>>, Error> {
     match decode_source(bytes) {
         Ok(text) => Ok(Some(text)),
+        Err(SourceDecodeError::Allocation) => Err(Error::allocation()),
         Err(SourceDecodeError::Null | SourceDecodeError::Invalid(..)) => Ok(None),
         Err(SourceDecodeError::NonText(msg)) => Err(Error::new(Kind::LookupError, msg)),
         Err(SourceDecodeError::Unsupported(name)) => Err(Error::new(
@@ -233,7 +265,9 @@ pub(crate) fn decode_compile_source(bytes: &[u8]) -> Result<String, SourceDecode
     }
     let mut normalized;
     let input = if bytes.contains(&b'\r') || !bytes.ends_with(b"\n") {
-        normalized = bytes.to_vec();
+        normalized = Vec::new();
+        normalized.try_reserve_exact(bytes.len().saturating_add(1))?;
+        normalized.extend_from_slice(bytes);
         super::super::codecs::normalize_newlines(&mut normalized);
         if !normalized.ends_with(b"\n") {
             normalized.push(b'\n');
@@ -256,10 +290,19 @@ pub(crate) fn decode_compile_source(bytes: &[u8]) -> Result<String, SourceDecode
             }),
         ));
     }
+    let text = match text {
+        Cow::Owned(text) => text,
+        Cow::Borrowed(slice) => {
+            let mut text = String::new();
+            text.try_reserve_exact(slice.len())?;
+            text.push_str(slice);
+            text
+        }
+    };
     Ok(if text.contains('\r') {
-        super::super::codecs::universal_newlines(text.into_owned())
+        super::super::codecs::universal_newlines(text)
     } else {
-        text.into_owned()
+        text
     })
 }
 

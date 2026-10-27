@@ -532,7 +532,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
                 })
                 .ok_or_else(|| Error::new("ValueError", "incomplete format key"))?;
             let key = ctx.alloc(Value::Bytes(format[start + 2..end].to_vec()));
-            if matches!(ctx.heap.get(rhs), Value::List(_) | Value::Range { .. }) {
+            if matches!(ctx.heap.get(rhs), Value::List(_) | Value::Range(_)) {
                 return Err(type_error(format!(
                     "{} indices must be integers or slices, not bytes",
                     ctx.type_name(rhs)

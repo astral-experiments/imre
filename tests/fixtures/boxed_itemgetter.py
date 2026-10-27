@@ -1,6 +1,38 @@
 from operator import itemgetter
 
 
+def getter_repr():
+    visits = []
+
+    class Key:
+        def __init__(self, name):
+            self.name = name
+
+        def __repr__(self):
+            visits.append(self.name)
+            if self.name == "raise":
+                raise LookupError("key repr")
+            if self.name == "invalid":
+                return None
+            if self.name == "cycle":
+                return repr(cycle)
+            return self.name
+
+    print(repr([itemgetter((Key("a"),), Key("b"))]))
+    for name in ("raise", "invalid"):
+        try:
+            print(str(itemgetter(Key(name), Key("unvisited"))))
+        except (LookupError, TypeError) as error:
+            print(type(error).__name__, error.args)
+    cycle = itemgetter(Key("cycle"))
+    print(repr(cycle), visits)
+    pair = itemgetter(Key("cycle"), 7)
+    cycle = pair.__reduce__()[1]
+    print(repr(pair), visits)
+    cycle = pair
+    print(repr(pair.__reduce__()[1]), visits)
+
+
 class Lookup:
     def __init__(self):
         self.keys = []
@@ -41,6 +73,7 @@ def index_lifetime():
 
 def current():
     index_lifetime()
+    getter_repr()
     column = itemgetter(1)
     rows = [("b", 2), ("a", 1), ("c", 2)]
     sorts = ["endpoint", "methods"]

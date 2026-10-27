@@ -161,7 +161,8 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::Union(union) => unhashable_part(ctx, union.args),
-        Value::List(_)
+        Value::Deque(_)
+        | Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
@@ -375,6 +376,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__repr__"
             | "dict.__len__"
             | "dict.__iter__"
             | "dict.__setitem__"
@@ -405,6 +407,19 @@ pub(super) fn method(
     } else {
         object
     };
+    if name == "dict.__repr__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                args.len()
+            )));
+        }
+        let representation = ctx.checked_dict_repr(object, receiver)?;
+        return Ok(ctx.text(representation));
+    }
     if name == "dict.__delitem__" {
         if !kwargs.is_empty() {
             return Err(type_error(
@@ -439,6 +454,19 @@ pub(super) fn method(
         positional(name, kwargs)?;
     }
     match name {
+        "dict.clear" => {
+            arity(name, args, 0, 0)?;
+            let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                ctx.heap.get_mut(receiver)
+            else {
+                unreachable!("dictionary payload")
+            };
+            for (key, value) in entries.clear() {
+                ctx.heap.weak_edge_removed(key);
+                ctx.heap.weak_edge_removed(value);
+            }
+            Ok(NONE)
+        }
         "dict.keys" | "dict.values" | "dict.items" => {
             arity(name, args, 0, 0)?;
             let kind = match name {
