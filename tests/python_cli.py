@@ -474,6 +474,7 @@ def report(text):
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",
+            "boxed_enumerate_methods.py",
             "boxed_sorted.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",

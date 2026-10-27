@@ -976,6 +976,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("slice.{name}")));
             }
+            Value::Native(class)
+                if class == "enumerate" && matches!(name, "__iter__" | "__next__") =>
+            {
+                return Ok(self.builtin(&format!("enumerate.{name}")));
+            }
             Value::Native(class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
             }
@@ -1421,6 +1426,7 @@ impl Context {
                         name.split('.').next(),
                         Some(
                             "str"
+                                | "enumerate"
                                 | "dict"
                                 | "list"
                                 | "map"
