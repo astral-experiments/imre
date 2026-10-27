@@ -30,7 +30,25 @@ def delete_declared():
     del declared_value
 
 
+def discard(assigned, child):
+    def drop():
+        nonlocal token
+        del token
+
+    if assigned:
+        token = "local"
+    if child:
+        drop()
+    else:
+        del token
+
+
 def current():
+    for child in (False, True):
+        try:
+            discard(False, child)
+        except NameError as error:
+            print(type(error).__name__, str(error))
     module = __import__(__name__)
     mapping = globals()
     fetch = nested(23)
