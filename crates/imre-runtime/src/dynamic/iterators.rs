@@ -2,6 +2,20 @@
 use super::{Context, Error, Id, Result, Value};
 
 impl Context {
+    /// Pull the item before reading the index, since its iterator can reenter enumerate.
+    pub(super) fn next_enumerated(&mut self, id: Id, input: Id) -> Result<Option<Id>> {
+        let Some(item) = self.next_result(input)? else {
+            return Ok(None);
+        };
+        let Value::Enumerate { next_index, .. } = self.heap.get_mut(id) else {
+            unreachable!("enumerate iterator")
+        };
+        let following = crate::integer_binary(next_index, &crate::Int::from(1), 0)?;
+        let index = std::mem::replace(next_index, following);
+        let index = self.alloc(Value::Int(index));
+        Ok(Some(self.alloc(Value::Tuple(vec![index, item]))))
+    }
+
     pub(super) fn generator(&mut self, function: Id, iter: Id) -> Result<Id> {
         let Value::Function {
             code,

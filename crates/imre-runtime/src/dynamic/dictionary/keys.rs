@@ -5,8 +5,9 @@ use std::sync::LazyLock;
 
 use num_traits::ToPrimitive;
 
-use super::{Context, Entries, Error, Id, Result, Value};
+use super::Entries;
 use crate::dynamic::value::{DictViewKind, NONE};
+use crate::dynamic::{Context, Error, Id, Result, Value};
 
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
