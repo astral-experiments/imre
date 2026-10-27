@@ -354,6 +354,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("collections.defaultdict", "dict")
                     | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
@@ -412,6 +413,7 @@ impl Context {
             | Value::ThreadLocal(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
+            Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Weak(wr) => wr.kind.class(),
@@ -472,6 +474,7 @@ impl Context {
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
+                            | "collections.defaultdict"
                             | "itertools.count"
                             | "itertools.repeat"
                             | "weakref.ReferenceType"
@@ -588,6 +591,7 @@ impl Context {
             | ("_io.TextIOWrapper", Value::TextFile(_))
             | ("list", Value::List(_))
             | ("dict", Value::Dict(_) | Value::DefaultDict { .. })
+            | ("collections.defaultdict", Value::DefaultDict { .. })
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))

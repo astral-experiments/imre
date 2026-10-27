@@ -294,6 +294,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("_collections", "_count_elements") => ctx.builtin("_collections._count_elements"),
+        ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
@@ -460,7 +461,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
-        | ("collections", "defaultdict")
         | ("contextlib", "contextmanager")
         | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
         | ("contextvars", "ContextVar" | "Context" | "Token" | "copy_context")

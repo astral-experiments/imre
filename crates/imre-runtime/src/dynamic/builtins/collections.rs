@@ -418,7 +418,7 @@ pub(super) fn method(
                 return Ok(copy);
             }
             if let Some(storage) = ctx.raw_dict_source(object)
-                && let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                && let Value::Dict(entries) | Value::DefaultDict { entries, .. } =
                     ctx.heap.get(storage)
                 && let Some(entries) = entries.clone_dense()
             {

@@ -45,7 +45,7 @@ def current():
     other = groups.copy()
     other["visits"].append(2)
     print(plain_copy["visits"], groups["visits"], other["fresh"], list(groups))
-    print(type(plain_copy) is dict, type(other) is type(groups), "fresh" in plain_copy)
+    print(type(plain_copy) is dict, type(other) is defaultdict, isinstance(other, dict), "fresh" in plain_copy)
 
     class ClearOnCompare:
         def __hash__(self):
