@@ -250,6 +250,7 @@ impl Context {
                 FormatKind::Field => "fieldnameiterator",
             },
             Value::Partial { .. } => "partial",
+            Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -485,6 +486,7 @@ pub(super) enum Value {
         keywords: Id,
         coroutine_marker: Option<Id>,
     },
+    PartialPlaceholder,
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
@@ -760,6 +762,7 @@ impl Value {
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
             | Self::TextFile(_) => {}

@@ -82,6 +82,7 @@ const FUNCTIONS: &[&str] = &[
     "sorted",
     "ord",
     "chr",
+    "divmod",
     "callable",
     "all",
     "any",
@@ -153,6 +154,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
     match name {
+        "float.__new__" => Some("float"),
         "int.__new__" => Some("int"),
         "str.__new__" => Some("str"),
         _ => None,
@@ -273,7 +275,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_)
             if matches!(
                 attr,
-                "append" | "extend" | "index" | "insert" | "pop" | "sort"
+                "append" | "clear" | "extend" | "index" | "insert" | "pop" | "reverse" | "sort"
             ) =>
         {
             "list"
@@ -755,6 +757,27 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
+        }
+        "divmod" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("divmod() takes no keyword arguments"));
+            }
+            let [a, b] = args else {
+                return Err(type_error(format!(
+                    "divmod expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
+                return Err(type_error(format!(
+                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                    ctx.type_name(*a),
+                    ctx.type_name(*b)
+                )));
+            };
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
+            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
         }
         "chr" | "ord" => {
             if !kwargs.is_empty() {

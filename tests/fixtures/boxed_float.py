@@ -12,6 +12,18 @@ def current():
     assert float(negative) is negative and repr(negative) == "-0.0"
     nan = float("NaN")
     assert float(nan) is nan
+
+    class Weight(float):
+        pass
+
+    weight = Weight("1.5")
+    assert type(weight) is Weight and isinstance(weight, float)
+    assert float(weight) == 1.5 and weight + 0.5 == 2.0
+    negative_weight = float.__new__(Weight, -0.0)
+    assert type(negative_weight) is Weight and repr(negative_weight) == "-0.0"
+    assert Weight.__new__ is float.__new__
+    assert type(Weight.__new__(Weight, 2.5)) is Weight
+
     print(repr(float("  -Infinity")), repr(nan), repr(float(9007199254740993)))
     assert float("  ٣.١٤  ") == float(b"  3.14\t") == float(bytearray(b"3.14"))
     assert float("2_5.e-1") == 2.5 and float(9007199254740993) == 9007199254740992.0
@@ -57,3 +69,24 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("accepted invalid arguments")
+
+    class Override(float):
+        def __float__(self):
+            return 9.5
+
+    class Raises(float):
+        def __float__(self):
+            raise ValueError("float override")
+
+    class Wrong(float):
+        def __float__(self):
+            return 7
+
+    assert float(Override(1.5)) == 9.5
+    for cls, kind in ((Raises, ValueError), (Wrong, TypeError)):
+        try:
+            float(cls(1.5))
+        except kind:
+            pass
+        else:
+            raise AssertionError("ignored float override")

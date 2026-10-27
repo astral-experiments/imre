@@ -176,6 +176,8 @@ impl Context {
                             | "int.to_bytes"
                             | "list.index"
                             | "list.pop"
+                            | "list.clear"
+                            | "list.reverse"
                             | "list.sort"
                             | "map.__iter__"
                             | "map.__next__"
@@ -342,6 +344,7 @@ impl Context {
             Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
+            Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Repeat(_) => "itertools.repeat",
             Value::ItemGetter(_) => "operator.itemgetter",
@@ -384,6 +387,7 @@ impl Context {
                             | "bytearray_iterator"
                             | "range_iterator"
                             | "getset_descriptor"
+                            | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
                             | "itertools.count"
@@ -610,6 +614,9 @@ impl Context {
     }
 
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.local_attribute(obj, name);
+        }
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return self.default_get_attr(obj, name);
         };
@@ -631,9 +638,6 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
-        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.local_attribute(obj, name);
-        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -692,7 +696,8 @@ impl Context {
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(class)
-                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float") =>
+                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float")
+                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
@@ -832,8 +837,10 @@ impl Context {
             {
                 return Ok(self.builtin(owner));
             }
-            Value::Native(class) if class == "int" && name == "__new__" => {
-                return Ok(self.builtin("int.__new__"));
+            Value::Native(class)
+                if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__new__")));
             }
             Value::Super {
                 start,
@@ -990,7 +997,10 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
-            Value::Native(class) if class == "list" && matches!(name, "index" | "pop" | "sort") => {
+            Value::Native(class)
+                if class == "list"
+                    && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>
+            {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
             Value::Native(class)
@@ -1056,6 +1066,9 @@ impl Context {
                 if name == "__new__" && self.has_base(obj, "str") {
                     return Ok(self.builtin("str.__new__"));
                 }
+                if name == "__new__" && self.has_base(obj, "float") {
+                    return Ok(self.builtin("float.__new__"));
+                }
             }
             Value::NamedTuple {
                 class,
@@ -1103,6 +1116,9 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, None);
+        }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
@@ -1132,7 +1148,7 @@ impl Context {
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, None);
+            return self.update_base_local_attribute(obj, name, None);
         }
         let member = self.slot(obj, name);
         if let Some(descriptor) = member
@@ -1266,6 +1282,9 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, Some(value));
+        }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
@@ -1281,7 +1300,7 @@ impl Context {
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, Some(value));
+            return self.update_base_local_attribute(obj, name, Some(value));
         }
         if name == "__abstractmethods__"
             && let Value::Class { scope, .. } = *self.heap.get(obj)
@@ -1405,6 +1424,40 @@ impl Context {
         })
     }
 
+    /// Allocate a binary64 payload while retaining the requested float subclass.
+    ///
+    /// ```python
+    /// class Weight(float):
+    ///     pass
+    /// assert type(Weight("1.5")) is Weight
+    /// ```
+    pub(super) fn new_float(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, values)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "float.__new__(): not enough arguments",
+            ));
+        };
+        let base = self.builtin("float");
+        if !self.subclass(class, base) {
+            return Err(Error::new(
+                "TypeError",
+                "float.__new__ requires a float subtype",
+            ));
+        }
+        let value = builtins::call(self, "float", values, kwargs)?;
+        if class == base {
+            return Ok(value);
+        }
+        Ok(self.alloc(Value::Instance {
+            class,
+            fields: HashMap::new(),
+            scalar: Some(value),
+            dictionary: None,
+            memory_stream: None,
+        }))
+    }
+
     /// Allocate the immutable string or bytes payload while retaining the Python class.
     pub(super) fn new_string(
         &mut self,
@@ -1462,6 +1515,7 @@ impl Context {
                 Ok(result)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || !name.contains('.')
@@ -1501,8 +1555,30 @@ impl Context {
                 keywords,
                 ..
             } => {
-                let mut positional = self.items(bound)?;
-                positional.extend(args);
+                let bound = self.items(bound)?;
+                let required = bound
+                    .iter()
+                    .filter(|&&id| matches!(self.heap.get(id), Value::PartialPlaceholder))
+                    .count();
+                if args.len() < required {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "missing positional arguments in 'partial' call; expected at least {required}, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let mut supplied = args.into_iter();
+                let mut positional = Vec::with_capacity(bound.len() + supplied.len());
+                for argument in bound {
+                    if matches!(self.heap.get(argument), Value::PartialPlaceholder) {
+                        positional.push(supplied.next().unwrap());
+                    } else {
+                        positional.push(argument);
+                    }
+                }
+                positional.extend(supplied);
                 let mut merged = self.keyword_args(keywords)?;
                 for (key, value) in kwargs {
                     if let Some((_, previous)) = merged.iter_mut().find(|(k, _)| k == &key) {
@@ -1630,6 +1706,7 @@ impl Context {
                 let string_base = ["str", "bytes"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
+                let float_subclass = self.has_base(callable, "float");
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -1642,6 +1719,11 @@ impl Context {
                     instance
                 } else if let Some(kind) = string_base {
                     self.new_string(kind, callable, &args, &kwargs)?
+                } else if float_subclass {
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect::<Vec<_>>();
+                    self.new_float(&positional, &kwargs)?
                 } else {
                     let dictionary = self
                         .has_base(callable, "dict")
@@ -1654,6 +1736,7 @@ impl Context {
                     }
                 } else if new.is_none()
                     && string_base.is_none()
+                    && !float_subclass
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(

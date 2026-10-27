@@ -66,6 +66,33 @@ def current():
     cursor = Cursor()
     cursor.__iter__ = lambda: []
     print(iter(cursor) is cursor)
+    target = [7]
+    alias = target
+    target.extend(len(alias) for _ in range(3))
+    try:
+        target.extend(12 // value for value in (3, 2, 0))
+    except ZeroDivisionError:
+        print(alias)
+    target.extend(alias)
+    print(alias)
+
+    class Hint:
+        def __iter__(self):
+            events.append("iter")
+            return iter((3,))
+
+        def __length_hint__(self):
+            events.append("hint")
+            alias.append(9)
+            raise ValueError("stop")
+
+    events = []
+    try:
+        target.extend(Hint())
+    except ValueError as error:
+        print(str(error), events, alias)
+    else:
+        raise AssertionError("ignored length hint")
     growing = [4, 5]
     for index, item in enumerate(growing, start=1 << 70):
         print(index, item)
