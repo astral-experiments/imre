@@ -87,7 +87,7 @@ pub(super) fn construct(
             {
                 return ctx.call(repr, Vec::new(), Vec::new());
             }
-            Ok(ctx.text(ctx.repr(args[0])))
+            Ok(ctx.text(ctx.checked_format(args[0], true)?))
         }
         "int" => {
             if kwargs.iter().any(|(k, _)| k != "base") {
@@ -163,7 +163,7 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.display(value)))
+            Ok(ctx.text(ctx.checked_format(value, false)?))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -240,6 +240,9 @@ fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
+        if let Value::Int(number) = ctx.heap.get(value) {
+            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+        }
         return Ok(ctx.display(value));
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
@@ -257,33 +260,11 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         );
     }
     if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
-        let int = ctx.as_int(value)?;
-        let int = int.big();
-        let (sign, spec) = match spec.as_bytes().first() {
-            Some(b'+' | b' ' | b'-') => (&spec[..1], &spec[1..]),
-            _ => ("", spec),
-        };
-        let digits = match spec {
-            "" | "d" => int.magnitude().to_string(),
-            "b" => format!("{:b}", int.magnitude()),
-            "o" => format!("{:o}", int.magnitude()),
-            "x" => format!("{:x}", int.magnitude()),
-            "X" => format!("{:X}", int.magnitude()),
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("unsupported integer format {spec:?}"),
-                ));
-            }
-        };
-        let sign = if int.is_negative() {
-            "-"
-        } else if sign == "-" {
-            ""
-        } else {
-            sign
-        };
-        return Ok(format!("{sign}{digits}"));
+        return Ok(crate::objects::brace_integer_field(
+            spec,
+            ctx.as_int(value)?,
+            ctx.type_name(value),
+        )?);
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
 }
@@ -977,7 +958,7 @@ pub(super) fn method(
             Ok(ctx.alloc(Value::List(values)))
         }
         "splitlines" => {
-            let [keep] = bind(name, args, kwargs, ["keepends"])?;
+            let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
             let keep = ctx.optional_truth(keep, false)?;
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));

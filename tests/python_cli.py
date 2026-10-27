@@ -143,6 +143,11 @@ def main():
                 expected.stderr,
             )
 
+        compare(
+            "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
+            "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
+        )
+
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
@@ -422,9 +427,12 @@ def report(text):
             "boxed_ast.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
+            "boxed_slice_deep_repr.py",
+            "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
+            "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
@@ -481,6 +489,7 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
+            "boxed_selector_modify_data.py",
             "boxed_list_pop.py",
             "boxed_zip.py",
             "boxed_map.py",

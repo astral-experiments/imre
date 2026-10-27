@@ -1,3 +1,6 @@
+from operator import imul
+
+
 class Rank:
     def __init__(self, value):
         self.value = value
@@ -41,6 +44,16 @@ def current():
         list.sort(values, key=append_during_sort)
     except ValueError as error:
         print(str(error), alias)
+    def append_then_empty(value):
+        if value == 1:
+            alias.append(4)
+            imul(alias, 0)
+        return value
+
+    try:
+        values.sort(key=append_then_empty)
+    except ValueError as error:
+        print(str(error), alias)
     print(values.sort(reverse=True), alias)
     cursor = iter(values)
     print(next(cursor), list.reverse(alias), values, list(cursor))
@@ -71,6 +84,8 @@ def current():
     print(sorted([], key=1), sorted("βaA", key=None, reverse=None))
 
     for call in (
+        lambda: [].sort(1),
+        lambda: [].sort(1, 2, 3),
         lambda: sorted(),
         lambda: sorted(iterable=[]),
         lambda: sorted([1], None),

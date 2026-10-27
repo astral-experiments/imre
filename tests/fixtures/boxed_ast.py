@@ -34,6 +34,13 @@ class Broken(ast.AST):
         raise ValueError("bad child")
 
 
+class GrowingFields(ast.AST):
+    @property
+    def first(self):
+        self._fields.append("tail")
+        return None
+
+
 def current():
     decorated_source = (
         "if ready:\n"
@@ -107,3 +114,8 @@ def current():
     else:
         raise AssertionError("missing child lookup error")
     assert list(cursor) == []
+
+    root = GrowingFields()
+    root._fields = ["first"]
+    root.tail = ast.Name("added", ast.Load())
+    assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["added"]

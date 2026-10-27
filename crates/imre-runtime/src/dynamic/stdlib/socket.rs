@@ -188,14 +188,8 @@ pub(super) fn call(
                 "socket.makefile supports the default buffered binary reader",
             ));
         }
-        // CPython 3.14 uses io.DEFAULT_BUFFER_SIZE (128 KiB) for socket.makefile.
-        let raw = super::ReadSource::Socket(native::SocketInput::new(s));
-        let reader = std::io::BufReader::with_capacity(128 * 1024, raw);
-        return Ok(
-            ctx.alloc(Value::File(std::rc::Rc::new(super::BinaryFile::reader(
-                reader,
-            )))),
-        );
+        let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
+        return Ok(ctx.alloc(super::BinaryFile::reader(reader).into_value()?));
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,

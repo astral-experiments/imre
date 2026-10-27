@@ -426,18 +426,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
         | ("_imre_posixpath", "extension_start" | "isfile")
-        | (
-            "platform",
-            "system"
-            | "node"
-            | "release"
-            | "version"
-            | "machine"
-            | "mac_ver"
-            | "python_version"
-            | "python_version_tuple"
-            | "python_implementation",
-        )
+        | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dumps" | "loads")
@@ -888,12 +877,6 @@ pub(super) fn call(
         "hashlib.sha256" => return hashlib::sha256(ctx, args, kwargs),
         "hash.update" | "hash.copy" | "hash.digest" | "hash.hexdigest" => {
             return hashlib::method(ctx, name, args);
-        }
-        "platform.python_implementation" => ctx.text("Imre"),
-        "platform.python_version" => ctx.text(full_version(ctx)?),
-        "platform.python_version_tuple" => {
-            let version = full_version(ctx)?;
-            tuple_text(ctx, &version.split('.').collect::<Vec<_>>())
         }
         "platform.system" | "platform.node" | "platform.release" | "platform.version"
         | "platform.machine" => {

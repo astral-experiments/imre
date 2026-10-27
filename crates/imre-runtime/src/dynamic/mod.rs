@@ -64,6 +64,8 @@ pub(crate) struct Context {
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
     bytearray_exports: Vec<Id>,
+    // Active sorts temporarily detach their list storage while Python callbacks run.
+    sorting_lists: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,

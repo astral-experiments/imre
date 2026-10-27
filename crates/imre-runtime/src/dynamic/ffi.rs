@@ -251,11 +251,7 @@ impl Context {
                 } else {
                     self.str_value(c)?.to_owned()
                 };
-                let s = if spec.is_empty() {
-                    self.display(value)
-                } else {
-                    builtins::format_value(self, value, &spec)?
-                };
+                let s = builtins::format_value(self, value, &spec)?;
                 Ok(self.text(s))
             }
             "take_error" => {
@@ -324,8 +320,10 @@ impl Context {
                 Err(error)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
-            _ if let Some(op) = op.strip_prefix("inplace:") => self.inplace(op, a, b),
-            _ => self.binary(op, a, b),
+            _ => match op.strip_prefix("inplace:") {
+                Some(op) => self.inplace(op, a, b),
+                None => self.binary(op, a, b),
+            },
         }
     }
 }
@@ -362,6 +360,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         sys_path: NONE,
         contexts: Vec::new(),
         bytearray_exports: Vec::new(),
+        sorting_lists: Vec::new(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,

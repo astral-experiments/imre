@@ -223,12 +223,23 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", format!("Invalid events: {bits}")));
             }
             let fd = reg_fd(ctx, &handle, obj)?;
-            let (fd, fileobj) = if name == "modify" {
+            let (fd, fileobj, class) = if name == "modify" {
                 let (fd, key) = registered(ctx, &handle.borrow(), obj, fd)?;
-                if key.interests == bits && ctx.checked_equal(key.data, data)? {
+                // A data comparison can unregister or replace the key and collect its old data.
+                ctx.heap.keep(key.key);
+                let events_changed = key.interests != bits;
+                if events_changed {
+                    handle
+                        .borrow_mut()
+                        .poll
+                        .set(fd, poll_mask(bits))
+                        .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+                }
+                let unequal = ctx.binary("!=", data, key.data)?;
+                if !ctx.truth(unequal)? && !events_changed {
                     return Ok(key.key);
                 }
-                (fd, key.fileobj)
+                (fd, key.fileobj, ctx.exact_type(key.key)?)
             } else {
                 let fd = fd.ok_or_else(|| {
                     Error::new("OverflowError", "Python int too large to convert to C int")
@@ -244,17 +255,23 @@ pub(super) fn call(
                     .keys
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                (fd, obj)
+                let module = ctx.module("selectors")?;
+                (fd, obj, ctx.lookup_attr(module, "SelectorKey")?)
             };
-            let module = ctx.module("selectors")?;
-            let class = ctx.lookup_attr(module, "SelectorKey")?;
             let number = ctx.int(i64::from(fd));
             let key = ctx.call(class, vec![fileobj, number, events, data], Vec::new())?;
             let mut selector = handle.borrow_mut();
-            selector
-                .poll
-                .set(fd, poll_mask(bits))
-                .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+            if name == "register" {
+                selector
+                    .poll
+                    .set(fd, poll_mask(bits))
+                    .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+            } else if !selector.keys.contains_key(&fd) {
+                selector
+                    .keys
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+            }
             selector.keys.insert(
                 fd,
                 Registration {

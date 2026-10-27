@@ -1,7 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::rc::Rc;
-
 use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
@@ -434,6 +432,11 @@ pub(super) fn bind_method_arguments<const N: usize>(
         )));
     }
     if args.len() > max_positional {
+        if max_positional == 0 {
+            return Err(type_error(format!(
+                "{name}() takes no positional arguments"
+            )));
+        }
         return Err(type_error(format!(
             "{name}() takes at most {max_positional} positional {} ({} given)",
             arguments(max_positional),
@@ -555,7 +558,7 @@ fn set_attribute(
     if base {
         ctx.default_set_attr(*obj, &attr_name, *value)?;
     } else {
-        ctx.set_attr(*obj, &attr_name, *value)?;
+        ctx.set_named_attr(*obj, &attr_name, Some(*attr), *value)?;
     }
     Ok(NONE)
 }
@@ -589,11 +592,11 @@ fn delete_attribute(
     if base && ctx.builtin_type_name(*obj) == Some("type") {
         return Err(type_error("can't apply this __delattr__ to type object"));
     }
-    let attr = attribute_name(ctx, *attr)?;
+    let name = attribute_name(ctx, *attr)?;
     if base {
-        ctx.default_delete_attr(*obj, &attr)?;
+        ctx.default_delete_attr(*obj, &name)?;
     } else {
-        ctx.delete_attr(*obj, &attr)?;
+        ctx.delete_named_attr(*obj, &name, Some(*attr))?;
     }
     Ok(NONE)
 }
@@ -834,7 +837,7 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
             let attr = attribute_name(ctx, args[1])?;
-            match ctx.lookup_attr(args[0], &attr) {
+            match ctx.lookup_named_attr(args[0], &attr, Some(args[1])) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
                 Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),
@@ -1114,7 +1117,7 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::TextFile(file)));
             }
             let file = super::stdlib::BinaryFile::open(path, mode)?;
-            Ok(ctx.alloc(Value::File(Rc::new(file))))
+            Ok(ctx.alloc(file.into_value()?))
         }
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(

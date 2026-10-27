@@ -27,7 +27,9 @@ fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id
     for &value in &values {
         ctx.heap.keep(value);
     }
+    ctx.sorting_lists.push(receiver);
     let result = sort_list_items(ctx, &mut values, key, reverse);
+    ctx.sorting_lists.pop();
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
