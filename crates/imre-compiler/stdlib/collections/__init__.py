@@ -91,6 +91,23 @@ class Counter(dict):
         if counts:
             self.subtract(counts)
 
+    def most_common(self, n=None):
+        items = self.items()
+        if n is not None and n <= 0:
+            return []
+        ranked = sorted(items, key=_operator.itemgetter(1), reverse=True)
+        return ranked if n is None or n >= len(ranked) else ranked[:n]
+
+    def __repr__(self):
+        name = type(self).__name__
+        if not self:
+            return f"{name}()"
+        try:
+            entries = dict(self.most_common())
+        except TypeError:
+            entries = dict(self)
+        return f"{name}({entries!r})"
+
     def total(self):
         return sum(self.values())
 
