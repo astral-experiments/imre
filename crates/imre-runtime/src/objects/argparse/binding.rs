@@ -1,5 +1,7 @@
 //! Bound actions retain their converted values until the namespace takes ownership.
 
+mod range_labels;
+
 use crate::StrOwner;
 use std::borrow::Cow;
 

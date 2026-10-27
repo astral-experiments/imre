@@ -109,7 +109,11 @@ impl Context {
                 .dict_entries(*dict)
                 .expect("dict view backing")
                 .is_empty(),
-            Value::Context(bindings) => !bindings.is_empty(),
+            Value::Context(bindings)
+            | Value::Iterator {
+                context: Some(bindings),
+                ..
+            } => !bindings.is_empty(),
             Value::Range { start, stop, step } => {
                 if *step > 0 {
                     start < stop
@@ -535,6 +539,25 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::Instance { class, .. } = value
+            && self.classes.get("re.RegexFlag") == Some(class)
+            && let Some((_, name, bits)) = self.enum_member(id)
+        {
+            return match self.str_value(name) {
+                Ok(names) => names
+                    .split('|')
+                    .map(|name| {
+                        if name.starts_with("0x") {
+                            name.to_owned()
+                        } else {
+                            format!("re.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                Err(_) => format!("re.RegexFlag({})", self.repr(bits)),
+            };
+        }
         if let Value::Instance { scalar, .. } = value
             && (repr || scalar.is_none())
             && let Some((class, name, member_value)) = self.enum_member(id)
@@ -582,12 +605,14 @@ impl Context {
             }
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
+            Value::PartialPlaceholder => "Placeholder".to_owned(),
             Value::None => "None".into(),
             Value::Ellipsis => "Ellipsis".into(),
             Value::NotImplemented => "NotImplemented".into(),
             Value::Bool(true) => "True".into(),
             Value::Bool(false) => "False".into(),
             Value::Int(n) => n.to_string(),
+            Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
             Value::Repeat(repeat) => {
@@ -1262,6 +1287,20 @@ impl Context {
                 }
             }
         }
+        if op == "**"
+            && [left, right]
+                .into_iter()
+                .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            ));
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));
@@ -1293,7 +1332,12 @@ impl Context {
             };
             crate::integer_binary(&x, &y, code)?
         };
-        Ok(self.alloc(Value::Int(result)))
+        let class = if matches!(op, "&" | "|" | "^") {
+            self.flag_class(a).or_else(|| self.flag_class(b))
+        } else {
+            None
+        };
+        self.flag_or_integer(class, result)
     }
 }
 
@@ -1326,6 +1370,11 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         let Some(method) = self.bound_slot(obj, name)? else {
+            if name == "__ne__"
+                && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
+            {
+                return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));
+            }
             return Ok(None);
         };
         let result = self.call(method, vec![other], vec![])?;

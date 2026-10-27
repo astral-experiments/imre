@@ -239,6 +239,7 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
             Value::Bytes(_) => (id, "bytes_iterator"),
@@ -280,6 +281,7 @@ impl Context {
             offset: 0,
             reverse: false,
             kind,
+            context: None,
         }))
     }
 

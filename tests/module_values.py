@@ -15,6 +15,12 @@ from imports import require_success, run, write_files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "module_values"
 ERRORS = {"initialization_error": "ValueError", "entry_error": "ValueError"}
 REJECTED = {
+    "metadata_entry_points": {
+        "main.py": "import importlib.metadata\nimport sys\nprint(importlib.metadata.entry_points(group=sys.argv[1]))\n",
+    },
+    "metadata_local_before_import": {
+        "main.py": "import importlib.metadata as info\ndef lookup() -> str:\n    result = info.version('example')\n    import importlib.metadata as info\n    return result\nprint(lookup())\n",
+    },
     "early_namedtuple_imported": {
         "library.py": 'from collections import namedtuple\ndef early() -> str:\n    return Late("before").value\nVALUE = early()\nLate = namedtuple("Late", "value")\n',
     },
@@ -172,6 +178,8 @@ def main() -> None:
             assert "panicked" not in actual.stderr, (name, actual.stderr)
             if name.startswith("early_class_"):
                 assert "references a class before it is available" in actual.stderr, actual.stderr
+            if name == "metadata_entry_points":
+                assert "importlib.metadata.entry_points" in actual.stderr, actual.stderr
             checks += 1
     print(
         f"Passed {checks} module value checks ({len(REJECTED)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

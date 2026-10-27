@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::Context;
-use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
 mod float;
@@ -84,6 +84,7 @@ const FUNCTIONS: &[&str] = &[
     "chr",
     "divmod",
     "callable",
+    "abs",
     "all",
     "any",
     "isinstance",
@@ -165,7 +166,10 @@ pub(super) fn constructor_owner(name: &str) -> Option<&'static str> {
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || is_exception(name)
-        || matches!(name, "enum.Enum" | "enum.IntEnum" | "enum.StrEnum")
+        || matches!(
+            name,
+            "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+        )
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -328,7 +332,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
-        Value::RegexPattern(_) if matches!(attr, "findall" | "match" | "fullmatch" | "search") => {
+        Value::RegexPattern(_)
+            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+        {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
@@ -446,6 +452,55 @@ pub(super) fn bind_method_arguments<const N: usize>(
         values[index] = Some(*value);
     }
     Ok(values)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["base", "exp", "mod"];
+    if args.len() + kwargs.len() <= names.len() {
+        // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
+        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+            if !kwargs.iter().any(|(key, _)| key == name) {
+                return Err(type_error(format!(
+                    "pow() missing required argument '{name}' (pos {})",
+                    index + 1
+                )));
+            }
+        }
+        if let Some((key, _)) = kwargs
+            .iter()
+            .find(|(key, _)| !names.contains(&key.as_str()))
+            && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+        {
+            return Err(type_error(format!(
+                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+            )));
+        }
+    }
+    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    else {
+        unreachable!("required pow operands were checked above")
+    };
+    let Some(modulus) = modulus.filter(|&id| id != NONE) else {
+        return ctx.binary("**", base, exp);
+    };
+    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
+        if [base, exp, modulus]
+            .into_iter()
+            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
+        {
+            return Err(type_error(
+                "pow() 3rd argument not allowed unless all arguments are integers",
+            ));
+        }
+        return Err(type_error(format!(
+            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
+            ctx.type_name(base),
+            ctx.type_name(exp),
+            ctx.type_name(modulus)
+        )));
+    };
+    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -720,6 +775,38 @@ pub(super) fn call(
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied())
         }
+        "abs" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("abs() takes no keyword arguments"));
+            }
+            let &[value] = args else {
+                return Err(type_error(format!(
+                    "abs() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            if let Some(method) = ctx.bound_slot(value, "__abs__")? {
+                return ctx.call(method, vec![], vec![]);
+            }
+            let scalar = ctx.scalar_value(value);
+            match ctx.heap.get(scalar) {
+                Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
+                Value::Int(number) => {
+                    let zero = crate::Int::from(0);
+                    if number.cmp(&zero).is_lt() {
+                        let magnitude = crate::integer_binary(&zero, number, 1)?;
+                        Ok(ctx.alloc(Value::Int(magnitude)))
+                    } else {
+                        Ok(scalar)
+                    }
+                }
+                _ => Err(type_error(format!(
+                    "bad operand type for abs(): '{}'",
+                    ctx.type_name(value)
+                ))),
+            }
+        }
         "callable" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -832,22 +919,7 @@ pub(super) fn call(
                 ))),
             }
         }
-        "pow" => {
-            let [base, exp, modulus] = bind(name, args, kwargs, ["base", "exp", "mod"])?;
-            let base =
-                base.ok_or_else(|| type_error("pow() missing required argument 'base' (pos 1)"))?;
-            let exp =
-                exp.ok_or_else(|| type_error("pow() missing required argument 'exp' (pos 2)"))?;
-            if let Some(modulus) = modulus.filter(|&id| id != NONE) {
-                let result = crate::integer_power::modular_power(
-                    &ctx.as_int(base)?,
-                    &ctx.as_int(exp)?,
-                    &ctx.as_int(modulus)?,
-                )?;
-                return Ok(ctx.alloc(Value::Int(result)));
-            }
-            ctx.binary("**", base, exp)
-        }
+        "pow" => power(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
@@ -870,6 +942,7 @@ pub(super) fn call(
                     offset: items.len(),
                     reverse: true,
                     kind: "list_reverseiterator",
+                    context: None,
                 }));
             }
             if let Some(hook) = ctx.bound_slot(object, "__reversed__")?
@@ -914,7 +987,11 @@ pub(super) fn call(
             let size = match ctx.heap.get(args[0]) {
                 Value::List(v) | Value::Tuple(v) | Value::Set { items: v, .. } => v.len(),
                 Value::NamedTuple { values, .. } => values.len(),
-                Value::Context(bindings) => bindings.len(),
+                Value::Context(bindings)
+                | Value::Iterator {
+                    context: Some(bindings),
+                    ..
+                } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
@@ -1069,6 +1146,21 @@ pub(super) fn call(
             Ok(boolean(!stop_value))
         }
         "print" => print::call(ctx, args, kwargs),
+        "NoneType" | "NotImplementedType" | "ellipsis" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                let ty = if name == "ellipsis" {
+                    "EllipsisType"
+                } else {
+                    name
+                };
+                return Err(type_error(format!("{ty} takes no arguments")));
+            }
+            Ok(match name {
+                "NoneType" => NONE,
+                "NotImplementedType" => NOT_IMPLEMENTED,
+                _ => ELLIPSIS,
+            })
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

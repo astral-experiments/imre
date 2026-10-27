@@ -82,6 +82,7 @@ pub(crate) enum Kind {
     GaiError = 68,
     BinasciiError = 69,
     BinasciiIncomplete = 70,
+    PackageNotFoundError = 71,
     TypeError = 13,
     AttributeError = 14,
     MemoryError = 15,
@@ -157,6 +158,7 @@ impl Kind {
             68 => Self::GaiError,
             69 => Self::BinasciiError,
             70 => Self::BinasciiIncomplete,
+            71 => Self::PackageNotFoundError,
             13 => Self::TypeError,
             14 => Self::AttributeError,
             15 => Self::MemoryError,
@@ -260,6 +262,7 @@ impl Kind {
             Self::UnboundLocalError => "UnboundLocalError",
             Self::ImportError => "ImportError",
             Self::ModuleNotFoundError => "ModuleNotFoundError",
+            Self::PackageNotFoundError => "PackageNotFoundError",
             Self::RecursionError => "RecursionError",
             Self::BlockingIOError => "BlockingIOError",
             Self::ConnectionError => "ConnectionError",
@@ -310,7 +313,13 @@ impl Kind {
                 self,
                 Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
             ),
-            Self::ImportError => matches!(self, Self::ImportError | Self::ModuleNotFoundError),
+            Self::ImportError => matches!(
+                self,
+                Self::ImportError | Self::ModuleNotFoundError | Self::PackageNotFoundError
+            ),
+            Self::ModuleNotFoundError => {
+                matches!(self, Self::ModuleNotFoundError | Self::PackageNotFoundError)
+            }
             Self::SubprocessError => {
                 matches!(
                     self,
@@ -639,6 +648,7 @@ impl Exception {
             Kind::JsonDecodeError => "json.decoder.JSONDecodeError",
             Kind::CancelledError => "asyncio.exceptions.CancelledError",
             Kind::BadZipFile => "zipfile.BadZipFile",
+            Kind::PackageNotFoundError => "importlib.metadata.PackageNotFoundError",
             Kind::UnsupportedOperation => "io.UnsupportedOperation",
             kind => kind.name(),
         }
@@ -1763,6 +1773,18 @@ impl Storage {
     fn exception_message(&self) -> Rendered {
         use std::fmt::Write as _;
         match &self.exception().payload {
+            Payload::Import(err) if self.exception().kind == Kind::PackageNotFoundError => {
+                let (kind, word) = err
+                    .package_name()
+                    .map_err(|e| e.returning(std::fmt::Error))?;
+                let name = super::boxed_values::word_text(kind, word, false)?;
+                let mut text = String::new();
+                write!(
+                    super::values::ReprWriter(&mut text),
+                    "No package metadata was found for {name}"
+                )?;
+                rendered(text.into())
+            }
             Payload::Import(err) => err.message(),
             Payload::Positional(args) => args.message(self.exception().quotes_single_key()),
             Payload::ExitArguments(args) => args.message(false),

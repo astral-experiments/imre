@@ -31,7 +31,7 @@ impl Context {
     }
 
     fn scalar_enum_base(&self, base: Id) -> bool {
-        matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "enum.StrEnum" | "enum.IntEnum"))
+        matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "enum.StrEnum" | "enum.IntEnum" | "enum.IntFlag"))
     }
 
     pub(super) fn new_int(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -62,7 +62,7 @@ impl Context {
     }
 
     pub(super) fn enum_lookup(
-        &self,
+        &mut self,
         class: Id,
         values: Id,
         args: &[Id],
@@ -84,12 +84,97 @@ impl Context {
         {
             return Ok(*value);
         }
-        self.member_for_value(values, *value).ok_or_else(|| {
-            Error::new(
-                "ValueError",
-                format!("{} is not a valid {name}", self.repr(*value)),
-            )
-        })
+        if let Some(member) = self.member_for_value(values, *value) {
+            return Ok(member);
+        }
+        if self.has_base(class, "enum.IntFlag")
+            && let Ok(bits) = self.as_int(*value)
+        {
+            return self.flag_combination(class, values, bits);
+        }
+        Err(Error::new(
+            "ValueError",
+            format!("{} is not a valid {name}", self.repr(*value)),
+        ))
+    }
+
+    /// Intern a combination without adding a new declaration to __members__.
+    fn flag_combination(&mut self, class: Id, values: Id, bits: crate::Int) -> Result<Id> {
+        use num_bigint::BigInt;
+        use num_traits::{One, Signed, Zero};
+
+        let names = self
+            .class_attr(class, "_member_map_")
+            .expect("enum name map");
+        let Value::Dict(entries) = self.heap.get(names) else {
+            unreachable!()
+        };
+        let mut declared = Vec::new();
+        let mut mask = BigInt::zero();
+        for &(key, member) in entries {
+            let Some((_, canonical, value)) = self.enum_member(member) else {
+                continue;
+            };
+            if canonical != key {
+                continue;
+            }
+            let bit = self.as_int(value)?.big().into_owned();
+            mask |= &bit;
+            if bit.is_positive() && (&bit & (&bit - 1u8)).is_zero() {
+                declared.push((self.str_value(key)?.to_owned(), bit));
+            }
+        }
+        let mut value = bits.big().into_owned();
+        if value.is_negative() {
+            value += BigInt::one() << mask.bits().max(value.bits());
+        }
+        let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
+        if let Some(member) = self.member_for_value(values, key) {
+            return Ok(member);
+        }
+        let mut names = Vec::new();
+        let mut rest = value;
+        for (name, bit) in declared {
+            if (&rest & &bit) == bit {
+                rest ^= bit;
+                names.push(name);
+            }
+        }
+        let name = if names.is_empty() {
+            NONE
+        } else {
+            if !rest.is_zero() {
+                names.push(if self.classes.get("re.RegexFlag") == Some(&class) {
+                    format!("{rest:#x}")
+                } else {
+                    rest.to_string()
+                });
+            }
+            self.text(names.join("|"))
+        };
+        let member = self.new_int(&[class, key], &[])?;
+        self.default_set_attr(member, "_name_", name)?;
+        self.default_set_attr(member, "_value_", key)?;
+        self.put_item(values, key, member)?;
+        Ok(member)
+    }
+
+    pub(super) fn flag_class(&self, member: Id) -> Option<Id> {
+        let Value::Instance { class, .. } = *self.heap.get(member) else {
+            return None;
+        };
+        self.has_base(class, "enum.IntFlag").then_some(class)
+    }
+
+    pub(super) fn flag_or_integer(&mut self, class: Option<Id>, bits: crate::Int) -> Result<Id> {
+        let value = self.alloc(Value::Int(bits));
+        if let Some(class) = class
+            && let Some(values) = self.enum_values(class)
+        {
+            self.enum_lookup(class, values, &[value], &[])
+        } else {
+            Ok(value)
+        }
     }
 
     fn member_for_value(&self, values: Id, value: Id) -> Option<Id> {

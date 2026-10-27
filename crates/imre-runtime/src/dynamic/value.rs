@@ -249,6 +249,7 @@ impl Context {
                 FormatKind::Field => "fieldnameiterator",
             },
             Value::Partial { .. } => "partial",
+            Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
             Value::ReadOnlyDescriptor { .. } => "getset_descriptor",
@@ -482,6 +483,7 @@ pub(super) enum Value {
         keywords: Id,
         coroutine_marker: Option<Id>,
     },
+    PartialPlaceholder,
     Cached {
         function: Id,
         entries: Vec<CachedCall>,
@@ -520,6 +522,7 @@ pub(super) enum Value {
         sequence: Option<Id>,
         offset: usize,
         reverse: bool,
+        context: Option<std::rc::Rc<HashMap<Id, Id>>>,
     },
     FormatIterator {
         input: Id,
@@ -566,10 +569,23 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
+        for (key, value) in bindings {
+            visit.extend([*key, *value]);
+        }
+    }
+
     fn children(&self, visit: &mut Vec<Id>) {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
-            Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::Iterator {
+                sequence, context, ..
+            } => {
+                visit.extend(*sequence);
+                if let Some(bindings) = context {
+                    Self::visit_bindings(bindings, visit);
+                }
+            }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
@@ -601,11 +617,7 @@ impl Value {
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
             }
-            Self::Context(bindings) => {
-                for (key, value) in bindings.iter() {
-                    visit.extend([*key, *value]);
-                }
-            }
+            Self::Context(bindings) => Self::visit_bindings(bindings, visit),
             Self::ContextVar { name, default, .. } => {
                 visit.push(*name);
                 visit.extend(default);
@@ -756,6 +768,7 @@ impl Value {
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
+            | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
             | Self::TextFile(_) => {}
@@ -998,5 +1011,43 @@ impl Heap {
         self.next_collection = (self.slots.len() - self.free.len())
             .saturating_mul(2)
             .max(4096);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhausted_context_iterator_traces_bindings_until_dropped() {
+        let mut heap = Heap::new();
+        let name = heap.alloc(Value::Str("key".into()));
+        let key = heap.alloc(Value::ContextVar {
+            name,
+            default: None,
+            repr_active: std::cell::Cell::new(false),
+        });
+        let value = heap.alloc(Value::List(Vec::new()));
+        let view = heap.alloc(Value::Iterator {
+            sequence: None,
+            offset: 1,
+            reverse: false,
+            kind: "values",
+            context: Some(std::rc::Rc::new(HashMap::from([(key, value)]))),
+        });
+        let location = Location {
+            file: "test".into(),
+            line: 1,
+            span: None,
+        };
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[view], location.clone(), NONE);
+        assert!(matches!(heap.get(key), Value::ContextVar { .. }));
+        assert!(matches!(heap.get(value), Value::List(_)));
+
+        heap.next_collection = 0;
+        heap.statement(std::iter::empty(), &[], location, NONE);
+        assert!(heap.slots[key as usize].is_none());
+        assert!(heap.slots[value as usize].is_none());
     }
 }
