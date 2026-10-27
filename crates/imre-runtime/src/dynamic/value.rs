@@ -209,6 +209,11 @@ impl Context {
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Class { .. } => "type",
+            Value::MappingView { kind, .. } => match kind {
+                DictViewKind::Keys => "KeysView",
+                DictViewKind::Values => "ValuesView",
+                DictViewKind::Items => "ItemsView",
+            },
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
@@ -361,6 +366,10 @@ pub(super) enum Value {
     },
     Dict(Vec<(Id, Id)>),
     MappingProxy(Id),
+    MappingView {
+        mapping: Id,
+        kind: DictViewKind,
+    },
     DictView {
         dict: Id,
         kind: DictViewKind,
@@ -560,6 +569,7 @@ impl Value {
                     visit.extend([*key, *value]);
                 }
             }
+            Self::MappingView { mapping, .. } => visit.push(*mapping),
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
             Self::Hmac(mac) => {
                 visit.extend([mac.inner, mac.outer, mac.digest_size, mac.block_size])
@@ -786,6 +796,8 @@ impl DictIterator {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Option<Value>>,
+    // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
+    pub(super) abc_registrations: Vec<[Id; 2]>,
     free: Vec<usize>,
     frames: Vec<Frame>,
     next_collection: usize,
@@ -825,6 +837,7 @@ impl Heap {
                 Some(Value::Ellipsis),
                 Some(Value::NotImplemented),
             ],
+            abc_registrations: Vec::new(),
             free: Vec::new(),
             frames: vec![Frame::new(NONE, NONE, NONE)],
             next_collection: 4096,
@@ -935,6 +948,8 @@ impl Heap {
                 self.get(id).children(&mut pending);
             }
         }
+        self.abc_registrations
+            .retain(|&[owner, member]| marked[owner as usize] && marked[member as usize]);
         for (id, alive) in marked.into_iter().enumerate() {
             if !alive && self.slots[id].take().is_some() {
                 self.free.push(id);

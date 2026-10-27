@@ -838,6 +838,10 @@ pub(super) fn call(
                 Value::NamedTuple { values, .. } => values.len(),
                 Value::Context(bindings) => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
+                Value::MappingView { mapping, .. } => {
+                    let mapping = *mapping;
+                    return call(ctx, "len", &[mapping], &[]);
+                }
                 Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
                     collections::entries(ctx, *dict)?.len()
                 }

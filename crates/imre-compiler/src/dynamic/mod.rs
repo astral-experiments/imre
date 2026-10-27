@@ -380,7 +380,13 @@ pub(crate) fn compile(
         if imports.needs_typed_machinery() {
             return Ok(None);
         }
-        for (level, requested) in imports.names {
+        let mut names = imports.names;
+        if names.iter().any(|(level, name)| {
+            *level == 0 && matches!(name.as_str(), "collections" | "collections.abc")
+        }) {
+            names.push((0, "_collections_abc".to_owned()));
+        }
+        for (level, requested) in names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;
             };

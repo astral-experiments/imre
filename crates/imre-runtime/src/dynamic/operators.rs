@@ -122,6 +122,10 @@ impl Context {
             | Value::Set { items: v, .. }
             | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Dict(v) | Value::DefaultDict { entries: v, .. } => !v.is_empty(),
+            Value::MappingView { mapping, .. } => {
+                let mapping = *mapping;
+                return self.truth(mapping);
+            }
             Value::DictView { dict, .. } => !self
                 .dict_entries(*dict)
                 .expect("dict view backing")
