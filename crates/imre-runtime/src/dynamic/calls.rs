@@ -937,6 +937,16 @@ impl Context {
             Value::Native(class) if class == "contextvars.Token" && name == "MISSING" => {
                 return Ok(self.token_missing);
             }
+            Value::Native(class)
+                if matches!(class.as_str(), "bytes" | "bytearray")
+                    && matches!(name, "maketrans" | "translate") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Bytes(_) if name == "maketrans" => return Ok(self.builtin("bytes.maketrans")),
+            Value::ByteArray(_) if name == "maketrans" => {
+                return Ok(self.builtin("bytearray.maketrans"));
+            }
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }

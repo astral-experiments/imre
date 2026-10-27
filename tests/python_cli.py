@@ -478,6 +478,7 @@ def report(text):
             "boxed_generator_delegation.py",
             "boxed_slice.py",
             "boxed_binascii.py",
+            "boxed_standard_base64.py",
             "boxed_bytes_separators.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",
