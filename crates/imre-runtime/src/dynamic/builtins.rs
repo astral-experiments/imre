@@ -58,6 +58,9 @@ exception_kinds!(
     ImportError,
     ModuleNotFoundError,
     OSError,
+    InterruptedError,
+    ChildProcessError,
+    ProcessLookupError,
     ConnectionError,
     ConnectionRefusedError,
     ConnectionResetError,
@@ -155,6 +158,7 @@ pub(super) fn exception_initializer(kind: &str) -> &'static str {
     match kind {
         "StopIteration" => "StopIteration.__init__",
         "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
+        kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
         _ => "BaseException.__init__",
     }
 }
@@ -721,7 +725,7 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration" | "ImportError")) =
+    if let Some(owner @ ("BaseException" | "StopIteration" | "OSError" | "ImportError")) =
         name.strip_suffix(".__init__")
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
@@ -1272,7 +1276,11 @@ pub(super) fn call(
         }
         name if is_exception(name) => {
             positional(name, kwargs)?;
-            let error = ctx.exception(name, args);
+            let error = if exception_subclass(name, "OSError") == Some(true) {
+                ctx.os_exception(name, None, args, None)?
+            } else {
+                ctx.exception(name, args)
+            };
             Ok(ctx.alloc(Value::Raised(error)))
         }
         name => Err(type_error(format!("unsupported builtin {name}"))),

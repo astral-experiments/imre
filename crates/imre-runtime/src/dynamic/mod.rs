@@ -13,6 +13,7 @@ mod importlib;
 mod iterators;
 mod mapping_abc;
 mod operators;
+mod os_error;
 mod property;
 mod slice;
 mod source_code;

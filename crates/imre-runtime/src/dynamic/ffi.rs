@@ -516,6 +516,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
                 1
             }
         },
+        Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
+            ctx.report_os_error(error);
+            1
+        }
         Err(mut error) => {
             let current = error
                 .trace

@@ -580,7 +580,26 @@ impl Context {
                             output.push_str(text);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
-                        } else if error.os_args.is_some() {
+                        } else if let Some(super::os_error::Args::Python(fields)) =
+                            error.os_args.as_deref()
+                            && let Some(fragments) = fields.fragments()
+                        {
+                            work.try_reserve(9)
+                                .map_err(|_| Error::new("MemoryError", ""))?;
+                            work.push(Part::Closing(closing));
+                            for part in fragments.into_iter().rev().flatten() {
+                                work.push(match part {
+                                    super::os_error::Fragment::Text(text) => Part::Text(text),
+                                    super::os_error::Fragment::Value(id, repr) => {
+                                        Part::Value(id, repr)
+                                    }
+                                });
+                            }
+                            break;
+                        } else if matches!(
+                            error.os_args.as_deref(),
+                            Some(super::os_error::Args::Native { .. })
+                        ) {
                             output.push_str(&error.message);
                             output.extend(std::iter::repeat_n(')', closing));
                             break;
@@ -615,7 +634,9 @@ impl Context {
                         } else {
                             if repr {
                                 output.push('(');
-                                if let Some(os) = &error.os_args {
+                                if let Some(super::os_error::Args::Native { source: os, .. }) =
+                                    error.os_args.as_deref()
+                                {
                                     output.push_str(&format!(
                                         "{}, {}",
                                         os.errno,
@@ -687,6 +708,18 @@ impl Context {
                 Part::Value(id, repr) => {
                     match self.heap.get(id) {
                         Value::Raised(error) => {
+                            if !repr
+                                && let Some(super::os_error::Args::Python(fields)) =
+                                    error.os_args.as_deref()
+                                && fields.fragments().is_some()
+                            {
+                                if !ancestors.insert(id) {
+                                    output.push_str("...");
+                                    continue;
+                                }
+                                active.push(id);
+                                work.push(Part::Leave(id, ""));
+                            }
                             work.push(Part::Exception(error, repr));
                             continue;
                         }

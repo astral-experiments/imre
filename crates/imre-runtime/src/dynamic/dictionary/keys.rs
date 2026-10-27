@@ -219,6 +219,18 @@ impl Context {
     }
 
     fn dictionary_hash_error(&self, container: Id, key: Id, error: Error) -> Error {
+        self.key_hash_error(
+            key,
+            if matches!(self.heap.get(container), Value::Set { .. }) {
+                "set element"
+            } else {
+                "dict key"
+            },
+            error,
+        )
+    }
+
+    pub(in super::super) fn key_hash_error(&self, key: Id, role: &str, error: Error) -> Error {
         if error.kind != "TypeError" {
             return error;
         }
@@ -240,15 +252,7 @@ impl Context {
         };
         Error::new(
             "TypeError",
-            format!(
-                "cannot use '{name}' as a {} ({})",
-                if matches!(self.heap.get(container), Value::Set { .. }) {
-                    "set element"
-                } else {
-                    "dict key"
-                },
-                error.message
-            ),
+            format!("cannot use '{name}' as a {} ({})", role, error.message),
         )
     }
 
