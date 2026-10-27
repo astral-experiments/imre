@@ -134,6 +134,15 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "weak_method_export": {
+        "main.py": (
+            "from weakref import WeakMethod\n"
+            "class Receiver:\n    def accept(self, value): return value\n"
+            "receiver = Receiver()\nsaved = WeakMethod(receiver.accept)\n"
+            "print(saved().__self__ is receiver, saved()(42))\n"
+            "del receiver\nprint(saved() is None)\n"
+        ),
+    },
     "weak_key_dictionary_export": {
         "main.py": (
             "from weakref import WeakKeyDictionary, ref\n"
