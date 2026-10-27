@@ -24,7 +24,7 @@ pub(super) struct Program {
 
 enum Instruction {
     Eval(ast::Expr),
-    Assign(String, ast::Expr),
+    Assign(ast::Expr, ast::Expr),
     AssignItem(ast::ExprSubscript, ast::Expr),
     AssignAttr(ast::ExprAttribute, ast::Expr),
     From(String, Vec<(String, String)>),
@@ -158,8 +158,8 @@ impl Program {
                 Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
                     strings.visit_expr(e)
                 }
-                Instruction::Assign(name, e) => {
-                    strings.heap.code_name(name);
+                Instruction::Assign(target, e) => {
+                    strings.visit_expr(target);
                     strings.visit_expr(e);
                 }
                 Instruction::AssignItem(target, e) => {
@@ -251,10 +251,9 @@ impl Program {
                     e => Instruction::Eval(e.clone()),
                 },
                 Stmt::Assign(s) => match s.targets.as_slice() {
-                    [ast::Expr::Name(n)] => {
-                        let name = n.id.to_string();
-                        self.locals.insert(name.clone());
-                        Instruction::Assign(name, (*s.value).clone())
+                    [target @ (ast::Expr::Name(_) | ast::Expr::Tuple(_) | ast::Expr::List(_))] => {
+                        self.declare_target(target)?;
+                        Instruction::Assign(target.clone(), (*s.value).clone())
                     }
                     [ast::Expr::Attribute(target)] => {
                         Instruction::AssignAttr(target.clone(), (*s.value).clone())
@@ -270,11 +269,10 @@ impl Program {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
                     };
-                    let name = name.id.to_string();
-                    self.locals.insert(name.clone());
+                    self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = &s.value else { continue };
-                    Instruction::Assign(name, (**value).clone())
+                    Instruction::Assign((*s.target).clone(), (**value).clone())
                 }
                 Stmt::Return(s) => {
                     if !function {
@@ -312,7 +310,7 @@ impl Program {
                     Instruction::Define(Rc::new(child), s.parameters.clone())
                 }
                 Stmt::For(s) if !s.is_async => {
-                    self.loop_target(&s.target)?;
+                    self.declare_target(&s.target)?;
                     self.instructions
                         .push((line, Instruction::Iter((*s.iter).clone())));
                     let head = self.instructions.len();
@@ -358,17 +356,19 @@ impl Program {
         Ok(())
     }
 
-    fn loop_target(&mut self, target: &ast::Expr) -> Result<()> {
+    /// Declare every local name in a loop or fixed unpacking target.
+    fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
         match target {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
-            ast::Expr::Tuple(t) => {
-                for e in &t.elts {
-                    self.loop_target(e)?;
+            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
+            | ast::Expr::List(ast::ExprList { elts, .. }) => {
+                for element in elts {
+                    self.declare_target(element)?;
                 }
             }
-            _ => return Err(unsupported("for target")),
+            _ => return Err(unsupported("unpacking target")),
         }
         Ok(())
     }
@@ -1165,9 +1165,9 @@ impl Context {
                 };
                 self.op(op, exception, cause, explicit)?;
             }
-            Instruction::Assign(n, e) => {
+            Instruction::Assign(target, e) => {
                 let value = eval(self, e)?;
-                self.bind_source_name(scope, n, value)?;
+                self.bind_target(scope, target, value)?;
             }
             Instruction::AssignAttr(target, e) => {
                 let value = eval(self, e)?;
@@ -1195,7 +1195,7 @@ impl Context {
                 match self.next_item(iter)? {
                     Some(v) => {
                         if let Some(target) = target {
-                            self.bind_loop_target(scope, target, v)?;
+                            self.bind_target(scope, target, v)?;
                         } else {
                             return Ok(Some(Step::Yield(v, *ip - 1)));
                         }
@@ -1305,11 +1305,13 @@ impl Context {
         Ok(None)
     }
 
-    fn bind_loop_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
+    /// Unpack each level before binding its component targets from left to right.
+    fn bind_target(&mut self, scope: Id, target: &ast::Expr, value: Id) -> Result<()> {
         match target {
             ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
-            ast::Expr::Tuple(t) => {
-                let count = t.elts.len();
+            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
+            | ast::Expr::List(ast::ExprList { elts, .. }) => {
+                let count = elts.len();
                 let iter = self.iterator(value)?;
                 let mut unpacked = Vec::with_capacity(count);
                 for i in 0..count {
@@ -1332,11 +1334,11 @@ impl Context {
                         format!("too many values to unpack (expected {count}{detail})"),
                     ));
                 }
-                for (element, item) in t.elts.iter().zip(unpacked) {
-                    self.bind_loop_target(scope, element, item)?;
+                for (element, item) in elts.iter().zip(unpacked) {
+                    self.bind_target(scope, element, item)?;
                 }
             }
-            _ => unreachable!("validated loop target"),
+            _ => unreachable!("validated unpacking target"),
         }
         Ok(())
     }

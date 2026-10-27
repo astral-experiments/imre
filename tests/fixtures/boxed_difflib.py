@@ -7,6 +7,7 @@ def current():
     print(type(longest) is Match, longest.a, longest.b, longest.size)
     print(matcher.get_matching_blocks(), matcher.ratio())
     print(matcher.get_opcodes())
+    print(list(matcher.get_grouped_opcodes(1)))
     matcher.set_seq2("hello")
     print(matcher.get_matching_blocks(), matcher.ratio())
     print(SequenceMatcher(None, "", "").ratio())
