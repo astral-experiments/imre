@@ -210,6 +210,7 @@ impl Context {
                 "issubclass() arg 2 must be a class, a tuple of classes, or a union",
             ));
         }
+        self.require_checkable_protocol(parent)?;
         Ok(self.subclass(child, parent))
     }
 
@@ -813,6 +814,27 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Raised(error)
+                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
+                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+            {
+                if name == "msg" {
+                    return Ok(match error.args.as_deref() {
+                        Some([one]) => *one,
+                        Some(_) => NONE,
+                        None => self.text(error.message),
+                    });
+                }
+                let Some(fields) = error.import else {
+                    return Ok(NONE);
+                };
+                let value = match name {
+                    "name" => fields.name.as_deref(),
+                    "path" => fields.path.as_deref(),
+                    _ => fields.name_from.as_deref(),
+                };
+                return Ok(value.map_or(NONE, |value| self.text(value)));
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -923,6 +945,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Ok(self.module_globals(scope));
@@ -1261,6 +1284,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -1468,6 +1492,11 @@ impl Context {
                 }
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
+                }
+                if self.is_protocol_declaration(callable)
+                    && self.class_attr(callable, "__init__").is_none()
+                {
+                    return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
                 }
                 if self.classes.get("collections.abc.Callable") == Some(&callable) {
                     return Err(Error::new(
@@ -1719,6 +1748,20 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
+        if let Some(&protocol) = self.classes.get("typing.Protocol")
+            && bases.iter().any(|&base| self.subclass(base, protocol))
+        {
+            self.bind(
+                scope,
+                "_is_protocol",
+                if bases.contains(&protocol) {
+                    TRUE
+                } else {
+                    FALSE
+                },
+            );
+        }
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));

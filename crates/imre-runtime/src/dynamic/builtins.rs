@@ -77,6 +77,7 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "sorted",
     "ord",
     "chr",
     "callable",
@@ -777,6 +778,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
             let iterable = iterable

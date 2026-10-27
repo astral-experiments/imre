@@ -28,6 +28,10 @@ impl Context {
             && !self
                 .module_class("abc", "ABC")
                 .is_some_and(|abc| self.subclass(class, abc))
+            && !self
+                .classes
+                .get("typing.Protocol")
+                .is_some_and(|&protocol| self.subclass(class, protocol))
         {
             return Ok(());
         }
