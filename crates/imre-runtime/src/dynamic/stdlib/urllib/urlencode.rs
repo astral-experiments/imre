@@ -104,7 +104,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
             let len = ctx.builtin("len");
             match ctx.call(len, vec![*v], Vec::new()) {
                 Ok(_) => Some(ctx.iterator(*v)?),
-                Err(e) if e.kind == "TypeError" => None,
+                Err(e) if ctx.is_builtin_error(&e, "TypeError") => None,
                 Err(e) => return Err(e),
             }
         } else {

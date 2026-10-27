@@ -49,5 +49,13 @@ def current():
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
+    class NoLength(TypeError):
+        pass
+    class Scalar:
+        def __len__(self):
+            raise NoLength()
+        def __str__(self):
+            return "a b"
+    print(urlencode([("q", Scalar())], doseq=True))
     print(urlencode([("suffix", "a b"), ("suffix", "Málaga/+")]))
     print(parse.urlencode({b"q": [b"a/", b"\xff"]}, doseq=True, safe="/", quote_via=quote))
