@@ -15,6 +15,7 @@ pub(super) struct Parsers {
     declarations: HashSet<(ModuleId, TextSize)>,
     calls: HashMap<(ModuleId, TextRange), Parser>,
     registration_errors: HashMap<(ModuleId, TextSize), Expr>,
+    choice_checks: HashMap<(ModuleId, TextRange), usize>,
     namespaces: HashSet<usize>,
     /// Child layouts share the complete parent prefix and add their own options.
     commands: HashMap<usize, CommandVariants>,
@@ -216,7 +217,7 @@ fn option(
     classes: &Classes,
     flags: &Flags,
     locals: &HashSet<String>,
-) -> Result<OptionField, String> {
+) -> Result<(OptionField, Option<usize>), String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
         return Err(module.error(
@@ -654,16 +655,24 @@ fn option(
     } else {
         element
     };
-    Ok(OptionField {
-        name: dest.clone(),
-        annotation: flag.clone(),
-        ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "action": action, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
+    let choice_digits = if element == Type::Int {
+        registration::choice_digits(range.as_ref(), &choices)
+    } else {
+        None
+    };
+    Ok((
+        OptionField {
+            name: dest.clone(),
+            annotation: flag.clone(),
+            ty: if optional { types.optional(ty) } else { ty },
+            option: json!({ "flag": flag_name, "dest": dest, "positional": positional, "aliases": aliases, "action": action, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "nargs": nargs, "constant": constant, "list_default":list_default, "required": required,
             "choices": choices, "range":range, "has_choices": kw.contains_key("choices"), "int_default": int_default || element == Type::Int && numeric_kw("default", element),
             "int_constant": int_constant || element == Type::Int && numeric_kw("const", element),
             "float_default": element == Type::Float && numeric_kw("default", element),
             "float_constant": element == Type::Float && numeric_kw("const", element), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
-    })
+        },
+        choice_digits,
+    ))
 }
 
 #[derive(Default)]
@@ -1066,6 +1075,7 @@ impl Parsers {
                             .map(|p| p.name().to_string()),
                     );
                     let mut registration_errors = HashMap::new();
+                    let mut choice_checks = HashMap::new();
                     let mut read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -1152,8 +1162,11 @@ impl Parsers {
                                     *index += 1;
                                     continue;
                                 }
-                                let mut field =
+                                let (mut field, choice_digits) =
                                     option(add, graph, module_id, types, classes, flags, &locals)?;
+                                if let Some(digits) = choice_digits {
+                                    choice_checks.insert(add.range(), digits);
+                                }
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
                                 }
@@ -1405,11 +1418,17 @@ impl Parsers {
                     });
                     for stmt in &function.body[start..index] {
                         if !matches!(stmt, ast::Stmt::Expr(stmt)
-                            if registration_errors.contains_key(&stmt.value.start()))
+                            if registration_errors.contains_key(&stmt.value.start())
+                                || choice_checks.contains_key(&stmt.value.range()))
                         {
                             parsers.declarations.insert((module_id, stmt.start()));
                         }
                     }
+                    parsers.choice_checks.extend(
+                        choice_checks
+                            .into_iter()
+                            .map(|(range, digits)| ((module_id, range), digits)),
+                    );
                     parsers.registration_errors.extend(
                         registration_errors
                             .into_iter()
@@ -1445,6 +1464,17 @@ impl Checker<'_> {
             .get(&(self.module, call.start()))
         {
             return registration::at_call(self, call, error.clone()).map(Some);
+        }
+        if let Some(&digits) = self
+            .classes
+            .parsers
+            .choice_checks
+            .get(&(self.module, call.range()))
+        {
+            return Ok(Some(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::ArgparseChoiceDigits(digits), Vec::new()),
+            }));
         }
         let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.range())) else {
             return Ok(None);
