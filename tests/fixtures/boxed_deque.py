@@ -21,6 +21,10 @@ def current():
     queue = deque(iterable=range(5), maxlen=2)
     queue.appendleft(marker)
     assert queue.maxlen == 2 and list(queue) == [marker, 3]
+    copied = queue.copy()
+    assert copied is not queue and copied.maxlen == 2
+    assert copied.popleft() is marker and list(queue) == [marker, 3]
+    assert deque.__copy__(queue).popleft() is marker
     cursor = iter(queue)
     assert iter(cursor) is cursor and next(cursor) is marker
     queue.append("last")

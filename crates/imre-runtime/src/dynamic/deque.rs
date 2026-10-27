@@ -9,6 +9,8 @@ pub(super) const METHODS: &[&str] = &[
     "append",
     "appendleft",
     "clear",
+    "copy",
+    "__copy__",
     "extend",
     "remove",
     "pop",
@@ -320,6 +322,10 @@ pub(super) fn method(
         "clear" => {
             clear(ctx, receiver);
             Ok(NONE)
+        }
+        "copy" | "__copy__" => {
+            let copy = ring.shallow_copy()?;
+            Ok(ctx.alloc(Value::Deque(Box::new(copy))))
         }
         "reverse" => {
             ring.reverse();
