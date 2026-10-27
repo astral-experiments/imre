@@ -216,6 +216,7 @@ impl Context {
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
+            Value::BufferedRandom(_) => "_io.BufferedRandom",
             Value::List(_) => "list",
             Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
@@ -538,6 +539,7 @@ pub(super) enum Value {
     File(std::rc::Rc<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
+    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
     RegexMatch {
         groups: Vec<Option<Id>>,
         names: HashMap<String, usize>,
@@ -773,7 +775,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)
-            | Self::TextFile(_) => {}
+            | Self::TextFile(_)
+            | Self::BufferedRandom(_) => {}
         }
     }
 }
