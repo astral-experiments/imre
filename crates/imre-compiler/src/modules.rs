@@ -31,6 +31,8 @@ pub(crate) type ModuleId = usize;
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "os" => Some(("os.py", include_str!("../stdlib/os.py"))),
+        "posixpath" => Some(("posixpath.py", include_str!("../stdlib/posixpath.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "contextlib" => Some((
             "contextlib.py",

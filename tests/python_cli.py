@@ -406,6 +406,7 @@ def report(text):
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
+            "boxed_posixpath.py",
             "boxed_itertools_count.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
