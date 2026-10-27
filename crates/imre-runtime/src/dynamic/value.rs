@@ -172,6 +172,7 @@ impl Context {
             Value::Str(_) => "str",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
+            Value::Repeat(_) => "repeat",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
             Value::File(file) => match file.as_ref() {
@@ -187,6 +188,7 @@ impl Context {
                 class: Some(class), ..
             } => class,
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
             Value::Iterator { kind, .. } => kind,
             Value::Set { frozen: true, .. } => "frozenset",
@@ -313,6 +315,7 @@ pub(super) enum Value {
         tzinfo: Id,
     },
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
+    Slice([Id; 3]),
     Range {
         start: i64,
         stop: i64,
@@ -443,6 +446,7 @@ pub(super) enum Value {
         current: Id,
         step: Id,
     },
+    Repeat(crate::objects::Repeat<Id>),
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -512,6 +516,7 @@ impl Value {
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
             Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Repeat(repeat) => visit.push(repeat.value),
             Self::Zip {
                 inputs, pending, ..
             } => {
@@ -555,6 +560,7 @@ impl Value {
                 visit.extend(old);
             }
             Self::Yielded(item) => visit.push(*item),
+            Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),

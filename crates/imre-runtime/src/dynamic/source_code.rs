@@ -829,6 +829,15 @@ impl Context {
                 let base = eval(self, &v.value)?;
                 self.lookup_attr(base, v.attr.as_str())
             }
+            Expr::Slice(v) => {
+                let mut parts = [NONE; 3];
+                for (part, expr) in parts.iter_mut().zip([&v.lower, &v.upper, &v.step]) {
+                    if let Some(expr) = expr {
+                        *part = eval(self, expr)?;
+                    }
+                }
+                Ok(self.alloc(Value::Slice(parts)))
+            }
             Expr::Subscript(v) => {
                 let base = eval(self, &v.value)?;
                 let k = eval(self, &v.slice)?;

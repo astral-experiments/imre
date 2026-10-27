@@ -11,6 +11,7 @@ mod function_fields;
 mod iterators;
 mod operators;
 mod property;
+mod slice;
 mod source_code;
 mod static_method;
 mod stdlib;
@@ -184,6 +185,7 @@ impl Context {
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
+                | Value::Repeat(_)
         )
     }
 
@@ -292,6 +294,9 @@ impl Context {
         if matches!(self.heap.get(id), Value::Count { .. }) {
             return Ok(true);
         }
+        if let Value::Repeat(repeat) = self.heap.get(id) {
+            return Ok(repeat.remaining != Some(0));
+        }
         if let Value::LoopIterator { source, peeked } = *self.heap.get(id) {
             if peeked.is_some() {
                 return Ok(true);
@@ -357,6 +362,7 @@ impl Context {
             Value::AstWalk(_) => return stdlib::ast::advance(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Count { .. } => return stdlib::itertools::advance(self, id).map(Some),
+            Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Generator { code, .. } => {
                 let code = *code;
                 return match self.code_object(code).body {
@@ -423,6 +429,7 @@ impl Context {
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Count { .. }
+                | Value::Repeat(_)
         ) || self.slot(id, "__iter__").is_some()
         {
             let iter = self.iterator(id)?;

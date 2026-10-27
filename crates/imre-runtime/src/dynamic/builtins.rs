@@ -1,15 +1,16 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::io::{self, Write};
 use std::rc::Rc;
 
 use super::Context;
 use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod collections;
+mod float;
 mod integer;
+mod print;
 mod text;
-pub(super) use collections::{hashable, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -100,6 +101,7 @@ const TYPES: &[&str] = &[
     "bytes",
     "complex",
     "dict",
+    "float",
     "frozenset",
     "int",
     "list",
@@ -109,6 +111,7 @@ const TYPES: &[&str] = &[
     "staticmethod",
     "range",
     "set",
+    "slice",
     "str",
     "tuple",
     "type",
@@ -161,6 +164,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "get",
     "items",
     "keys",
+    "pop",
     "setdefault",
     "update",
     "values",
@@ -169,6 +173,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 pub(super) const STR_METHODS: &[&str] = &[
     "encode",
     "endswith",
+    "expandtabs",
     "find",
     "format",
     "join",
@@ -192,6 +197,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_) if matches!(attr, "decode" | "rsplit" | "rstrip") => "bytes",
@@ -290,6 +296,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
+        Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
+            "itertools.repeat"
+        }
         Value::Function { .. } | Value::Cached { .. } | Value::Partial { .. }
             if attr == "__get__" =>
         {
@@ -578,6 +587,7 @@ pub(super) fn call(
                 Ok(NONE)
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
+            "slice" => super::slice::method(ctx, method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -816,6 +826,7 @@ pub(super) fn call(
                 pending: None,
             }))
         }
+        "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 3)?;
@@ -930,6 +941,7 @@ pub(super) fn call(
             ctx.module(name.split('.').next().unwrap())
         }
         "complex" => ctx.new_complex(args, kwargs),
+        "float" => float::construct(ctx, args, kwargs),
         "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -941,33 +953,7 @@ pub(super) fn call(
             }
             Ok(FALSE)
         }
-        "print" => {
-            let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
-            let flush = ctx.optional_truth(flush, false)?;
-            if file.is_some_and(|id| id != NONE) {
-                return Err(type_error("print supports standard output"));
-            }
-            let sep = sep
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or(" ");
-            let end = end
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("\n");
-            let values = args
-                .iter()
-                .map(|&id| ctx.display(id))
-                .collect::<Vec<_>>()
-                .join(sep);
-            let mut out = io::stdout().lock();
-            write!(out, "{values}{end}")
-                .and_then(|()| if flush { out.flush() } else { Ok(()) })
-                .map_err(|err| Error::new("OSError", err.to_string()))?;
-            Ok(NONE)
-        }
+        "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

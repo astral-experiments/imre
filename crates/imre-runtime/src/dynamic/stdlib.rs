@@ -243,6 +243,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
+        ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
@@ -445,7 +446,13 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("itertools.count.") {
+    if name == "itertools.repeat" {
+        return itertools::repeat(ctx, args, kwargs);
+    }
+    if let Some(method) = name
+        .strip_prefix("itertools.count.")
+        .or_else(|| name.strip_prefix("itertools.repeat."))
+    {
         return itertools::method(ctx, method, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
