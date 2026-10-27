@@ -4,7 +4,7 @@ use crate::StrOwner;
 mod expandtabs;
 mod lowercase;
 mod normalization;
-mod translate;
+pub(crate) mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
 

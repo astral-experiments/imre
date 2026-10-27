@@ -10,7 +10,7 @@ use ruff_python_literal::format::{
 
 use super::*;
 
-use crate::objects::{python_whitespace, split_parts, visit_line_fields as split_lines};
+use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 fn strict(ctx: &Context, id: Option<Id>) -> Result<()> {
     if let Some(id) = id
@@ -795,6 +795,37 @@ pub(super) fn method(
         return Ok(boolean(crate::objects::python_isspace(
             ctx.str_value(receiver)?,
         )));
+    }
+    if name == "translate" {
+        positional(name, kwargs)?;
+        arity(name, args, 1, 1)?;
+        let Value::Dict(table) = ctx.heap.get(args[0]) else {
+            return Err(type_error("str.translate requires a plain dictionary"));
+        };
+        let text = translate::text(ctx.str_value(receiver)?, |ch| {
+            let ordinal = i64::from(u32::from(ch));
+            let entry = table
+                .iter()
+                .find(|&&(key, _)| match ctx.heap.get(ctx.scalar_value(key)) {
+                    Value::Int(key) => key.to_i64() == Some(ordinal),
+                    Value::Bool(key) => i64::from(*key) == ordinal,
+                    _ => false,
+                });
+            let Some(&(_, id)) = entry else {
+                return Ok(translate::Piece::Character(ch));
+            };
+            match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::None => Ok(translate::Piece::Text("")),
+                Value::Str(value) => Ok(translate::Piece::Text(value)),
+                Value::Int(value) => translate::Piece::ordinal(value),
+                Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
+                _ => Err(crate::Error::new(
+                    crate::Kind::TypeError,
+                    translate::INVALID_VALUE,
+                )),
+            }
+        })?;
+        return Ok(ctx.text(text.into_string()));
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {

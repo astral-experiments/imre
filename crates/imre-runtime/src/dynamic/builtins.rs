@@ -199,6 +199,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "translate",
     "upper",
 ];
 
