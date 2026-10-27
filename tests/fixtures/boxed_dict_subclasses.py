@@ -2,6 +2,21 @@
 
 
 def current():
+    from collections import Counter
+
+    counts = Counter(a=10, b=5, c=0)
+    print(counts.total(), counts["absent"], len(counts))
+    counts.update("ba", a=1 << 100)
+    counts.subtract({"a": 1 << 100, "b": 9}, c=1)
+    copied = counts.copy()
+    del counts["c"]
+    del counts["absent"]
+    print(list(counts.items()), copied.total(), copied["absent"])
+    plain = Counter(a=1)
+    with_zero = Counter(a=1, b=0)
+    print(plain == with_zero, plain != with_zero, with_zero == dict(plain))
+    print(Counter(b=-1) < Counter(), plain <= with_zero, with_zero > plain)
+
     class Data(dict):
         pass
 
@@ -61,6 +76,19 @@ def current():
         print(key)
         break
     print(length_hint(pairs), list(pairs), length_hint(pairs))
+
+    live = {"first": 1, "second": 2}
+    live_items = iter(live.items())
+    live_values = iter(live.values())
+    print(next(live_items), next(live_values))
+    live["second"] = 99
+    print(next(live_items), next(live_values))
+    live["third"] = 3
+    for cursor in (live_items, live_values):
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            print(error, length_hint(cursor))
 
     def replace_and_append(value):
         if value == 1:

@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod binascii;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
@@ -40,9 +41,12 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "sys"
+            | "threading"
+            | "_thread"
             | "abc"
             | "codecs"
             | "types"
+            | "_io"
             | "io"
             | "traceback"
             | "sysconfig"
@@ -57,6 +61,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "selectors"
             | "struct"
             | "base64"
+            | "binascii"
             | "json"
             | "_imre_logging"
             | "marshal"
@@ -162,7 +167,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         class,
         dictionary: None,
         scalar: None,
-        text_memory: None,
+        memory_stream: None,
         fields: fields
             .iter()
             .map(|&(key, value)| (key.to_owned(), value))
@@ -256,6 +261,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return ctx.module(&format!("{module}.{name}"));
     }
     let id = match (module, name) {
+        ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
+        ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", "ASCII") => ctx.int(regex::ASCII),
         ("re", "UNICODE") => ctx.int(regex::UNICODE),
         ("re", "VERBOSE") => ctx.int(regex::VERBOSE),
@@ -281,7 +288,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
         ("typing", "TYPE_CHECKING") => FALSE,
-        ("typing", "Generic") => super::typing::named_class(ctx, "typing", "Generic"),
+        ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", "Callable") => {
             super::typing::named_class(ctx, "collections.abc", "Callable")
         }
@@ -323,6 +330,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
+            ctx.builtin(&format!("binascii.{name}"))
+        }
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
@@ -469,8 +479,26 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == super::thread_lock::CLASS {
+        return super::thread_lock::construct(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_thread.lock.") {
+        return super::thread_lock::method(ctx, method, args, kwargs);
+    }
+    if name == super::thread_local::CLASS {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "Initialization arguments are not supported",
+            ));
+        }
+        return Ok(ctx.alloc(Value::ThreadLocal(Default::default())));
+    }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("binascii.") {
+        return binascii::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);

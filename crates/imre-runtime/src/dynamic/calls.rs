@@ -141,6 +141,8 @@ impl Context {
                             | "object.__init__"
                             | "int.to_bytes"
                             | "list.pop"
+                            | "map.__iter__"
+                            | "map.__next__"
                     ) || name.starts_with("dict.")
                         || name
                             .strip_prefix("str.")
@@ -209,6 +211,7 @@ impl Context {
                 "issubclass() arg 2 must be a class, a tuple of classes, or a union",
             ));
         }
+        self.require_checkable_protocol(parent)?;
         Ok(self.subclass(child, parent))
     }
 
@@ -285,16 +288,21 @@ impl Context {
             | Value::Set { .. }
             | Value::Range { .. }
             | Value::Slice(_)
+            | Value::Enumerate { .. }
             | Value::Iterator { .. }
             | Value::Tuple(_)
+            | Value::DictIterator(_)
             | Value::Class { .. }
             | Value::Function { .. }
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
             | Value::Generator { .. }
-            | Value::Module { .. } => self.type_name(obj),
+            | Value::Module { .. }
+            | Value::ThreadLocal(_)
+            | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::ByteArray(_) => "bytearray",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",
@@ -340,6 +348,8 @@ impl Context {
                             | "operator.attrgetter"
                             | "itertools.count"
                             | "itertools.repeat"
+                            | super::thread_local::CLASS
+                            | super::thread_lock::CLASS
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -352,7 +362,9 @@ impl Context {
                     )
                 {
                     "type"
-                } else if builtins::is_builtin(name) || builtins::constructor_owner(name).is_some()
+                } else if builtins::is_builtin(name)
+                    || builtins::constructor_owner(name).is_some()
+                    || matches!(name.as_str(), "binascii.a2b_base64" | "binascii.b2a_base64")
                 {
                     "builtin_function_or_method"
                 } else {
@@ -433,6 +445,7 @@ impl Context {
             | ("frozenset", Value::Set { frozen: true, .. })
             | ("slice", Value::Slice(_))
             | ("range", Value::Range { .. })
+            | ("map", Value::Map { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -441,6 +454,8 @@ impl Context {
             | ("operator.attrgetter", Value::AttrGetter(_))
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
+            | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 "urllib.parse.SplitResult",
@@ -499,7 +514,7 @@ impl Context {
             _ => false,
         }
     }
-    fn missing_attribute(&self, obj: Id, name: &str) -> Error {
+    pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
         Error::new(
             "AttributeError",
             format!("'{}' object has no attribute '{name}'", self.type_name(obj)),
@@ -548,6 +563,9 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.local_attribute(obj, name);
+        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -688,9 +706,28 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
+            Value::Native(class) if class == "map" => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("map")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::Native(class) if class == "datetime.time" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("time")),
                 "__module__" => return Ok(self.text("datetime")),
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_lock::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("lock")),
+                attr if super::thread_lock::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
+                _ => {}
+            },
+            Value::Native(class) if class == super::thread_local::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("_local")),
                 _ => {}
             },
             Value::Native(class)
@@ -772,6 +809,27 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Raised(error)
+                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
+                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+            {
+                if name == "msg" {
+                    return Ok(match error.args.as_deref() {
+                        Some([one]) => *one,
+                        Some(_) => NONE,
+                        None => self.text(error.message),
+                    });
+                }
+                let Some(fields) = error.import else {
+                    return Ok(NONE);
+                };
+                let value = match name {
+                    "name" => fields.name.as_deref(),
+                    "path" => fields.path.as_deref(),
+                    _ => fields.name_from.as_deref(),
+                };
+                return Ok(value.map_or(NONE, |value| self.text(value)));
+            }
             Value::Raised(error) if name == "args" => {
                 let args = error.args.unwrap_or_else(|| {
                     if error.message.is_empty() {
@@ -811,6 +869,28 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(builtin)
+                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+            {
+                let short = builtin.rsplit('.').next().unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__module__" => return Ok(self.text("binascii")),
+                    "__base__" | "__bases__" => {
+                        let base = self.builtin(if short == "Error" {
+                            "ValueError"
+                        } else {
+                            "Exception"
+                        });
+                        return Ok(if name == "__base__" {
+                            base
+                        } else {
+                            self.alloc(Value::Tuple(vec![base]))
+                        });
+                    }
+                    _ => {}
+                }
             }
             Value::Native(builtin)
                 if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>
@@ -855,6 +935,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Ok(self.module_globals(scope));
@@ -955,6 +1036,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, None);
+        }
         if let Some(descriptor) = self.slot(obj, name)
             && self.data_descriptor(descriptor)
         {
@@ -1100,6 +1184,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
+            return self.update_local_attribute(obj, name, Some(value));
+        }
         if name == "__abstractmethods__"
             && let Value::Class { scope, .. } = *self.heap.get(obj)
         {
@@ -1179,6 +1266,7 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
@@ -1215,7 +1303,7 @@ impl Context {
         self.alloc(Value::Instance {
             class,
             dictionary,
-            text_memory: None,
+            memory_stream: None,
             fields: HashMap::new(),
             scalar: None,
         })
@@ -1254,7 +1342,7 @@ impl Context {
             fields: HashMap::new(),
             dictionary: None,
             scalar: Some(text),
-            text_memory: None,
+            memory_stream: None,
         }))
     }
 
@@ -1286,6 +1374,7 @@ impl Context {
                             "str"
                                 | "dict"
                                 | "list"
+                                | "map"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -1387,6 +1476,11 @@ impl Context {
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);
                 }
+                if self.is_protocol_declaration(callable)
+                    && self.class_attr(callable, "__init__").is_none()
+                {
+                    return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
+                }
                 if self.classes.get("collections.abc.Callable") == Some(&callable) {
                     return Err(Error::new(
                         "TypeError",
@@ -1429,7 +1523,7 @@ impl Context {
                         fields,
                         dictionary: None,
                         scalar: None,
-                        text_memory: None,
+                        memory_stream: None,
                     }));
                 }
                 let new = self.class_attr(callable, "__new__");
@@ -1637,6 +1731,20 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope)?;
+        // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
+        if let Some(&protocol) = self.classes.get("typing.Protocol")
+            && bases.iter().any(|&base| self.subclass(base, protocol))
+        {
+            self.bind(
+                scope,
+                "_is_protocol",
+                if bases.contains(&protocol) {
+                    TRUE
+                } else {
+                    FALSE
+                },
+            );
+        }
         super::typing::class_parameters(self, scope, original, &bases)?;
         let class = self.allocate_class(name.clone(), scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));

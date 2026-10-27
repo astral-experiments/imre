@@ -101,11 +101,26 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         return class;
     }
     let scope = ctx.scope(module, None);
+    let bases = if key == "typing.Protocol" {
+        let generic = named_class(ctx, "typing", "Generic");
+        ctx.bind(scope, "_is_protocol", TRUE);
+        ctx.bind(scope, "_is_runtime_protocol", FALSE);
+        let parameters = ctx.alloc(Value::Tuple(Vec::new()));
+        ctx.bind(scope, "__parameters__", parameters);
+        let abstract_methods = ctx.alloc(Value::Set {
+            items: Vec::new(),
+            frozen: true,
+        });
+        ctx.bind(scope, "__abstractmethods__", abstract_methods);
+        vec![generic]
+    } else {
+        Vec::new()
+    };
     let module = ctx.text(module);
     ctx.bind(scope, "__module__", module);
     let class = ctx
-        .allocate_class(name.to_owned(), scope, Vec::new())
-        .expect("object has a linearization");
+        .allocate_class(name.to_owned(), scope, bases)
+        .expect("native typing classes have a single base");
     ctx.classes.insert(key, class);
     class
 }
@@ -237,11 +252,16 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     };
     Some((|| {
         if kind == AliasKind::Generic {
-            if ctx.classes.get("typing.Generic") == Some(&target) {
+            if ctx.classes.get("typing.Generic") == Some(&target)
+                || ctx.classes.get("typing.Protocol") == Some(&target)
+            {
+                let Value::Class { name, .. } = ctx.heap.get(target) else {
+                    unreachable!()
+                };
                 if args.is_empty() {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameter list to Generic[...] cannot be empty",
+                        format!("Parameter list to {name}[...] cannot be empty"),
                     ));
                 }
                 if args
@@ -250,13 +270,15 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameters to Generic[...] must all be type variables or parameter specification variables.",
+                        format!(
+                            "Parameters to {name}[...] must all be type variables or parameter specification variables."
+                        ),
                     ));
                 }
                 if variables(ctx, &args).len() != args.len() {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameters to Generic[...] must all be unique",
+                        format!("Parameters to {name}[...] must all be unique"),
                     ));
                 }
             } else {
@@ -309,7 +331,12 @@ pub(super) fn resolve_bases(ctx: &mut Context, bases: Id) -> Result<(Option<Id>,
     let mut resolved = Vec::with_capacity(raw.len());
     let mut original = None;
     for &base in &raw {
-        if matches!(ctx.heap.get(base), Value::Class { .. } | Value::Native(_)) {
+        let resolved_type = match ctx.heap.get(base) {
+            Value::Class { .. } => true,
+            Value::Native(name) => name != "typing.Callable",
+            _ => false,
+        };
+        if resolved_type {
             resolved.push(base);
             continue;
         }
@@ -340,6 +367,55 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
             "TypeError",
             "Cannot subclass an instance of TypeVar",
         ));
+    }
+    if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
+        let base_tuple = bases;
+        let bases = ctx.items(base_tuple)?;
+        let i = bases
+            .iter()
+            .position(|base| *base == id)
+            .ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
+        let callable = named_class(ctx, "collections.abc", "Callable");
+        let generic = named_class(ctx, "typing", "Generic");
+        let mut result = Vec::new();
+        if !bases.contains(&callable) {
+            result.push(callable);
+        }
+        let mut later_generic = false;
+        for &base in &bases[i + 1..] {
+            if matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")
+                || matches!(ctx.heap.get(base), Value::GenericAlias(a) if a.kind.is_typing_alias())
+            {
+                later_generic = true;
+                break;
+            }
+            if matches!(ctx.heap.get(base), Value::Class { .. } | Value::Native(_)) {
+                if ctx.subclass(base, generic) {
+                    later_generic = true;
+                    break;
+                }
+                continue;
+            }
+            let method = match ctx.lookup_attr(base, "__mro_entries__") {
+                Ok(method) => method,
+                Err(error) if ctx.is_attribute_error(&error) => continue,
+                Err(error) => return Err(error),
+            };
+            let entries = ctx.call(method, vec![base_tuple], vec![])?;
+            if let Value::Tuple(entries) = ctx.heap.get(entries)
+                && entries.iter().any(|&entry| {
+                    matches!(ctx.heap.get(entry), Value::Class { .. } | Value::Native(_))
+                        && ctx.subclass(entry, generic)
+                })
+            {
+                later_generic = true;
+                break;
+            }
+        }
+        if !later_generic {
+            result.push(generic);
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
     }
     let Value::GenericAlias(alias) = ctx.heap.get(id) else {
         unreachable!()
@@ -445,6 +521,14 @@ pub(super) fn class_parameters(
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     let attr = match ctx.heap.get(value) {
         Value::TypeVar(_) | Value::GenericAlias(_) if name == "__mro_entries__" => {
+            let callable = ctx.builtin("typing.alias_mro_entries");
+            ctx.alloc(Value::Method {
+                callable,
+                receiver: value,
+                explicit: false,
+            })
+        }
+        Value::Native(class) if class == "typing.Callable" && name == "__mro_entries__" => {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
                 callable,
@@ -667,6 +751,28 @@ pub(super) fn call(
 }
 
 impl Context {
+    /// Distinguish a declared protocol from Protocol itself and its concrete descendants.
+    pub(super) fn is_protocol_declaration(&self, class: Id) -> bool {
+        self.classes
+            .get("typing.Protocol")
+            .is_some_and(|&protocol| {
+                class != protocol
+                    && self.subclass(class, protocol)
+                    && self.class_attr(class, "_is_protocol") == Some(TRUE)
+            })
+    }
+
+    /// Reject direct runtime checks on protocol declarations before nominal matching.
+    pub(super) fn require_checkable_protocol(&self, class: Id) -> Result<()> {
+        if self.is_protocol_declaration(class) {
+            return Err(Error::new(
+                "TypeError",
+                "Instance and class checks can only be used with @runtime_checkable protocols",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
             Value::Tuple(classes) => {
@@ -694,7 +800,10 @@ impl Context {
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
-            _ => Ok(self.instance_of(value, class)),
+            _ => {
+                self.require_checkable_protocol(class)?;
+                Ok(self.instance_of(value, class))
+            }
         }
     }
 
@@ -706,6 +815,13 @@ impl Context {
         mut bases: Vec<Id>,
     ) -> Result<Id> {
         for &base in &bases {
+            if matches!(self.heap.get(base), Value::Native(name) if name == super::thread_local::CLASS)
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "thread-local subclasses require per-thread initialization",
+                ));
+            }
             if let Value::Native(name) = self.heap.get(base)
                 && matches!(name.as_str(), "typing.TypeVar" | "slice")
             {

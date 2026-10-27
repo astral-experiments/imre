@@ -124,7 +124,10 @@ fn components(ctx: &mut Context, [start, stop, step]: [Id; 3]) -> Result<[Option
     Ok([part(start)?, part(stop)?, step])
 }
 
-fn normalize<T: Signed + Ord + Clone>([start, stop, step]: [Option<T>; 3], length: T) -> [T; 3] {
+pub(super) fn normalize<T: Signed + Ord + Clone>(
+    [start, stop, step]: [Option<T>; 3],
+    length: T,
+) -> [T; 3] {
     let step = step.unwrap_or_else(T::one);
     let reverse = step.is_negative();
     let (low, high) = if reverse {
@@ -174,9 +177,9 @@ pub(super) fn range(
     }))
 }
 
-/// Clip bounds only when addressing storage whose actual length fits a machine word.
-pub(super) fn sequence_bounds(ctx: &mut Context, parts: [Id; 3], len: usize) -> Result<[i64; 3]> {
-    let bounds = components(ctx, parts)?.map(|v| {
+/// Convert Python slice indices before a caller measures potentially mutable storage.
+pub(super) fn sequence_components(ctx: &mut Context, parts: [Id; 3]) -> Result<[Option<i64>; 3]> {
+    Ok(components(ctx, parts)?.map(|v| {
         v.map(|n| {
             n.to_i64().unwrap_or_else(|| {
                 if n.big().is_negative() {
@@ -186,6 +189,5 @@ pub(super) fn sequence_bounds(ctx: &mut Context, parts: [Id; 3], len: usize) -> 
                 }
             })
         })
-    });
-    Ok(normalize(bounds, len as i64))
+    }))
 }

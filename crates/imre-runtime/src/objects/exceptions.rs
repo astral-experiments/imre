@@ -119,6 +119,7 @@ pub(crate) enum Kind {
     // Warning exception identities use a separate block from module errors and filter categories.
     UnidiffParseError = 52,
     ReferenceError = 53,
+    BufferError = 54,
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
@@ -192,6 +193,7 @@ impl Kind {
             51 => Self::TimeoutError,
             52 => Self::UnidiffParseError,
             53 => Self::ReferenceError,
+            54 => Self::BufferError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
@@ -213,6 +215,7 @@ impl Kind {
             Self::AssertionError => "AssertionError",
             Self::RuntimeError => "RuntimeError",
             Self::ReferenceError => "ReferenceError",
+            Self::BufferError => "BufferError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
             Self::ShutilError => "Error",

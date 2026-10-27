@@ -61,8 +61,9 @@ jobs:
 
   unittest-source:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' }}
+    # Use Imre's repository ID so a rename keeps the verified Namespace profile.
     runs-on: &linux-x64 >-
-      ${{ github.repository == 'viarius-experiments/imre' && 'namespace-profile-ubuntu-24-04-16' ||
+      ${{ github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' ||
           github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     env:

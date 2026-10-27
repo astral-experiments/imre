@@ -61,6 +61,13 @@ pub(super) struct Trace {
     cached: Option<(usize, Id)>,
 }
 
+#[derive(Debug)]
+pub(super) struct ImportFields {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub name_from: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Error {
     pub kind: String,
@@ -69,6 +76,7 @@ pub(super) struct Error {
     pub os_args: Option<Box<crate::objects::exceptions::OsErrorArgs>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
+    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 impl Error {
@@ -80,7 +88,27 @@ impl Error {
             os_args: None,
             trace: None,
             exit_status: None,
+            import: None,
         }
+    }
+
+    /// Attach the module and member names exposed on a Python import exception.
+    pub fn with_import(
+        mut self,
+        name: Option<&str>,
+        path: Option<String>,
+        name_from: Option<&str>,
+    ) -> Self {
+        let fields = ImportFields {
+            name: name.map(str::to_owned),
+            path,
+            name_from: name_from.map(str::to_owned),
+        };
+        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+            return Self::new("MemoryError", "");
+        };
+        self.import = Some(fields);
+        self
     }
 
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
@@ -170,6 +198,7 @@ impl Context {
             Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
+            Value::Map { .. } => "map",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -190,7 +219,13 @@ impl Context {
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
             Value::Slice(_) => "slice",
             Value::Range { .. } => "range",
+            Value::Enumerate { .. } => "enumerate",
             Value::Iterator { kind, .. } => kind,
+            Value::DictIterator(iter) => match iter.kind {
+                DictViewKind::Keys => "dict_keyiterator",
+                DictViewKind::Values => "dict_valueiterator",
+                DictViewKind::Items => "dict_itemiterator",
+            },
             Value::Set { frozen: true, .. } => "frozenset",
             Value::Set { frozen: false, .. } => "set",
             Value::Dict(_) => "dict",
@@ -204,6 +239,8 @@ impl Context {
             Value::Class { .. } => "type",
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
+            Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
                 FormatKind::Field => "fieldnameiterator",
@@ -356,6 +393,7 @@ pub(super) enum Value {
         dict: Id,
         kind: DictViewKind,
     },
+    DictIterator(DictIterator),
     DefaultDict {
         factory: Id,
         entries: Vec<(Id, Id)>,
@@ -370,6 +408,8 @@ pub(super) enum Value {
     Module {
         name: String,
         scope: Id,
+        origin: Option<Id>,
+        initializing: bool,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -398,10 +438,12 @@ pub(super) enum Value {
         fields: HashMap<String, Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
-        text_memory: Option<crate::objects::TextFile>,
+        memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    ThreadLocal(super::thread_local::Dictionaries),
+    PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
         frame: Id,
@@ -442,15 +484,23 @@ pub(super) enum Value {
     },
     Yielded(Id),
     AstWalk(std::collections::VecDeque<Id>),
+    Enumerate {
+        input: Id,
+        next_index: crate::Int,
+    },
     Count {
         current: Id,
         step: Id,
     },
     Repeat(crate::objects::Repeat<Id>),
+    Map {
+        function: Id,
+        inputs: std::rc::Rc<[Id]>,
+        strict: bool,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
-        pending: Option<Id>,
     },
     CallableIterator(Option<[Id; 2]>),
     // Private to a compiled loop. Python-visible iterators keep their original identity.
@@ -513,16 +563,19 @@ impl Value {
         match self {
             Self::List(v) | Self::Tuple(v) | Self::Set { items: v, .. } => visit.extend(v),
             Self::Iterator { sequence, .. } => visit.extend(*sequence),
+            Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ClassMethod(callable) => visit.push(*callable),
+            Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
-            Self::Zip {
-                inputs, pending, ..
+            Self::Map {
+                function, inputs, ..
             } => {
+                visit.push(*function);
                 visit.extend(inputs.iter());
-                visit.extend(pending);
             }
+            Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);
@@ -563,6 +616,7 @@ impl Value {
             Self::Slice(parts) => visit.extend(parts),
             Self::Range { .. } => {}
             Self::AstWalk(queue) => visit.extend(queue),
+            Self::Enumerate { input, .. } => visit.push(*input),
             Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
@@ -590,7 +644,10 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, .. } => visit.push(*scope),
+            Self::Module { scope, origin, .. } => {
+                visit.push(*scope);
+                visit.extend(origin);
+            }
             Self::Function {
                 scope,
                 class_cell,
@@ -629,8 +686,11 @@ impl Value {
                 fields,
                 dictionary,
                 scalar,
-                ..
+                memory_stream,
             } => {
+                if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
+                    visit.extend(stream.snapshot.get());
+                }
                 visit.push(*class);
                 visit.extend(dictionary);
                 visit.extend(fields.values());
@@ -684,6 +744,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::PrimitiveLock(_)
             | Self::Socket(_)
             | Self::Native(_)
             | Self::AttrGetter(_)
@@ -699,6 +760,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DictIterator {
+    dict: Option<Id>,
+    kind: DictViewKind,
+    expected_len: Option<usize>,
+    index: usize,
+}
+
+impl DictIterator {
+    /// Capture the original size while keeping the entries live.
+    pub(super) fn new(dict: Id, kind: DictViewKind, size: usize) -> Self {
+        Self {
+            dict: Some(dict),
+            kind,
+            expected_len: Some(size),
+            index: 0,
+        }
+    }
+
+    /// An invalid or exhausted iterator has no remaining length hint.
+    pub(super) fn length_hint(&self, ctx: &Context) -> usize {
+        self.dict
+            .and_then(|dict| ctx.dict_entries(dict))
+            .filter(|entries| Some(entries.len()) == self.expected_len)
+            .map_or(0, |entries| entries.len() - self.index)
+    }
+
+    /// Check the live size before each pull, including the one that reaches exhaustion.
+    pub(super) fn next(&mut self, ctx: &mut Context) -> Result<Option<Id>> {
+        let Some(dict) = self.dict else {
+            return Ok(None);
+        };
+        let entries = ctx.dict_entries(dict).expect("dictionary iterator source");
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "dictionary changed size during iteration",
+            ));
+        }
+        let Some(&(key, value)) = entries.get(self.index) else {
+            self.dict = None;
+            return Ok(None);
+        };
+        self.index += 1;
+        Ok(Some(match self.kind {
+            DictViewKind::Keys => key,
+            DictViewKind::Values => value,
+            DictViewKind::Items => ctx.alloc(Value::Tuple(vec![key, value])),
+        }))
+    }
 }
 
 /// Native frames hold temporaries until the next Python statement. A caller's

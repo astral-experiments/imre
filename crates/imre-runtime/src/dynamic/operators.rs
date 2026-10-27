@@ -243,7 +243,17 @@ impl Context {
             },
         }
     }
-    pub(super) fn compare(&self, a: Id, b: Id) -> Result<Option<Ordering>> {
+    pub(super) fn compare(&self, op: &str, a: Id, b: Id) -> Result<Option<Ordering>> {
+        let unsupported = || {
+            Error::new(
+                "TypeError",
+                format!(
+                    "'{op}' not supported between instances of '{}' and '{}'",
+                    self.type_name(a),
+                    self.type_name(b)
+                ),
+            )
+        };
         let (a, b) = (self.scalar_value(a), self.scalar_value(b));
         let int_float = |integer, float| {
             let order = crate::floats::compare(&self.as_int(integer)?, float);
@@ -271,17 +281,17 @@ impl Context {
                 if matches!(self.heap.get(a), Value::List(_))
                     != matches!(self.heap.get(b), Value::List(_))
                 {
-                    return Err(Error::new("TypeError", "incomparable sequence types"));
+                    return Err(unsupported());
                 }
                 if let (Some(x), Some(y)) = (self.sequence(a), self.sequence(b)) {
                     for (&i, &j) in x.iter().zip(&y) {
                         if !self.checked_equal(i, j)? {
-                            return self.compare(i, j);
+                            return self.compare(op, i, j);
                         }
                     }
                     Ok(Some(x.len().cmp(&y.len())))
                 } else {
-                    Err(Error::new("TypeError", "objects do not support ordering"))
+                    Err(unsupported())
                 }
             }
         }
@@ -603,7 +613,7 @@ impl Context {
             }
         } else if let Value::ByteArray(data) = self.heap.get(obj) {
             if let Value::Slice(parts) = *self.heap.get(key) {
-                return self.set_slice(obj, parts, val);
+                return self.set_slice(obj, parts, Some(val));
             }
             let i = self.as_integer(key)?;
             let i = if i < 0 { data.len() as i64 + i } else { i };
@@ -697,8 +707,9 @@ impl Context {
                 format!("'{}' object is not subscriptable", self.type_name(obj)),
             ));
         }
+        let bounds = super::slice::sequence_components(self, parts)?;
         let vals = self.items(obj)?;
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, vals.len())?;
+        let [start, end, step] = super::slice::normalize(bounds, vals.len() as i64);
         let out: Vec<_> = slice_positions(start, end, step).map(|i| vals[i]).collect();
         match self.heap.get(obj) {
             Value::Str(_) => {
@@ -727,15 +738,26 @@ impl Context {
         }
     }
 
-    fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Id) -> Result<()> {
-        let Value::ByteArray(target) = self.heap.get(obj) else {
-            return Err(Error::new(
-                "TypeError",
-                "object does not support slice assignment",
-            ));
+    fn set_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
+        let mut bounds = super::slice::sequence_components(self, parts)?;
+        let data = match source {
+            Some(source) => {
+                let data = builtins::bytes_from_iterable(self, source)?;
+                // CPython retries the assignment with a converted or aliased bytearray.
+                if source == obj || !matches!(self.heap.get(source), Value::ByteArray(_)) {
+                    bounds = super::slice::sequence_components(self, parts)?;
+                }
+                data
+            }
+            None => Vec::new(),
         };
-        let [start, end, step] = super::slice::sequence_bounds(self, parts, target.len())?;
-        let data = builtins::bytes_from_iterable(self, source)?;
+        let len = self.bytes_like(obj)?.len() as i64;
+        let [start, end, step] = super::slice::normalize(bounds, len);
+        if (step == 1 && data.len() != (end - start).max(0) as usize)
+            || (step != 1 && data.is_empty() && slice_positions(start, end, step).next().is_some())
+        {
+            self.check_bytearray_resize(obj)?;
+        }
         let Value::ByteArray(target) = self.heap.get_mut(obj) else {
             unreachable!()
         };
@@ -835,7 +857,7 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => {
-                let Some(c) = self.compare(a, b)? else {
+                let Some(c) = self.compare(op, a, b)? else {
                     return Ok(FALSE);
                 };
                 return Ok(truth(match op {
@@ -1073,6 +1095,39 @@ impl Context {
             return Ok(());
         }
         match self.heap.get(obj) {
+            Value::ByteArray(_) => {
+                if let Value::Slice(parts) = *self.heap.get(key) {
+                    return self.set_slice(obj, parts, None);
+                }
+                let index = self.index_value(key)?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "bytearray indices must be integers or slices, not {}",
+                            self.type_name(key)
+                        ),
+                    )
+                })?;
+                let i = index.to_i64().ok_or_else(|| {
+                    Error::new(
+                        "IndexError",
+                        format!(
+                            "cannot fit '{}' into an index-sized integer",
+                            self.type_name(key)
+                        ),
+                    )
+                })?;
+                let len = self.bytes_like(obj)?.len() as i64;
+                let i = if i < 0 { i + len } else { i };
+                if !(0..len).contains(&i) {
+                    return Err(Error::new("IndexError", "bytearray index out of range"));
+                }
+                self.check_bytearray_resize(obj)?;
+                let Value::ByteArray(data) = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
+                data.remove(i as usize);
+            }
             Value::List(entries) => {
                 let i = self.as_integer(key)?;
                 let i = if i < 0 { entries.len() as i64 + i } else { i };
