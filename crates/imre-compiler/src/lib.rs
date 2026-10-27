@@ -147,6 +147,9 @@ pub struct Compilation {
 pub struct SourceInputs {
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
+    /// Existing namespace portions and the canonical directories they resolve to.
+    #[serde(default)]
+    pub directories: Vec<(PathBuf, PathBuf)>,
 }
 
 impl SourceInputs {
@@ -154,6 +157,9 @@ impl SourceInputs {
         self.missing
             .iter()
             .all(|p| matches!(p.try_exists(), Ok(false)))
+            && self.directories.iter().all(|(p, identity)| {
+                p.is_dir() && p.canonicalize().is_ok_and(|now| &now == identity)
+            })
             && self.files.iter().all(|(p, identity, digest)| {
                 p.canonicalize().is_ok_and(|now| &now == identity)
                     && std::fs::read(p)
@@ -233,8 +239,10 @@ fn object_fallback<T>(
     {
         return Err(error);
     }
-    let runtime_imports =
-        options.runtime_imports || graph.as_ref().is_some_and(|g| g.needs_object_runtime.get());
+    let runtime_imports = options.runtime_imports
+        || graph
+            .as_ref()
+            .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
     let registered_imports = graph
         .as_ref()
         .filter(|_| runtime_imports)

@@ -194,7 +194,7 @@ impl Context {
         self.checked_equal_impl(a, b, true)
     }
 
-    fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
+    pub(super) fn checked_equal_impl(&mut self, a: Id, b: Id, rich_initial: bool) -> Result<bool> {
         use std::collections::HashSet;
 
         enum Children {
@@ -943,6 +943,10 @@ impl Context {
                 };
                 format!("{variance}{}", self.display(var.name))
             }
+            Value::WeakrefDescriptor(owner) => format!(
+                "<attribute '__weakref__' of '{}' objects>",
+                self.weakref_descriptor_owner(*owner)
+            ),
             Value::Class { name, .. } | Value::Native(name) => format!("<class '{name}'>"),
             Value::Module { name, .. } => format!("<module '{name}'>"),
             Value::StaticMethod { callable, .. } => {

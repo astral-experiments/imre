@@ -81,6 +81,15 @@ def current():
     except ReferenceError as error:
         print(str(error))
 
+    target = Item()
+    print(target.__weakref__ is None)
+    observation = ref(target)
+    print(target.__weakref__ is observation)
+    try:
+        target.__weakref__ = None
+    except AttributeError:
+        print('read only')
+
     other = Item()
     observer = proxy(other)
     methods = {"GET"}
@@ -192,3 +201,14 @@ def current():
             print(False)
         else:
             print(observer() is target)
+
+    class Rendered:
+        def __str__(self):
+            return 'weak target'
+
+    rendered = Rendered()
+    print(str(proxy(rendered)))
+    try:
+        str(dead_proxy)
+    except ReferenceError as error:
+        print(type(error).__name__)

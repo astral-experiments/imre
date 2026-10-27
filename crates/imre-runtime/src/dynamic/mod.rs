@@ -30,7 +30,8 @@ use std::path::PathBuf;
 
 use crate::objects::exceptions::string_repr;
 use value::{
-    Code, DictIterator, DictViewKind, Error, FALSE, Heap, Id, NONE, Result, Scope, TRUE, Value,
+    Code, DictIterator, DictViewKind, Error, FALSE, FrameOwner, Heap, Id, NONE, Result, Scope,
+    TRUE, Value,
 };
 
 struct SourceModule {
@@ -84,6 +85,15 @@ pub(crate) struct Context {
     pending: Option<Error>,
     // Fallback for targets whose native stack bounds cannot be queried.
     slot_depth: usize,
+}
+
+fn copy_ids(values: &[Id]) -> Result<Vec<Id>> {
+    let mut copied = Vec::new();
+    copied
+        .try_reserve_exact(values.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    copied.extend_from_slice(values);
+    Ok(copied)
 }
 
 impl Context {
@@ -538,10 +548,12 @@ impl Context {
         if let Value::MappingProxy(dict) = *self.heap.get(id) {
             return self.items(dict);
         }
+        if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
+            self.heap.get(id)
+        {
+            return copy_ids(items);
+        }
         match self.heap.get(id).clone() {
-            Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
-                Ok(items)
-            }
             Value::Set { entries, .. }
             | Value::Dict(entries)
             | Value::DefaultDict { entries, .. } => {
@@ -620,12 +632,7 @@ impl Context {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
                 let frame = self.scope_data(parent);
-                if let Some(&cell) = frame.closure.cells.get(name)
-                    && let Value::Cell { scope, .. } = self.heap.get(cell)
-                {
-                    return *scope;
-                }
-                if frame.closure.declared.contains(name) {
+                if frame.closure.cells.contains_key(name) || frame.closure.declared.contains(name) {
                     return parent;
                 }
                 cursor = frame.parent;
@@ -641,10 +648,33 @@ impl Context {
 
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
+        if let Some(&cell) = scope.closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get(cell)
+        {
+            return *contents;
+        }
         if let Some(namespace) = scope.namespace {
             return self.dict_named_item(namespace, name);
         }
         scope.names.get(name).copied()
+    }
+
+    /// Link a function's free-variable cells to its globals without retaining its caller's frame.
+    fn closure_environment(&mut self, globals: Id, names: Vec<String>, cells: &[Id]) -> Id {
+        if cells.is_empty() {
+            return globals;
+        }
+        let module = self.scope_data(globals).module.clone();
+        let environment = self.scope(&module, Some(globals));
+        let Value::Scope(frame) = self.heap.get_mut(environment) else {
+            unreachable!()
+        };
+        frame.closure.declared_complete = true;
+        frame
+            .closure
+            .cells
+            .extend(names.into_iter().zip(cells.iter().copied()));
+        environment
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -675,6 +705,11 @@ impl Context {
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            return Ok(contents.take().is_some());
+        }
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
         }
@@ -701,6 +736,12 @@ impl Context {
 
     fn bind(&mut self, scope: Id, name: &str, value: Id) {
         let scope = self.binding_scope(scope, name);
+        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name)
+            && let Value::Cell(contents) = self.heap.get_mut(cell)
+        {
+            *contents = Some(value);
+            return;
+        }
         if let Some(namespace) = self.scope_data(scope).namespace {
             let key = self.text(name);
             let storage = self.dict_storage(namespace).expect("module namespace");
@@ -732,13 +773,8 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if let Some(&cell) = s.closure.cells.get(name)
-                && let Value::Cell {
-                    scope: owner,
-                    name: cell_name,
-                } = self.heap.get(cell)
-            {
-                return self.scope_name(*owner, cell_name).ok_or_else(|| {
+            if s.closure.cells.contains_key(name) {
+                return self.scope_name(scope, name).ok_or_else(|| {
                     Error::new(
                         "NameError",
                         format!("free variable '{name}' is not associated with a value"),
@@ -806,14 +842,14 @@ impl Context {
         }
         value
     }
-    fn execute(&mut self, code: Id, scope: Id) -> Result<Id> {
+    fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                return self.call_source(code, scope);
+                return self.call_source(code, scope, owner);
             }
         };
-        self.heap.enter(scope, code);
+        self.heap.enter(scope, code, owner);
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
@@ -939,17 +975,33 @@ impl Context {
         first.is_ok_and(|first| first == root)
     }
 
+    fn missing_module(name: &str) -> Error {
+        Error::new(
+            "ModuleNotFoundError",
+            format!("No module named {}", string_repr(name)),
+        )
+        .with_import(Some(name), None, None)
+    }
+
     fn module(&mut self, name: &str) -> Result<Id> {
+        self.find_module(name, false)?
+            .ok_or_else(|| Self::missing_module(name))
+    }
+
+    /// Package resource lookups can initialize filesystem sources added after compilation.
+    fn find_module(&mut self, name: &str, filesystem: bool) -> Result<Option<Id>> {
         if let Some(value) = self.modules.get(name) {
-            return Ok(*value);
+            return Ok(Some(*value));
         }
         // Execute the package initializer before its child. A regular package
         // constrains child modules to its __path__; namespace packages combine
         // their locations in search order.
         let parent = if let Some((parent, child)) = name.rsplit_once('.') {
-            let id = self.module(parent)?;
+            let id = self
+                .find_module(parent, filesystem)?
+                .ok_or_else(|| Self::missing_module(parent))?;
             if let Some(id) = self.modules.get(name) {
-                return Ok(*id);
+                return Ok(Some(*id));
             }
             Some((id, child))
         } else {
@@ -1000,14 +1052,17 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            self.registered_source(name, child, search, parent.is_none(), &mut locations)?
+            self.source_on_path(
+                name,
+                child,
+                search,
+                parent.is_none(),
+                filesystem,
+                &mut locations,
+            )?
         };
         if source.is_none() && !stdlib::is_module(name) {
-            return Err(Error::new(
-                "ModuleNotFoundError",
-                format!("No module named {}", string_repr(name)),
-            )
-            .with_import(Some(name), None, None));
+            return Ok(None);
         }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
@@ -1114,7 +1169,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     loader,
                 ),
-                importlib::SourceBody::Compiled(_)
+                importlib::SourceBody::Compiled(_) | importlib::SourceBody::Filesystem
                     if let Some(origin) = origin
                         && name != "__main__"
                         && !stdlib::is_module(name)
@@ -1125,8 +1180,9 @@ impl Context {
                 }
                 importlib::SourceBody::Compiled(entry) => {
                     let code = self.module_code(entry, &path);
-                    self.execute(code, scope)
+                    self.execute(code, scope, FrameOwner::Module(name_id))
                 }
+                importlib::SourceBody::Filesystem => Ok(NONE),
             };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()
@@ -1140,6 +1196,6 @@ impl Context {
         if let Some((parent, child)) = parent {
             self.set_attr(parent, child, module)?;
         }
-        Ok(module)
+        Ok(Some(module))
     }
 }

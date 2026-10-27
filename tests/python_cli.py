@@ -30,6 +30,26 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_getter_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "itemgetter_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
+    # The first equal-sized allocation copies the call's positional arguments.
+    for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
+        result = run(imre, "-B", "-c", imports + "fixture.constructor_allocation()", extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), result
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -78,6 +98,26 @@ def check_slice_stack(imre, imports, root, env):
     assert output(imre, boundary, 8) == exhausted
 
 
+def check_argument_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "argument_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    cases = [
+        ((), 0, b"113 113 2\n", b""),
+        ((), 1, b"caught () 0\n113 113 1\n", b"refused\n"),
+    ]
+    for arguments, ordinal, stdout, stderr in cases:
+        result = run(imre, "-B", fixtures / "boxed_call_arguments.py", *arguments, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (0, stdout, stderr), result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", type=Path, required=True)
@@ -103,7 +143,9 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_argument_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
+            check_getter_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
@@ -483,6 +525,10 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        resource_package = installed / "pkgutil_resource"
+        resource_package.mkdir()
+        (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
+        (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
@@ -508,6 +554,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_random.py",
             "boxed_secrets.py",
+            "boxed_pkgutil.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",

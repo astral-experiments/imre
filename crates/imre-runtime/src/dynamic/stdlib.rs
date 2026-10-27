@@ -32,6 +32,7 @@ mod marshal;
 mod math;
 mod operator;
 mod pickle;
+mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
@@ -65,6 +66,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "posix"
             | "posixpath"
             | "_imre_posixpath"
+            | "_imre_pkgutil"
             | "fnmatch"
             | "itertools"
             | "operator"
@@ -296,8 +298,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
-        ("traceback", "print_exc") => ctx.builtin("traceback.print_exc"),
-        ("traceback", "print_exception") => ctx.builtin("traceback.print_exception"),
+        ("traceback", "format_exc" | "format_exception" | "print_exc" | "print_exception") => {
+            ctx.builtin(&format!("traceback.{name}"))
+        }
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),
@@ -454,6 +457,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("site", "getsitepackages")
         | ("os", "confstr" | "uname")
+        | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_posixpath", "extension_start" | "isfile")
         | ("_imre_zipimport", "exists" | "index" | "read" | "contains")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
@@ -686,6 +690,9 @@ pub(super) fn call(
     if name == "posix.fspath" || name.starts_with("_imre_posixpath.") {
         return posixpath::call(ctx, name, args, kwargs);
     }
+    if let Some(operation) = name.strip_prefix("_imre_pkgutil.") {
+        return pkgutil::call(ctx, operation, args, kwargs);
+    }
     if name == "fnmatch.filter" {
         return fnmatch::filter(ctx, args, kwargs);
     }
@@ -712,7 +719,7 @@ pub(super) fn call(
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
-                return ctx.find_spec(&fullname, &original);
+                return ctx.find_spec(&fullname, &original, false);
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
             ("loader_fields", [object], []) => {
@@ -953,6 +960,8 @@ pub(super) fn call(
         "match.groups" => (2, &["default"]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
+        "traceback.format_exc" => return traceback::format_active(ctx, args, kwargs),
+        "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "sysconfig.get_config_var"
