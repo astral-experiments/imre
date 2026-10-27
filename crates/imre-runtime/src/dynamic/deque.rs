@@ -5,8 +5,10 @@ pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const METHODS: &[&str] = &[
+    "__init__",
     "append",
     "appendleft",
+    "clear",
     "extend",
     "remove",
     "pop",
@@ -15,7 +17,57 @@ pub(super) const METHODS: &[&str] = &[
     "__len__",
     "__iter__",
     "__reversed__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
 ];
+
+pub(super) enum IndexOp {
+    Get,
+    Set(Id),
+    Delete,
+}
+
+impl IndexOp {
+    /// Resolve the index before borrowing the ring so an index hook can mutate the deque.
+    /// Explicit slot calls report overflow differently from bracket syntax.
+    pub(super) fn apply(self, ctx: &mut Context, queue: Id, key: Id, explicit: bool) -> Result<Id> {
+        let index = ctx.index_value(key)?.ok_or_else(|| {
+            let kind = ctx.type_name(key);
+            let message = if explicit {
+                format!("'{kind}' object cannot be interpreted as an integer")
+            } else {
+                format!("sequence index must be integer, not '{kind}'")
+            };
+            Error::new("TypeError", message)
+        })?;
+        let index = crate::signed_index(&index).ok_or_else(|| {
+            Error::new(
+                if explicit {
+                    "OverflowError"
+                } else {
+                    "IndexError"
+                },
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    ctx.type_name(key)
+                ),
+            )
+        })?;
+        let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+            unreachable!()
+        };
+        let position = crate::normalized_index(index, ring.items.len())
+            .ok_or_else(|| Error::new("IndexError", "deque index out of range"))?;
+        let removed = match self {
+            Self::Get => return Ok(ring.items[position]),
+            Self::Set(value) => std::mem::replace(&mut ring.items[position], value),
+            Self::Delete => ring.remove_at(position).expect("validated deque position"),
+        };
+        ctx.heap.weak_edge_removed(removed);
+        Ok(NONE)
+    }
+}
 
 /// Capture the current length and generation for a live cursor in either direction.
 pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse: bool) -> Value {
@@ -28,6 +80,16 @@ pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse:
 }
 
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let queue = ctx.alloc(Value::Deque(Box::new(crate::objects::DequeRing::new(
+        (),
+        None,
+    ))));
+    initialize(ctx, queue, args, kwargs)?;
+    Ok(queue)
+}
+
+/// Validate the new bound before clearing the deque, then consume the source in order.
+fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<()> {
     let [iterable, maxlen] =
         builtins::bind_method_arguments("deque", args, kwargs, ["iterable", "maxlen"], 2)?;
     let maxlen = maxlen
@@ -49,14 +111,25 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
                 .map_err(|_| Error::new("ValueError", "maxlen must be non-negative"))
         })
         .transpose()?;
-    let queue = ctx.alloc(Value::Deque(Box::new(crate::objects::DequeRing::new(
-        (),
-        maxlen,
-    ))));
+    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+        unreachable!()
+    };
+    ring.maxlen = maxlen;
+    clear(ctx, queue);
     if let Some(source) = iterable {
         extend(ctx, queue, source)?;
     }
-    Ok(queue)
+    Ok(())
+}
+
+/// Remove the ring's traced edges after detaching all its items.
+fn clear(ctx: &mut Context, queue: Id) {
+    let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+        unreachable!()
+    };
+    for item in ring.take_items() {
+        ctx.heap.weak_edge_removed(item);
+    }
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
@@ -147,8 +220,7 @@ fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
             return Err(Error::new("IndexError", "deque mutated during iteration"));
         }
         if equal {
-            let removed = ring.items.remove(index).unwrap();
-            ring.state = ring.state.wrapping_add(1);
+            let removed = ring.remove_at(index).unwrap();
             ctx.heap.weak_edge_removed(removed);
             return Ok(());
         }
@@ -165,23 +237,57 @@ pub(super) fn method(
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("unbound method deque.{name}() needs an argument"),
+            if name == "__init__" {
+                "descriptor '__init__' of 'collections.deque' object needs an argument".to_owned()
+            } else {
+                format!("unbound method deque.{name}() needs an argument")
+            },
         ));
     };
     let Value::Deque(ring) = ctx.heap.get_mut(receiver) else {
+        let actual = ctx.type_name(receiver);
         return Err(Error::new(
             "TypeError",
-            format!(
-                "descriptor '{name}' for 'collections.deque' objects doesn't apply to a '{}' object",
-                ctx.type_name(receiver)
-            ),
+            if name == "__init__" {
+                format!(
+                    "descriptor '__init__' requires a 'collections.deque' object but received a '{actual}'"
+                )
+            } else {
+                format!(
+                    "descriptor '{name}' for 'collections.deque' objects doesn't apply to a '{actual}' object"
+                )
+            },
         ));
     };
+    if name == "__init__" {
+        initialize(ctx, receiver, rest, kwargs)?;
+        return Ok(NONE);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("deque.{name}() takes no keyword arguments"),
         ));
+    }
+    match (name, rest) {
+        ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, receiver, *index, true),
+        ("__setitem__", [index, value]) => {
+            return IndexOp::Set(*value).apply(ctx, receiver, *index, true);
+        }
+        ("__delitem__", [index]) => return IndexOp::Delete.apply(ctx, receiver, *index, true),
+        ("__getitem__" | "__delitem__", _) => {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        }
+        ("__setitem__", _) => {
+            return Err(Error::new(
+                "TypeError",
+                format!("__setitem__ expected 2 arguments, got {}", rest.len()),
+            ));
+        }
+        _ => {}
     }
     if matches!(name, "append" | "appendleft" | "extend" | "remove") {
         let [item] = rest else {
@@ -211,6 +317,10 @@ pub(super) fn method(
         ));
     }
     match name {
+        "clear" => {
+            clear(ctx, receiver);
+            Ok(NONE)
+        }
         "reverse" => {
             ring.reverse();
             Ok(NONE)

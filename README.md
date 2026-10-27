@@ -1,6 +1,6 @@
 # Imre
 
-An ahead-of-time compiler for typed Python, written in Rust.
+An experimental ahead-of-time compiler for typed Python, written in Rust.
 
 > [!WARNING]
 > This README includes human edits; all code changes, PR summaries, and additional
@@ -90,6 +90,10 @@ At present, Imre doesn't support any of the following:
 - Dynamic attributes and general-purpose reflection
 - Recursive calls and async generators
 - Most of the Python standard library (see [module coverage](docs/stdlib.md))
+
+At the same time, Imre is capable of running scripts like
+[ty’s conformance report](examples/conformance_report/README.md) unchanged,
+with Rust-competitive performance.
 
 ## Design
 

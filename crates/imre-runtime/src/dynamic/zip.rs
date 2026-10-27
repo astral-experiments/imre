@@ -1,5 +1,5 @@
-use super::Context;
 use super::value::{Error, Id, Result, Value};
+use super::{Context, NONE};
 
 impl Context {
     /// Acquire inputs left to right at construction and defer pulls and calls until iteration.
@@ -100,6 +100,27 @@ impl Context {
         }
     }
 
+    /// Keep each candidate alive across its predicate and return the original item.
+    pub(super) fn next_filtered(&mut self, predicate: Id, input: Id) -> Result<Option<Id>> {
+        loop {
+            let mark = self.heap.temporary_mark();
+            let Some(item) = self.next_result(input)? else {
+                return Ok(None);
+            };
+            self.heap.keep(item);
+            let selected = if predicate == NONE {
+                self.truth(item)
+            } else {
+                self.call(predicate, vec![item], Vec::new())
+                    .and_then(|value| self.truth(value))
+            };
+            self.heap.release_temporaries_since(mark);
+            if selected? {
+                return Ok(Some(item));
+            }
+        }
+    }
+
     /// Apply the shared iterator slots to a receiver of the defining builtin type.
     pub(super) fn iterator_method(
         &mut self,
@@ -116,7 +137,9 @@ impl Context {
         };
         if !matches!(
             (owner, self.heap.get(cursor)),
-            ("map", Value::Map { .. }) | ("enumerate", Value::Enumerate { .. })
+            ("map", Value::Map { .. })
+                | ("filter", Value::Filter { .. })
+                | ("enumerate", Value::Enumerate { .. })
         ) {
             return Err(Error::new(
                 "TypeError",

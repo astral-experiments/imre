@@ -83,10 +83,21 @@ pub(super) struct Error {
     pub class: Option<Id>,
     pub message: String,
     pub args: Option<Id>,
+    pub decode: Option<Box<DecodeState>>,
     pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
     pub trace: Option<Box<Trace>>,
     pub exit_status: Option<ExitStatus>,
     pub import: Option<crate::shared::Shared<ImportFields>>,
+}
+
+/// The decoder reuses these writable fields while BaseException.args keeps its first tuple.
+#[derive(Clone, Debug)]
+pub(super) struct DecodeState {
+    pub encoding: Id,
+    pub object: Id,
+    pub start: i64,
+    pub end: i64,
+    pub reason: Id,
 }
 
 impl Error {
@@ -96,6 +107,7 @@ impl Error {
             class: None,
             message: message.into(),
             args: None,
+            decode: None,
             os_args: None,
             trace: None,
             exit_status: None,
@@ -140,6 +152,11 @@ impl Error {
         self.args
             .into_iter()
             .chain(self.class)
+            .chain(
+                self.decode
+                    .iter()
+                    .flat_map(|d| [d.encoding, d.object, d.reason]),
+            )
             .chain(self.os_args.iter().flat_map(|args| args.roots()))
             .chain(self.trace.iter().flat_map(|trace| {
                 trace
@@ -230,6 +247,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -324,6 +342,38 @@ impl Context {
     pub(super) fn lookup_error(&mut self, kind: &str, key: Id) -> Error {
         let mut error = Error::new(kind, self.repr(key));
         error.args = Some(self.alloc(Value::Tuple(vec![key])));
+        error
+    }
+
+    /// Keep the decoder's original object and offsets when crossing into boxed Python.
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let decoded = native.decode_args().map(|args| {
+            let encoding = self.text(args.encoding);
+            let object = self.alloc(Value::Bytes(args.object.to_vec()));
+            let reason = self.text(args.reason);
+            let values = vec![
+                encoding,
+                object,
+                self.int(args.start),
+                self.int(args.end),
+                reason,
+            ];
+            let state = DecodeState {
+                encoding,
+                object,
+                start: args.start,
+                end: args.end,
+                reason,
+            };
+            (self.alloc(Value::Tuple(values)), state)
+        });
+        let mut error = Error::from(native);
+        if error.kind == "UnicodeDecodeError"
+            && let Some((values, state)) = decoded
+        {
+            error.args = Some(values);
+            error.decode = Some(Box::new(state));
+        }
         error
     }
 
@@ -630,6 +680,10 @@ pub(super) enum Value {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
     },
+    Filter {
+        predicate: Id,
+        input: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -735,6 +789,7 @@ impl Value {
                 visit.extend(inputs.iter());
             }
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
+            Self::Filter { predicate, input } => visit.extend([*predicate, *input]),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);
@@ -1275,17 +1330,22 @@ impl Heap {
         id
     }
 
+    /// Mark the shared spelling as a live code constant and return its local Python handle.
+    pub fn code_name(&mut self, text: &str) -> Id {
+        if let Some(entry) = self.interned.get_mut(text) {
+            entry.literal = true;
+            let id = entry.id;
+            self.keep(id);
+            return id;
+        }
+        self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
+            text,
+        )))
+    }
+
     pub fn string_literal(&mut self, text: &str) -> Id {
         if text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            if let Some(entry) = self.interned.get_mut(text) {
-                entry.literal = true;
-                let id = entry.id;
-                self.keep(id);
-                return id;
-            }
-            return self.intern_literal(crate::sys::intern_owner(&crate::objects::literal_string(
-                text,
-            )));
+            return self.code_name(text);
         }
         self.alloc(Value::Str(text.to_owned()))
     }

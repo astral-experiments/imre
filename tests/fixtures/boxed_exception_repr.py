@@ -101,6 +101,25 @@ def current():
     except TypeError as caught:
         print("an instance of BaseException" in str(caught), "NoneType" in str(caught))
 
+    class Saved(ValueError):
+        def __repr__(self):
+            return "<saved>"
+
+    error = Saved("x")
+    assert repr(error) == "<saved>" and repr([error]) == "[<saved>]"
+    assert str(error) == "x"
+
+    class Poison(ValueError):
+        def __repr__(self):
+            raise LookupError("poison")
+
+    try:
+        repr([Poison()])
+    except LookupError as caught:
+        assert caught.args == ("poison",)
+    else:
+        raise AssertionError("the exception repr hook was skipped")
+
 class NamespaceError(ValueError):
     declared = "default"
 

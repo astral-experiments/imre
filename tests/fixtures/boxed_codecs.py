@@ -42,6 +42,14 @@ def current():
         print(codecs.lookup(name).decode(data))
     print(codecs.lookup("utf-8").decode(input=b"\xff", errors="replace"))
 
+    for decode_invalid in (lambda: b"ab\xffcd".decode("utf-8"),
+                           lambda: codecs.lookup("ascii").decode(b"ab\xffcd")):
+        try:
+            decode_invalid()
+        except UnicodeDecodeError as exc:
+            print(exc.encoding, exc.object, exc.start, exc.end, exc.reason)
+            print(str(exc), repr(exc), exc.args, exc.object is exc.args[1])
+
     wire = bytes(range(256))
     text = entry.decode(wire)[0]
     for name in ("latin-1", "LATIN_1", "iso-8859-1", "cp819"):

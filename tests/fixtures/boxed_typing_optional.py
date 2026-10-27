@@ -18,3 +18,9 @@ def current():
         isinstance(None, typing.Optional[list[int]])
     except TypeError as error:
         print(issubclass(type(error), TypeError), str(error))
+
+    class Unhashable:
+        __hash__ = None
+
+    member = Unhashable()
+    print(typing.Optional[member] is typing.Optional[member])

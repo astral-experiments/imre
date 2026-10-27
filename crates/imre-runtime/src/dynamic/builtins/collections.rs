@@ -3,6 +3,99 @@ use super::super::value::DictViewKind;
 use super::*;
 use num_traits::Signed;
 
+/// Select the first minimum or maximum, evaluating each key as its candidate arrives.
+pub(super) fn extremum(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some(&first) = args.first() else {
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
+    };
+    let [key, default] = bind_method_arguments(name, &[], kwargs, ["key", "default"], 0)?;
+    let key = key.filter(|&key| key != NONE);
+    if args.len() > 1 {
+        if default.is_some() {
+            return Err(type_error(format!(
+                "Cannot specify a default for {name}() with multiple positional arguments"
+            )));
+        }
+        let mut values = args.iter().copied();
+        return select_item(ctx, name, key, None, |_| Ok(values.next()));
+    }
+    if matches!(ctx.heap.get(first), Value::Instance { .. })
+        && ctx.slot(first, "__iter__").is_none()
+        && ctx.slot(first, "__getitem__").is_some()
+    {
+        let mut index = 0_i64;
+        return select_item(ctx, name, key, default, |ctx| {
+            let position = ctx.int(index);
+            match ctx.get_item(first, position) {
+                Ok(value) => {
+                    index += 1;
+                    Ok(Some(value))
+                }
+                Err(error) => {
+                    let index_error = ctx.builtin("IndexError");
+                    if ctx.raised_error_matches(&error, index_error)
+                        || ctx.is_stop_iteration(&error)
+                    {
+                        Ok(None)
+                    } else {
+                        Err(error)
+                    }
+                }
+            }
+        });
+    }
+    let iterator = ctx.iterator(first)?;
+    select_item(ctx, name, key, default, |ctx| ctx.next_item(iterator))
+}
+
+/// Keep the winning item and key alive across iterator and comparison callbacks.
+fn select_item(
+    ctx: &mut Context,
+    name: &str,
+    key: Option<Id>,
+    default: Option<Id>,
+    mut next: impl FnMut(&mut Context) -> Result<Option<Id>>,
+) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    let Some(mut winner) = next(ctx)? else {
+        return default.ok_or_else(|| {
+            Error::new("ValueError", format!("{name}() iterable argument is empty"))
+        });
+    };
+    let comparison = if name == "min" { "<" } else { ">" };
+    let rank = |ctx: &mut Context, item| match key {
+        Some(key) => ctx.call(key, vec![item], Vec::new()),
+        None => Ok(item),
+    };
+    ctx.heap.keep(winner);
+    let mut winning_key = rank(ctx, winner)?;
+    loop {
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(winner);
+        ctx.heap.keep(winning_key);
+        let Some(item) = next(ctx)? else {
+            break;
+        };
+        ctx.heap.keep(item);
+        let item_key = rank(ctx, item)?;
+        let better = ctx.binary(comparison, item_key, winning_key)?;
+        if ctx.truth(better)? {
+            winner = item;
+            winning_key = item_key;
+        }
+    }
+    ctx.heap.release_temporaries_since(mark);
+    ctx.heap.keep(winner);
+    Ok(winner)
+}
+
 /// Materialize the iterable before parsing the forwarded list.sort keywords.
 pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [iterable] = args else {
@@ -379,6 +472,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "list.__init__" | "list.__repr__" | "tuple.__repr__") {
+        return sequence_slot(ctx, name, args, kwargs);
+    }
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
@@ -390,6 +486,7 @@ pub(super) fn method(
                 "unbound method {name}() needs an argument"
             )));
         };
+        let receiver = ctx.scalar_value(receiver);
         if !matches!(ctx.heap.get(receiver), Value::List(_)) {
             return Err(type_error(format!(
                 "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
@@ -453,6 +550,8 @@ pub(super) fn method(
                 ))
             }
         })?
+    } else if name.starts_with("list.") {
+        ctx.scalar_value(object)
     } else {
         object
     };
@@ -466,7 +565,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let representation = ctx.checked_dict_repr(object, receiver)?;
+        let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
     }
     if name == "dict.__delitem__" {
@@ -809,6 +908,88 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         return Ok(ctx.int(i));
     }
     Err(Error::new("ValueError", "list.index(x): x not in list"))
+}
+
+/// Render native sequence storage directly, bypassing an override on this receiver.
+fn sequence_slot(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (owner, method) = name.split_once('.').expect("sequence slot");
+    let Some((&object, rest)) = args.split_first() else {
+        return Err(type_error(format!(
+            "descriptor '{method}' of '{owner}' object needs an argument"
+        )));
+    };
+    if !ctx.sequence_slot_accepts(object, owner) {
+        return Err(type_error(format!(
+            "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+            ctx.type_name(object)
+        )));
+    }
+    let storage = ctx.scalar_value(object);
+    if method == "__repr__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+        }
+        if !rest.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                rest.len()
+            )));
+        }
+        let storage = match ctx.heap.get(storage) {
+            Value::List(_) | Value::Tuple(_) => storage,
+            _ => {
+                // Named tuple records store their fields directly rather than in a separate tuple.
+                let fields = ctx
+                    .sequence(object)
+                    .expect("validated named tuple receiver");
+                ctx.alloc(Value::Tuple(fields))
+            }
+        };
+        let text = ctx.checked_container_slot_repr(object, storage)?;
+        return Ok(ctx.text(text));
+    }
+    if !kwargs.is_empty() {
+        return Err(type_error("list() takes no keyword arguments"));
+    }
+    if rest.len() > 1 {
+        return Err(type_error(format!(
+            "list expected at most 1 argument, got {}",
+            rest.len()
+        )));
+    }
+    let Value::List(items) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
+    let old = std::mem::take(items);
+    for item in old {
+        ctx.heap.weak_edge_removed(item);
+    }
+    if let Some(&input) = rest.first() {
+        let iter = ctx.iterator(input)?;
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(storage);
+        ctx.heap.keep(iter);
+        let extend: Result<()> = (|| {
+            while let Some(item) = ctx.next_item(iter)? {
+                let Value::List(items) = ctx.heap.get_mut(storage) else {
+                    unreachable!()
+                };
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                items.push(item);
+            }
+            Ok(())
+        })();
+        ctx.heap.release_temporaries_since(mark);
+        extend?;
+    }
+    Ok(NONE)
 }
 
 fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

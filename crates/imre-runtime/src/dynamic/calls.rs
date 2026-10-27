@@ -64,7 +64,14 @@ impl Context {
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
-                    "dict" | "int" | "str" | "property" | "module" | weakref::REFERENCE_TYPE
+                    "dict"
+                        | "list"
+                        | "tuple"
+                        | "int"
+                        | "str"
+                        | "property"
+                        | "module"
+                        | weakref::REFERENCE_TYPE
                 ) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -623,6 +630,7 @@ impl Context {
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
@@ -826,6 +834,7 @@ impl Context {
             | ("slice", Value::Slice(_))
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
+            | ("filter", Value::Filter { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -1393,9 +1402,9 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "map" => match name {
-                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text("map")),
+            Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text(&class)),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
@@ -1506,8 +1515,33 @@ impl Context {
                 };
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
-            Value::Raised(error) if name == "args" => {
-                return Ok(self.exception_argument_tuple(obj, error));
+            Value::Raised(error) => {
+                if let Some(state) = &error.decode {
+                    match name {
+                        "encoding" => return Ok(state.encoding),
+                        "object" => return Ok(state.object),
+                        "start" => return Ok(self.int(state.start)),
+                        "end" => return Ok(self.int(state.end)),
+                        "reason" => return Ok(state.reason),
+                        _ => {}
+                    }
+                }
+                if name == "args" {
+                    return Ok(self.exception_argument_tuple(obj, error));
+                }
+                if error.kind == "UnicodeDecodeError"
+                    && let Some([encoding, object, start, end, reason]) =
+                        self.exception_arguments(&error)
+                {
+                    match name {
+                        "encoding" => return Ok(*encoding),
+                        "object" => return Ok(*object),
+                        "start" => return Ok(*start),
+                        "end" => return Ok(*end),
+                        "reason" => return Ok(*reason),
+                        _ => {}
+                    }
+                }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
             Value::Native(class) if class == "collections.defaultdict" && name == "__missing__" => {
@@ -1646,7 +1680,7 @@ impl Context {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
             Value::Native(class)
-                if class == "dict"
+                if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
@@ -2141,6 +2175,49 @@ impl Context {
                 Some(value),
             );
         }
+        if matches!(
+            self.heap.get(obj),
+            Value::Raised(Error {
+                decode: Some(_),
+                ..
+            })
+        ) && matches!(name, "encoding" | "object" | "start" | "end" | "reason")
+        {
+            let offset = if matches!(name, "start" | "end") {
+                let integer = self
+                    .as_int(value)
+                    .map_err(|_| Error::new("TypeError", "an integer is required"))?;
+                Some(
+                    integer
+                        .to_i64()
+                        .and_then(|n| isize::try_from(n).ok())
+                        .ok_or_else(|| {
+                            Error::new(
+                                "OverflowError",
+                                "Python int too large to convert to C ssize_t",
+                            )
+                        })? as i64,
+                )
+            } else {
+                None
+            };
+            let Value::Raised(Error {
+                decode: Some(state),
+                ..
+            }) = self.heap.get_mut(obj)
+            else {
+                unreachable!();
+            };
+            match name {
+                "encoding" => state.encoding = value,
+                "object" => state.object = value,
+                "start" => state.start = offset.unwrap(),
+                "end" => state.end = offset.unwrap(),
+                "reason" => state.reason = value,
+                _ => unreachable!(),
+            }
+            return Ok(());
+        }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
         {
@@ -2521,6 +2598,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "map"
+                                | "filter"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -2596,14 +2674,14 @@ impl Context {
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
-            Value::Cached { function, entries } => {
-                if !args
-                    .iter()
-                    .chain(kwargs.iter().map(|(_, v)| v))
-                    .all(|&id| builtins::hashable(self, id))
-                {
-                    return Err(Error::new("TypeError", "unhashable cache argument"));
+            Value::Cached { function, .. } => {
+                for &value in args.iter().chain(kwargs.iter().map(|(_, value)| value)) {
+                    self.dictionary_hash(value)?;
                 }
+                // A hash hook can call this wrapper and evict earlier entries.
+                let Value::Cached { entries, .. } = self.heap.get(callable) else {
+                    unreachable!()
+                };
                 let hit = entries.iter().position(|call| {
                     call.args.len() == args.len()
                         && call.args.iter().zip(&args).all(|(&x, &y)| self.equal(x, y))
@@ -2746,6 +2824,7 @@ impl Context {
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
+                let tuple_subclass = self.has_base(callable, "tuple");
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -2769,7 +2848,18 @@ impl Context {
                     let dictionary = self
                         .has_base(callable, "dict")
                         .then(|| self.dict(Vec::new()));
-                    self.instance(callable, dictionary)
+                    let sequence = if self.has_base(callable, "list") {
+                        Some(self.alloc(Value::List(Vec::new())))
+                    } else if tuple_subclass {
+                        Some(builtins::call(self, "tuple", &args, &kwargs)?)
+                    } else {
+                        None
+                    };
+                    let object = self.instance(callable, dictionary);
+                    if let Value::Instance { scalar, .. } = self.heap.get_mut(object) {
+                        *scalar = sequence;
+                    }
+                    object
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
@@ -2787,6 +2877,7 @@ impl Context {
                 } else if new.is_none()
                     && string_base.is_none()
                     && !float_subclass
+                    && !tuple_subclass
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(

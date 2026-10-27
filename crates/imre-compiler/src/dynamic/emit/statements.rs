@@ -151,7 +151,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
-            let name = self.text(name);
+            let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
     }
@@ -214,7 +214,7 @@ impl Function<'_, '_> {
                     if let ast::Expr::Name(name) = &*v.target
                         && (self.class_locals.is_none() || v.simple)
                     {
-                        let key = self.text(name.id.as_str());
+                        let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
                             // Class annotations may refer to a name bound after the class body.
                             let code = self.output.definition(
@@ -297,7 +297,7 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
-                    let name = self.text(v.name.as_str());
+                    let name = self.code_name(v.name.as_str());
                     let class = self.op("class", &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
@@ -396,7 +396,7 @@ impl Function<'_, '_> {
                             self.unsupported("star import");
                             continue;
                         }
-                        let attr = self.text(alias.name.as_str());
+                        let attr = self.code_name(alias.name.as_str());
                         let value = self.op("from", &[&module, &attr]);
                         self.bind(
                             alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
@@ -446,7 +446,7 @@ impl Function<'_, '_> {
     }
 
     fn import(&mut self, name: &str) -> String {
-        let name = self.text(name);
+        let name = self.code_name(name);
         self.op("import", &[&self.scope.clone(), &name])
     }
 
@@ -537,6 +537,9 @@ impl Function<'_, '_> {
         signature["types"] = json!({});
         signature["return_type"] = json!(returns.and_then(scalar_annotation));
         if let Some(p) = params {
+            self.output
+                .interned_identifiers
+                .extend(p.iter().map(|p| p.name().to_string()));
             for (group, args) in [
                 ("posonly", &p.posonlyargs),
                 ("positional", &p.args),
@@ -555,7 +558,7 @@ impl Function<'_, '_> {
                     signature[group].as_array_mut().unwrap().push(json!(name));
                     if let Some(default) = &arg.default {
                         let default = self.expr(default);
-                        let name = self.text(name);
+                        let name = self.code_name(name);
                         self.op("put", &[&defaults, &name, &default]);
                     }
                 }
@@ -592,7 +595,7 @@ impl Function<'_, '_> {
         signature["scope_complete"] = json!(!closure_names.incomplete);
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
-        let name = self.text(name);
+        let name = self.code_name(name);
         let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
         if let Some((source, line)) = generator {
             self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
@@ -615,7 +618,7 @@ impl Function<'_, '_> {
         self.label(&good);
         let values = self.op("dict", &[]);
         for &(name, expression) in entries {
-            let key = self.text(name);
+            let key = self.code_name(name);
             let value = if self.source.string_annotations {
                 self.text(&crate::frontend::annotation_spelling(expression))
             } else {
@@ -635,10 +638,10 @@ impl Function<'_, '_> {
 
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
         Some(match target {
-            ast::Expr::Name(n) => Place::Name(self.text(n.id.as_str())),
+            ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
             ast::Expr::Attribute(a) => {
                 let obj = self.expr(&a.value);
-                Place::Attr(obj, self.text(a.attr.as_str()))
+                Place::Attr(obj, self.code_name(a.attr.as_str()))
             }
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
@@ -783,7 +786,7 @@ impl Function<'_, '_> {
             if !self.terminated
                 && let Some(name) = &h.name
             {
-                let name = self.text(name.as_str());
+                let name = self.code_name(name.as_str());
                 self.op("clearname", &[&self.scope.clone(), &name]);
             }
             self.jump(&done);

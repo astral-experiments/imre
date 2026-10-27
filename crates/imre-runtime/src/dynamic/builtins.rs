@@ -89,6 +89,8 @@ const FUNCTIONS: &[&str] = &[
     "reversed",
     "dir",
     "sorted",
+    "min",
+    "max",
     "ord",
     "chr",
     "divmod",
@@ -125,6 +127,7 @@ const TYPES: &[&str] = &[
     "complex",
     "dict",
     "enumerate",
+    "filter",
     "float",
     "frozenset",
     "int",
@@ -337,11 +340,21 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_)
             if matches!(
                 attr,
-                "append" | "clear" | "extend" | "index" | "insert" | "pop" | "reverse" | "sort"
+                "append"
+                    | "clear"
+                    | "extend"
+                    | "index"
+                    | "insert"
+                    | "pop"
+                    | "reverse"
+                    | "sort"
+                    | "__init__"
+                    | "__repr__"
             ) =>
         {
             "list"
         }
+        Value::Tuple(_) if attr == "__repr__" => "tuple",
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
@@ -403,6 +416,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Deque(_) if super::deque::METHODS.contains(&attr) => super::deque::CLASS,
@@ -770,12 +784,14 @@ pub(super) fn call(
                 target.extend(data);
                 Ok(NONE)
             }
-            "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
+            "list" | "tuple" | "dict" | "set" | "frozenset" => {
+                collections::method(ctx, name, args, kwargs)
+            }
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "map" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -1027,6 +1043,7 @@ pub(super) fn call(
         "pow" => power(ctx, args, kwargs),
         "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
+        "min" | "max" => collections::extremum(ctx, name, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
             let iterable = iterable
@@ -1158,6 +1175,22 @@ pub(super) fn call(
             Ok(ctx.int(size))
         }
         "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
+        "filter" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("filter() takes no keyword arguments"));
+            }
+            let [predicate, source] = args else {
+                return Err(type_error(format!(
+                    "filter expected 2 arguments, got {}",
+                    args.len()
+                )));
+            };
+            let input = ctx.iterator(*source)?;
+            Ok(ctx.alloc(Value::Filter {
+                predicate: *predicate,
+                input,
+            }))
+        }
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
