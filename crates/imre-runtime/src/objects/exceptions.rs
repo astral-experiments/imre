@@ -45,6 +45,11 @@ pub struct NamedDescriptor {
 }
 
 impl NamedDescriptor {
+    fn qualified_name(&self) -> &str {
+        // SAFETY: the compiler emits a static UTF-8 class name with this length.
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.name, self.length)) }
+    }
+
     fn mro(&self) -> &[u32] {
         // SAFETY: the compiler emits count entries in C3 order in static storage.
         unsafe { std::slice::from_raw_parts(self.kinds, self.count) }
@@ -609,16 +614,33 @@ impl Exception {
     fn name(&self) -> &str {
         self.named().map_or_else(
             || self.kind.name(),
-            |descriptor| {
-                // SAFETY: the compiler emits a static UTF-8 identifier with this length.
-                unsafe {
-                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        descriptor.name,
-                        descriptor.length,
-                    ))
-                }
-            },
+            |descriptor| descriptor.qualified_name().rsplit('.').next().unwrap(),
         )
+    }
+
+    /// Python tracebacks qualify standard-library exceptions with their defining module.
+    fn diagnostic_name(&self) -> &str {
+        if let Some(descriptor) = self.named() {
+            return descriptor.qualified_name();
+        }
+        match self.kind {
+            Kind::ShutilError => "shutil.Error",
+            Kind::SameFileError => "shutil.SameFileError",
+            Kind::SpecialFileError => "shutil.SpecialFileError",
+            Kind::SubprocessError => "subprocess.SubprocessError",
+            Kind::CalledProcessError => "subprocess.CalledProcessError",
+            Kind::TimeoutExpired => "subprocess.TimeoutExpired",
+            Kind::BadGzipFile => "gzip.BadGzipFile",
+            Kind::CsvError => "_csv.Error",
+            Kind::GaiError => "socket.gaierror",
+            Kind::ZlibError => "zlib.error",
+            Kind::TomlDecodeError => "tomllib.TOMLDecodeError",
+            Kind::JsonDecodeError => "json.decoder.JSONDecodeError",
+            Kind::CancelledError => "asyncio.exceptions.CancelledError",
+            Kind::BadZipFile => "zipfile.BadZipFile",
+            Kind::UnsupportedOperation => "io.UnsupportedOperation",
+            kind => kind.name(),
+        }
     }
 }
 
@@ -2725,7 +2747,7 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
             exception.0.with(|storage| {
                 let e = storage.exception();
                 (
-                    e.name().to_owned(),
+                    e.diagnostic_name().to_owned(),
                     e.details.as_deref().map(|details| details.origins.clone()),
                 )
             })

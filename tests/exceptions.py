@@ -1306,6 +1306,14 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "unhandled_skip_class": (
+        'import unittest\nraise unittest.SkipTest("skip")\n',
+        "unittest.case.SkipTest",
+    ),
+    "unhandled_json_class": (
+        'import json\njson.loads("{")\n',
+        "json.decoder.JSONDecodeError",
+    ),
     "handler_optional_arithmetic": (
         """\
 value: int | None = 1
@@ -1415,6 +1423,7 @@ CHAIN_REPORTS = {
         CAUSE_SEPARATOR,
         "RuntimeError: outer",
     ],
+    "unhandled_skip_class": ["unittest.case.SkipTest: skip"],
     "unhandled_suppressed_context": ["ValueError: visible"],
 }
 
