@@ -352,7 +352,9 @@ impl Context {
                     )
                 {
                     "type"
-                } else if builtins::is_builtin(name) || builtins::constructor_owner(name).is_some()
+                } else if builtins::is_builtin(name)
+                    || builtins::constructor_owner(name).is_some()
+                    || matches!(name.as_str(), "binascii.a2b_base64" | "binascii.b2a_base64")
                 {
                     "builtin_function_or_method"
                 } else {
@@ -811,6 +813,28 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::Native(builtin)
+                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+            {
+                let short = builtin.rsplit('.').next().unwrap();
+                match name {
+                    "__name__" | "__qualname__" => return Ok(self.text(short)),
+                    "__module__" => return Ok(self.text("binascii")),
+                    "__base__" | "__bases__" => {
+                        let base = self.builtin(if short == "Error" {
+                            "ValueError"
+                        } else {
+                            "Exception"
+                        });
+                        return Ok(if name == "__base__" {
+                            base
+                        } else {
+                            self.alloc(Value::Tuple(vec![base]))
+                        });
+                    }
+                    _ => {}
+                }
             }
             Value::Native(builtin)
                 if name == "__name__" && self.builtins.get(&builtin) == Some(&obj) =>

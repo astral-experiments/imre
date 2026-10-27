@@ -21,6 +21,8 @@ macro_rules! exception_kinds {
             match name {
                 $(stringify!($kind) => Some(Kind::$kind),)*
                 "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+                "binascii.Error" => Some(Kind::BinasciiError),
+                "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
                 _ => None,
             }
         }

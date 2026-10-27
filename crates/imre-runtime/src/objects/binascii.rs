@@ -127,6 +127,14 @@ fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
     Ok(decoded)
 }
 
+pub(crate) fn base64_encode(data: &[u8], newline: bool) -> Result<Bytes> {
+    encode(data, &STANDARD, newline)
+}
+
+pub(crate) fn base64_decode(data: &[u8], strict: bool) -> Result<Bytes> {
+    decode(data, strict, false)
+}
+
 pub(crate) fn urlsafe_encode(data: &[u8]) -> Result<Bytes> {
     encode(data, &URL_SAFE, false)
 }
@@ -161,7 +169,7 @@ pub unsafe extern "C" fn imre_binascii_ascii_input(value: *const Str) -> *const 
 pub unsafe extern "C" fn imre_binascii_encode(value: *const Bytes, newline: bool) -> *const Bytes {
     // SAFETY: the caller supplied an exact bytes owner.
     finish(
-        encode(unsafe { &*value }, &STANDARD, newline).map(owned),
+        base64_encode(unsafe { &*value }, newline).map(owned),
         std::ptr::null(),
     )
 }
@@ -172,7 +180,7 @@ pub unsafe extern "C" fn imre_binascii_encode(value: *const Bytes, newline: bool
 pub unsafe extern "C" fn imre_binascii_decode(value: *const Bytes, strict: bool) -> *const Bytes {
     // SAFETY: the caller supplied an exact bytes owner.
     finish(
-        decode(unsafe { &*value }, strict, false).map(owned),
+        base64_decode(unsafe { &*value }, strict).map(owned),
         std::ptr::null(),
     )
 }

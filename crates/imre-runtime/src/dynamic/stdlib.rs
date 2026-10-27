@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod binascii;
 pub(super) mod codecs;
 mod contextvars;
 pub(super) mod datetime;
@@ -57,6 +58,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "selectors"
             | "struct"
             | "base64"
+            | "binascii"
             | "json"
             | "_imre_logging"
             | "marshal"
@@ -288,6 +290,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("binascii", "Error" | "Incomplete" | "a2b_base64" | "b2a_base64") => {
+            ctx.builtin(&format!("binascii.{name}"))
+        }
         ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
@@ -436,6 +441,9 @@ pub(super) fn call(
 ) -> Result<Id> {
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("binascii.") {
+        return binascii::call(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
