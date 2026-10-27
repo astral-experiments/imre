@@ -625,6 +625,7 @@ impl Context {
                             | "binascii.b2a_base64"
                             | "posix.fspath"
                             | "posix._path_normpath"
+                            | "zlib.adler32"
                     )
                     || name.starts_with("_weakref.")
                 {
@@ -1090,7 +1091,10 @@ impl Context {
                 }
             }
             Value::Native(symbol)
-                if matches!(symbol.as_str(), "posix.fspath" | "posix._path_normpath") =>
+                if matches!(
+                    symbol.as_str(),
+                    "posix.fspath" | "posix._path_normpath" | "zlib.adler32"
+                ) =>
             {
                 let (module, function) = symbol.split_once('.').unwrap();
                 match name {
