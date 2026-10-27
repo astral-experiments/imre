@@ -496,6 +496,7 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "UnboundLocalError" => return Some(40),
         "RecursionError" => return Some(43),
         "ReferenceError" => return Some(53),
+        "BufferError" => return Some(54),
         "BlockingIOError" => return Some(44),
         "ConnectionError" => return Some(45),
         "BrokenPipeError" => return Some(46),
@@ -5918,6 +5919,15 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> String {
+        self.graph.needs_object_runtime.set(true);
+        error(
+            self.source,
+            node,
+            &format!("{name} requires native Python object operations"),
+        )
+    }
+
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
@@ -6139,6 +6149,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::ObjectRuntimeExport(name) => {
+                    return Err(self.object_runtime_export(name, expression));
+                }
                 Intrinsic::BuiltinsLen => return Ok(self.builtin_len()),
                 Intrinsic::CodecBom(bytes) => {
                     return Ok(Expr {
@@ -8734,6 +8747,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
+                return Err(self.object_runtime_export(name, call));
+            }
             Some(Binding::Intrinsic(Intrinsic::AttrGetter)) => {
                 return Err(self.runtime_attrgetter(call));
             }

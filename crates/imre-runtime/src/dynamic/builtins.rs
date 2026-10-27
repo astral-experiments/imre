@@ -1,6 +1,5 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use std::io::{self, Write};
 use std::rc::Rc;
 
 use super::Context;
@@ -9,8 +8,9 @@ use super::value::{Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod collections;
 mod float;
 mod integer;
+mod print;
 mod text;
-pub(super) use collections::{hashable, remove_dict_item, set_add, set_member, view_items};
+pub(super) use collections::{hashable, remove_dict_item, set_add, set_member};
 pub(super) use text::{bytes_from_iterable, bytes_percent, format_value, percent, zeroed_bytes};
 
 macro_rules! exception_kinds {
@@ -21,6 +21,8 @@ macro_rules! exception_kinds {
             match name {
                 $(stringify!($kind) => Some(Kind::$kind),)*
                 "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+                "binascii.Error" => Some(Kind::BinasciiError),
+                "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
                 _ => None,
             }
         }
@@ -65,6 +67,7 @@ exception_kinds!(
     PermissionError,
     AssertionError,
     MemoryError,
+    BufferError,
     SystemExit,
     StopIteration,
     Warning,
@@ -74,8 +77,11 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "sorted",
     "ord",
+    "chr",
     "callable",
+    "all",
     "any",
     "isinstance",
     "issubclass",
@@ -86,6 +92,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "sum",
     "__import__",
     "repr",
     "format",
@@ -101,10 +108,12 @@ const TYPES: &[&str] = &[
     "bytes",
     "complex",
     "dict",
+    "enumerate",
     "float",
     "frozenset",
     "int",
     "list",
+    "map",
     "object",
     "property",
     "classmethod",
@@ -171,11 +180,13 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "capitalize",
     "encode",
     "endswith",
     "expandtabs",
     "find",
     "format",
+    "isspace",
     "join",
     "lower",
     "lstrip",
@@ -190,11 +201,13 @@ pub(super) const STR_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "translate",
     "upper",
 ];
 
 pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
     let owner = match value {
+        Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
@@ -295,6 +308,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "pattern"
         }
         Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -577,6 +591,9 @@ pub(super) fn call(
                 positional(name, kwargs)?;
                 arity(name, args, 2, 2)?;
                 let data = text::bytes_from_iterable(ctx, args[1])?;
+                if !data.is_empty() {
+                    ctx.check_bytearray_resize(args[0])?;
+                }
                 let Value::ByteArray(target) = ctx.heap.get_mut(args[0]) else {
                     return Err(type_error("expected bytearray"));
                 };
@@ -588,6 +605,7 @@ pub(super) fn call(
             }
             "list" | "dict" | "set" | "frozenset" => collections::method(ctx, name, args, kwargs),
             "slice" => super::slice::method(ctx, method, args, kwargs),
+            "map" => ctx.map_method(method, args, kwargs),
             "property" if method == "setter" => super::property::setter(ctx, args, kwargs),
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -709,16 +727,20 @@ pub(super) fn call(
             arity(name, args, 2, 2)?;
             Ok(boolean(ctx.python_instance_check(args[0], args[1])?))
         }
-        "ord" => {
+        "chr" | "ord" => {
             if !kwargs.is_empty() {
-                return Err(type_error("ord() takes no keyword arguments"));
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
             let [value] = args else {
                 return Err(type_error(format!(
-                    "ord() takes exactly one argument ({} given)",
+                    "{name}() takes exactly one argument ({} given)",
                     args.len()
                 )));
             };
+            if name == "chr" {
+                let code = ctx.index_integer(*value)?;
+                return Ok(ctx.text(crate::objects::chr_scalar(&code)?.to_string()));
+            }
             let code = match ctx.heap.get(*value) {
                 Value::Bytes(b) | Value::ByteArray(b) => crate::objects::ord_byte(b)?,
                 _ => {
@@ -758,6 +780,18 @@ pub(super) fn call(
                 ))),
             }
         }
+        "sorted" => collections::sorted(ctx, args, kwargs),
+        "enumerate" => {
+            let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
+            let iterable = iterable
+                .ok_or_else(|| type_error("enumerate() missing required argument 'iterable'"))?;
+            let next_index = match start {
+                Some(value) => ctx.index_integer(value)?,
+                None => crate::Int::from(0),
+            };
+            let input = ctx.iterator(iterable)?;
+            Ok(ctx.alloc(Value::Enumerate { input, next_index }))
+        }
         "reversed" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
@@ -779,6 +813,26 @@ pub(super) fn call(
                 "'{}' object is not reversible",
                 ctx.type_name(object)
             )))
+        }
+        "sum" => {
+            let Some((&source, rest)) = args.split_first() else {
+                return Err(type_error("sum requires a positional iterable"));
+            };
+            let [start] = bind(name, rest, kwargs, ["start"])?;
+            let iterator = ctx.iterator(source)?;
+            let mut total = start
+                .map(|id| ctx.as_int(id))
+                .transpose()?
+                .unwrap_or_else(|| crate::Int::from(0));
+            let mut item = ctx.next_item(iterator)?;
+            if item.is_none() {
+                return Ok(start.unwrap_or_else(|| ctx.int(0)));
+            }
+            while let Some(value) = item {
+                total = crate::integer_binary(&total, &ctx.as_int(value)?, 0)?;
+                item = ctx.next_item(iterator)?;
+            }
+            Ok(ctx.alloc(Value::Int(total)))
         }
         "len" => {
             positional(name, kwargs)?;
@@ -813,19 +867,7 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(size))
         }
-        "zip" => {
-            let [strict] = bind(name, &[], kwargs, ["strict"])?;
-            let strict = ctx.truth(strict.unwrap_or(FALSE))?;
-            let inputs = args
-                .iter()
-                .map(|&argument| ctx.iterator(argument))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(ctx.alloc(Value::Zip {
-                inputs: inputs.into(),
-                strict,
-                pending: None,
-            }))
-        }
+        "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
         "slice" => super::slice::construct(ctx, args, kwargs),
         "range" => {
             positional(name, kwargs)?;
@@ -942,44 +984,19 @@ pub(super) fn call(
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
-        "any" => {
+        "all" | "any" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let iter = ctx.iterator(args[0])?;
+            let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
-                if ctx.truth(item)? {
-                    return Ok(TRUE);
+                if ctx.truth(item)? == stop_value {
+                    return Ok(boolean(stop_value));
                 }
             }
-            Ok(FALSE)
+            Ok(boolean(!stop_value))
         }
-        "print" => {
-            let [sep, end, file, flush] = bind(name, &[], kwargs, ["sep", "end", "file", "flush"])?;
-            let flush = ctx.optional_truth(flush, false)?;
-            if file.is_some_and(|id| id != NONE) {
-                return Err(type_error("print supports standard output"));
-            }
-            let sep = sep
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or(" ");
-            let end = end
-                .filter(|&id| id != NONE)
-                .map(|id| ctx.str_value(id))
-                .transpose()?
-                .unwrap_or("\n");
-            let values = args
-                .iter()
-                .map(|&id| ctx.display(id))
-                .collect::<Vec<_>>()
-                .join(sep);
-            let mut out = io::stdout().lock();
-            write!(out, "{values}{end}")
-                .and_then(|()| if flush { out.flush() } else { Ok(()) })
-                .map_err(|err| Error::new("OSError", err.to_string()))?;
-            Ok(NONE)
-        }
+        "print" => print::call(ctx, args, kwargs),
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

@@ -175,14 +175,32 @@ def native_build(compiler, runtime, site, binary, opt, flags, timeout):
     command = [compiler, "build", site / "serve.py", "--module-root", site,
                "--runtime", runtime, "--opt-level", str(opt), "-o", binary, *flags]
     started = time.monotonic()
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
     try:
-        p = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        stdout, stderr = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = p.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired as exc:
+            # A process outside the killed group may still hold a captured pipe.
+            # Stop waiting for EOF and preserve the output collected so far.
+            stdout = (exc.stdout or b"").decode(errors="replace")
+            stderr = (exc.stderr or b"").decode(errors="replace")
+            p.stdout.close()
+            p.stderr.close()
+            try:
+                p.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                pass
+        build = {"outcome": "compile_timeout", "status": None, "stdout": stdout, "stderr": stderr}
+    else:
         build = {"outcome": "compile_error" if p.returncode else "compiled",
-                 "status": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
-    except subprocess.TimeoutExpired as exc:
-        build = {"outcome": "compile_timeout", "status": None,
-                 "stdout": (exc.stdout or b"").decode(errors="replace"),
-                 "stderr": (exc.stderr or b"").decode(errors="replace")}
+                 "status": p.returncode, "stdout": stdout, "stderr": stderr}
     return {**build, "timeout_seconds": timeout, "elapsed_seconds": time.monotonic() - started}
 
 

@@ -585,7 +585,7 @@ fn release(owner: Release) {
                 Release::Record(record) => unsafe { release_record_owner(record, &pending) },
                 // SAFETY: an unfinished frame owns the standalone allocation and remaining fields.
                 Release::Fields(record, next) => unsafe {
-                    release_standalone_fields(record, descriptor(record), next, &pending);
+                    release_standalone_fields(record, next, &pending);
                 },
                 Release::Object(object) => super::release_object_owner(object),
                 Release::Table(mut table, mut next) => {
@@ -649,16 +649,18 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
         }
     } else {
         // SAFETY: the final owner transfers this standalone allocation and all its fields.
-        unsafe { release_standalone_fields(payload, descriptor, 0, pending) };
+        unsafe { release_standalone_fields(payload, 0, pending) };
     }
 }
 
 unsafe fn release_standalone_fields(
     payload: *const usize,
-    descriptor: &RecordDescriptor,
     mut next: usize,
     pending: &ReleaseQueue,
 ) {
+    // SAFETY: this record owns its descriptor until its final field is released.
+    // Keep the borrow local so it ends before the last tuple layout owner drops.
+    let descriptor = unsafe { descriptor(payload) };
     let (siblings, room) = {
         let queue = pending.borrow();
         (queue.len(), queue.capacity() - queue.len())

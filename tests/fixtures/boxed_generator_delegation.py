@@ -37,6 +37,11 @@ def stopped(cause):
     yield fail(cause)
 
 
+def raise_after_yield(error, cause):
+    yield -1, +1, ~1, not 1
+    raise error from cause
+
+
 def annotated():
     item: missing_annotation = 7
     yield item
@@ -72,6 +77,14 @@ def current():
     except RuntimeError as error:
         print(str(error), error.__cause__ is cause, error.__context__ is cause)
         print(error.__suppress_context__, next(g, "closed"))
+
+    for error, explicit in ((ValueError("bad row"), cause), (cause, None)):
+        g = raise_after_yield(error, explicit)
+        print(next(g))
+        try:
+            next(g)
+        except (ValueError, RuntimeError) as caught:
+            print(type(caught).__name__, caught.__cause__ is cause, next(g, "closed"))
 
     paused = wrapped([("gc", [1, 2])])
     print(next(paused))

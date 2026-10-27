@@ -314,13 +314,20 @@ pub(crate) fn netloc_property(
     }
     let (name, zone) = partition(hostname, b'%');
     let lower = if is_bytes {
-        let mut lower = hostname.to_vec();
+        let mut lower = Vec::new();
+        lower
+            .try_reserve_exact(hostname.len())
+            .map_err(|_| Error::allocation())?;
+        lower.extend_from_slice(hostname);
         lower[..name.len()].make_ascii_lowercase();
         lower
     } else {
         let mut lower = super::lowercase::lowercase(std::str::from_utf8(name).unwrap())
             .map_err(|_| Error::allocation())?;
         if let Some(zone) = zone {
+            lower
+                .try_reserve(1 + zone.len())
+                .map_err(|_| Error::allocation())?;
             lower.push('%');
             lower.push_str(std::str::from_utf8(zone).unwrap());
         }
