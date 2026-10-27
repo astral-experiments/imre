@@ -118,3 +118,16 @@ except Ordered as outer:
         output = io.StringIO()
         print_exception(outer, limit=0, file=output, chain=chain)
         print(calls, "Ordered: inner" in output.getvalue(), sys.exception() is outer)
+
+
+class Renames(Exception):
+    __module__ = "builtins"
+
+    def __str__(self):
+        Renames.__qualname__ = "AfterRender"
+        return "renamed"
+
+
+stream = io.StringIO()
+print_exception(Renames(), limit=0, file=stream)
+assert stream.getvalue() == "AfterRender: renamed\n"
