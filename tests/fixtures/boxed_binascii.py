@@ -2,11 +2,15 @@ import binascii
 
 
 class Resize:
-    def __init__(self, data):
+    def __init__(self, data, delete=False):
         self.data = data
+        self.delete = delete
 
     def __bool__(self):
-        self.data.extend(b"!")
+        if self.delete:
+            del self.data[::-2]
+        else:
+            self.data.extend(b"!")
         return True
 
 
@@ -30,9 +34,11 @@ def current():
     except Error as error:
         print(isinstance(error, ValueError), error.args)
     data = bytearray(b"YWJj")
-    try:
-        a2b_base64(data, strict_mode=Resize(data))
-    except BufferError as error:
-        print(str(error), data)
+    for delete in (False, True):
+        try:
+            a2b_base64(data, strict_mode=Resize(data, delete))
+        except BufferError as error:
+            print(str(error), data)
+    del data[::-2]
     data.extend(b"!")
     print(data)
