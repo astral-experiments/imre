@@ -1,6 +1,7 @@
 """Exercise context-local bindings with wheel-defined objects in the native object runtime."""
 
 from contextvars import Context, ContextVar, Token, copy_context
+from operator import length_hint
 
 
 class Request:
@@ -89,3 +90,15 @@ def current():
     mapping[var] = None
     mapping.update(saved)
     assert len(mapping) == 3 and mapping[var] is req and mapping[missing] == "keep"
+
+
+    empty = Context()
+    for view in (empty.keys(), empty.items(), empty.values()):
+        assert not view and len(view) == 0 and length_hint(view) == 0
+    empty.run(var.set, 1)
+    views = (empty.keys(), empty.items(), empty.values())
+    empty.run(another.set, 2)
+    for view in views:
+        assert view and len(view) == 1
+        assert len(list(view)) == 1 and list(view) == []
+        assert view and len(view) == 1 and length_hint(view) == 1
