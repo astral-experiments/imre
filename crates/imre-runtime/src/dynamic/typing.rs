@@ -101,11 +101,26 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         return class;
     }
     let scope = ctx.scope(module, None);
+    let bases = if key == "typing.Protocol" {
+        let generic = named_class(ctx, "typing", "Generic");
+        ctx.bind(scope, "_is_protocol", TRUE);
+        ctx.bind(scope, "_is_runtime_protocol", FALSE);
+        let parameters = ctx.alloc(Value::Tuple(Vec::new()));
+        ctx.bind(scope, "__parameters__", parameters);
+        let abstract_methods = ctx.alloc(Value::Set {
+            items: Vec::new(),
+            frozen: true,
+        });
+        ctx.bind(scope, "__abstractmethods__", abstract_methods);
+        vec![generic]
+    } else {
+        Vec::new()
+    };
     let module = ctx.text(module);
     ctx.bind(scope, "__module__", module);
     let class = ctx
-        .allocate_class(name.to_owned(), scope, Vec::new())
-        .expect("object has a linearization");
+        .allocate_class(name.to_owned(), scope, bases)
+        .expect("native typing classes have a single base");
     ctx.classes.insert(key, class);
     class
 }
@@ -237,11 +252,16 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
     };
     Some((|| {
         if kind == AliasKind::Generic {
-            if ctx.classes.get("typing.Generic") == Some(&target) {
+            if ctx.classes.get("typing.Generic") == Some(&target)
+                || ctx.classes.get("typing.Protocol") == Some(&target)
+            {
+                let Value::Class { name, .. } = ctx.heap.get(target) else {
+                    unreachable!()
+                };
                 if args.is_empty() {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameter list to Generic[...] cannot be empty",
+                        format!("Parameter list to {name}[...] cannot be empty"),
                     ));
                 }
                 if args
@@ -250,13 +270,15 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameters to Generic[...] must all be type variables or parameter specification variables.",
+                        format!(
+                            "Parameters to {name}[...] must all be type variables or parameter specification variables."
+                        ),
                     ));
                 }
                 if variables(ctx, &args).len() != args.len() {
                     return Err(Error::new(
                         "TypeError",
-                        "Parameters to Generic[...] must all be unique",
+                        format!("Parameters to {name}[...] must all be unique"),
                     ));
                 }
             } else {
@@ -729,6 +751,28 @@ pub(super) fn call(
 }
 
 impl Context {
+    /// Distinguish a declared protocol from Protocol itself and its concrete descendants.
+    pub(super) fn is_protocol_declaration(&self, class: Id) -> bool {
+        self.classes
+            .get("typing.Protocol")
+            .is_some_and(|&protocol| {
+                class != protocol
+                    && self.subclass(class, protocol)
+                    && self.class_attr(class, "_is_protocol") == Some(TRUE)
+            })
+    }
+
+    /// Reject direct runtime checks on protocol declarations before nominal matching.
+    pub(super) fn require_checkable_protocol(&self, class: Id) -> Result<()> {
+        if self.is_protocol_declaration(class) {
+            return Err(Error::new(
+                "TypeError",
+                "Instance and class checks can only be used with @runtime_checkable protocols",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
             Value::Tuple(classes) => {
@@ -756,7 +800,10 @@ impl Context {
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
-            _ => Ok(self.instance_of(value, class)),
+            _ => {
+                self.require_checkable_protocol(class)?;
+                Ok(self.instance_of(value, class))
+            }
         }
     }
 

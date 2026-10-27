@@ -379,6 +379,7 @@ def report(text):
             "boxed_float.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
+            "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
