@@ -18,7 +18,12 @@ pub(super) fn expand(source: &str) -> Result<String, String> {
             let Ast::Repetition(outer) = ast else {
                 return Ok(());
             };
-            if !outer.greedy || !matches!(outer.op.kind, RepetitionKind::ZeroOrMore) {
+            if !outer.greedy
+                || !matches!(
+                    outer.op.kind,
+                    RepetitionKind::ZeroOrMore | RepetitionKind::OneOrMore
+                )
+            {
                 return Ok(());
             }
             let Ast::Group(group) = &*outer.ast else {
@@ -31,7 +36,10 @@ pub(super) fn expand(source: &str) -> Result<String, String> {
                 return Ok(());
             };
             if !inner.greedy
-                || !matches!(inner.op.kind, RepetitionKind::ZeroOrOne)
+                || !matches!(
+                    inner.op.kind,
+                    RepetitionKind::ZeroOrOne | RepetitionKind::ZeroOrMore
+                )
                 || !matches!(
                     &*inner.ast,
                     Ast::Literal(_)
