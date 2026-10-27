@@ -12,6 +12,28 @@ class DroppingChild(ast.AST):
         return None
 
 
+class Reentrant(ast.AST):
+    _fields = ("child",)
+
+    @property
+    def child(self):
+        try:
+            for unused in self.cursor:
+                break
+            raise AssertionError("running walk accepted a second caller")
+        except ValueError as error:
+            assert str(error) == "generator already executing"
+        return self.payload
+
+
+class Broken(ast.AST):
+    _fields = ("bad",)
+
+    @property
+    def bad(self):
+        raise ValueError("bad child")
+
+
 def current():
     tree = ast.parse("if ready:\n    value = source.method('X')\n")
     for node in ast.walk(tree):
@@ -58,3 +80,17 @@ def current():
     root = DroppingChild()
     root.first = ast.Name("retained", ast.Load())
     assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["retained"]
+
+    root = Reentrant()
+    root.payload = ast.Name("child", ast.Load())
+    root.cursor = ast.walk(root)
+    assert [type(n).__name__ for n in root.cursor] == ["Reentrant", "Name", "Load"]
+
+    cursor = ast.walk(ast.Module(body=[Broken(), ast.Constant("following")], type_ignores=[]))
+    try:
+        list(cursor)
+    except ValueError as error:
+        assert str(error) == "bad child"
+    else:
+        raise AssertionError("missing child lookup error")
+    assert list(cursor) == []

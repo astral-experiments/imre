@@ -197,7 +197,7 @@ impl Context {
             self.heap.get(id),
             Value::Iterator { .. }
                 | Value::DictIterator(_)
-                | Value::AstWalk(_)
+                | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -355,8 +355,8 @@ impl Context {
             };
             return Ok(item.is_some());
         }
-        if let Value::AstWalk(queue) = self.heap.get(id) {
-            return Ok(!queue.is_empty());
+        if matches!(self.heap.get(id), Value::AstWalk { .. }) {
+            return stdlib::ast::has_item(self, id);
         }
         let more = self.iterator_remaining(id)?.len() != 0;
         if !more && let Value::Iterator { sequence, .. } = self.heap.get_mut(id) {
@@ -403,7 +403,7 @@ impl Context {
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
         match self.heap.get_mut(id) {
             Value::Iterator { .. } => {}
-            Value::AstWalk(_) => return stdlib::ast::advance(self, id),
+            Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::DictIterator(iter) => {
                 let mut iter = *iter;
                 let item = iter.next(self);
@@ -476,7 +476,7 @@ impl Context {
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
         if matches!(
             self.heap.get(id),
-            Value::AstWalk(_)
+            Value::AstWalk { .. }
                 | Value::DictIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
