@@ -118,6 +118,7 @@ fn boxed_operator(name: &str) -> bool {
     matches!(
         name,
         "attrgetter"
+            | "itemgetter"
             | "lt"
             | "le"
             | "eq"
@@ -387,6 +388,9 @@ pub(crate) fn compile(
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
     let mut roots = initial.clone();
     roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    // Discover each search directory once even when it appears twice in sys.path.
+    let mut seen_roots = HashSet::new();
+    roots.retain(|root| seen_roots.insert(root.clone()));
     let bundled_root = "<imre stdlib>";
     let mut sources = vec![(
         "__main__".to_owned(),

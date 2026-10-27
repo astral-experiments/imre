@@ -211,6 +211,7 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
@@ -472,8 +473,9 @@ def report(text):
             "    raise ValueError('from plugin')\n"
         )
         plugin.write_text(source)
-        imports = f"import sys\nsys.path = [{str(installed)!r}] + sys.path\nimport arithmetic\n"
-        compare("-IB", "-c", imports + "print(arithmetic.total())")
+        roots = [str(installed), str(installed)]
+        imports = f"import sys\nsys.path = {roots!r} + sys.path\nimport arithmetic\n"
+        compare("-IB", "-c", imports + f"print(arithmetic.total())\nprint(sys.path[:2] == {roots!r})")
         plugin.write_text(source.replace("n = 0", "n = 7"))
         compare("-IB", "-c", imports + "print(arithmetic.total())")
         error = run(imre, "-IB", "-c", imports + "arithmetic.fail()")
@@ -520,6 +522,7 @@ def report(text):
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
+            "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_type_identity.py",

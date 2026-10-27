@@ -1115,6 +1115,15 @@ impl Context {
         match name {
             "os" => {
                 let path = self.module("posixpath")?;
+                let posix_sep = self.lookup_attr(path, "sep")?;
+                for (name, alternate) in [("sep", false), ("altsep", true)] {
+                    let value = match crate::objects::os_separator(alternate) {
+                        Some(sep) if self.str_value(posix_sep)? == sep => posix_sep,
+                        Some(sep) => self.text(sep),
+                        None => NONE,
+                    };
+                    self.bind(scope, name, value);
+                }
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
             }
