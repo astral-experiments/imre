@@ -492,6 +492,22 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
+        (helpers / "decimal_values.py").write_text(
+            "from decimal import Decimal\n"
+            "x = Decimal('1.2300')\n"
+            "print(x, Decimal(value=x) is x, Decimal(True), len(str(Decimal(10 ** 5000))))\n"
+        )
+        compare("-IB", "-c", decimal_import + "import decimal_values")
+        (helpers / "decimal_comparison.py").write_text(
+            "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
+        )
+        unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_comparison")
+        assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+
+        (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
+        compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
+
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")

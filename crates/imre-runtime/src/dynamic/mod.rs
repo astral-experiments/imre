@@ -1192,6 +1192,14 @@ impl Context {
                 self.modules.remove(name);
                 return Err(error);
             }
+            if name == "decimal"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("decimal.py"))
+                && let Some(class) = self.scope_name(scope, "Decimal")
+            {
+                self.classes.insert("decimal.Decimal".into(), class);
+            }
         }
         if let Some((parent, child)) = parent {
             self.set_attr(parent, child, module)?;

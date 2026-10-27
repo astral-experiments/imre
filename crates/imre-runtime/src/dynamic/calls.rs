@@ -2289,6 +2289,29 @@ impl Context {
                 Ok(result)
             }
             Value::Class { name, scope, .. } => {
+                let (mut args, mut kwargs) = (args, kwargs);
+                if name == "Decimal" && self.classes.get("decimal.Decimal") == Some(&callable) {
+                    let value = match (&mut args[..], &mut kwargs[..]) {
+                        ([value], []) => Some(value),
+                        ([], [(key, value)]) if key == "value" => Some(value),
+                        _ => None,
+                    };
+                    if let Some(value) = value {
+                        if matches!(self.heap.get(*value), Value::Instance { class, .. } if *class == callable)
+                        {
+                            return Ok(*value);
+                        }
+                        if matches!(
+                            self.heap.get(self.scalar_value(*value)),
+                            Value::Int(_) | Value::Bool(_)
+                        ) {
+                            let text =
+                                crate::integer_text::try_decimal_coefficient(&self.as_int(*value)?)
+                                    .ok_or_else(crate::Error::memory_error)?;
+                            *value = self.text(text.into_string());
+                        }
+                    }
+                }
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
                 }

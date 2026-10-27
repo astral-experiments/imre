@@ -1755,6 +1755,15 @@ impl Context {
         if ac.is_none() && bc.is_none() {
             return Ok(None);
         }
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+            && let Some(&decimal) = self.classes.get("decimal.Decimal")
+            && (ac == Some(decimal) || bc == Some(decimal))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native Decimal numeric comparisons are unsupported",
+            ));
+        }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             ac != bc
                 && self.subclass(bc, ac)
