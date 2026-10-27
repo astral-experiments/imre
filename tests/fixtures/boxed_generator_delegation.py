@@ -60,6 +60,14 @@ def byte_chunks():
         yield b'a\x00' b'\xff', br'\n', b''
 
 
+def totals(values, cells, trace):
+    total = 0
+    for value in values:
+        total += value
+        cells[visited(trace, 'index', 0)] += visited(trace, 'rhs', total)
+        yield total, cells[0]
+
+
 def indexed_values(owner, trace):
     for word in ['first', 'second']:
         visited(trace, 'receiver', owner)[visited(trace, 'key', 0)] = visited(trace, 'rhs', word)
@@ -116,6 +124,9 @@ def current():
     assert next(values) == 1 and pulls == ["outer", 1]
     print(list(byte_chunks()))
     assert list(values) == [2] and pulls == ["outer", 1, 2]
+
+    trace = []
+    print(list(totals([3, -1, 5], [0], trace)), trace)
 
     saved = -1
     assert any((saved := item) for item in [0, 4, 9]) and saved == 4
