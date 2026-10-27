@@ -2,9 +2,10 @@
 //! its entire copy is complete, so addresses in the memo cannot be reused.
 use std::collections::HashMap;
 
+use super::mappings::TableOwner;
 use super::records::{allocate_record, descriptor};
 use super::words::WordKind;
-use super::{Error, List, OwnedWord, Storage, Words};
+use super::{Error, List, Object, OwnedWord, Storage, StorageCell, Words};
 
 struct Graph {
     memo: HashMap<usize, OwnedWord>,
@@ -25,7 +26,7 @@ impl Graph {
             Visit(OwnedWord),
             Tuple(OwnedWord, usize),
         }
-        let mut work = vec![Task::Visit(source)];
+        let mut work = smallvec::SmallVec::from_buf([Task::Visit(source)]);
         let mut results = Vec::<OwnedWord>::new();
         while let Some(task) = work.pop() {
             let source = match task {
@@ -87,12 +88,15 @@ impl Graph {
                             Ok::<_, Error>(output)
                         })
                     }?;
-                    crate::new_list(values) as usize
+                    let list = crate::try_new_list(values).map_err(|_| Error::memory_error())?;
+                    crate::ListOwner::into_raw(list) as usize
                 }
                 5 => {
                     // Do not inspect the source cell here; copy() may have been
                     // called while the very same container is being traversed.
-                    let output = Words::new(0).into_object();
+                    let empty = Words::new(0).into_storage();
+                    let output = crate::ObjectOwner::try_new(Object(StorageCell::new(empty)))
+                        .map_err(|_| Error::memory_error())?;
                     // SAFETY: kind 5 roots an Object for the pending traversal.
                     let input = unsafe { crate::ObjectOwner::acquire_word(source.word) };
                     push(&mut self.pending, (input, output.clone()))?;
@@ -165,13 +169,15 @@ impl Graph {
                         Ok(Storage::Sequence(out))
                     }
                     Storage::Dictionary(map) => {
-                        Ok(Storage::Dictionary(super::mappings::TableOwner::new(
-                            map.copy_values(|value| self.copy(value))?,
-                        )))
+                        let copy = map.copy_values(|value| self.copy(value))?;
+                        let owner = TableOwner::try_new(copy).map_err(|_| Error::memory_error())?;
+                        Ok(Storage::Dictionary(owner))
                     }
-                    Storage::Set(set) => Ok(Storage::Set(super::mappings::TableOwner::new(
-                        set.copy_keys()?,
-                    ))),
+                    Storage::Set(set) => {
+                        let copy = set.copy_keys()?;
+                        let owner = TableOwner::try_new(copy).map_err(|_| Error::memory_error())?;
+                        Ok(Storage::Set(owner))
+                    }
                     _ => unreachable!("deep-copy admission requires an exact builtin container"),
                 })
             }?;
