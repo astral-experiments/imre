@@ -158,7 +158,17 @@ def current():
             return dict.__getitem__(self, key) + 10
 
     filtered = Filtered(data)
-    print(dict(filtered), {**filtered})
+    print(dict(filtered), {**filtered}, filtered.copy())
+
+    class MissingKeys(Filtered):
+        @property
+        def keys(self):
+            raise AttributeError("unavailable keys")
+
+    try:
+        dict.copy(MissingKeys(data))
+    except AttributeError as error:
+        print(error.args)
 
     pending = []
 

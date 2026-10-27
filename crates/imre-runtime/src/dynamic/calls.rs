@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) enum MappingOperation {
+    Copy,
     Update,
     Unpack,
 }

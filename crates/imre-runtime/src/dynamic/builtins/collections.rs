@@ -427,7 +427,7 @@ pub(super) fn method(
                 ctx.for_each_mapping_item(
                     object,
                     copy,
-                    MappingOperation::Unpack,
+                    MappingOperation::Copy,
                     |ctx, key, value, hash| {
                         ctx.set_dictionary_key(copy, key, value, hash, true)
                             .map(|_| ())
