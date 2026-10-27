@@ -52,6 +52,28 @@ def current():
     ):
         result = normpath(path=Path(value))
         assert result == expected and type(result) is type(expected)
+    assert os.path.exists is posixpath.exists
+    assert os.path.exists(Path(b".")) and not os.path.exists(b"imre\0missing")
+    assert not os.path.exists(-1)
+    key = "IMRE_BOXED_GETENV_FIXTURE"
+    missing = []
+    assert os.getenv("not=a=variable", missing) is missing
+    previous = os.getenv(key)
+    try:
+        os.environ[key] = ""
+        os.putenv(key, "native only")
+        assert os.getenv(key, missing) == ""
+        assert posix.environ[key.encode()] == b""
+        try:
+            os.getenv(key.encode())
+        except TypeError as error:
+            assert str(error) == "str expected, not bytes"
+        else:
+            raise AssertionError("accepted a bytes environment key")
+    finally:
+        del os.environ[key]
+        if previous is not None:
+            os.environ[key] = previous
     assert os.path is posixpath and os.path.__name__ == "posixpath"
     assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
     assert altsep is os.altsep is path_altsep is posixpath.altsep is None
