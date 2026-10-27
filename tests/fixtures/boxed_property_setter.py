@@ -123,3 +123,32 @@ def current():
             call()
         except TypeError as exc:
             print(exc.args)
+
+    def discard(owner):
+        owner.saved = "removed"
+        return "ignored"
+
+    class Managed:
+        saved = 5
+        original = Sub(Cell.first.fget, Cell.value.fset)
+        replaced = original.deleter(discard)
+
+    original, replaced = Managed.original, Managed.replaced
+    assert original.fdel is None and type(replaced) is Sub
+    assert replaced.fget is original.fget and replaced.fset is original.fset
+    assert replaced is not original and replaced.fdel is discard
+    assert replaced.deleter(None).fdel is discard
+    managed = Managed()
+    managed.replaced = 8
+    assert managed.replaced == 8
+    del managed.replaced
+    assert managed.saved == "removed" and replaced.__delete__(managed) is None
+    for call in (
+        lambda: property.deleter(),
+        lambda: property.deleter(1, discard),
+        lambda: replaced.deleter(fdel=discard),
+    ):
+        try:
+            call()
+        except TypeError as exc:
+            print(exc.args)

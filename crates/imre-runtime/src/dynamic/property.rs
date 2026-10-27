@@ -9,6 +9,7 @@ pub(super) const METHODS: &[&str] = &[
     "__delete__",
     "__set_name__",
     "setter",
+    "deleter",
 ];
 
 #[derive(Clone, Copy, Default)]
@@ -165,7 +166,7 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let wrapper = !matches!(name, "setter" | "__set_name__");
+    let wrapper = !matches!(name, "setter" | "deleter" | "__set_name__");
     let Some((&receiver, args)) = args.split_first() else {
         let msg = if wrapper {
             format!("descriptor '{name}' of 'property' object needs an argument")
@@ -188,9 +189,7 @@ pub(super) fn method(
     if name == "__init__" {
         return initialize(ctx, receiver, args, kwargs);
     }
-    if name == "setter" {
-        return setter(ctx, receiver, property, args, kwargs);
-    }
+
     if !kwargs.is_empty() {
         let owner = if wrapper { "wrapper " } else { "property." };
         return Err(Error::new(
@@ -200,6 +199,13 @@ pub(super) fn method(
     }
     let count = args.len();
     match (name, args) {
+        ("setter" | "deleter", [accessor]) => {
+            copy_accessor(ctx, receiver, property, name, *accessor)
+        }
+        ("setter" | "deleter", _) => Err(Error::new(
+            "TypeError",
+            format!("property.{name}() takes exactly one argument ({count} given)"),
+        )),
         ("__get__", [object] | [object, _]) => {
             if *object != NONE {
                 property.read(ctx, *object)
@@ -245,30 +251,20 @@ pub(super) fn method(
     }
 }
 
-fn setter(
+/// Reconstruct the originating property subtype with the replaced accessor.
+fn copy_accessor(
     ctx: &mut Context,
     receiver: Id,
     mut property: Property,
-    args: &[Id],
-    kwargs: &[(String, Id)],
+    name: &str,
+    accessor: Id,
 ) -> Result<Id> {
-    if !kwargs.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            "property.setter() takes no keyword arguments",
-        ));
-    }
-    let [set] = args else {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "property.setter() takes exactly one argument ({} given)",
-                args.len()
-            ),
-        ));
-    };
-    if *set != NONE {
-        property.set = *set;
+    if accessor != NONE {
+        match name {
+            "setter" => property.set = accessor,
+            "deleter" => property.delete = accessor,
+            _ => unreachable!(),
+        }
     }
     let class = ctx.exact_type(receiver)?;
     let doc = if property.getter_doc {
