@@ -209,7 +209,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
 }
 
 impl Wrapper {
-    pub(in crate::dynamic) fn children(&self, visit: &mut Vec<Id>) {
+    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
         visit.extend(self.buffer.get());
         visit.extend([self.encoding, self.errors]);
     }

@@ -119,6 +119,33 @@ def class_patterns():
 
 def current():
     class_patterns()
+
+    class Journal:
+        pass
+
+    class Name(str):
+        pass
+
+    original = Journal.__name__
+    assert original is Journal.__name__
+    replacement = Name("Journáux")
+    Journal.__name__ = replacement
+    assert Journal.__name__ is replacement
+    assert "__name__" not in Journal.__dict__
+    assert Journal.__qualname__.endswith("Journal")
+    try:
+        del Journal.__name__
+    except TypeError as exc:
+        assert "immutable type 'Journáux'" in str(exc)
+    else:
+        raise AssertionError("a class name cannot be deleted")
+    try:
+        Journal.__name__ = "nul\0name"
+    except ValueError:
+        assert Journal.__name__ is replacement
+    else:
+        raise AssertionError("a class name cannot contain a null character")
+
     private_names()
     for obj in (Plain(), Advertised(), Data(), Fallback(), Key(), Guarded()):
         cls = obj.__class__

@@ -1,6 +1,55 @@
 def current():
     left = []
     right = []
+
+    from typing import Literal
+
+    class LiteralMember:
+        def __hash__(self):
+            return 41
+
+        def __eq__(self, other):
+            left.clear()
+            right.clear()
+            return False
+
+    left_alias = Literal[LiteralMember()]
+    right_alias = Literal[LiteralMember()]
+    left.append(left_alias)
+    right.append(right_alias)
+    assert left == right
+    assert not left and not right
+
+    class Clear:
+        def __eq__(self, other):
+            left.clear()
+            right.clear()
+            return False
+
+    left.append(Clear())
+    right.append(1)
+    assert left == right
+
+    class Grow:
+        def __eq__(self, other):
+            left.append(1)
+            return True
+
+    class Later:
+        def __eq__(self, other):
+            raise ValueError("later comparison")
+
+    left.extend([Grow(), Later()])
+    right.extend([1, 2])
+    try:
+        left == right
+    except ValueError as error:
+        assert str(error) == "later comparison"
+    else:
+        raise AssertionError("the next common element was skipped")
+
+    left = []
+    right = []
     left.append(left)
     right.append(right)
     for operator in range(3):

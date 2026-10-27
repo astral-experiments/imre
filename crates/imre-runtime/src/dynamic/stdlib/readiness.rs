@@ -1,7 +1,7 @@
 //! A boxed selector holds Python keys and shares the native descriptor poller with typed Imre.
 use super::super::{
     Context, builtins,
-    value::{Error, Id, NONE, Result, Value},
+    value::{Error, Id, MarkQueue, NONE, Result, Value},
 };
 use crate::objects::readiness::{Poll, PollError};
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
@@ -148,7 +148,7 @@ fn registered(
 }
 
 impl Selector {
-    pub(in crate::dynamic) fn trace(&self, roots: &mut Vec<Id>) {
+    pub(in crate::dynamic) fn trace(&self, roots: &mut MarkQueue<'_>) {
         for entry in self.keys.values() {
             roots.extend([entry.key, entry.fileobj, entry.data]);
         }

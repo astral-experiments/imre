@@ -36,7 +36,7 @@ impl FunctionFields {
         }
     }
 
-    pub fn children(self, visit: &mut Vec<Id>) {
+    pub fn children(self, visit: &mut super::value::MarkQueue<'_>) {
         visit.extend([
             self.name,
             self.qualname,

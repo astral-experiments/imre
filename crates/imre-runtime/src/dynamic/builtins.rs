@@ -515,6 +515,20 @@ fn arity(name: &str, args: &[Id], min: usize, max: usize) -> Result<()> {
     Ok(())
 }
 
+/// Read the sole positional argument of a CPython `METH_O` builtin.
+fn one_positional_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!("{name}() takes no keyword arguments")));
+    }
+    let [value] = args else {
+        return Err(type_error(format!(
+            "{name}() takes exactly one argument ({} given)",
+            args.len()
+        )));
+    };
+    Ok(*value)
+}
+
 fn positional(name: &str, kwargs: &[(String, Id)]) -> Result<()> {
     if let Some((key, _)) = kwargs.first() {
         Err(type_error(format!(
@@ -984,9 +998,8 @@ pub(super) fn call(
         }
         "round" => round::call(ctx, args, kwargs),
         "id" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(args[0] as usize))))
+            let object = one_positional_arg(name, args, kwargs)?;
+            Ok(ctx.alloc(Value::Int(crate::Int::from_usize(object as usize))))
         }
         "callable" => {
             positional(name, kwargs)?;
@@ -1388,16 +1401,8 @@ pub(super) fn call(
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
         "all" | "any" => {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!("{name}() takes no keyword arguments")));
-            }
-            let [iterable] = args else {
-                return Err(type_error(format!(
-                    "{name}() takes exactly one argument ({} given)",
-                    args.len()
-                )));
-            };
-            let iter = ctx.iterator(*iterable)?;
+            let iterable = one_positional_arg(name, args, kwargs)?;
+            let iter = ctx.iterator(iterable)?;
             let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? == stop_value {

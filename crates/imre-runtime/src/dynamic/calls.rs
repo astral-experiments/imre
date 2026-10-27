@@ -1834,7 +1834,12 @@ impl Context {
                     return Ok(mapping);
                 }
                 if name == "__name__" {
-                    return Ok(self.text(class_name));
+                    let assigned = self
+                        .scope_data(scope)
+                        .class_namespace
+                        .as_ref()
+                        .and_then(|namespace| namespace.name_override);
+                    return Ok(assigned.unwrap_or_else(|| self.heap.code_name(&class_name)));
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
@@ -2066,16 +2071,15 @@ impl Context {
                     Err(self.missing_attribute(obj, name))
                 }
             }
-            Value::Class {
-                scope,
-                name: ref class,
-                ..
-            } => {
+            Value::Class { scope, .. } => {
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
                         "TypeError",
-                        format!("cannot delete '{name}' attribute of immutable type '{class}'"),
+                        format!(
+                            "cannot delete '{name}' attribute of immutable type '{}'",
+                            self.class_name(obj)
+                        ),
                     ),
                     "__dict__" | "__mro__" => Error::new(
                         "AttributeError",
@@ -2105,12 +2109,12 @@ impl Context {
                             }
                             return Ok(());
                         }
-                        let Value::Class { name: class, .. } = self.heap.get(obj) else {
-                            unreachable!()
-                        };
                         Error::new(
                             "AttributeError",
-                            format!("type object '{class}' has no attribute '{name}'"),
+                            format!(
+                                "type object '{}' has no attribute '{name}'",
+                                self.class_name(obj)
+                            ),
                         )
                     }
                 };
@@ -2301,6 +2305,40 @@ impl Context {
             && let Value::Class { scope, .. } = *self.heap.get(obj)
         {
             return self.set_abstract_methods(scope, value);
+        }
+        if name == "__name__"
+            && let Value::Class { scope, .. } = *self.heap.get(obj)
+        {
+            let text = self.str_value(value).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "can only assign string to {}.__name__, not '{}'",
+                        self.class_name(obj),
+                        self.type_name(value)
+                    ),
+                )
+            })?;
+            if text.contains('\0') {
+                return Err(Error::new(
+                    "ValueError",
+                    "type name must not contain null characters",
+                ));
+            }
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            let old = frame
+                .class_namespace
+                .get_or_insert_with(Default::default)
+                .name_override
+                .replace(value);
+            if let Some(old) = old
+                && old != value
+            {
+                self.heap.weak_edge_removed(old);
+            }
+            return Ok(());
         }
         if name == "__context__" && matches!(self.heap.get(obj), Value::Raised(_)) {
             if value != NONE && !matches!(self.heap.get(value), Value::Raised(_)) {

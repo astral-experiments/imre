@@ -56,5 +56,13 @@ def current():
             [[n] for n in range(4800)]
         return value
     print(urlencode(pairs, doseq=True, quote_via=detach))
+    class NoLength(TypeError):
+        pass
+    class Scalar:
+        def __len__(self):
+            raise NoLength()
+        def __str__(self):
+            return "a b"
+    print(urlencode([("q", Scalar())], doseq=True))
     print(urlencode([("suffix", "a b"), ("suffix", "Málaga/+")]))
     print(parse.urlencode({b"q": [b"a/", b"\xff"]}, doseq=True, safe="/", quote_via=quote))
