@@ -32,6 +32,10 @@ pub(crate) type ModuleId = usize;
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
+        "collections" => Some((
+            "collections/__init__.py",
+            include_str!("../stdlib/collections/__init__.py"),
+        )),
         "contextlib" => Some((
             "contextlib.py",
             concat!(
