@@ -399,7 +399,7 @@ def main() -> None:
                     continue
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
-                        archive.writestr(f"{pkg}/__init__.py", "from witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
