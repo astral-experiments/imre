@@ -114,3 +114,9 @@ def current():
     flags.pop()
     flags.append("delete")
     print(left == right, len(left), len(right))
+    from types import GenericAlias
+    print(GenericAlias(list, (Candidate(),)) == GenericAlias(list, (17,)))
+    try:
+        print(GenericAlias(list, (Boom(),)) == GenericAlias(list, (17,)))
+    except ValueError as error:
+        print(type(error).__name__, str(error))
