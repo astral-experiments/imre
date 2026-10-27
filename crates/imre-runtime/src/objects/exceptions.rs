@@ -126,6 +126,8 @@ pub(crate) enum Kind {
     UnidiffParseError = 52,
     ReferenceError = 53,
     BufferError = 54,
+    SyntaxError = 55,
+    IndentationError = 56,
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
@@ -201,6 +203,8 @@ impl Kind {
             52 => Self::UnidiffParseError,
             53 => Self::ReferenceError,
             54 => Self::BufferError,
+            55 => Self::SyntaxError,
+            56 => Self::IndentationError,
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
@@ -223,6 +227,8 @@ impl Kind {
             Self::RuntimeError => "RuntimeError",
             Self::ReferenceError => "ReferenceError",
             Self::BufferError => "BufferError",
+            Self::SyntaxError => "SyntaxError",
+            Self::IndentationError => "IndentationError",
             Self::EOFError => "EOFError",
             Self::OSError => "OSError",
             Self::ShutilError => "Error",
@@ -287,6 +293,7 @@ impl Kind {
                 Self::Warning | Self::RuntimeWarning | Self::DeprecationWarning
             ),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
+            Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),
             Self::Exception => !matches!(
                 self,
                 Self::BaseException | Self::SystemExit | Self::CancelledError

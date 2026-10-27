@@ -68,6 +68,8 @@ exception_kinds!(
     AssertionError,
     MemoryError,
     BufferError,
+    SyntaxError,
+    IndentationError,
     SystemExit,
     StopIteration,
     Warning,

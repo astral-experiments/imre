@@ -307,6 +307,8 @@ jobs:
           python3 benchmarks/cpython_stdlib/full/typing/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-typing-overloads.json"
           cmp benchmarks/cpython_stdlib/full/typing/native-linux.json "$RUNNER_TEMP/cpython-typing-overloads.json"
           cmp benchmarks/cpython_stdlib/full/typing/warnings-client-linux.json "$RUNNER_TEMP/typing-warnings-client.json"
+      - name: Verify native literal evaluation against the pinned AST tests
+        run: python3 -B benchmarks/cpython_stdlib/full/ast/literal_eval.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --output "$RUNNER_TEMP/ast-literal-eval.json"
       - name: Verify the complete OS, POSIX and genericpath evidence
         run: |
           for level in 0 3; do
