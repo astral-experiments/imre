@@ -787,8 +787,15 @@ pub(super) fn method(
     if name == "rstrip"
         && let Value::Bytes(data) = ctx.heap.get(receiver)
     {
-        positional(name, kwargs)?;
-        arity(name, args, 0, 1)?;
+        if !kwargs.is_empty() {
+            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+        }
+        if args.len() > 1 {
+            return Err(type_error(format!(
+                "rstrip expected at most 1 argument, got {}",
+                args.len()
+            )));
+        }
         let chars = args
             .first()
             .copied()

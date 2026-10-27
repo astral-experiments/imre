@@ -147,6 +147,7 @@ pub(crate) enum IntrinsicModule {
     ImportlibMachinery,
     ImportlibUtil,
     Array,
+    Ast,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -574,6 +575,7 @@ impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
             "array" => Some(Self::Array),
+            "ast" => Some(Self::Ast),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -719,6 +721,8 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Array, "array") => Intrinsic::NominalClass("array.array"),
+            (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
+            (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -2797,8 +2801,9 @@ impl<'a> Loader<'a> {
         let module = IntrinsicModule::named(name).filter(|module| {
             self.reachable_only || !matches!(module, IntrinsicModule::Declaration(_))
         });
-        if module.is_some() {
+        if let Some(module) = module {
             self.reject_stdlib_shadow(name)?;
+            self.needs_object_imports |= module == IntrinsicModule::Ast;
         }
         if module == Some(IntrinsicModule::Selectors)
             && cfg!(any(target_os = "linux", target_os = "macos"))

@@ -426,6 +426,7 @@ def report(text):
         for fixture in (
             "boxed_ast.py",
             "boxed_code_objects.py",
+            "boxed_recursive_repr.py",
             "boxed_source_exec.py",
             "boxed_bytes_add.py",
             "boxed_bytes_io.py",
@@ -459,6 +460,7 @@ def report(text):
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
+            "boxed_function_defaults.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
             "boxed_super.py",
