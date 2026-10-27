@@ -141,6 +141,12 @@ impl Member {
         })
     }
 
+    /// zipimport reads the indexed bytes without checking the optional ZIP checksum.
+    pub(super) fn read_import_data(mut self) -> Result<Bytes> {
+        self.crc = None;
+        self.read(None)
+    }
+
     pub(in crate::objects) fn name(&self) -> &StrOwner {
         &self.info.filename
     }

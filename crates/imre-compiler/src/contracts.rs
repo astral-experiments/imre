@@ -624,6 +624,7 @@ impl Builtin {
             | Self::BinaryTell
             | Self::ZipOpenFile
             | Self::ZipGetInfo
+            | Self::ZipImportData
             | Self::ZipInfoList
             | Self::ZipMember
             | Self::ZipRead
@@ -1258,6 +1259,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_binary_tell"
                 | "imre_zip_open_file"
                 | "imre_zip_getinfo"
+                | "imre_zipimport_data"
                 | "imre_zip_infolist"
                 | "imre_zip_member"
                 | "imre_zip_read"

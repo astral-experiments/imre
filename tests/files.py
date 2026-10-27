@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
@@ -589,6 +590,7 @@ REJECTED = {
     "unsupported_newline": 'open("input.txt", "r", encoding="utf-8", newline="other")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
     "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
+    "zipimport_code": 'import zipimport\nzipimport.zipimporter("archive.zip").get_code("module")',
     "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
     "gzip_text_codec": 'import gzip\ngzip.open("input.gz", "rt", encoding="latin1")',
     "gzip_binary_encoding": 'import gzip\ngzip.open("input.gz", "rb", encoding="utf-8")',
@@ -705,6 +707,10 @@ def seed(directory: Path, case: str) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
+    if case == "zipimport_resources":
+        for name, method in [("stored.zip", zipfile.ZIP_STORED), ("deflated.zip", zipfile.ZIP_DEFLATED)]:
+            with zipfile.ZipFile(directory / name, "w") as archive:
+                archive.writestr(zipfile.ZipInfo("pkg/templates/page.html"), b"hello {{ name }}", compress_type=method)
     if case == "stream_reads":
         (directory / "truncated-after-open.gz").write_bytes(
             gzip.compress(b"x" * 300_000, compresslevel=0, mtime=0)
@@ -838,7 +844,7 @@ def main() -> None:
             result = run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             passed += 1
-        for module in ["sys", "typing", "io", "gzip", "zlib"]:
+        for module in ["sys", "typing", "io", "gzip", "zlib", "zipimport"]:
             project = temporary / f"shadow-{module}"
             project.mkdir()
             (project / "main.py").write_text(f"import {module}\n")

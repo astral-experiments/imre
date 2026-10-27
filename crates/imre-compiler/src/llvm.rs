@@ -6088,6 +6088,11 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ZipImportData => self.call(
+                "imre_zipimport_data",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ZipInfoList => self.call("imre_zip_infolist", returns, &[&args[0].value]),
             Builtin::ZipMember | Builtin::ZipRead => {
                 let name = if matches!(builtin, Builtin::ZipMember) {
@@ -9350,6 +9355,7 @@ declare i64 @imre_binary_seek(ptr, i64, i64)
 declare i64 @imre_binary_tell(ptr)
 declare ptr @imre_zip_open_file(ptr)
 declare ptr @imre_zip_getinfo(ptr, ptr)
+declare ptr @imre_zipimport_data(ptr, ptr)
 declare ptr @imre_zip_infolist(ptr)
 declare ptr @imre_zip_member(ptr, ptr, i32)
 declare ptr @imre_zip_read(ptr, ptr, i32)
