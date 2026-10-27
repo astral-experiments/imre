@@ -479,7 +479,12 @@ impl Context {
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(1_000_003_i64.wrapping_mul(normalized(float_hash(z.imag, key)))),
-                Value::Native(_) if self.builtin_type_name(key) == Some("type") => {
+                Value::Native(_)
+                    if matches!(
+                        self.builtin_type_name(key),
+                        Some("type" | "wrapper_descriptor")
+                    ) =>
+                {
                     Self::identity_hash(key)
                 }
                 Value::Str(text) | Value::Native(text) => data_hash(text.as_bytes()),

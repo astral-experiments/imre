@@ -75,7 +75,8 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (name == "__repr__"
+                    && matches!(kind.as_str(), "set" | "frozenset" | "bytes" | "bytearray")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1675,7 +1676,7 @@ impl Context {
             }
             Value::Native(class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
-                    && matches!(name, "maketrans" | "translate") =>
+                    && matches!(name, "__repr__" | "maketrans" | "translate") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -2977,7 +2978,7 @@ impl Context {
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
                 let tuple_subclass = self.has_base(callable, "tuple");
-                let set_kind = ["set", "frozenset"]
+                let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {
@@ -3007,9 +3008,9 @@ impl Context {
                         Some(self.alloc(Value::List(Vec::new())))
                     } else if tuple_subclass {
                         Some(builtins::call(self, "tuple", &args, &kwargs)?)
-                    } else if let Some(kind) = set_kind {
+                    } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
-                        let items = if kind == "set" && custom_init {
+                        let items = if kind != "frozenset" && custom_init {
                             &[][..]
                         } else {
                             &args
@@ -3042,7 +3043,7 @@ impl Context {
                     && string_base.is_none()
                     && !float_subclass
                     && !tuple_subclass
-                    && set_kind.is_none()
+                    && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(

@@ -92,3 +92,17 @@ def current():
     value = (cycle,)
     cycle.append(value)
     print(tuple.__repr__(value))
+
+
+    for owner, raw in ((str, "a'b"), (bytes, b"a'b"), (bytearray, b"a'b")):
+        class Scalar(owner):
+            def __repr__(self):
+                return "override"
+
+        obj = Scalar(raw)
+        slot = owner.__repr__
+        bound = slot.__get__(obj, Scalar)
+        assert slot.__objclass__ is owner and bound.__self__ is obj
+        assert hash(slot) == object.__hash__(slot)
+        assert {(slot,): 1}[(owner.__repr__,)] == 1
+        print(slot.__qualname__, repr(obj), slot(obj), bound())

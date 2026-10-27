@@ -11,6 +11,9 @@ impl Wrapper {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
         let (owner, name) = match symbol {
             "object.__hash__" => ("object", "__hash__"),
+            "str.__repr__" => ("str", "__repr__"),
+            "bytes.__repr__" => ("bytes", "__repr__"),
+            "bytearray.__repr__" => ("bytearray", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "list.__repr__" => ("list", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
@@ -32,8 +35,8 @@ impl Wrapper {
         let accepts = match self.owner {
             "object" => true,
             "dict" => ctx.dict_storage(receiver).is_some(),
-            "list" | "tuple" | "set" | "frozenset" => {
-                ctx.container_slot_accepts(receiver, self.owner)
+            "str" | "bytes" | "bytearray" | "list" | "tuple" | "set" | "frozenset" => {
+                ctx.builtin_slot_accepts(receiver, self.owner)
             }
             _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
         };
