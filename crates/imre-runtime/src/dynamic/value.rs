@@ -312,7 +312,7 @@ impl Context {
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::StaticMethod { .. } => "staticmethod",
             Value::Property(_) => "property",
-            Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
             Value::Traceback { .. } => "traceback",
             Value::PythonFrame { .. } => "frame",
@@ -668,8 +668,9 @@ pub(super) enum Value {
     },
     Property(super::property::Property),
     WeakrefDescriptor(Id),
-    ReadOnlyDescriptor {
+    GetSetDescriptor {
         get: Id,
+        set: Option<Id>,
         owner: &'static str,
         name: &'static str,
     },
@@ -968,8 +969,14 @@ impl Value {
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
                 }
-                if let Some(super::stdlib::io::MemoryStream::Bytes(stream)) = memory_stream {
-                    visit.extend(stream.snapshot.get());
+                match memory_stream {
+                    Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
+                        visit.extend(stream.snapshot.get())
+                    }
+                    Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
+                        stream.children(visit)
+                    }
+                    _ => {}
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
@@ -986,7 +993,10 @@ impl Value {
             Self::Property(property) => property.children(visit),
             Self::Weak(wr) => visit.push(wr.callback),
             Self::WeakrefDescriptor(owner) => visit.push(*owner),
-            Self::ReadOnlyDescriptor { get, .. } => visit.push(*get),
+            Self::GetSetDescriptor { get, set, .. } => {
+                visit.push(*get);
+                visit.extend(*set);
+            }
             Self::Partial {
                 function,
                 args,

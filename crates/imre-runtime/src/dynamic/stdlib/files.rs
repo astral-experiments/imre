@@ -69,6 +69,15 @@ pub(in crate::dynamic) enum ReadSource {
     Socket(crate::objects::socket::SocketInput),
 }
 
+impl ReadSource {
+    fn seekable(&mut self) -> bool {
+        match self {
+            Self::File(file) => file.get_mut().stream_position().is_ok(),
+            Self::Socket(_) => false,
+        }
+    }
+}
+
 impl Read for ReadSource {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
@@ -242,7 +251,7 @@ fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     ))
 }
 
-fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
+pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
     let Some(id) = size.filter(|&id| id != NONE) else {
         return Ok(-1);
     };
@@ -293,6 +302,19 @@ pub(super) fn call(
     let (slot, socket) = match handle.as_ref() {
         BinaryFile::Reader { slot, socket } => (slot, *socket),
         BinaryFile::Writer(file) => {
+            if name == "file.seek" {
+                let value = option(args, 2, kwargs, "whence")?;
+                let whence = value
+                    .map(|v| ctx.index_integer(v))
+                    .transpose()?
+                    .map_or(Some(0), |v| v.to_i64().and_then(|n| i32::try_from(n).ok()))
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?;
+                let offset = ctx.index_integer(argument(args, 1)?)?;
+                let pos = file.borrow_mut().seek_disk(&offset, i64::from(whence))?;
+                return Ok(ctx.int(pos as i64));
+            }
             // Converting a size can close this same writer.
             match (name, &args[1..]) {
                 ("file.read", [size]) => {
@@ -323,6 +345,18 @@ pub(super) fn call(
                 }
                 ("file.__enter__", []) => Ok(first),
                 ("file.fileno", []) => Ok(ctx.int(i64::from(file.fileno()?))),
+                ("file.tell", []) => Ok(ctx.int(file.tell()? as i64)),
+                ("file.readable" | "file.writable" | "file.seekable" | "file.isatty", []) => {
+                    let fd = file.fileno()?;
+                    let enabled = match name {
+                        "file.writable" => true,
+                        "file.seekable" => file.tell().is_ok(),
+                        // SAFETY: the borrowed writer keeps its file descriptor open.
+                        "file.isatty" => unsafe { libc::isatty(fd) != 0 },
+                        _ => false,
+                    };
+                    Ok(crate::dynamic::builtins::boolean(enabled))
+                }
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
                     if let ("file.readinto", [buffer]) = (name, &args[1..])
                         && !matches!(ctx.heap.get(*buffer), Value::ByteArray(_))
@@ -377,11 +411,7 @@ pub(super) fn call(
             let reader = slot
                 .as_mut()
                 .ok_or_else(|| Error::new("ValueError", "seek of closed file"))?;
-            let seekable = match reader {
-                ReadSource::File(file) => file.get_mut().stream_position().is_ok(),
-                ReadSource::Socket(_) => false,
-            };
-            if !seekable {
+            if !reader.seekable() {
                 return Err(Error::new(
                     "UnsupportedOperation",
                     "File or stream is not seekable.",
@@ -490,6 +520,19 @@ pub(super) fn call(
     let f = reader?;
     match name {
         "file.__enter__" => Ok(first),
+        "file.readable" => Ok(TRUE),
+        "file.writable" => Ok(FALSE),
+        "file.seekable" => Ok(crate::dynamic::builtins::boolean(f.seekable())),
+        "file.isatty" => {
+            use std::io::IsTerminal;
+            Ok(
+                if matches!(f, ReadSource::File(file) if file.get_ref().is_terminal()) {
+                    TRUE
+                } else {
+                    FALSE
+                },
+            )
+        }
         "file.flush" => Ok(NONE),
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
@@ -557,6 +600,7 @@ pub(super) fn text_method(
         ));
     }
     match name {
+        "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
         "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {
             let Value::Str(value) = ctx.heap.get(args[0]) else {
