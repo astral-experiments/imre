@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 89 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 42 modules with recorded suites, 119 complete test executions pass natively at both optimization levels; 15,152 of 15,299 upstream executions have a classification.
+**At a glance:** 89 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 43 modules with recorded suites, 119 complete test executions pass natively at both optimization levels; 15,152 of 15,368 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -44,6 +44,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHA-1 and SHA-256 construction, incremental updates, copy, digest and hexdigest. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
+| `heapq` | Rejected | Runtime-imported min and max heaps and stable top-N selection by key. [Evidence](../tests/fixtures/boxed_heapq.py) | [— / 69 (0 assessed)](../benchmarks/cpython_stdlib/full/heapq/) | — | — |
 | `hmac` | Yes | No API example recorded. | — | — | — |
 | `http` | Yes | Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 1 | 27 |
 | `importlib` | Yes | Construct and mutate `machinery.ModuleSpec`, convert paths with `util.cache_from_source` and `util.source_from_cache` using a configured cache tag, and read `metadata.version` from unpacked `.dist-info` directories in the configured import roots. [Version lookup](../tests/fixtures/module_values/distribution_version/) [Evidence](../benchmarks/cpython_stdlib/full/importlib/README.md) | [0 / 1,346](../benchmarks/cpython_stdlib/full/importlib/) | 10 | 72 |
@@ -140,7 +141,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `glob` |
 | `graphlib` |
 | `grp` |
-| `heapq` |
 | `html` |
 | `imaplib` |
 | `ipaddress` |

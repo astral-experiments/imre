@@ -154,7 +154,18 @@ pub(super) fn construct(
             if matches!(ctx.heap.get(value), Value::Str(_)) {
                 return Ok(value);
             }
-            let (name, method) = match ctx.bound_slot(value, "__str__")? {
+            let string_hook = ctx.bound_slot(value, "__str__")?;
+            if string_hook.is_none()
+                && let Value::Raised(error) = ctx.heap.get(value)
+                && ctx.is_os_error(error)
+            {
+                if let Some(text) = ctx.checked_os_text(value)? {
+                    return Ok(text);
+                }
+                let text = ctx.checked_format(value, false)?;
+                return Ok(ctx.text(text));
+            }
+            let (name, method) = match string_hook {
                 Some(method) => ("__str__", Some(method)),
                 None if ctx.string_storage(value).is_none() => {
                     ("__repr__", ctx.bound_slot(value, "__repr__")?)
