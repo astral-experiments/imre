@@ -90,6 +90,15 @@ def current():
     except TypeError as error:
         print(str(error))
 
+    class Finished:
+        global marked_in_body
+        marked_in_body = 'module value'
+
+    Finished.marked_in_body = 'class value'
+    print(marked_in_body, Finished.marked_in_body)
+    del Finished.marked_in_body
+    print(marked_in_body, hasattr(Finished, 'marked_in_body'))
+
 
 if __name__ == '__main__':
     current()

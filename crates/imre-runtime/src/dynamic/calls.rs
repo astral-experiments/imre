@@ -2901,6 +2901,9 @@ impl Context {
         let annotations = self.dict(Vec::new());
         self.bind(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.globals.clear();
+        }
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
