@@ -30,7 +30,7 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
-def check_getter_allocation(imre, root, run):
+def check_boxed_call_allocation(imre, root, run):
     fixtures = Path(__file__).resolve().with_name("fixtures")
     wrapper = root / "itemgetter_refuse.o"
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
@@ -58,6 +58,16 @@ def check_getter_allocation(imre, root, run):
             assert (result.returncode, result.stdout, result.stderr) == (
                 0, expected, b"refused\n" if ordinal else b"",
             ), result
+
+    source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_source_exec as fixture; fixture.decode_allocation()"
+    for ordinal, output in ((0, b"compiled\n7\n"), (1, b"caught ()\n7\n")):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, output, b"refused\n" if ordinal else b"",
+        ), result
 
 
 def check_slice_stack(imre, imports, root, env):
@@ -158,7 +168,7 @@ def main():
         if sys.platform.startswith("linux"):
             check_argument_allocation(imre, root, run)
             check_raise_site_allocation(imre, root, run)
-            check_getter_allocation(imre, root, run)
+            check_boxed_call_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")

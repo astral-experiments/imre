@@ -271,6 +271,7 @@ impl Context {
         use crate::objects::SourceDecodeError::*;
         let null = matches!(error, Null);
         let (message, range) = match error {
+            Allocation => return Error::new("MemoryError", ""),
             Null => (
                 "source code string cannot contain null bytes".to_owned(),
                 None,
