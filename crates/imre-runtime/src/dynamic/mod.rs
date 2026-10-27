@@ -269,11 +269,7 @@ impl Context {
         let (sequence, kind) = match *self.heap.get(id) {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
-                let cursor = Value::DequeIterator {
-                    deque: id,
-                    state: ring.state,
-                    remaining: ring.items.len(),
-                };
+                let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
             Value::List(_) => (id, "list_iterator"),
@@ -460,19 +456,23 @@ impl Context {
                 deque,
                 state,
                 remaining,
+                reverse,
             } => {
-                let (deque, state, remaining) = (*deque, *state, *remaining);
+                let (deque, state, mut remaining, reverse) = (*deque, *state, *remaining, *reverse);
                 let Value::Deque(ring) = self.heap.get(deque) else {
                     unreachable!()
                 };
-                let item = ring.cursor_item(state, remaining, false)?.copied();
-                if item.is_some() {
-                    let Value::DequeIterator { remaining, .. } = self.heap.get_mut(id) else {
-                        unreachable!()
-                    };
-                    *remaining -= 1;
-                }
-                return Ok(item);
+                let item = ring
+                    .cursor_item(state, &mut remaining, reverse)
+                    .map(|item| item.copied());
+                let Value::DequeIterator {
+                    remaining: saved, ..
+                } = self.heap.get_mut(id)
+                else {
+                    unreachable!()
+                };
+                *saved = remaining;
+                return Ok(item?);
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),

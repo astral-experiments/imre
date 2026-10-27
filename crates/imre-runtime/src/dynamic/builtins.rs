@@ -1027,6 +1027,10 @@ pub(super) fn call(
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
+            if let Value::Deque(ring) = ctx.heap.get(object) {
+                let iter = super::deque::iterator(object, ring, true);
+                return Ok(ctx.alloc(iter));
+            }
             if let Value::List(items) | Value::Tuple(items) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::Iterator {
                     sequence: Some(object),

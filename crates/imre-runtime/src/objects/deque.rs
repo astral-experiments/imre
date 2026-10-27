@@ -72,26 +72,35 @@ impl<T, K> Ring<T, K> {
         Ok(item)
     }
 
-    /// Check the cursor's saved mutation counter before returning the next borrowed item.
+    /// Reverse the live items while keeping every cursor at its current position.
+    pub(crate) fn reverse(&mut self) {
+        self.items.make_contiguous().reverse();
+    }
+
+    /// Advance a cursor, dropping its remaining items on a mutation error.
     pub(crate) fn cursor_item(
         &self,
         state: usize,
-        remaining: usize,
+        remaining: &mut usize,
         reverse: bool,
     ) -> Result<Option<&T>, Error> {
-        if (!reverse || remaining != 0) && state != self.state {
+        if (!reverse || *remaining != 0) && state != self.state {
+            *remaining = 0;
             return Err(Error::new(
                 Kind::RuntimeError,
                 "deque mutated during iteration",
             ));
         }
-        Ok((remaining != 0).then(|| {
-            &self.items[if reverse {
-                remaining - 1
-            } else {
-                self.items.len() - remaining
-            }]
-        }))
+        if *remaining == 0 {
+            return Ok(None);
+        }
+        let index = if reverse {
+            *remaining - 1
+        } else {
+            self.items.len() - *remaining
+        };
+        *remaining -= 1;
+        Ok(Some(&self.items[index]))
     }
 }
 
@@ -392,7 +401,7 @@ pub unsafe extern "C" fn imre_deque_reverse(value: *const Object) {
     // SAFETY: no element is copied or released while rearranging the ring.
     unsafe {
         object(value).0.with_mut(|storage| {
-            storage.deque_mut().items.make_contiguous().reverse();
+            storage.deque_mut().reverse();
         });
     }
 }
@@ -428,18 +437,11 @@ impl DequeIterator {
         // allocations; cloning a word cannot run a destructor or mutate storage.
         unsafe {
             self.owner.0.with(|storage| {
-                let deque = storage.deque();
-                match deque.cursor_item(self.state, self.remaining, self.reverse) {
-                    Ok(Some(item)) => {
-                        self.remaining -= 1;
-                        Ok(Some((item.clone(), None)))
-                    }
-                    Ok(None) => Ok(None),
-                    Err(error) => {
-                        self.remaining = 0;
-                        Err(error)
-                    }
-                }
+                let item =
+                    storage
+                        .deque()
+                        .cursor_item(self.state, &mut self.remaining, self.reverse)?;
+                Ok(item.map(|item| (item.clone(), None)))
             })
         }
     }
