@@ -142,6 +142,7 @@ impl Context {
                             | "object.__delattr__"
                             | "object.__init__"
                             | "int.to_bytes"
+                            | "list.index"
                             | "list.pop"
                             | "list.sort"
                             | "map.__iter__"
@@ -944,7 +945,7 @@ impl Context {
             Value::Native(class) if class == "bool" && name == "to_bytes" => {
                 return Ok(self.builtin("int.to_bytes"));
             }
-            Value::Native(class) if class == "list" && matches!(name, "pop" | "sort") => {
+            Value::Native(class) if class == "list" && matches!(name, "index" | "pop" | "sort") => {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
             Value::Native(class)

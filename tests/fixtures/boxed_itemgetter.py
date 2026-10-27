@@ -22,7 +22,8 @@ class Lookup:
 def current():
     column = itemgetter(1)
     rows = [("b", 2), ("a", 1), ("c", 2)]
-    rows.sort(key=column)
+    sorts = ["endpoint", "methods"]
+    rows.sort(key=itemgetter(sorts.index("methods")))
     print(rows, callable(column), isinstance(column, itemgetter))
     print(itemgetter(-1, 0)("aé"), itemgetter(slice(1, 3))((1, 2, 3)))
     print(itemgetter("right", "left")({"left": 1, "right": 2}))
