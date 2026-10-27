@@ -96,6 +96,7 @@ const FUNCTIONS: &[&str] = &[
     "hasattr",
     "open",
     "print",
+    "pow",
     "sum",
     "__import__",
     "repr",
@@ -457,6 +458,55 @@ pub(super) fn bind_method_arguments<const N: usize>(
         values[index] = Some(*value);
     }
     Ok(values)
+}
+
+/// Bind the positional or named operands of `pow` before selecting its numeric operation.
+fn power(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["base", "exp", "mod"];
+    if args.len() + kwargs.len() <= names.len() {
+        // Argument Clinic diagnoses missing required operands before duplicate or unknown names.
+        for (index, &name) in names[..2].iter().enumerate().skip(args.len()) {
+            if !kwargs.iter().any(|(key, _)| key == name) {
+                return Err(type_error(format!(
+                    "pow() missing required argument '{name}' (pos {})",
+                    index + 1
+                )));
+            }
+        }
+        if let Some((key, _)) = kwargs
+            .iter()
+            .find(|(key, _)| !names.contains(&key.as_str()))
+            && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+        {
+            return Err(type_error(format!(
+                "pow() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
+            )));
+        }
+    }
+    let [Some(base), Some(exp), modulus] = bind_method_arguments("pow", args, kwargs, names, 3)?
+    else {
+        unreachable!("required pow operands were checked above")
+    };
+    let Some(modulus) = modulus.filter(|&id| id != NONE) else {
+        return ctx.binary("**", base, exp);
+    };
+    let (Ok(x), Ok(y), Ok(m)) = (ctx.as_int(base), ctx.as_int(exp), ctx.as_int(modulus)) else {
+        if [base, exp, modulus]
+            .into_iter()
+            .any(|id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Float(_)))
+        {
+            return Err(type_error(
+                "pow() 3rd argument not allowed unless all arguments are integers",
+            ));
+        }
+        return Err(type_error(format!(
+            "unsupported operand type(s) for ** or pow(): '{}', '{}', '{}'",
+            ctx.type_name(base),
+            ctx.type_name(exp),
+            ctx.type_name(modulus)
+        )));
+    };
+    Ok(ctx.alloc(Value::Int(crate::integer_power::modular_power(&x, &y, &m)?)))
 }
 
 pub(super) fn boolean(value: bool) -> Id {
@@ -875,6 +925,7 @@ pub(super) fn call(
                 ))),
             }
         }
+        "pow" => power(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
