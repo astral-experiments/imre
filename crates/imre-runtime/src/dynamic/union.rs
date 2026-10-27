@@ -93,6 +93,14 @@ fn accepts(ctx: &Context, id: Id) -> bool {
 fn make(ctx: &mut Context, inputs: &[Id]) -> Result<Id> {
     let mut flattened = Vec::new();
     for &input in inputs {
+        if matches!(ctx.heap.get(input), Value::Instance { .. })
+            && let Some(&typing) = ctx.modules.get("typing")
+            && let Value::Module { scope, .. } = *ctx.heap.get(typing)
+            && let Some(check) = ctx.scope_name(scope, "_type_check")
+        {
+            let message = ctx.text("Union[arg, ...]: each arg must be a type.");
+            ctx.call(check, vec![input, message], Vec::new())?;
+        }
         if matches!(ctx.heap.get(input), Value::Str(_)) {
             return Err(Error::new(
                 "NotImplementedError",

@@ -40,6 +40,21 @@ impl AliasKind {
     pub(super) fn type_name(self) -> &'static str {
         self.class().rsplit_once('.').unwrap().1
     }
+
+    /// Parameterized aliases reject both public class checks, even as a union member.
+    pub(super) fn class_check_error(self, operation: &str) -> Error {
+        if self.is_typing_alias() {
+            Error::new(
+                "TypeError",
+                "Subscripted generics cannot be used with class and instance checks",
+            )
+        } else {
+            Error::new(
+                "TypeError",
+                format!("{operation}() argument 2 cannot be a parameterized generic"),
+            )
+        }
+    }
 }
 
 /// Render a type used in a generic alias or a union.
@@ -809,11 +824,11 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
+    pub(super) fn python_instance_check(&mut self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
             Value::Union(union) => self.python_instance_check(value, union.args),
             Value::Tuple(classes) => {
-                for &class in classes {
+                for class in classes.clone() {
                     if self.python_instance_check(value, class)? {
                         return Ok(true);
                     }
@@ -824,20 +839,17 @@ impl Context {
                 "TypeError",
                 "isinstance() arg 2 must be a type, a tuple of types, or a union",
             )),
-            Value::GenericAlias(alias) => Err(Error::new(
-                "TypeError",
-                if alias.kind.is_typing_alias() {
-                    "Subscripted generics cannot be used with class and instance checks"
-                } else {
-                    "isinstance() argument 2 cannot be a parameterized generic"
-                },
-            )),
+            Value::GenericAlias(alias) => Err(alias.kind.class_check_error("isinstance")),
             Value::Native(name) if name == "typing.Any" => Err(Error::new(
                 "TypeError",
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
+                if let Some(check) = self.bound_slot(class, "__instancecheck__")? {
+                    let result = self.call(check, vec![value], Vec::new())?;
+                    return self.truth(result);
+                }
                 self.require_checkable_protocol(class)?;
                 Ok(self.instance_of(value, class))
             }
