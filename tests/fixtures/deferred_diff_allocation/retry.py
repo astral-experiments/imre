@@ -3,6 +3,8 @@ from difflib import ndiff
 from itertools import tee
 from sys import argv
 
+from imre import struct
+
 
 class RowsError(Exception):
     def __init__(self, value, *args):
@@ -18,7 +20,41 @@ def union_truth(value: list[str] | str) -> bool:
     return bool(value)
 
 
+@struct
+class PackedRow:
+    value: float
+    enabled: bool
+
+
+def packed_rows(mode: str, shape: str) -> None:
+    rows = [PackedRow(1.5, True), PackedRow(2.5, False)]
+    result: list[PackedRow] = []
+    count = 0 if shape == "empty" else 2
+    print("armed")
+    for attempt in range(2):
+        try:
+            if mode == "packed-slice":
+                result = rows[:count]
+            else:
+                result = rows * count
+            print("ok")
+            break
+        except MemoryError as error:
+            print("refused")
+            print(repr(error))
+    for row in rows:
+        print(row.value)
+        print(row.enabled)
+    print(len(result))
+    for row in result:
+        print(row.value)
+        print(row.enabled)
+
+
 def check(mode: str, shape: str) -> None:
+    if mode == "packed-slice" or mode == "packed-repeat":
+        packed_rows(mode, shape)
+        return
     left = [argv[3], argv[4]]
     right = [argv[4], argv[3]]
     if shape == "sparse":
