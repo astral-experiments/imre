@@ -16,6 +16,9 @@ class Child(Tagged):
 
 
 def current():
+    for value in (15, -15, True, 1 << 100):
+        print(f"[{value:4X}][{value:04x}]")
+    print(len(f"{-1:01000X}"))
     wrapper = classmethod(len)
     assert wrapper.__func__ is len and wrapper.__wrapped__ is len
     assert type(Child.native) is type(Child.owner)

@@ -258,6 +258,18 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
     }
     if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
         let int = ctx.as_int(value)?;
+        if let Some(digits) = spec.strip_suffix(['x', 'X'])
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && let Ok(width) = digits.parse::<usize>()
+            && width <= 1000
+        {
+            return Ok(crate::objects::format_hex_integer(
+                &int,
+                width,
+                spec.ends_with('X'),
+                digits.starts_with('0'),
+            ));
+        }
         let int = int.big();
         let (sign, spec) = match spec.as_bytes().first() {
             Some(b'+' | b' ' | b'-') => (&spec[..1], &spec[1..]),

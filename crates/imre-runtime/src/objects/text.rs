@@ -198,23 +198,30 @@ pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
     finish(result, 0)
 }
 
+/// Format a bounded hexadecimal field, placing zero padding after the sign.
+pub(crate) fn format_hex_integer(
+    value: &Int,
+    width: usize,
+    uppercase: bool,
+    zero_pad: bool,
+) -> String {
+    let big = value.big();
+    let n = big.as_ref();
+    match (uppercase, zero_pad) {
+        (false, false) => format!("{n:width$x}"),
+        (false, true) => format!("{n:0width$x}"),
+        (true, false) => format!("{n:width$X}"),
+        (true, true) => format!("{n:0width$X}"),
+    }
+}
+
 /// # Safety
-/// The caller roots the integer and supplies a bounded literal width. BigInt's
-/// formatter pads signed magnitudes, including zeroes after a negative sign.
+/// The caller roots the integer and supplies a bounded literal width and valid flags.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_int_hex_format(value: usize, width: u32, flags: u32) -> *const Str {
     // SAFETY: the native integer owner stays live until formatting completes.
     let value = unsafe { Int::borrow(value) };
-    let big = value.big();
-    let n = big.as_ref();
-    let width = width as usize;
-    let output = match flags {
-        0 => format!("{n:width$x}"),
-        1 => format!("{n:0width$x}"),
-        2 => format!("{n:width$X}"),
-        3 => format!("{n:0width$X}"),
-        _ => unreachable!("invalid hexadecimal format flags"),
-    };
+    let output = format_hex_integer(&value, width as usize, flags & 2 != 0, flags & 1 != 0);
     StrOwner::into_raw(StrOwner::new(Str::from(output)))
 }
 
