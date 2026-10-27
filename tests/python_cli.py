@@ -455,6 +455,7 @@ def report(text):
             "boxed_codecs.py",
             "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
+            "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_type_identity.py",
