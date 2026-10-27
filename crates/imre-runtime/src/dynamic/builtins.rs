@@ -86,6 +86,7 @@ const FUNCTIONS: &[&str] = &[
     "reversed",
     "dir",
     "sorted",
+    "max",
     "ord",
     "chr",
     "divmod",
@@ -1020,6 +1021,7 @@ pub(super) fn call(
         "pow" => power(ctx, args, kwargs),
         "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
+        "max" => collections::maximum(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
             let iterable = iterable

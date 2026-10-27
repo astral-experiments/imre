@@ -660,6 +660,7 @@ def report(text):
             "boxed_enumerate_methods.py",
             "boxed_enumerate_metadata.py",
             "boxed_sorted.py",
+            "boxed_max.py",
             "boxed_generator_delegation.py",
             "boxed_slice.py",
             "boxed_binascii.py",
