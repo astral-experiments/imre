@@ -1,7 +1,7 @@
 """Dictionary and mapping classes for the runtime collections module."""
 
 import operator as _operator
-from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_repr, _ordered_dict_view
+from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_popitem, _ordered_dict_repr, _ordered_dict_view
 from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
 
@@ -84,6 +84,9 @@ class OrderedDict(dict):
     def __ne__(self, other):
         equal = self.__eq__(other)
         return NotImplemented if equal is NotImplemented else not equal
+
+    def popitem(self, /, last=True):
+        return _ordered_dict_popitem(self, last)
 
     def copy(self):
         return type(self)(self)

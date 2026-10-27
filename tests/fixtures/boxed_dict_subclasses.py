@@ -32,6 +32,10 @@ def ordered_dictionary():
     else:
         raise AssertionError("cursor missed a deletion and reinsertion")
     assert next(cursor, None) is None
+    endpoints = OrderedDict(a=1, b=2, c=3)
+    assert endpoints.popitem(last=False) == ("a", 1)
+    assert endpoints.popitem() == ("c", 3)
+    assert list(endpoints.items()) == [("b", 2)]
     source.clear()
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"

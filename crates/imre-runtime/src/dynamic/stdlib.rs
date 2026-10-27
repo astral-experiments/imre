@@ -329,7 +329,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
         (
             "_collections",
-            "_count_elements" | "_ordered_dict_equal" | "_ordered_dict_repr" | "_ordered_dict_view",
+            "_count_elements"
+            | "_ordered_dict_equal"
+            | "_ordered_dict_popitem"
+            | "_ordered_dict_repr"
+            | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
