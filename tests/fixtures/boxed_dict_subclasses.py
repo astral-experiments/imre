@@ -403,6 +403,24 @@ def current():
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
 
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    existing = groups["key"]
+    print(groups.default_factory is list, groups.__missing__("key") is existing)
+    groups.default_factory = None
+    try:
+        defaultdict.__missing__(groups, "key")
+    except KeyError as error:
+        print(error.args, groups["key"] is existing)
+
+    def fill():
+        groups["new"] = [7]
+        return []
+
+    groups.default_factory = fill
+    print(groups["new"], list(groups))
+
     class Late:
         pass
 

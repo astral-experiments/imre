@@ -1508,12 +1508,8 @@ impl Context {
             if let Some(index) = index {
                 return Ok(self.dict_entries(obj).expect("dictionary")[index].1);
             }
-            if let Value::DefaultDict { factory, .. } = self.heap.get(obj)
-                && *factory != NONE
-            {
-                let v = self.call(*factory, Vec::new(), Vec::new())?;
-                self.put_item(obj, key, v)?;
-                return Ok(v);
+            if matches!(self.heap.get(obj), Value::DefaultDict { .. }) {
+                return self.defaultdict_missing(obj, key);
             }
             return Err(self.lookup_error("KeyError", key));
         }
@@ -1603,6 +1599,24 @@ impl Context {
             _ => unreachable!(),
         })
     }
+    /// Call the current factory, preserving any value it inserts for this key.
+    pub(super) fn defaultdict_missing(&mut self, obj: Id, key: Id) -> Result<Id> {
+        let Value::DefaultDict { factory, .. } = *self.heap.get(obj) else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__missing__' for 'collections.defaultdict' objects doesn't apply to a '{}' object",
+                    self.type_name(obj)
+                ),
+            ));
+        };
+        if factory == NONE {
+            return Err(self.lookup_error("KeyError", key));
+        }
+        let value = self.call(factory, Vec::new(), Vec::new())?;
+        self.set_dictionary_key(obj, key, value, None, false)
+    }
+
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
         if matches!(

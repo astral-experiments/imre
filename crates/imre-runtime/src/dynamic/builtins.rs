@@ -349,6 +349,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "frozenset"
         }
+        Value::DefaultDict { .. } if attr == "__missing__" => "collections.defaultdict",
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Selector(_)
             if matches!(
