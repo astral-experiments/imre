@@ -57,8 +57,14 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
-            "lookup" => {
+            "lookup" | "lookup_class_local" => {
                 let name = self.str_value(b)?.to_owned();
+                if op == "lookup_class_local" {
+                    if let Some(value) = self.scope_name(a, &name) {
+                        return Ok(value);
+                    }
+                    return self.lookup(self.root_scope(a), &name);
+                }
                 self.lookup(a, &name)
             }
             "assign" => {

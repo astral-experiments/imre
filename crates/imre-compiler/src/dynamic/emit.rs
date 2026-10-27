@@ -1,6 +1,6 @@
 //! Emit native functions and control flow for closed modules using boxed Python values.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -174,7 +174,12 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
-            class_body: matches!(body, Body::Namespace(_)) && !prefix.is_empty(),
+            class_locals: match &body {
+                Body::Namespace(stmts) if !prefix.is_empty() => {
+                    Some(statements::class_locals(stmts))
+                }
+                _ => None,
+            },
             prefix,
             ir: String::new(),
             block: "entry".into(),
@@ -235,7 +240,7 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
-    class_body: bool,
+    class_locals: Option<BTreeSet<String>>,
     ir: String,
     block: String,
     error: String,
@@ -348,8 +353,17 @@ impl Function<'_, '_> {
     }
 
     fn lookup(&mut self, name: &str) -> String {
+        let op = if self
+            .class_locals
+            .as_ref()
+            .is_some_and(|locals| locals.contains(name))
+        {
+            "lookup_class_local"
+        } else {
+            "lookup"
+        };
         let name = self.text(name);
-        self.op("lookup", &[&self.scope.clone(), &name])
+        self.op(op, &[&self.scope.clone(), &name])
     }
 
     fn bind(&mut self, name: &str, value: &str) {
