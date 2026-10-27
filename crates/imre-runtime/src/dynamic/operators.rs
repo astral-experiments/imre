@@ -1423,7 +1423,12 @@ impl Context {
             let Value::List(items) = self.heap.get_mut(a) else {
                 unreachable!()
             };
-            *items = values;
+            if values.is_empty() && self.sorting_lists.contains(&a) {
+                // The allocated callback buffer records a mutation until the sort restores it.
+                items.clear();
+            } else {
+                *items = values;
+            }
             return Ok(a);
         }
         self.binary(op, a, b)
