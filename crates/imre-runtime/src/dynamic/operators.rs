@@ -277,10 +277,14 @@ impl Context {
         let mut frames = Vec::new();
         let mut pair = Some((a, b));
         let mut check_special = rich_initial;
-        while pair.is_some() || !frames.is_empty() {
-            if let Some((a, b)) = pair.take()
-                && a != b
-            {
+        'walk: while pair.is_some() || !frames.is_empty() {
+            let mut equal = 'current: {
+                let Some((a, b)) = pair.take() else {
+                    break 'current true;
+                };
+                if a == b {
+                    break 'current true;
+                }
                 if check_special
                     && (matches!(self.heap.get(a), Value::Instance { .. })
                         || matches!(self.heap.get(b), Value::Instance { .. }))
@@ -289,35 +293,29 @@ impl Context {
                     self.heap.keep(b);
                 }
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
-                    if !self.truth(result)? {
-                        return Ok(false);
-                    }
-                    continue;
+                    break 'current self.truth(result)?;
                 }
                 if matches!(self.heap.get(a), Value::Method { .. })
                     && matches!(self.heap.get(b), Value::Method { .. })
                 {
                     let Some((left, right, same_receivers)) = self.method_equality_operands(a, b)
                     else {
-                        return Ok(false);
+                        break 'current false;
                     };
                     if left != right {
                         self.heap.keep(a);
                         self.heap.keep(b);
                         if !self.checked_equal(left, right)? {
-                            return Ok(false);
+                            break 'current false;
                         }
                     }
-                    if !same_receivers {
-                        return Ok(false);
-                    }
-                    continue;
+                    break 'current same_receivers;
                 }
                 let left = self.mapping_comparison_target(a);
                 let right = self.mapping_comparison_target(b);
                 let (a, b) = if right != b { (right, left) } else { (left, b) };
                 if a == b {
-                    continue;
+                    break 'current true;
                 }
                 let storage = |id| {
                     self.dict_storage(id)
@@ -329,10 +327,7 @@ impl Context {
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
                 ) {
-                    if !self.dictionary_equal(a, b)? {
-                        return Ok(false);
-                    }
-                    continue;
+                    break 'current self.dictionary_equal(a, b)?;
                 }
                 if let (Value::Union(left), Value::Union(right)) =
                     (self.heap.get(a), self.heap.get(b))
@@ -340,33 +335,32 @@ impl Context {
                     let (left, right) = (*left, *right);
                     self.heap.keep(a);
                     self.heap.keep(b);
-                    if !left.checked_equal(right, self)? {
-                        return Ok(false);
-                    }
-                    continue;
+                    break 'current left.checked_equal(right, self)?;
                 }
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::GenericAlias(_), Value::GenericAlias(_))
                 ) {
                     let Some(parts) = super::typing::checked_alias_parts(self, a, b)? else {
-                        return Ok(false);
+                        break 'current false;
                     };
                     pair = Some(parts);
                     check_special = true;
-                    continue;
+                    continue 'walk;
                 }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
                     (Value::List(_), right) if !matches!(right, Value::List(_)) => {
-                        return Ok(false);
+                        break 'current false;
                     }
-                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => return Ok(false),
+                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => {
+                        break 'current false;
+                    }
                     (
                         Value::Dict(x) | Value::DefaultDict { entries: x, .. },
                         Value::Dict(y) | Value::DefaultDict { entries: y, .. },
                     ) => {
                         if x.len() != y.len() {
-                            return Ok(false);
+                            break 'current false;
                         }
                         Some(Children::Dict {
                             position: 0,
@@ -375,19 +369,19 @@ impl Context {
                     }
                     (Value::Context(x), Value::Context(y)) => {
                         if x.len() != y.len() {
-                            return Ok(false);
+                            break 'current false;
                         }
                         (!std::rc::Rc::ptr_eq(x, y)).then_some(Children::Context(0))
                     }
                     _ => match (self.sequence_at(a, 0), self.sequence_at(b, 0)) {
                         (Some((x, _)), Some((y, _))) => {
                             if x != y {
-                                return Ok(false);
+                                break 'current false;
                             }
                             Some(Children::Sequence(0))
                         }
                         _ if self.equal(a, b) => None,
-                        _ => return Ok(false),
+                        _ => break 'current false,
                     },
                 };
                 if let Some(children) = children {
@@ -404,56 +398,67 @@ impl Context {
                     self.heap.keep(b);
                     frames.push(((a, b), children));
                 }
-            }
+                true
+            };
             check_special = true;
             while let Some((parents, children)) = frames.last_mut() {
                 let (a, b) = *parents;
-                pair = match children {
-                    Children::Sequence(index) => {
+                // An element callback may have removed the unequal item from both lists.
+                if !equal
+                    && let Children::Sequence(index) = children
+                    && let (Value::List(left), Value::List(right)) =
+                        (self.heap.get(a), self.heap.get(b))
+                    && *index > left.len()
+                    && left.len() == right.len()
+                {
+                    equal = true;
+                }
+                pair = match (equal, &mut *children) {
+                    (false, _) => None,
+                    (true, Children::Sequence(index)) => {
                         let (xlen, x) = self.sequence_at(a, *index).expect("sequence parent");
                         let (ylen, y) = self.sequence_at(b, *index).expect("sequence parent");
-                        if xlen != ylen {
-                            return Ok(false);
-                        }
                         if let (Some(x), Some(y)) = (x, y) {
                             *index += 1;
                             Some((x, y))
                         } else {
+                            equal = xlen == ylen;
                             None
                         }
                     }
-                    Children::Dict { position, roots } => {
+                    (true, Children::Dict { position, roots }) => {
                         // Retain one entry across reentrant key and value comparisons.
                         let roots = *roots.get_or_insert_with(|| self.heap.temporary_mark());
                         self.heap.release_temporaries_since(roots);
                         if let Some((at, key, left, hash)) = self.dictionary_pair(a, *position) {
                             *position = at + 1;
                             self.heap.keep(left);
-                            let Some(index) = self.find_dictionary_key(b, key, hash)?.1 else {
-                                return Ok(false);
-                            };
-                            let right = self.dict_entries(b).expect("dict parent")[index].1;
-                            self.heap.keep(right);
-                            Some((left, right))
+                            if let Some(index) = self.find_dictionary_key(b, key, hash)?.1 {
+                                let right = self.dict_entries(b).expect("dict parent")[index].1;
+                                self.heap.keep(right);
+                                Some((left, right))
+                            } else {
+                                equal = false;
+                                None
+                            }
                         } else {
                             None
                         }
                     }
-                    Children::Context(index) => {
+                    (true, Children::Context(index)) => {
                         let (Value::Context(x), Value::Context(y)) =
                             (self.heap.get(a), self.heap.get(b))
                         else {
                             unreachable!()
                         };
                         if x.len() != y.len() {
-                            return Ok(false);
-                        }
-                        if let Some((&key, &value)) = x.iter().nth(*index) {
+                            equal = false;
+                            None
+                        } else if let Some((&key, &value)) = x.iter().nth(*index) {
                             *index += 1;
-                            let Some(&right) = y.get(&key) else {
-                                return Ok(false);
-                            };
-                            Some((value, right))
+                            let entry = y.get(&key).map(|&right| (value, right));
+                            equal = entry.is_some();
+                            entry
                         } else {
                             None
                         }
@@ -462,8 +467,18 @@ impl Context {
                 if pair.is_some() {
                     break;
                 }
+                if !equal
+                    && let Children::Dict {
+                        roots: Some(mark), ..
+                    } = children
+                {
+                    self.heap.release_temporaries_since(*mark);
+                }
                 active.remove(parents);
                 frames.pop();
+            }
+            if !equal {
+                return Ok(false);
             }
         }
         Ok(true)
