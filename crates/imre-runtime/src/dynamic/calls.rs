@@ -1,3 +1,4 @@
+use super::wrapper_descriptor::Wrapper;
 use super::*;
 
 pub(super) enum MappingOperation {
@@ -339,9 +340,9 @@ impl Context {
             return Ok(callable);
         }
         if let Value::Native(symbol) = self.heap.get(value)
-            && let Some(slot) = super::thread_local::wrapper_name(symbol)
+            && let Some(slot) = Wrapper::lookup(symbol)
         {
-            return super::thread_local::bind_wrapper(self, value, slot, receiver);
+            return slot.bind(self, value, receiver);
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
@@ -578,15 +579,11 @@ impl Context {
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
-                Value::Native(symbol) if super::thread_local::wrapper_name(symbol).is_some() => {
-                    "method-wrapper"
-                }
+                Value::Native(symbol) if Wrapper::lookup(symbol).is_some() => "method-wrapper",
                 Value::Native(_) => "builtin_function_or_method",
                 _ => return None,
             },
-            Value::Native(name) if super::thread_local::wrapper_name(name).is_some() => {
-                "wrapper_descriptor"
-            }
+            Value::Native(name) if Wrapper::lookup(name).is_some() => "wrapper_descriptor",
             Value::Native(name) if self.builtins.get(name) == Some(&obj) => {
                 if name == "typing.Any" {
                     return Some("typing._AnyMeta");
@@ -1225,23 +1222,21 @@ impl Context {
             Value::Method {
                 callable, receiver, ..
             } if let Value::Native(ref symbol) = *self.heap.get(callable)
-                && let Some(slot) = super::thread_local::wrapper_name(symbol) =>
+                && let Some(slot) = Wrapper::lookup(symbol) =>
             {
                 if name == "__self__" {
                     return Ok(receiver);
                 }
-                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+                if let Some(value) = slot.attribute(self, name) {
                     return Ok(value);
                 }
             }
-            Value::Native(ref symbol)
-                if let Some(slot) = super::thread_local::wrapper_name(symbol) =>
-            {
-                if let Some(value) = super::thread_local::wrapper_attribute(self, slot, name) {
+            Value::Native(ref symbol) if let Some(slot) = Wrapper::lookup(symbol) => {
+                if let Some(value) = slot.attribute(self, name) {
                     return Ok(value);
                 }
                 if name == "__get__" {
-                    let callable = self.builtin("_thread._local.wrapper_get");
+                    let callable = self.builtin("wrapper_descriptor.__get__");
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -2367,6 +2362,9 @@ impl Context {
                     return Err(error);
                 }
                 Ok(result)
+            }
+            Value::Native(name) if name == "wrapper_descriptor.__get__" => {
+                wrapper_descriptor::descriptor_get(self, &args, &kwargs)
             }
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),

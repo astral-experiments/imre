@@ -375,6 +375,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__repr__"
             | "dict.__len__"
             | "dict.__iter__"
             | "dict.__setitem__"
@@ -405,6 +406,19 @@ pub(super) fn method(
     } else {
         object
     };
+    if name == "dict.__repr__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                args.len()
+            )));
+        }
+        let representation = ctx.checked_dict_repr(object, receiver)?;
+        return Ok(ctx.text(representation));
+    }
     if name == "dict.__delitem__" {
         if !kwargs.is_empty() {
             return Err(type_error(

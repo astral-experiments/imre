@@ -206,6 +206,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__repr__",
     "__init__",
     "__len__",
     "__iter__",
