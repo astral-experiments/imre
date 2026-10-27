@@ -30,6 +30,26 @@ def check_raise_site_allocation(imre, root, run):
         ), (ordinal, result)
 
 
+def check_getter_allocation(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures")
+    wrapper = root / "itemgetter_refuse.o"
+    subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
+    flags = "\x1f".join([
+        "-C", f"link-arg={wrapper}",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc",
+    ])
+    imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_itemgetter as fixture; "
+    # The first equal-sized allocation copies the call's positional arguments.
+    for ordinal, expected in ((0, b"113\n"), (2, b"caught ()\n113\n")):
+        result = run(imre, "-B", "-c", imports + "fixture.constructor_allocation()", extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, expected, b"refused\n" if ordinal else b"",
+        ), result
+
+
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
         set_stack = None
@@ -104,6 +124,7 @@ def main():
 
         if sys.platform.startswith("linux"):
             check_raise_site_allocation(imre, root, run)
+            check_getter_allocation(imre, root, run)
 
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
