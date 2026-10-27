@@ -263,6 +263,9 @@ impl Context {
     }
 
     pub(in super::super) fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
+        if let Value::Union(union) = *self.heap.get(key) {
+            return union.hash(self);
+        }
         if let Value::Weak(wr) = *self.heap.get(key) {
             if wr.kind != super::super::weakref::Kind::Reference {
                 return Err(self.unhashable(key));
@@ -452,7 +455,7 @@ impl Context {
         None
     }
 
-    fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
+    pub(in super::super) fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
         }

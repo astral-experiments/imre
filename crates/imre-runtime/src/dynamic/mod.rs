@@ -22,6 +22,7 @@ mod super_object;
 mod thread_local;
 mod thread_lock;
 mod typing;
+mod union;
 mod value;
 mod weakref;
 mod zip;

@@ -426,6 +426,9 @@ impl Context {
     }
 
     pub(super) fn python_subclass_check(&self, child: Id, parent: Id) -> Result<bool> {
+        if let Value::Union(union) = self.heap.get(parent) {
+            return self.python_subclass_check(child, union.args);
+        }
         if let Value::Tuple(classes) = self.heap.get(parent) {
             for &class in classes {
                 if self.python_subclass_check(child, class)? {
@@ -551,6 +554,7 @@ impl Context {
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
+            Value::Union(_) => "typing.Union",
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::ReadOnlyDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
@@ -640,6 +644,7 @@ impl Context {
     /// Return the actual class independently of an instance's Python-level __class__ attribute.
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
+            Value::Union(_) => Ok(super::union::class(self)),
             Value::Instance { class, .. } => Ok(*class),
             Value::NamedTuple {
                 class: Some("time.struct_time"),
@@ -673,6 +678,9 @@ impl Context {
     }
 
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
+        if self.classes.get("typing.Union") == Some(&class) {
+            return matches!(self.heap.get(value), Value::Union(_));
+        }
         if self.classes.get("collections.abc.Callable") == Some(&class) {
             return self.callable(value);
         }
@@ -943,6 +951,16 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if let Value::Union(union) = *self.heap.get(obj) {
+            match name {
+                "__args__" => return Ok(union.args),
+                "__parameters__" => return Ok(union.parameters),
+                "__class__" | "__origin__" => return Ok(super::union::class(self)),
+                "__module__" => return Ok(self.text("typing")),
+                "__name__" | "__qualname__" => return Ok(self.text("Union")),
+                _ => {}
+            }
+        }
         if let Value::Instance { class, fields, .. } = self.heap.get(obj) {
             if matches!(name, "name" | "value")
                 && let Some((_, member_name, value)) = self.enum_member(obj)
@@ -2433,6 +2451,12 @@ impl Context {
                 }
                 if let Some(values) = self.enum_values(callable) {
                     return self.enum_lookup(callable, values, &args, &kwargs);
+                }
+                if self.classes.get("typing.Union") == Some(&callable) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "cannot create 'typing.Union' instances",
+                    ));
                 }
                 if self.scope_data(scope).is_abstract {
                     return Err(self.abstract_class_error(scope, &name)?);

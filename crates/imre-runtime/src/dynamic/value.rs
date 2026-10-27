@@ -267,6 +267,7 @@ impl Context {
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::GenericAlias(alias) => alias.kind.type_name(),
+            Value::Union(_) => "Union",
             Value::Class { .. } => "type",
             Value::MappingView { kind, .. } => match kind {
                 DictViewKind::Keys => "KeysView",
@@ -515,6 +516,7 @@ pub(super) enum Value {
     },
     TypeVar(super::typing::TypeVariable),
     GenericAlias(super::typing::Alias),
+    Union(super::union::Union),
     Instance {
         class: Id,
         fields: HashMap<String, Id>,
@@ -801,6 +803,10 @@ impl Value {
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
+            Self::Union(union) => {
+                visit.extend([union.args, union.members, union.parameters]);
+                visit.extend(union.unhashable);
+            }
             Self::Instance {
                 class,
                 fields,

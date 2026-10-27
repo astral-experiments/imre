@@ -256,6 +256,17 @@ impl Context {
                 }
                 let a = self.dict_storage(a).unwrap_or(a);
                 let b = self.dict_storage(b).unwrap_or(b);
+                if let (Value::Union(left), Value::Union(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    let (left, right) = (*left, *right);
+                    self.heap.keep(a);
+                    self.heap.keep(b);
+                    if !left.checked_equal(right, self)? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
                 if let (Value::GenericAlias(left), Value::GenericAlias(right)) =
                     (self.heap.get(a), self.heap.get(b))
                 {
@@ -429,6 +440,7 @@ impl Context {
                 a.kind == b.kind && a.origin == b.origin && equal(a.args, b.args)
             }
             (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
+            (Value::Union(a), Value::Union(b)) => a.structural_equal(*b, self, equal),
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
             }
@@ -1022,6 +1034,10 @@ impl Context {
                     .to_owned()
                 }),
             Value::GenericAlias(alias) => alias.repr(self),
+            Value::Union(union) => super::union::repr(self, *union),
+            Value::Class { .. } if self.classes.get("typing.Union") == Some(&id) => {
+                "<class 'typing.Union'>".to_owned()
+            }
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
@@ -1081,6 +1097,9 @@ impl Context {
     }
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        if let Some(value) = super::union::subscribe(self, obj, key) {
+            return value;
+        }
         if let Some(value) = super::typing::subscribe(self, obj, key) {
             return value;
         }
@@ -1481,6 +1500,11 @@ impl Context {
         };
         if let Some(result) = self.binary_special(op, a, b)? {
             return Ok(result);
+        }
+        if op == "|"
+            && let Some(result) = super::union::binary(self, a, b)
+        {
+            return result;
         }
         if let (Value::Slice(left), Value::Slice(right)) = (self.heap.get(a), self.heap.get(b))
             && matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
