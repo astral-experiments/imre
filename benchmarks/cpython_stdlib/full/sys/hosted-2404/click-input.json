@@ -1,0 +1,68 @@
+{
+  "source": "cb0c9041bad27e70f3a65f6001e286866e983f15",
+  "parent": "883f42bc28ed17d7304c87f2022ac685b0806de4",
+  "groups": {
+    "click_textio": {
+      "file": "click_textio.py",
+      "sha256": "5a156138212bbf9b06cfe6aa1cf068d739ae47fc1f10382ac09953241fe85af7",
+      "cases": [
+        "original_class_identity",
+        "write_line_buffering_and_detach",
+        "read_seek_replace_and_newlines",
+        "strict_unicode_error",
+        "defaults_and_forced_wrapper",
+        "supplied_binary_read1_fallback",
+        "drop_keeps_original_buffer_open"
+      ],
+      "lowering": "boxed",
+      "oracle": {
+        "original_class_identity": {
+          "exit": 0,
+          "stdout": "original_class_identity\n",
+          "stderr": ""
+        },
+        "write_line_buffering_and_detach": {
+          "exit": 0,
+          "stdout": "write_line_buffering_and_detach\n",
+          "stderr": ""
+        },
+        "read_seek_replace_and_newlines": {
+          "exit": 0,
+          "stdout": "read_seek_replace_and_newlines\n",
+          "stderr": ""
+        },
+        "strict_unicode_error": {
+          "exit": 0,
+          "stdout": "strict_unicode_error\n",
+          "stderr": ""
+        },
+        "defaults_and_forced_wrapper": {
+          "exit": 0,
+          "stdout": "defaults_and_forced_wrapper\n",
+          "stderr": ""
+        },
+        "supplied_binary_read1_fallback": {
+          "exit": 0,
+          "stdout": "supplied_binary_read1_fallback\n",
+          "stderr": ""
+        },
+        "drop_keeps_original_buffer_open": {
+          "exit": 0,
+          "stdout": "drop_keeps_original_buffer_open\n",
+          "stderr": ""
+        }
+      },
+      "retained_failure": {
+        "drop_keeps_original_buffer_open": "line 207\nAssertionError"
+      }
+    },
+    "registered_callback": {
+      "file": "registered_callback.py",
+      "sha256": "d86d24f30d57bab36bba57d2066ecb1a0e785865ad48784060fda348c78d0b93",
+      "cases": [
+        ""
+      ],
+      "lowering": "boxed"
+    }
+  }
+}
