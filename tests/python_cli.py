@@ -422,6 +422,10 @@ def report(text):
         assert b'File "<string>", line 4' in error.stderr, error.stderr
         assert f'File "{plugin}", line 8'.encode() in error.stderr, error.stderr
         assert error.stderr.rstrip().endswith(b"ValueError: from plugin"), error.stderr
+        resource_package = installed / "pkgutil_resource"
+        resource_package.mkdir()
+        (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
+        (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
         for fixture in (
             "boxed_ast.py",
@@ -442,6 +446,7 @@ def report(text):
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
             "boxed_random.py",
+            "boxed_pkgutil.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",

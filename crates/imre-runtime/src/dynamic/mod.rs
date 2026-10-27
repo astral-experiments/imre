@@ -921,8 +921,19 @@ impl Context {
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
+        self.find_module(name)?.ok_or_else(|| {
+            Error::new(
+                "ModuleNotFoundError",
+                format!("No module named {}", string_repr(name)),
+            )
+            .with_import(Some(name), None, None)
+        })
+    }
+
+    /// Keep an absent final name distinct from a failure in a package initializer.
+    fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
         if let Some(value) = self.modules.get(name) {
-            return Ok(*value);
+            return Ok(Some(*value));
         }
         // Execute the package initializer before its child. A regular package
         // constrains child modules to its __path__; namespace packages combine
@@ -930,7 +941,7 @@ impl Context {
         let parent = if let Some((parent, child)) = name.rsplit_once('.') {
             let id = self.module(parent)?;
             if let Some(id) = self.modules.get(name) {
-                return Ok(*id);
+                return Ok(Some(*id));
             }
             Some((id, child))
         } else {
@@ -1018,11 +1029,7 @@ impl Context {
             selected.or(namespace)
         };
         if source.is_none() && !stdlib::is_module(name) {
-            return Err(Error::new(
-                "ModuleNotFoundError",
-                format!("No module named {}", string_repr(name)),
-            )
-            .with_import(Some(name), None, None));
+            return Ok(None);
         }
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
@@ -1133,6 +1140,6 @@ impl Context {
         if let Some((parent, child)) = parent {
             self.set_attr(parent, child, module)?;
         }
-        Ok(module)
+        Ok(Some(module))
     }
 }

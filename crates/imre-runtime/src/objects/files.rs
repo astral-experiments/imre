@@ -809,7 +809,7 @@ pub(super) fn read_path_text(path: &str) -> Result<Str> {
     path_text::read(path, None, None, None)
 }
 
-pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
+pub(crate) fn read_path_bytes(path: &str) -> Result<Bytes> {
     let path = super::text::try_owned_string(path)?;
     let (mut file, metadata) = open_file(&path, 0)?;
     let mut bytes = Vec::new();
