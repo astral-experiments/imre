@@ -85,6 +85,7 @@ impl Context {
                 | Value::GenericAlias(_)
                 | Value::Function { .. }
                 | Value::AttrGetter(_)
+                | Value::ItemGetter(_)
                 | Value::StaticMethod { .. }
                 | Value::Cached { .. }
                 | Value::Partial { .. }
@@ -309,6 +310,7 @@ impl Context {
             Value::ClassMethod(_) => "classmethod",
             Value::Count { .. } => "itertools.count",
             Value::Repeat(_) => "itertools.repeat",
+            Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::GenericAlias(alias) => alias.kind.class(),
@@ -348,6 +350,7 @@ impl Context {
                             | "range_iterator"
                             | "getset_descriptor"
                             | "operator.attrgetter"
+                            | "operator.itemgetter"
                             | "itertools.count"
                             | "itertools.repeat"
                             | super::thread_local::CLASS
@@ -460,6 +463,7 @@ impl Context {
             | ("functools.partial", Value::Partial { .. })
             | ("contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
+            | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
@@ -1463,6 +1467,7 @@ impl Context {
                 self.call(callable, all, kwargs)
             }
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
+            Value::ItemGetter(keys) => self.apply_itemgetter(&keys, &args, &kwargs),
             Value::Cached { function, entries } => {
                 if !args
                     .iter()

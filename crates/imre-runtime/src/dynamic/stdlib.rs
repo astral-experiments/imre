@@ -378,7 +378,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.alloc(Value::List(vec![suffix]))
         }
         ("operator", name)
-            if name == "attrgetter" || operator::Operation::named(name).is_some() =>
+            if matches!(name, "attrgetter" | "itemgetter")
+                || operator::Operation::named(name).is_some() =>
         {
             ctx.alloc(Value::Native(format!("operator.{name}")))
         }
@@ -569,6 +570,9 @@ pub(super) fn call(
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
             return operator::attrgetter(ctx, args, kwargs);
+        }
+        if name == "itemgetter" {
+            return operator::itemgetter(ctx, args, kwargs);
         }
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);

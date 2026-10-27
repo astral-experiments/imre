@@ -346,6 +346,7 @@ impl Context {
             Value::List(_) => Some("[...]"),
             Value::Tuple(_) => Some("(...)"),
             Value::Dict(_) => Some("{...}"),
+            Value::ItemGetter(_) => Some("operator.itemgetter(...)"),
             _ => None,
         };
         if let Some(placeholder) = recursive {
@@ -529,6 +530,10 @@ impl Context {
                     .join(", ");
                 format!("operator.attrgetter({arguments})")
             }
+            Value::ItemGetter(keys) => format!(
+                "operator.itemgetter({})",
+                self.format_elements(keys, active)
+            ),
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
@@ -576,24 +581,86 @@ impl Context {
             }
             return Err(self.lookup_error("KeyError", key));
         }
-        if matches!(self.heap.get(obj), Value::Set { .. }) {
-            return Err(Error::new(
-                "TypeError",
-                format!("'{}' object is not subscriptable", self.type_name(obj)),
-            ));
-        }
-        if matches!(self.heap.get(obj), Value::DictView { .. }) {
-            return Err(Error::new("TypeError", "object is not subscriptable"));
-        }
+        let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
         }
-        let i = self.as_integer(key)?;
-        let vals = self.items(obj)?;
-        let i = if i < 0 { vals.len() as i64 + i } else { i };
-        vals.get(i as usize)
-            .copied()
-            .ok_or_else(|| Error::new("IndexError", "index out of range"))
+        let kind = match self.heap.get(storage) {
+            Value::List(_) => "list",
+            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => "tuple",
+            Value::Str(_) => "string",
+            Value::Bytes(_) => "byte",
+            Value::ByteArray(_) => "bytearray",
+            Value::Range { .. } => "range",
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not subscriptable", self.type_name(obj)),
+                ));
+            }
+        };
+        let index = self.index_value(key)?.ok_or_else(|| {
+            let key_type = self.type_name(key);
+            let message = if kind == "string" {
+                format!("string indices must be integers, not '{key_type}'")
+            } else {
+                format!("{kind} indices must be integers or slices, not {key_type}")
+            };
+            Error::new("TypeError", message)
+        })?;
+        let bounds_error = || {
+            let message = match kind {
+                "byte" => "index out of range".to_owned(),
+                "range" => "range object index out of range".to_owned(),
+                _ => format!("{kind} index out of range"),
+            };
+            Error::new("IndexError", message)
+        };
+        let offset = if kind == "range" {
+            index.big().to_i128().ok_or_else(bounds_error)?
+        } else {
+            i128::from(index.to_i64().ok_or_else(|| {
+                Error::new(
+                    "IndexError",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        self.type_name(key)
+                    ),
+                )
+            })?)
+        };
+        // __index__ can resize a list or bytearray. Read its current storage after the call.
+        let position = |len: usize| {
+            let i = if offset < 0 {
+                len as i128 + offset
+            } else {
+                offset
+            };
+            usize::try_from(i)
+                .ok()
+                .filter(|&i| i < len)
+                .ok_or_else(bounds_error)
+        };
+        Ok(match self.heap.get(storage) {
+            Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
+                v[position(v.len())?]
+            }
+            Value::Instance { .. } => {
+                let v = self.sequence(storage).unwrap();
+                v[position(v.len())?]
+            }
+            Value::Str(s) => {
+                let c = s.chars().nth(position(s.chars().count())?).unwrap();
+                self.text(c.to_string())
+            }
+            Value::Bytes(v) | Value::ByteArray(v) => self.int(i64::from(v[position(v.len())?])),
+            Value::Range { start, stop, step } => {
+                let i = position(builtins::range_len(*start, *stop, *step)?)? as i128;
+                self.int((i128::from(*start) + i * i128::from(*step)) as i64)
+            }
+            _ => unreachable!(),
+        })
     }
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         if let Value::Dict(entries) | Value::DefaultDict { entries, .. } = self.heap.get(obj) {

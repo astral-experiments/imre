@@ -116,6 +116,7 @@ fn boxed_operator(name: &str) -> bool {
     matches!(
         name,
         "attrgetter"
+            | "itemgetter"
             | "lt"
             | "le"
             | "eq"
