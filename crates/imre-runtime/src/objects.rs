@@ -65,6 +65,7 @@ mod mappings;
 mod module_specs;
 mod namespaces;
 mod os;
+pub(crate) use os::os_separator;
 mod patchset;
 mod paths;
 pub(crate) use paths::is_file;
@@ -91,7 +92,8 @@ pub(crate) use text::translate;
 pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{
-    expand_tabs, find_text, ord_byte, ord_char, partition_text, python_isspace, split_parts,
+    expand_tabs, find_text, normalize_unicode, ord_byte, ord_char, partition_text, python_isspace,
+    split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

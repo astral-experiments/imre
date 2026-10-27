@@ -259,6 +259,7 @@ impl Context {
             Value::MappingProxy(_) => "mappingproxy",
             Value::DefaultDict { .. } => "defaultdict",
             Value::Function { .. } => "function",
+            Value::ItemGetter(_) => "operator.itemgetter",
             Value::Code(_) => "code",
             Value::Cell { .. } => "cell",
             Value::Generator { .. } => "generator",
@@ -500,6 +501,8 @@ pub(super) enum Value {
     },
     Native(String),
     AttrGetter(std::rc::Rc<[Vec<String>]>),
+    /// The original keys are held in a Python tuple, shared by multi-key reductions.
+    ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
@@ -647,6 +650,7 @@ impl Value {
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
+            Self::ItemGetter(keys) => visit.push(*keys),
             Self::Map {
                 function, inputs, ..
             } => {
