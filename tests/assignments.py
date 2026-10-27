@@ -184,6 +184,7 @@ def main(
                     snapshot(actual_dir),
                     expected_files,
                 )
+                binary.unlink()
                 checks += 1
         rejected = {name: {"main.py": source} for name, source in rejections.items()}
         rejected.update(imported_rejections)

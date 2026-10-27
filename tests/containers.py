@@ -1085,6 +1085,7 @@ def main() -> None:
                 if name == "private_join_memory" and sys.platform == "linux" and not args.sanitize:
                     check_join_under_memory_limit([sys.executable, str(path)])
                     check_join_under_memory_limit([str(binary)])
+                binary.unlink()
                 passed += 1
     print(
         f"Passed {passed} container checks ({len(REJECTED)} rejected programs; optimization levels {args.opt_levels}; ASan={args.sanitize})"
