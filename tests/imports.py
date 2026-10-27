@@ -102,6 +102,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "native_ast_import": {
+        "main.py": (
+            "import ast as trees\nfrom ast import parse, walk\n"
+            "tree = parse('value', mode='eval')\n"
+            "print(trees.parse is parse, trees.walk is walk)\n"
+            "print([type(node).__name__ for node in walk(tree)])\n"
+        ),
+    },
     "conditional_function_export": {
         "main.py": (
             "from helper import selected as chosen\nimport helper\n"
