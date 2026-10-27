@@ -115,14 +115,15 @@ impl Context {
             "update" | "keywords" => {
                 let mapping = self.for_each_mapping_item(
                     b,
+                    a,
                     super::calls::MappingOperation::Unpack,
-                    |ctx, key, val| {
+                    |ctx, key, val, hash| {
                         if op == "keywords" {
                             ctx.str_value(key)
                                 .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
                             ctx.op("keyword", a, key, val)?;
                         } else {
-                            ctx.put_item(a, key, val)?;
+                            ctx.set_dictionary_key(a, key, val, hash, true)?;
                         }
                         Ok(())
                     },
