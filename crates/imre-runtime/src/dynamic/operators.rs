@@ -937,6 +937,105 @@ impl Context {
                 ),
             ));
         }
+        let (left, right) = (self.scalar_value(a), self.scalar_value(b));
+        if matches!(self.heap.get(left), Value::Float(_))
+            || matches!(self.heap.get(right), Value::Float(_))
+        {
+            let number = |value| -> Result<Option<f64>> {
+                match self.heap.get(value) {
+                    Value::Float(number) => Ok(Some(*number)),
+                    Value::Int(_) | Value::Bool(_) => {
+                        Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
+                    }
+                    _ => Ok(None),
+                }
+            };
+            if let (Some(x), Some(y)) = (number(left)?, number(right)?) {
+                let result = match op {
+                    "+" => Some(x + y),
+                    "-" => Some(x - y),
+                    "*" => Some(x * y),
+                    "**" => {
+                        if y == 0.0 {
+                            Some(1.0)
+                        } else if x.is_nan() {
+                            Some(x)
+                        } else if y.is_nan() {
+                            Some(if x == 1.0 { 1.0 } else { y })
+                        } else if y.is_infinite() {
+                            let magnitude = x.abs();
+                            Some(if magnitude == 1.0 {
+                                1.0
+                            } else if (y > 0.0) == (magnitude > 1.0) {
+                                f64::INFINITY
+                            } else {
+                                0.0
+                            })
+                        } else {
+                            let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
+                            if x.is_infinite() {
+                                Some(if y > 0.0 {
+                                    if odd { x } else { x.abs() }
+                                } else if odd {
+                                    0.0_f64.copysign(x)
+                                } else {
+                                    0.0
+                                })
+                            } else if x == 0.0 {
+                                if y < 0.0 {
+                                    return Err(Error::new(
+                                        "ZeroDivisionError",
+                                        "zero to a negative power",
+                                    ));
+                                }
+                                Some(if odd { x } else { 0.0 })
+                            } else if x < 0.0 && y.fract() != 0.0 {
+                                let magnitude = (-x).powf(y);
+                                if magnitude.is_infinite() {
+                                    return Err(Error::new(
+                                        "OverflowError",
+                                        "complex exponentiation",
+                                    ));
+                                }
+                                let phase = std::f64::consts::PI * y;
+                                return Ok(self.alloc(Value::Complex(super::complex::Complex {
+                                    real: magnitude * phase.cos(),
+                                    imag: magnitude * phase.sin(),
+                                })));
+                            } else {
+                                let magnitude = x.abs().powf(y);
+                                if magnitude.is_infinite() {
+                                    return Err(Error::new(
+                                        "OverflowError",
+                                        "(34, 'Numerical result out of range')",
+                                    ));
+                                }
+                                Some(if x < 0.0 && odd {
+                                    -magnitude
+                                } else {
+                                    magnitude
+                                })
+                            }
+                        }
+                    }
+                    "/" | "//" | "%" => {
+                        if y == 0.0 {
+                            return Err(Error::new("ZeroDivisionError", "division by zero"));
+                        }
+                        let operation = match op {
+                            "/" => 0,
+                            "//" => 1,
+                            _ => 2,
+                        };
+                        Some(crate::floats::imre_float_divide(x, y, operation))
+                    }
+                    _ => None,
+                };
+                if let Some(result) = result {
+                    return Ok(self.alloc(Value::Float(result)));
+                }
+            }
+        }
         let (x, y) = (self.as_int(a)?, self.as_int(b)?);
         if op == "/" {
             return Ok(self.alloc(Value::Float(crate::floats::ratio(&x, &y)?)));

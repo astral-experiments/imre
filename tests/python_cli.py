@@ -405,6 +405,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_complex.py",
             "boxed_float.py",
+            "boxed_float_arithmetic.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_typing_protocol.py",
