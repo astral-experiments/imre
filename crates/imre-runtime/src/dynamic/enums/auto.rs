@@ -179,7 +179,14 @@ impl Context {
             } else if empty || (kind == EnumKind::IntFlag && count == 0) {
                 start
             } else if kind == EnumKind::IntFlag {
-                let highest = builtins::call(self, "max", &[history], &[])?;
+                let mut values = self.items(history)?.into_iter();
+                let mut highest = values.next().unwrap();
+                for value in values {
+                    let greater = self.binary(">", value, highest)?;
+                    if self.truth(greater)? {
+                        highest = value;
+                    }
+                }
                 let bits = match self.heap.get(highest) {
                     Value::Int(value) => self.int(value.big().bits() as i64),
                     Value::Bool(value) => self.int(i64::from(*value)),
