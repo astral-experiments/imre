@@ -211,6 +211,7 @@ def main():
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
