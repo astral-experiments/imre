@@ -320,10 +320,12 @@ impl Context {
             "generator" => self.generator(a, b),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
-            "more" => Ok(flag(self.iterator_has_item(a)?)),
-            "release_loop_files" => {
-                self.heap.release_loop_files();
-                Ok(NONE)
+            "more" | "more_else" => {
+                let more = self.iterator_has_item(a)?;
+                if !more && op == "more_else" {
+                    self.heap.release_loop_files();
+                }
+                Ok(flag(more))
             }
             "next" => self
                 .next_item(a)?

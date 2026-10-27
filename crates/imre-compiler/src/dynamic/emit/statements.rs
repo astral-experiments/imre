@@ -357,7 +357,12 @@ impl Function<'_, '_> {
                         &v.orelse,
                         Some(&iter),
                         |f| {
-                            let more = f.op("more", &[&iter]);
+                            let op = if v.orelse.is_empty() {
+                                "more"
+                            } else {
+                                "more_else"
+                            };
+                            let more = f.op(op, &[&iter]);
                             f.value(&format!("icmp eq i64 {more}, 2"))
                         },
                         |f| {
@@ -775,9 +780,6 @@ impl Function<'_, '_> {
         self.label(&exhausted);
         if iterator.is_some() {
             self.live.pop();
-            if !otherwise.is_empty() {
-                self.op("release_loop_files", &[]);
-            }
         }
         self.statements(otherwise);
         self.jump(&done);

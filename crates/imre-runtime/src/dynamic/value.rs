@@ -1627,7 +1627,14 @@ impl Heap {
             return None;
         }
         let marked = self.marked(globals);
-        self.file_writers.retain(|&id| marked[id as usize]);
+        self.file_writers.retain(|&id| {
+            marked[id as usize]
+                && match &self.slots[id as usize] {
+                    Some(Value::TextFile(file)) => !file.closed(),
+                    Some(Value::File(file)) => !file.closed(),
+                    _ => false,
+                }
+        });
         self.interned.retain(|_, entry| marked[entry.id as usize]);
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
