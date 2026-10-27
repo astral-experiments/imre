@@ -815,6 +815,9 @@ impl Context {
                 return builtins::bytes_percent(self, &bytes.clone(), b);
             }
             "==" | "!=" => {
+                if let Some(equal) = self.set_is_subset(a, b, true)? {
+                    return Ok(truth(equal == (op == "==")));
+                }
                 let equal = self.checked_equal(a, b)?
                     && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());

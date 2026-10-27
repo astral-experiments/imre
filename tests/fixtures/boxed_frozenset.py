@@ -71,3 +71,29 @@ def current():
 
 if __name__ == "__main__":
     current()
+
+
+class ComparedKey:
+    def __hash__(self):
+        return 11
+
+    def __eq__(self, other):
+        compared.append("equal")
+        if fail_comparison:
+            raise LookupError("set comparison")
+        return True
+
+
+compared = []
+fail_comparison = False
+left = {ComparedKey()}
+right = frozenset([ComparedKey()])
+assert left == right and not right != left
+assert compared == ["equal", "equal"]
+fail_comparison = True
+try:
+    left == right
+except LookupError as error:
+    assert error.args == ("set comparison",)
+else:
+    raise AssertionError("missing element comparison")
