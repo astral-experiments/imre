@@ -857,6 +857,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
         for method in methods {

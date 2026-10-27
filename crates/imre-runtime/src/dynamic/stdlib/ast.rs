@@ -231,6 +231,7 @@ fn parsed_instance(
         dictionary: None,
         scalar: None,
         property: None,
+        weak_reference: None,
         memory_stream: None,
     })
 }
