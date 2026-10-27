@@ -222,7 +222,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
-            if matches!(attr, "decode" | "rfind" | "rsplit" | "rstrip" | "translate") =>
+            if matches!(
+                attr,
+                "__mod__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
+            ) =>
         {
             "bytes"
         }
