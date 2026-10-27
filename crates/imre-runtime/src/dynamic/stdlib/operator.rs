@@ -139,7 +139,8 @@ impl Context {
             return lookup(self, args[0], 0);
         }
         let mut values = Vec::new();
-        values.try_reserve_exact(count)
+        values
+            .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
         for i in 0..count {
             let value = lookup(self, args[0], i)?;
