@@ -859,9 +859,20 @@ impl Context {
         };
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
-        let [ast::Stmt::FunctionDef(def)] = parsed.syntax().body.as_slice() else {
+        let mut syntax = parsed.into_syntax();
+        let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
+        #[derive(serde::Deserialize)]
+        struct Signature<'a> {
+            #[serde(borrow)]
+            private_scope: Option<(&'a str, bool)>,
+        }
+        let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
+            .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
+        if let Some((owner, postponed)) = signature.private_scope {
+            imre_ast::lower_in(&mut def.body, owner, postponed);
+        }
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect::<Vec<_>>();

@@ -1,0 +1,15 @@
+[package]
+name = "imre-ast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+ruff_python_ast.workspace = true
+ruff_python_stdlib.workspace = true
+ruff_text_size.workspace = true
+
+[lints]
+workspace = true

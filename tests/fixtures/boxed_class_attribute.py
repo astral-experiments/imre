@@ -74,7 +74,32 @@ class Ordinary:
     __getattribute__ = object.__getattribute__
 
 
+def private_names():
+    _Owner__value = "outer"
+    __value = "unrelated"
+
+    class Owner:
+        __member = "class member"
+
+        def __write(self, __argument):
+            nonlocal __value
+            __value = __argument
+            return self.__member
+
+        def members(self, __argument):
+            yield self.__member
+            yield __argument
+
+        def update(self):
+            return self.__write("updated")
+
+    print(Owner().update(), _Owner__value, __value)
+    print(list(Owner().members("argument")))
+    print(Owner._Owner__write.__name__, hasattr(Owner, "__member"))
+
+
 def current():
+    private_names()
     for obj in (Plain(), Advertised(), Data(), Fallback(), Key(), Guarded()):
         cls = obj.__class__
         print(type(obj).__name__, cls is str, cls is type(obj), 42 == cls, cls == "field __class__")
