@@ -1,6 +1,7 @@
 use super::super::calls::MappingOperation;
 use super::super::value::DictViewKind;
 use super::*;
+use num_traits::Signed;
 
 /// Materialize the iterable before parsing the forwarded list.sort keywords.
 pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -157,6 +158,8 @@ pub(in super::super) fn hashable(ctx: &Context, value: Id) -> bool {
 
 fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     match ctx.heap.get(value) {
+        Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
+        Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
         Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
@@ -197,7 +200,10 @@ pub(in super::super) fn remove_dict_item(
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };
-    Ok(Some(entries.remove(index).1))
+    let (key, value) = entries.remove(index);
+    ctx.heap.weak_edge_removed(key);
+    ctx.heap.weak_edge_removed(value);
+    Ok(Some(value))
 }
 
 pub(in super::super) fn set_member(
@@ -325,7 +331,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if let Some(method @ ("clear" | "pop" | "reverse" | "sort")) = name.strip_prefix("list.") {
+    if let Some(method @ ("clear" | "index" | "pop" | "reverse" | "sort")) =
+        name.strip_prefix("list.")
+    {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
                 "unbound method {name}() needs an argument"
@@ -338,6 +346,7 @@ pub(super) fn method(
             )));
         }
         return match method {
+            "index" => list_index(ctx, receiver, args, kwargs),
             "pop" => list_pop(ctx, receiver, args, kwargs),
             "sort" => list_sort(ctx, receiver, args, kwargs),
             _ => {
@@ -560,6 +569,62 @@ pub(super) fn method(
     }
 }
 
+/// Compare against the live list; __index__ and __eq__ can both change its contents.
+fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error("list.index() takes no keyword arguments"));
+    }
+    let Some((&needle, bounds)) = args.split_first() else {
+        return Err(type_error("index expected at least 1 argument, got 0"));
+    };
+    if bounds.len() > 2 {
+        return Err(type_error(format!(
+            "index expected at most 3 arguments, got {}",
+            args.len()
+        )));
+    }
+    let mut limits = [0, i64::MAX];
+    for (limit, &bound) in limits.iter_mut().zip(bounds) {
+        let n = ctx.index_value(bound)?.ok_or_else(|| {
+            type_error("slice indices must be integers or have an __index__ method")
+        })?;
+        *limit = n.to_i64().unwrap_or_else(|| {
+            if n.big().is_negative() {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        });
+    }
+    let Value::List(items) = ctx.heap.get(receiver) else {
+        unreachable!()
+    };
+    let [start, stop] = limits.map(|i| {
+        if i < 0 {
+            (items.len() as i64 + i).max(0)
+        } else {
+            i
+        }
+    });
+    for i in start..stop {
+        let Value::List(items) = ctx.heap.get(receiver) else {
+            unreachable!()
+        };
+        let Some(&item) = items.get(i as usize) else {
+            break;
+        };
+        if item != needle {
+            ctx.heap.keep(item);
+            let equal = ctx.binary("==", item, needle)?;
+            if !ctx.truth(equal)? {
+                continue;
+            }
+        }
+        return Ok(ctx.int(i));
+    }
+    Err(Error::new("ValueError", "list.index(x): x not in list"))
+}
+
 fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error("list.pop() takes no keyword arguments"));
@@ -591,5 +656,7 @@ fn list_pop(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)
     if !(0..len).contains(&index) {
         return Err(Error::new("IndexError", "pop index out of range"));
     }
-    Ok(items.remove(index as usize))
+    let value = items.remove(index as usize);
+    ctx.heap.weak_edge_removed(value);
+    Ok(value)
 }

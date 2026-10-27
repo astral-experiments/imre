@@ -50,6 +50,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "codecs"
             | "types"
             | "_io"
+            | "_weakref"
             | "io"
             | "traceback"
             | "sysconfig"
@@ -67,6 +68,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "struct"
             | "base64"
             | "binascii"
+            | "unicodedata"
             | "json"
             | "_imre_logging"
             | "_imre_dataclasses"
@@ -271,10 +273,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
+        ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         ("traceback", "print_exc") => ctx.builtin("traceback.print_exc"),
@@ -401,7 +405,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
         ("os", "name") => ctx.text("posix"),
-        ("os" | "posixpath", "sep") => ctx.text("/"),
+        ("posixpath", "sep") => ctx.text("/"),
+        ("posixpath", "altsep") => NONE,
         ("importlib.machinery", "EXTENSION_SUFFIXES") => {
             let suffix = ctx.text(
                 ctx.config["archive_suffix"]
@@ -412,9 +417,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.alloc(Value::List(vec![suffix]))
         }
         ("operator", name)
-            if name == "attrgetter" || operator::Operation::named(name).is_some() =>
+            if matches!(name, "attrgetter" | "itemgetter")
+                || operator::Operation::named(name).is_some() =>
         {
-            ctx.alloc(Value::Native(format!("operator.{name}")))
+            ctx.builtin(&format!("operator.{name}"))
         }
         ("subprocess", "PIPE") => ctx.int(-1),
         ("functools", "Placeholder") => ctx.alloc(Value::PartialPlaceholder),
@@ -597,6 +603,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_thread.lock.") {
         return super::thread_lock::method(ctx, method, args, kwargs);
     }
+    if name.starts_with("_weakref.") || name.starts_with("weakref.") {
+        return super::weakref::call(ctx, name, args, kwargs);
+    }
     if name == super::thread_local::CLASS {
         if !args.is_empty() || !kwargs.is_empty() {
             return Err(Error::new(
@@ -608,6 +617,39 @@ pub(super) fn call(
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if name == "unicodedata.normalize" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "unicodedata.normalize() takes no keyword arguments",
+            ));
+        }
+        let [form, text] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("normalize expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let string = |value, position| {
+            ctx.str_value(value).map_err(|_| {
+                let kind = if value == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(value)
+                };
+                Error::new(
+                    "TypeError",
+                    format!("normalize() argument {position} must be str, not {kind}"),
+                )
+            })
+        };
+        return Ok(
+            match crate::objects::normalize_unicode(string(*form, 1)?, string(*text, 2)?)? {
+                Some(normalized) => ctx.text(normalized.into_string()),
+                None => ctx.scalar_value(*text),
+            },
+        );
     }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
@@ -698,6 +740,12 @@ pub(super) fn call(
     if let Some(name) = name.strip_prefix("operator.") {
         if name == "attrgetter" {
             return operator::attrgetter(ctx, args, kwargs);
+        }
+        if name == "itemgetter" {
+            return operator::itemgetter(ctx, args, kwargs);
+        }
+        if name == "itemgetter.__reduce__" {
+            return operator::reduce_itemgetter(ctx, args, kwargs);
         }
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);

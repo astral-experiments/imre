@@ -69,6 +69,7 @@ exception_kinds!(
     AssertionError,
     MemoryError,
     BufferError,
+    ReferenceError,
     SystemExit,
     StopIteration,
     Warning,
@@ -236,6 +237,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Int(_) | Value::Bool(_) if attr == "to_bytes" => "int",
         Value::Str(_) if STR_METHODS.contains(&attr) => "str",
         Value::Slice(_) if matches!(attr, "indices" | "__reduce__") => "slice",
+        Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::Property(_) if attr == "setter" => "property",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Bytes(_)
@@ -300,7 +302,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::List(_)
             if matches!(
                 attr,
-                "append" | "clear" | "extend" | "insert" | "pop" | "reverse" | "sort"
+                "append" | "clear" | "extend" | "index" | "insert" | "pop" | "reverse" | "sort"
             ) =>
         {
             "list"
