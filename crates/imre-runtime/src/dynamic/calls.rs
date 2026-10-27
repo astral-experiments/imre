@@ -1529,6 +1529,9 @@ impl Context {
             Value::Native(class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));
             }
+            Value::Native(class) if class == "set" && name == "discard" => {
+                return Ok(self.builtin("set.discard"));
+            }
             Value::Native(class)
                 if class == "list"
                     && matches!(name, "clear" | "index" | "pop" | "reverse" | "sort") =>

@@ -63,6 +63,9 @@ def current():
     copied = original.copy()
     copied.add(3)
     assert original == {1, 2} and copied == {1, 2, 3} and copied is not original
+    values = {1, 2}
+    assert values.discard(1) is None and values == {2}
+    assert values.discard(3) is None and values == {2}
     print("ok")
 
 
