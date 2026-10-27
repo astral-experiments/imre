@@ -22,8 +22,13 @@ impl Property {
         let name = self
             .name
             .map_or_else(String::new, |name| format!(" {}", ctx.repr(name)));
-        let owner = if let Value::Instance { class, .. } = ctx.heap.get(receiver)
-            && let Value::Class { scope, .. } = ctx.heap.get(*class)
+        let class = match ctx.heap.get(receiver) {
+            Value::Instance { class, .. } => Some(*class),
+            Value::Raised(error) => error.class,
+            _ => None,
+        };
+        let owner = if let Some(class) = class
+            && let Value::Class { scope, .. } = ctx.heap.get(class)
             && let Some(&name) = ctx.scope_data(*scope).names.get("__qualname__")
             && let Value::Str(name) = ctx.heap.get(name)
         {
