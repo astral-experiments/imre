@@ -27,7 +27,7 @@ METHODS = {
     "UnquotingTests": ("test_unquoting", "test_unquoting_badpercent", "test_unquoting_parts",
                        "test_unquoting_plus", "test_unquote_with_unicode", "test_unquoting_with_bytes_input"),
 }
-NATIVE_BODIES = ("test_quote_with_unicode", "test_unquote_with_unicode", "test_unquoting_with_bytes_input")
+NATIVE_BODIES = ("test_quote_bytes", "test_quote_with_unicode", "test_unquote_with_unicode", "test_unquoting_with_bytes_input")
 
 
 def wheel_cases(http):
@@ -76,7 +76,8 @@ def evidence(reference, test_module, calls, output):
                         operation="imre" if native else "mixed", fixture="mixed" if native else "cpython")
             observations[key, occurrence] = {"outcome": "pass", "roles": loc, "evidence": {
                 "operation": f"Native public quote/unquote results for {dict(calls[key])} calls. "
-                             + ("" if native else "Other urllib entry points run on CPython."),
+                             + ("The native test body also calls quote_from_bytes." if name == "test_quote_bytes"
+                                else "" if native else "Other urllib entry points run on CPython."),
                 "fixture": ("The native harness supplies the isolated TestCase entry and its two imports."
                             if native else "CPython runs the original test and assertions."),
             }}

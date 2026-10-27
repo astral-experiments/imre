@@ -17,6 +17,94 @@ fn slot(name: &str, default: Option<Expr>) -> Parameter {
 }
 
 impl Checker<'_> {
+    /// Bind the bytes-only public signature to the existing octet quoting operation.
+    pub(super) fn url_quote_from_bytes(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let params = [slot("bs", None), slot("safe", Some(unpacking::string("/")))];
+        calls::reject_unpacking(call, self.source)?;
+        let count = call.arguments.args.len();
+        let mut bound = [count >= 1, count >= 2];
+        let mut problem = None;
+        for kw in &call.arguments.keywords {
+            let key = kw.arg.as_deref().expect("expanded keywords were rejected");
+            match params.iter().position(|p| p.name == key) {
+                None => {
+                    problem.get_or_insert_with(|| {
+                        self.keyword_error_message(
+                            format!(
+                                "quote_from_bytes() got an unexpected keyword argument '{key}'"
+                            ),
+                            key,
+                            params.iter().map(|p| unpacking::string(&p.name)).collect(),
+                        )
+                    });
+                }
+                Some(i) if std::mem::replace(&mut bound[i], true) => {
+                    self.graph.checked_repeated_keyword(self.module, kw.range());
+                    problem.get_or_insert_with(|| {
+                        unpacking::string(format!(
+                            "quote_from_bytes() got multiple values for argument '{key}'"
+                        ))
+                    });
+                }
+                _ => {}
+            }
+        }
+        if count > 2 {
+            problem.get_or_insert_with(|| {
+                unpacking::string(format!("quote_from_bytes() takes from 1 to 2 positional arguments but {count} were given"))
+            });
+        } else if !bound[0] {
+            problem.get_or_insert_with(|| {
+                unpacking::string("quote_from_bytes() missing 1 required positional argument: 'bs'")
+            });
+        }
+        if let Some(problem) = problem {
+            return self.positional_argument_error(call, &["bs", "safe"], Type::Str, problem);
+        }
+        let mut args = self.arguments_with(call, &params, None, |checker, _, node| {
+            checker.evaluated_argument(node)
+        })?;
+        let source = args.values[args.order[0]].ty;
+        if source != Type::Bytes {
+            if matches!(
+                source,
+                Type::ObjectValue | Type::Union(_) | Type::Optional(_) | Type::Document(_)
+            ) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "quote_from_bytes requires a concrete bytes operand",
+                ));
+            }
+            return Ok(calls::type_error(
+                Type::Str,
+                args.values,
+                "quote_from_bytes() expected bytes".into(),
+            ));
+        }
+        let safe = args.order[1];
+        args.values[safe] = Self::enum_text(args.values[safe].clone());
+        if !matches!(
+            args.values[safe].ty,
+            Type::Str | Type::StrLiteral(_) | Type::Bytes
+        ) {
+            return Err(error(
+                self.source,
+                call,
+                "unsupported quote_from_bytes safe operand",
+            ));
+        }
+        // Bytes do not take an encoding or an error handler.
+        for _ in 0..2 {
+            args.order.push(args.values.len());
+            args.values.push(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            });
+        }
+        Ok(self.ordered_builtin(Builtin::Text(TextOperation::UrlQuote), Type::Str, args))
+    }
+
     /// Bind concrete strings and bytes while preserving keyword evaluation order.
     pub(super) fn url_quoting(
         &mut self,
