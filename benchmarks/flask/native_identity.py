@@ -41,6 +41,29 @@ def mapped_python(name, path, cache, identity=None):
         raise ValueError(f"cannot verify mapped file {name}: {error}") from error
 
 
+def require_stable_trace_path(path, binary):
+    """Fail if a post-exit pathname does not have a durable identity."""
+    try:
+        if path.samefile(binary):
+            return
+    except OSError as error:
+        raise ValueError(f"cannot establish mapped file identity after exit: {path}: {error}") from error
+    # audit_trace runs after the tracee exits, so it cannot compare the live
+    # mapped inode with this pathname. Only trust an immutable system path;
+    # otherwise the tracee could replace the file before this open.
+    if os.geteuid() == 0:
+        raise ValueError(f"cannot establish mapped file identity after exit as root: {path}")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            info = current.lstat()
+        except OSError as error:
+            raise ValueError(f"cannot establish mapped file identity after exit: {path}: {error}") from error
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ValueError(f"cannot establish mapped file identity after exit: {path}")
+
+
 def python_elf(fd):
     reader = shutil.which("readelf") or shutil.which("llvm-readelf")
     if not reader:
@@ -238,7 +261,9 @@ def audit_trace(path, binary, pid):
             name = trace_path(descriptor[2])
             if not name.startswith("/"):
                 raise ValueError(f"unverified mapped file path: {name}")
-            if mapped_python(name, Path(name), image_cache):
+            mapped_path = Path(name)
+            require_stable_trace_path(mapped_path, binary)
+            if mapped_python(name, mapped_path, image_cache):
                 raise ValueError(f"mapped libpython in syscall trace: {line}")
     if not images or images[0] != pid:
         raise ValueError("native executable launch evidence is incomplete")
