@@ -71,6 +71,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
+        "importlib.metadata" => Some((
+            "importlib/metadata/__init__.py",
+            concat!(
+                include_str!("../stdlib/importlib/metadata_boxed.py"),
+                "\n",
+                include_str!("../stdlib/importlib/metadata_version.py"),
+            ),
+        )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
@@ -3148,7 +3156,11 @@ impl<'a> Loader<'a> {
             && !self.by_name.contains_key(METADATA_VERSION)
             && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version"))
         {
-            let source = include_str!("../stdlib/importlib/metadata_version.py");
+            let source = concat!(
+                include_str!("../stdlib/importlib/metadata_typed.py"),
+                "\n",
+                include_str!("../stdlib/importlib/metadata_version.py"),
+            );
             let paths = self.filesystem_search_path()?;
             Some(format!("{source}\n_search_path: list[str] = {paths}\n"))
         } else {

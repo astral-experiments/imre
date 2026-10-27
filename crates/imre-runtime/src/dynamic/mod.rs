@@ -141,6 +141,32 @@ impl Context {
         }
     }
 
+    /// The native elements inherited by a Python-defined list or tuple subclass.
+    fn sequence_payload(&self, object: Id) -> Option<(Id, &[Id])> {
+        let Value::Instance {
+            scalar: Some(storage),
+            ..
+        } = self.heap.get(object)
+        else {
+            return None;
+        };
+        match self.heap.get(*storage) {
+            Value::List(items) | Value::Tuple(items) => Some((*storage, items)),
+            _ => None,
+        }
+    }
+
+    /// Slot descriptors require the native layout even when a proxy passes isinstance.
+    fn sequence_slot_accepts(&self, object: Id, owner: &str) -> bool {
+        match (owner, self.heap.get(self.scalar_value(object))) {
+            ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
+                true
+            }
+            ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            _ => false,
+        }
+    }
+
     fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
         match self.heap.get(self.dict_storage(value)?) {
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
@@ -264,6 +290,7 @@ impl Context {
                 | Value::MappingViewIterator { .. }
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
@@ -340,6 +367,9 @@ impl Context {
                     ),
                 ));
             }
+            Value::Instance { .. } if let Some((storage, _)) = self.sequence_payload(id) => {
+                return self.iterator(storage);
+            }
             _ => {
                 let values = self.items(id)?;
                 (self.alloc(Value::Tuple(values)), "iterator")
@@ -378,6 +408,7 @@ impl Context {
                 | Value::MappingViewIterator { .. }
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
@@ -537,6 +568,12 @@ impl Context {
             }
             Value::Repeat(repeat) => return Ok(repeat.next()),
             Value::Map { .. } => return self.next_zip_or_map(id),
+            Value::Filter { predicate, input } => {
+                let (predicate, input) = (*predicate, *input);
+                return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                    self.next_filtered(predicate, input)
+                });
+            }
             Value::Zip { .. } => {
                 // A zip input can itself be a zip, so advancing a row can descend many native frames.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
@@ -677,6 +714,7 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Map { .. }
+                | Value::Filter { .. }
                 | Value::Generator { .. }
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -710,7 +748,7 @@ impl Context {
             return self.items(dict);
         }
         if let Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(id)
+            self.heap.get(self.scalar_value(id))
         {
             return copy_ids(items);
         }
@@ -864,6 +902,36 @@ impl Context {
         environment
     }
 
+    /// Expose the class's own unbound members through a fresh read-only proxy.
+    fn class_dictionary(&mut self, scope: Id) -> Id {
+        let frame = self.scope_data(scope);
+        let dictionary = match frame
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary)
+        {
+            Some(existing) => existing,
+            None => {
+                let names = frame.names.clone();
+                let entries = names
+                    .into_iter()
+                    .filter(|(name, _)| name != "__qualname__")
+                    .map(|(name, value)| (self.text(name), value))
+                    .collect();
+                let dictionary = self.dict(entries);
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                frame
+                    .class_namespace
+                    .get_or_insert_with(Default::default)
+                    .dictionary = Some(dictionary);
+                dictionary
+            }
+        };
+        self.alloc(Value::MappingProxy(dictionary))
+    }
+
     /// Materialize once and keep that exact dict as the module's binding storage.
     fn module_globals(&mut self, scope: Id) -> Id {
         let scope = self.root_scope(scope);
@@ -911,6 +979,15 @@ impl Context {
             order.retain(|member| member != name);
         }
         let previous = data.names.shift_remove(name);
+        if previous.is_some()
+            && name != "__qualname__"
+            && let Some(dictionary) = data
+                .class_namespace
+                .as_ref()
+                .and_then(|class| class.dictionary)
+        {
+            self.delete_item(dictionary, key)?;
+        }
         if let Some(value) = previous {
             self.heap.weak_edge_removed(value);
         }
@@ -942,7 +1019,19 @@ impl Context {
         {
             order.push(name.to_owned());
         }
-        if let Some(previous) = s.names.insert(name.to_owned(), value)
+        let dictionary = s
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary);
+        let previous = s.names.insert(name.to_owned(), value);
+        if let Some(dictionary) = dictionary
+            && name != "__qualname__"
+        {
+            let key = self.text(name);
+            self.put_item(dictionary, key, value)
+                .expect("class dictionary has string keys");
+        }
+        if let Some(previous) = previous
             && previous != value
         {
             self.heap.weak_edge_removed(previous);
@@ -1033,6 +1122,8 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
+            "list" => &["__repr__", "__init__"],
+            "tuple" => &["__repr__"],
             "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {

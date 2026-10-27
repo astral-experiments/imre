@@ -247,6 +247,7 @@ impl Context {
             Value::Calendar { value, .. } => value.class(),
             Value::Str(_) => "str",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
@@ -449,6 +450,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// Backing dictionary shared by live class namespace proxies.
+    pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -680,6 +683,10 @@ pub(super) enum Value {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
     },
+    Filter {
+        predicate: Id,
+        input: Id,
+    },
     Zip {
         inputs: std::rc::Rc<[Id]>,
         strict: bool,
@@ -785,6 +792,7 @@ impl Value {
                 visit.extend(inputs.iter());
             }
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
+            Self::Filter { predicate, input } => visit.extend([*predicate, *input]),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
             Self::LoopIterator { source, peeked } => {
                 visit.push(*source);
@@ -848,6 +856,7 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);

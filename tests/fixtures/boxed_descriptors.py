@@ -171,3 +171,19 @@ def current():
     assert first == second and hash(first) == slot(first) == bound()
     keys = {first: 1, second: 2}
     assert keys[first] == 1 and keys[second] == 2
+
+    class Library:
+        field = 17
+
+    namespace = Library.__dict__
+    assert namespace["field"] == 17 and namespace is not Library.__dict__
+    Library.field = 19
+    assert namespace["field"] == 19
+    del Library.field
+    assert "field" not in namespace
+    try:
+        Library.__dict__ = {}
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("class __dict__ is writable")

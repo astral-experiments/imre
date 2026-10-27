@@ -64,7 +64,14 @@ impl Context {
             Value::Native(kind)
                 if matches!(
                     kind.as_str(),
-                    "dict" | "int" | "str" | "property" | "module" | weakref::REFERENCE_TYPE
+                    "dict"
+                        | "list"
+                        | "tuple"
+                        | "int"
+                        | "str"
+                        | "property"
+                        | "module"
+                        | weakref::REFERENCE_TYPE
                 ) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -623,6 +630,7 @@ impl Context {
             Value::DefaultDict { .. } => "collections.defaultdict",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
+            Value::Filter { .. } => "filter",
             Value::Weak(wr) => wr.kind.class(),
             Value::Zip { .. } => "zip",
             Value::ClassMethod(_) => "classmethod",
@@ -641,6 +649,7 @@ impl Context {
             Value::Property(_) => "property",
             Value::Super { .. } => "super",
             Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
+            Value::MappingProxy(_) => "mappingproxy",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -678,6 +687,7 @@ impl Context {
                             | "bytearray_iterator"
                             | "range_iterator"
                             | "getset_descriptor"
+                            | "mappingproxy"
                             | "functools._PlaceholderType"
                             | "operator.attrgetter"
                             | "operator.itemgetter"
@@ -832,6 +842,7 @@ impl Context {
             | ("slice", Value::Slice(_))
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
+            | ("filter", Value::Filter { .. })
             | ("selectors.PollSelector", Value::Selector(_))
             | ("contextvars.ContextVar", Value::ContextVar { .. })
             | ("contextvars.Context", Value::Context(_))
@@ -1399,9 +1410,9 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(class) if class == "map" => match name {
-                "__iter__" | "__next__" => return Ok(self.builtin(&format!("map.{name}"))),
-                "__name__" | "__qualname__" => return Ok(self.text("map")),
+            Value::Native(class) if matches!(class.as_str(), "map" | "filter") => match name {
+                "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text(&class)),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
@@ -1677,7 +1688,7 @@ impl Context {
                 return Ok(self.builtin(&format!("list.{name}")));
             }
             Value::Native(class)
-                if class == "dict"
+                if matches!(class.as_str(), "dict" | "list" | "tuple")
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
                     || (class == "int" && name == "to_bytes")
@@ -1753,6 +1764,9 @@ impl Context {
                 scope,
                 ..
             } => {
+                if name == "__dict__" {
+                    return Ok(self.class_dictionary(scope));
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -2432,6 +2446,12 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if name == "__dict__" {
+                    return Err(Error::new(
+                        "AttributeError",
+                        "attribute '__dict__' of 'type' objects is not writable",
+                    ));
+                }
                 let scope = *scope;
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
@@ -2606,6 +2626,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "map"
+                                | "filter"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -2831,6 +2852,7 @@ impl Context {
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
+                let tuple_subclass = self.has_base(callable, "tuple");
                 let instance = if let Some(new) = new {
                     let allocate = self.bind_attribute(new, NONE, callable)?;
                     let positional = std::iter::once(callable)
@@ -2854,7 +2876,18 @@ impl Context {
                     let dictionary = self
                         .has_base(callable, "dict")
                         .then(|| self.dict(Vec::new()));
-                    self.instance(callable, dictionary)
+                    let sequence = if self.has_base(callable, "list") {
+                        Some(self.alloc(Value::List(Vec::new())))
+                    } else if tuple_subclass {
+                        Some(builtins::call(self, "tuple", &args, &kwargs)?)
+                    } else {
+                        None
+                    };
+                    let object = self.instance(callable, dictionary);
+                    if let Value::Instance { scalar, .. } = self.heap.get_mut(object) {
+                        *scalar = sequence;
+                    }
+                    object
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
@@ -2872,6 +2905,7 @@ impl Context {
                 } else if new.is_none()
                     && string_base.is_none()
                     && !float_subclass
+                    && !tuple_subclass
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(

@@ -38,7 +38,7 @@ pub(super) fn call(
             let items = if ctx.stored_entries(storage).is_empty() {
                 String::new()
             } else {
-                ctx.checked_dict_repr(owner, storage)?
+                ctx.checked_container_slot_repr(owner, storage)?
             };
             let class = ctx.exact_type(owner)?;
             Ok(ctx.text(format!("{}({items})", ctx.class_name(class))))
