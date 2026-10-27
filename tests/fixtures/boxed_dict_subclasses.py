@@ -323,3 +323,27 @@ def current():
     once = Once()
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
+
+    class Late:
+        pass
+
+    retained = Late()
+    target = {retained: 7}
+    Late.__eq__ = lambda left, right: left is right
+    target[Late()] = 11
+    print(target[retained], len(target))
+
+    class Child(EqualOnly):
+        pass
+
+    del EqualOnly.__eq__
+    print(EqualOnly.__hash__ is None)
+    for key in (EqualOnly(), Child()):
+        try:
+            target[key] = 41
+        except TypeError:
+            print("implicit hash disabled")
+
+    del Colliding.__hash__
+    key = Colliding()
+    print({key: 13}[key])

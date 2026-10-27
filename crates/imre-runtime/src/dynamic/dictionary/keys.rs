@@ -240,21 +240,6 @@ impl Context {
         )
     }
 
-    fn hash_slot(&self, class: Id) -> Option<Id> {
-        let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return None;
-        };
-        for &base in std::iter::once(&class).chain(ancestors) {
-            if let Some(slot) = self.own_class_attr(base, "__hash__") {
-                return Some(slot);
-            }
-            if self.own_class_attr(base, "__eq__").is_some() {
-                return Some(NONE);
-            }
-        }
-        None
-    }
-
     fn tuple_keys(&self, key: Id) -> Option<Vec<Id>> {
         match self.heap.get(key) {
             Value::Tuple(values) | Value::NamedTuple { values, .. } => Some(values.clone()),
@@ -267,7 +252,7 @@ impl Context {
 
     fn dictionary_hash(&mut self, key: Id) -> Result<i64> {
         if let Value::Instance { class, .. } = *self.heap.get(key)
-            && let Some(slot) = self.hash_slot(class)
+            && let Some(slot) = self.class_attr(class, "__hash__")
         {
             if slot == NONE {
                 return Err(self.unhashable(key));

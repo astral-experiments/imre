@@ -901,6 +901,10 @@ impl Context {
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // A class-body __eq__ suppresses inherited hashing at type creation.
+        if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
+            fields.names.insert("__hash__".to_owned(), NONE);
+        }
         fields.class_lineage = Some((bases, mro));
         Ok(class)
     }
