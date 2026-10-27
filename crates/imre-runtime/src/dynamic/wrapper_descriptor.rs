@@ -14,6 +14,8 @@ impl Wrapper {
             "dict.__repr__" => ("dict", "__repr__"),
             "list.__repr__" => ("list", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
+            "set.__repr__" => ("set", "__repr__"),
+            "frozenset.__repr__" => ("frozenset", "__repr__"),
             "list.__init__" => ("list", "__init__"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
@@ -30,7 +32,9 @@ impl Wrapper {
         let accepts = match self.owner {
             "object" => true,
             "dict" => ctx.dict_storage(receiver).is_some(),
-            "list" | "tuple" => ctx.sequence_slot_accepts(receiver, self.owner),
+            "list" | "tuple" | "set" | "frozenset" => {
+                ctx.container_slot_accepts(receiver, self.owner)
+            }
             _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
         };
         if !accepts {

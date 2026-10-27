@@ -27,6 +27,16 @@ enum FormatPart {
 }
 
 impl FormatPart {
+    /// Snapshot the member identities before any element repr can mutate the set.
+    fn set_members(entries: &[(Id, Id)]) -> Result<Self> {
+        let mut members = Vec::new();
+        members
+            .try_reserve_exact(entries.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        members.extend(entries.iter().map(|&(key, _)| key));
+        Ok(Self::SetMembers(members, 0))
+    }
+
     /// Values a suspended renderer will read after a Python callback returns.
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
@@ -1020,6 +1030,26 @@ impl Context {
             RenderRoot::Object(id) => work.push(Part::Value(id, quoted)),
             RenderRoot::BuiltinContainer { object, storage } => {
                 let (open, end, cycle, contents) = match ctx.heap.get(storage) {
+                    Value::Set { entries, frozen } => {
+                        let name = ctx.type_name(object);
+                        if ancestors.contains(&object) {
+                            return Ok(format!("{name}(...)"));
+                        }
+                        if entries.is_empty() {
+                            return Ok(format!("{name}()"));
+                        }
+                        let wrapped = *frozen || object != storage;
+                        if wrapped {
+                            output.push_str(name);
+                            output.push('(');
+                        }
+                        (
+                            '{',
+                            if wrapped { "})" } else { "}" },
+                            "set(...)",
+                            Part::set_members(entries)?,
+                        )
+                    }
                     Value::List(_) => ('[', "]", "[...]", Part::Sequence(storage, 0)),
                     Value::Tuple(items) => (
                         '(',
@@ -1358,12 +1388,7 @@ impl Context {
                             let Value::Set { entries, .. } = ctx.heap.get(id) else {
                                 unreachable!()
                             };
-                            let mut members = Vec::new();
-                            members
-                                .try_reserve_exact(entries.len())
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            members.extend(entries.iter().map(|&(key, _)| key));
-                            work.push(Part::SetMembers(members, 0));
+                            work.push(Part::set_members(entries)?);
                         }
                         part => work.push(part),
                     }
