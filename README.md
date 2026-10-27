@@ -84,17 +84,12 @@ for field in ["name", "score"]:
     print(getattr(results[0], field))
 ```
 
-**Supported**
-
-- Statically resolved imports and functions with declared or inferred signatures
-- Classes and dataclasses with fixed fields, typed containers, and arbitrary-precision integers
-- Loops, comprehensions, and generator expressions passed directly to functions such as `sum` and `sorted`
-
-**Unsupported**
+At present, Imre doesn't support any of the following:
 
 - Dynamically typed storage (`Any`) and unrestricted unions
 - Dynamic attributes and general-purpose reflection
 - Recursive calls and async generators
+- Most of the Python standard library (see [module coverage](docs/stdlib.md))
 
 ## Design
 
