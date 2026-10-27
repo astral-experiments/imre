@@ -93,6 +93,7 @@ const FUNCTIONS: &[&str] = &[
     "delattr",
     "hasattr",
     "open",
+    "input",
     "print",
     "pow",
     "sum",
@@ -1160,6 +1161,11 @@ pub(super) fn call(
                 }
             }
             Ok(boolean(!stop_value))
+        }
+        "input" => {
+            positional(name, kwargs)?;
+            arity(name, args, 0, 0)?;
+            Ok(ctx.text(crate::sys::read_input_line()?))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {
