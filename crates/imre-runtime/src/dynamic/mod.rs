@@ -12,6 +12,7 @@ mod function_fields;
 mod importlib;
 mod iterators;
 mod mapping_abc;
+mod module_type;
 mod operators;
 mod property;
 mod slice;
@@ -1127,6 +1128,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
+            constructor: None,
         });
         self.modules.insert(name.to_owned(), module);
         match name {
