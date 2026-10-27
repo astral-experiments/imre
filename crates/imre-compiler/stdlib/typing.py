@@ -20,6 +20,18 @@ class TextIO(IO[str]):
     __slots__ = ()
 
 
+# Runtime assertion from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+_ASSERT_NEVER_REPR_MAX_LENGTH = 100
+
+
+def assert_never(arg, /):
+    """Statically assert that a line of code is unreachable."""
+    value = repr(arg)
+    if len(value) > _ASSERT_NEVER_REPR_MAX_LENGTH:
+        value = value[:_ASSERT_NEVER_REPR_MAX_LENGTH] + "..."
+    raise AssertionError(f"Expected code to be unreachable, but got: {value}")
+
+
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
 # See stdlib/docstrings/LICENSE. Union and the type parameters are native exports.
 class _Final:
@@ -100,3 +112,26 @@ def Optional(self, parameters):
     """Optional[X] is equivalent to Union[X, None]."""
     arg = _type_check(parameters, f"{repr(self)} requires a single type.")
     return _typing.Union[arg, type(None)]
+
+
+class _TypedCacheSpecialForm(_SpecialForm):
+    __module__ = __name__
+
+    @lru_cache
+    def _typed_getitem(self, parameters, types):
+        # As in _tp_cache(typed=True), only the immediate argument types are keys.
+        return self._getitem(self, *parameters)
+
+    def __getitem__(self, parameters):
+        if not isinstance(parameters, tuple):
+            parameters = (parameters,)
+        try:
+            return self._typed_getitem(parameters, tuple(type(p) for p in parameters))
+        except TypeError:
+            return self._getitem(self, *parameters)
+
+
+@_TypedCacheSpecialForm
+def Literal(self, *parameters):
+    """A type whose arguments are literal values."""
+    return _typing._LiteralGenericAlias(self, parameters)

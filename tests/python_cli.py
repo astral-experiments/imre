@@ -69,6 +69,25 @@ def check_boxed_call_allocation(imre, root, run):
             0, output, b"refused\n" if ordinal else b"",
         ), result
 
+    # Match the existing 113-word allocation probe with a fresh string of the same byte length.
+    source = """import sys
+sys.path
+value = ''.join(('cache ', 'q' * 898))
+marker = {}
+marker[0] = 1
+result = sys.intern(value)
+print(result is value, sys._is_interned(value))
+print(sys.intern(value) is value, sys._is_interned(value))
+"""
+    for ordinal, output in ((0, b"True True\nTrue True\n"), (1, b"True False\nTrue True\n")):
+        result = run(imre, "-B", "-c", source, extra={
+            "IMRE_ENCODED_FLAGS": flags,
+            "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
+        })
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, output, b"refused\n" if ordinal else b"",
+        ), result
+
 
 def check_slice_stack(imre, imports, root, env):
     def output(exe, depths, stack_mib=None):
@@ -612,6 +631,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_typing_optional.py",
+            "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",

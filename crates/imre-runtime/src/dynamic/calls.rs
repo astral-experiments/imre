@@ -44,6 +44,9 @@ impl Context {
             Value::Native(kind) if name == "__hash__" && kind == "object" => {
                 self.builtins.get("object.__hash__").copied()
             }
+            Value::Native(kind) if builtins::is_enum_base(kind) => {
+                self.builtins.get(&format!("enum.Enum.{name}")).copied()
+            }
             Value::Native(kind)
                 if name == "__hash__"
                     && matches!(kind.as_str(), "list" | "dict" | "set" | "bytearray") =>
@@ -72,7 +75,8 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (name == "__repr__" && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (name == "__repr__"
+                    && matches!(kind.as_str(), "set" | "frozenset" | "bytes" | "bytearray")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -429,6 +433,8 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Enum.__copy__"
+                            | "enum.Enum.__deepcopy__"
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"
@@ -727,6 +733,7 @@ impl Context {
                             | "frame"
                             | "typing.TypeVar"
                             | "typing._GenericAlias"
+                            | "typing._LiteralGenericAlias"
                             | "typing._CallableGenericAlias"
                             | "typing._CallableType"
                             | "typing._AnyMeta"
@@ -1669,7 +1676,7 @@ impl Context {
             }
             Value::Native(class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
-                    && matches!(name, "maketrans" | "translate") =>
+                    && matches!(name, "__repr__" | "maketrans" | "translate") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -1690,6 +1697,15 @@ impl Context {
                 if class == "collections.defaultdict" && matches!(name, "copy" | "__copy__") =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::Native(class)
+                if name == "__reduce__"
+                    && matches!(
+                        class.as_str(),
+                        "set" | "frozenset" | "collections.defaultdict"
+                    ) =>
+            {
+                return Ok(self.builtin(&format!("{class}.__reduce__")));
             }
             Value::Native(class)
                 if name == "fromkeys"
@@ -1718,6 +1734,7 @@ impl Context {
             }
             Value::Native(class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || builtins::is_enum_base(&class)
                     || (name == "__repr__" && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(&class)
                         && matches!(name, "__new__" | "__init__"))
@@ -2961,7 +2978,7 @@ impl Context {
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
                 let tuple_subclass = self.has_base(callable, "tuple");
-                let set_kind = ["set", "frozenset"]
+                let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let instance = if let Some(new) = new {
@@ -2991,9 +3008,9 @@ impl Context {
                         Some(self.alloc(Value::List(Vec::new())))
                     } else if tuple_subclass {
                         Some(builtins::call(self, "tuple", &args, &kwargs)?)
-                    } else if let Some(kind) = set_kind {
+                    } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
-                        let items = if kind == "set" && custom_init {
+                        let items = if kind != "frozenset" && custom_init {
                             &[][..]
                         } else {
                             &args
@@ -3026,7 +3043,7 @@ impl Context {
                     && string_base.is_none()
                     && !float_subclass
                     && !tuple_subclass
-                    && set_kind.is_none()
+                    && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())
                 {
                     return Err(Error::new(

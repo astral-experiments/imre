@@ -8,6 +8,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 mod expressions;
+mod patterns;
 mod statements;
 
 const ABI: &str = "\

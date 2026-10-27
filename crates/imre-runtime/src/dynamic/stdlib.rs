@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    Context,
+    Context, builtins,
     value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
@@ -298,6 +298,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     let id = match (module, name) {
         ("math", "trunc" | "floor" | "ceil") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
+        ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
+            ctx.builtin("enum.Enum.__copy__");
+            ctx.builtin("enum.Enum.__deepcopy__");
+            ctx.builtin(&format!("enum.{name}"))
+        }
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
@@ -342,8 +347,17 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "typing",
-            "TypeVar" | "Any" | "Callable" | "cast" | "overload" | "get_overloads"
-            | "clear_overloads" | "_overload_dummy" | "get_args" | "get_origin",
+            "TypeVar"
+            | "Any"
+            | "Callable"
+            | "cast"
+            | "overload"
+            | "get_overloads"
+            | "clear_overloads"
+            | "_overload_dummy"
+            | "get_args"
+            | "get_origin"
+            | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         ("datetime", "UTC") => datetime::utc(ctx),
@@ -509,7 +523,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
-        | ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum" | "_simple_enum")
+        | ("enum", "_simple_enum")
         | ("functools", "lru_cache" | "partial" | "update_wrapper")
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | ("inspect", "iscoroutinefunction" | "markcoroutinefunction")
@@ -953,6 +967,15 @@ pub(super) fn call(
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
     }
+    if name == "enum.Enum.__copy__" {
+        let [member] = builtins::bind_builtin_arguments("__copy__", args, kwargs, ["self"], 1)?;
+        return Ok(member.unwrap());
+    }
+    if name == "enum.Enum.__deepcopy__" {
+        let [member, _] =
+            builtins::bind_builtin_arguments("__deepcopy__", args, kwargs, ["self", "memo"], 2)?;
+        return Ok(member.unwrap());
+    }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
     }
@@ -1118,6 +1141,7 @@ pub(super) fn call(
         | "collections.defaultdict"
         | "collections.defaultdict.copy"
         | "collections.defaultdict.__copy__"
+        | "collections.defaultdict.__reduce__"
         | "functools.lru_cache"
         | "functools._cached"
         | "contextlib.contextmanager"
@@ -1385,6 +1409,23 @@ pub(super) fn call(
         }
         "collections.defaultdict.__missing__" => {
             ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
+        }
+        "collections.defaultdict.__reduce__" => {
+            let receiver = argument(args, 0)?;
+            let Value::DefaultDict { factory, .. } = *ctx.heap.get(receiver) else {
+                return Err(Error::new(
+                    "TypeError",
+                    "defaultdict.__reduce__ requires a defaultdict",
+                ));
+            };
+            let args = ctx.alloc(Value::Tuple(if factory == NONE {
+                Vec::new()
+            } else {
+                vec![factory]
+            }));
+            let class = ctx.exact_type(receiver)?;
+            let items = ctx.dict_iterator(receiver, super::value::DictViewKind::Items, false);
+            ctx.alloc(Value::Tuple(vec![class, args, NONE, NONE, items]))
         }
         "contextlib.contextmanager" => {
             let callable = ctx.alloc(Value::Native("contextlib._manager".into()));

@@ -25,6 +25,21 @@ def current():
         TWO = auto()
         FOUR = auto()
 
+    from copy import copy, deepcopy
+
+    for member in (State.ALIAS, Source.END, Label.ÉTÉ, Bits.ONE | Bits.FOUR):
+        assert copy(member) is member and deepcopy([member])[0] is member
+        assert member.__deepcopy__(memo={}) is member
+        assert type(member).__copy__ is Enum.__copy__
+
+    class Custom(Enum):
+        MEMBER = 1
+
+        def __copy__(self):
+            return self.name
+
+    assert copy(Custom.MEMBER) == "MEMBER"
+
     print({Source.END: "end"}[2], Source.START < Source.END, Label.ÉTÉ.value, Bits.FOUR.value)
 
     history = []

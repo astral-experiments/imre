@@ -31,8 +31,102 @@ impl Context {
         Ok(result)
     }
 
+    /// Check the mapping and its length before evaluating the pattern's key expressions.
+    fn match_mapping(&mut self, subject: Id, minimum: Id) -> Result<Id> {
+        if self.dict_storage(subject).is_none()
+            && !matches!(self.heap.get(subject), Value::MappingProxy(_))
+        {
+            let Some(&mapping) = self.classes.get("collections.abc.Mapping") else {
+                return Ok(FALSE);
+            };
+            let class = self.exact_type(subject)?;
+            if !self.subclass(class, mapping) {
+                return Ok(FALSE);
+            }
+        }
+        if minimum == NONE {
+            return Ok(TRUE);
+        }
+        let size = builtins::call(self, "len", &[subject], &[])?;
+        self.op(">=", size, minimum, NONE)
+    }
+
+    /// A missing pattern key fails without invoking a defaultdict factory. Present `None`
+    /// values survive in the result tuple, alongside the other keys fetched before matching.
+    fn match_mapping_keys(&mut self, subject: Id, keys: Id) -> Result<Id> {
+        let Value::List(keys) = self.heap.get(keys) else {
+            unreachable!("compiled pattern keys")
+        };
+        let keys = keys.clone();
+        if keys.is_empty() {
+            return Ok(self.alloc(Value::Tuple(Vec::new())));
+        }
+        let get = self.lookup_attr(subject, "get")?;
+        self.heap.keep(get);
+        let seen = self.op("set", NONE, NONE, NONE)?;
+        self.heap.keep(seen);
+        let object = self.builtin("object");
+        let missing = self.instance(object, None);
+        self.heap.keep(missing);
+        let mut values = Vec::with_capacity(keys.len());
+        for key in keys {
+            if builtins::set_member(self, seen, key, false)? {
+                let repr = builtins::call(self, "repr", &[key], &[])?;
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "mapping pattern checks duplicate key ({})",
+                        self.str_value(repr)?
+                    ),
+                ));
+            }
+            builtins::set_add(self, seen, key)?;
+            let value = self.call(get, vec![key, missing], Vec::new())?;
+            if value == missing {
+                return Ok(NONE);
+            }
+            self.heap.keep(value);
+            values.push(value);
+        }
+        Ok(self.alloc(Value::Tuple(values)))
+    }
+
+    /// Fetch keyword fields in source order before evaluating their nested patterns.
+    fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
+        if !self.instance_of(subject, class) {
+            return Ok(NONE);
+        }
+        let Value::List(names) = self.heap.get(names) else {
+            unreachable!("compiled class pattern keywords")
+        };
+        let names = names.clone();
+        let mut fields = Vec::with_capacity(names.len());
+        for name in names {
+            let name = self.str_value(name)?.to_owned();
+            match self.lookup_attr(subject, &name) {
+                Ok(field) => {
+                    self.heap.keep(field);
+                    fields.push(field);
+                }
+                Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(self.alloc(Value::Tuple(fields)))
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "match_class" => self.match_class(a, b, c),
+            "match_mapping" => self.match_mapping(a, b),
+            "match_mapping_keys" => self.match_mapping_keys(a, b),
+            "match_sequence_length"
+                if self.builtin_slot_accepts(a, "list")
+                    || self.builtin_slot_accepts(a, "tuple") =>
+            {
+                builtins::call(self, "len", &[a], &[])
+            }
+            "match_sequence_length" => Ok(NONE),
             "lookup" | "lookup_class_local" => {
                 let name = self.str_value(b)?.to_owned();
                 if op == "lookup_class_local" {
@@ -43,10 +137,19 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" => {
+            "assign" | "assign_expr" => {
+                let mut scope = a;
+                if op == "assign_expr" {
+                    while self.scope_data(scope).is_comprehension {
+                        scope = self
+                            .scope_data(scope)
+                            .parent
+                            .expect("enclosing comprehension scope");
+                    }
+                }
                 let name = self.str_value(b)?.to_owned();
-                let value = self.enum_assignment(a, &name, c)?;
-                self.bind_source_name(a, &name, value)?;
+                let value = self.enum_assignment(scope, &name, c)?;
+                self.bind_source_name(scope, &name, value)?;
                 Ok(c)
             }
             "declare_global" => {
@@ -65,10 +168,7 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "scope" => {
-                let module = self.scope_data(a).module.clone();
-                Ok(self.scope(&module, Some(a)))
-            }
+            "comprehension_scope" => Ok(self.comprehension_scope(a)),
             "import" => {
                 let name = self.str_value(b)?.to_owned();
                 self.module(&name)

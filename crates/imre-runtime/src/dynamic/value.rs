@@ -484,6 +484,7 @@ pub(super) struct Scope {
     pub class_body: Option<Vec<String>>,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
+    pub is_comprehension: bool,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
     pub first_argument: Option<String>,
@@ -955,7 +956,12 @@ impl Value {
                 visit.extend(ancestors);
             }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
-            Self::GenericAlias(alias) => visit.extend([alias.origin, alias.args, alias.parameters]),
+            Self::GenericAlias(alias) => {
+                visit.extend([alias.origin, alias.args, alias.parameters]);
+                if let super::typing::AliasKind::Literal(members) = alias.kind {
+                    visit.push(members);
+                }
+            }
             Self::Union(union) => {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
@@ -1432,7 +1438,15 @@ impl Heap {
             self.keep(entry.id);
             return entry.id;
         }
-        let owner = crate::sys::intern_owner(&crate::objects::literal_string(text));
+        let Ok(owner) = crate::objects::try_literal_string(text) else {
+            return id;
+        };
+        let Some(owner) = crate::sys::try_intern_owner(&owner) else {
+            return id;
+        };
+        if self.interned.try_reserve(1).is_err() {
+            return id;
+        }
         self.interned
             .insert(owner, InternedString { id, literal: false });
         id

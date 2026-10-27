@@ -158,13 +158,16 @@ impl Context {
     }
 
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
-    fn container_slot_accepts(&self, object: Id, owner: &str) -> bool {
+    fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("set", Value::Set { frozen: false, .. })
+            ("str", Value::Str(_))
+            | ("bytes", Value::Bytes(_))
+            | ("bytearray", Value::ByteArray(_))
+            | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. }) => true,
             _ => false,
         }
@@ -887,6 +890,7 @@ impl Context {
             class_body: None,
             enum_namespace: None,
             is_abstract: false,
+            is_comprehension: false,
             class_cell: None,
             class_namespace: None,
             first_argument: None,
@@ -900,6 +904,17 @@ impl Context {
             module: module.to_owned(),
         }))
     }
+    /// Comprehensions own their loop variables, but assignment expressions bind outside them.
+    fn comprehension_scope(&mut self, parent: Id) -> Id {
+        let module = self.scope_data(parent).module.clone();
+        let scope = self.scope(&module, Some(parent));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.is_comprehension = true;
+        scope
+    }
+
     fn scope_data(&self, scope: Id) -> &Scope {
         let Value::Scope(s) = self.heap.get(scope) else {
             unreachable!("compiled scope handle")
@@ -1181,7 +1196,7 @@ impl Context {
             "object" => &["__hash__"],
             "dict" => builtins::DICT_METHODS,
             "list" => &["__repr__", "__init__"],
-            "tuple" | "set" | "frozenset" => &["__repr__"],
+            "tuple" | "set" | "frozenset" | "bytes" | "bytearray" => &["__repr__"],
             "property" => property::METHODS,
             "int" => &["to_bytes"],
             "str" => {

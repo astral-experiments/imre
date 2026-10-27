@@ -86,6 +86,41 @@ def representation_descriptor():
             print(str(exc))
 
 
+def mapping_patterns():
+    from collections import defaultdict
+
+    matched = defaultdict(list)
+    matched["keep"] = None
+    matched["other"] = []
+    match matched:
+        case {"missing": _}:
+            raise AssertionError("looked up a missing key through __missing__")
+        case {"keep": None, **rest}:
+            assert type(rest) is dict and list(rest) == ["other"]
+            assert rest["other"] is matched["other"] and "missing" not in matched
+        case _:
+            raise AssertionError("present None did not match")
+
+    calls = []
+
+    class Keys:
+        @property
+        def key(self):
+            calls.append("key")
+            return "a"
+
+    keys = Keys()
+    for subject in ({"a": 1}, {"a": 1, "b": 2}):
+        try:
+            match subject:
+                case {keys.key: _, keys.key: _}:
+                    raise AssertionError("matched duplicate keys")
+        except ValueError:
+            assert calls == ["key", "key"]
+        else:
+            assert not calls
+
+
 def current():
     from collections import Counter, defaultdict
     from collections import _count_elements
@@ -94,6 +129,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    mapping_patterns()
     counts = Counter(a=3)
     clone = copy(counts)
     clone["a"] += 1

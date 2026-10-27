@@ -206,12 +206,15 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(&name)
-        || is_exception(name)
-        || matches!(
-            name,
-            "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
-        )
+    TYPES.contains(&name) || is_exception(name) || is_enum_base(name)
+}
+
+/// Recognize the native classes that provide Enum's member methods.
+pub(super) fn is_enum_base(name: &str) -> bool {
+    matches!(
+        name,
+        "enum.Enum" | "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum"
+    )
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
@@ -236,6 +239,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__repr__",
     "capitalize",
     "encode",
     "endswith",
@@ -283,12 +287,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bytes(_)
             if matches!(
                 attr,
-                "__mod__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
+                "__mod__" | "__repr__" | "decode" | "rfind" | "rsplit" | "rstrip" | "translate"
             ) =>
         {
             "bytes"
         }
-        Value::ByteArray(_) if matches!(attr, "decode" | "extend" | "translate") => "bytearray",
+        Value::ByteArray(_) if matches!(attr, "__repr__" | "decode" | "extend" | "translate") => {
+            "bytearray"
+        }
         Value::NamedTuple {
             class: Some("SplitResult" | "SplitResultBytes"),
             ..
@@ -361,17 +367,29 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
-                "add" | "copy" | "discard" | "update" | "issuperset" | "__contains__" | "__repr__"
+                "add"
+                    | "copy"
+                    | "discard"
+                    | "update"
+                    | "issuperset"
+                    | "__contains__"
+                    | "__reduce__"
+                    | "__repr__"
             ) =>
         {
             "set"
         }
         Value::Set { frozen: true, .. }
-            if matches!(attr, "copy" | "issuperset" | "__contains__" | "__repr__") =>
+            if matches!(
+                attr,
+                "copy" | "issuperset" | "__contains__" | "__reduce__" | "__repr__"
+            ) =>
         {
             "frozenset"
         }
-        Value::DefaultDict { .. } if matches!(attr, "copy" | "__copy__" | "__missing__") => {
+        Value::DefaultDict { .. }
+            if matches!(attr, "copy" | "__copy__" | "__missing__" | "__reduce__") =>
+        {
             "collections.defaultdict"
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
@@ -545,7 +563,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
 }
 
 /// Bind built-in arguments in the order Argument Clinic reports missing and invalid names.
-fn bind_builtin_arguments<const N: usize>(
+pub(super) fn bind_builtin_arguments<const N: usize>(
     builtin: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -769,6 +787,9 @@ pub(super) fn call(
             }
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
+            }
+            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),

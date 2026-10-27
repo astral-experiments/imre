@@ -16,6 +16,7 @@ class ReportsString:
 
 
 def current():
+    from collections import defaultdict
     from copy import deepcopy
 
     shared = []
@@ -25,6 +26,17 @@ def current():
     clone = deepcopy(graph, memo)
     assert clone is memo[id(graph)] and clone[0] is clone[1] is memo[id(shared)]
     assert clone is not graph and clone[0] is not shared
+
+    groups = defaultdict(list)
+    groups["self"] = groups
+    for source in ({1, 2}, frozenset({1, 2}), groups):
+        first, second = deepcopy([source, source])
+        assert first is second and first is not source and type(first) is type(source)
+        if source is groups:
+            assert first["self"] is first and first.default_factory is list
+            assert first["missing"] == [] and "missing" not in groups
+        else:
+            assert first == source
 
     class Reporter:
         def render(self):
