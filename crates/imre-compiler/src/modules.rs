@@ -195,6 +195,8 @@ pub(crate) enum IntrinsicModule {
     ImportlibUtil,
     Array,
     Ast,
+    Marshal,
+    Pickle,
     AnnotationLib,
     AnnotationFormat,
     Declaration(&'static str),
@@ -629,6 +631,8 @@ impl IntrinsicModule {
         match name {
             "array" => Some(Self::Array),
             "ast" => Some(Self::Ast),
+            "marshal" => Some(Self::Marshal),
+            "pickle" => Some(Self::Pickle),
             "annotationlib" => Some(Self::AnnotationLib),
             "__future__" => Some(Self::Future),
             "logging" => Some(Self::Logging),
@@ -781,6 +785,8 @@ impl IntrinsicModule {
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
+            (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::CollectionsAbc, "Sequence") => {
                 Intrinsic::NominalClass("collections.abc.Sequence")
             }
@@ -2909,10 +2915,12 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
-                        self.needs_object_imports |= matches!(
-                            binding,
-                            Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
-                        );
+                        self.needs_object_imports |=
+                            !matches!(module, IntrinsicModule::Marshal | IntrinsicModule::Pickle)
+                                && matches!(
+                                    binding,
+                                    Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_))
+                                );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
                         {

@@ -16,6 +16,13 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "serialization_import_preserves_annotation": ({
+        "main.py": "import helper\n",
+        "helper.py": (
+            "import marshal as serializer\nfrom pickle import dumps as encode\n"
+            "def result() -> int:\n    return 'wrong'\nresult()\n"
+        ),
+    }, "expected int, got str"),
     "unready_partial_function": ({
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
@@ -108,6 +115,17 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "imported_bytecode_header": {
+        "main.py": "from header import magic, decode, encode\nprint(list(magic), decode, encode)\n",
+        "header.py": (
+            "import marshal\nimport pickle\nimport sys\n"
+            "from marshal import loads\nfrom pickle import dumps\n"
+            "version = (sys.version_info[0] << 24) | sys.version_info[1]\n"
+            "magic = b'j2' + pickle.dumps(5, 2) + dumps(version, 2)\n"
+            "decode = loads(b'i\\x03\\x00\\x00\\x00')\n"
+            "encode = pickle.dumps is dumps\n"
+        ),
+    },
     "namespace_package": {
         "main.py": "import package.child\nfrom package.nested import sibling\nprint(package.child.f())\nprint(sibling.read())\n",
         "package/child.py": "def f() -> int:\n    return 41\n",
