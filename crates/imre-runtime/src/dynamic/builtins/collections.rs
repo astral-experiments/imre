@@ -160,6 +160,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
     match ctx.heap.get(value) {
         Value::Weak(wr) if wr.kind != super::super::weakref::Kind::Reference => Some(value),
         Value::Weak(wr) => wr.target.and_then(|target| unhashable_part(ctx, target)),
+        Value::Union(union) => unhashable_part(ctx, union.args),
         Value::List(_)
         | Value::ByteArray(_)
         | Value::Context(_)
@@ -373,7 +374,12 @@ pub(super) fn method(
     }
     let slot = matches!(
         name,
-        "dict.__init__" | "dict.__len__" | "dict.__iter__" | "dict.__setitem__"
+        "dict.__init__"
+            | "dict.__repr__"
+            | "dict.__len__"
+            | "dict.__iter__"
+            | "dict.__setitem__"
+            | "dict.__delitem__"
     );
     let (&object, args) = args
         .split_first()
@@ -400,9 +406,45 @@ pub(super) fn method(
     } else {
         object
     };
+    if name == "dict.__repr__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+        }
+        if !args.is_empty() {
+            return Err(type_error(format!(
+                "expected 0 arguments, got {}",
+                args.len()
+            )));
+        }
+        let representation = ctx.checked_dict_repr(object, receiver)?;
+        return Ok(ctx.text(representation));
+    }
+    if name == "dict.__delitem__" {
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __delitem__() takes no keyword arguments",
+            ));
+        }
+        let [key] = args else {
+            return Err(type_error(format!(
+                "expected 1 argument, got {}",
+                args.len()
+            )));
+        };
+        // Calling the base descriptor operates on the actual mapping and
+        // does not redispatch to an override on the original receiver.
+        ctx.delete_item(receiver, *key)?;
+        return Ok(NONE);
+    }
     if matches!(
         name,
-        "dict.pop" | "set.issuperset" | "frozenset.issuperset" | "frozenset.copy"
+        "dict.pop"
+            | "set.issuperset"
+            | "frozenset.issuperset"
+            | "frozenset.copy"
+            | "set.copy"
+            | "frozenset.__contains__"
+            | "set.__contains__"
     ) && !kwargs.is_empty()
     {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -545,12 +587,32 @@ pub(super) fn method(
             Ok(NONE)
         }
         "frozenset.__contains__" | "set.__contains__" => {
-            arity(name, args, 1, 1)?;
-            Ok(boolean(set_member(ctx, receiver, args[0], true)?))
+            let [value] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            Ok(boolean(set_member(ctx, receiver, *value, true)?))
         }
         "frozenset.copy" => {
             arity(name, args, 0, 0)?;
             Ok(receiver)
+        }
+        "set.copy" => {
+            arity(name, args, 0, 0)?;
+            let Value::Set {
+                entries,
+                frozen: false,
+            } = ctx.heap.get(receiver)
+            else {
+                return Err(type_error("descriptor 'copy' requires a 'set' object"));
+            };
+            let entries = entries.clone();
+            Ok(ctx.alloc(Value::Set {
+                entries,
+                frozen: false,
+            }))
         }
         "set.issuperset" | "frozenset.issuperset" => {
             let [source] = args else {
@@ -627,9 +689,13 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             break;
         };
         if item != needle {
+            let mark = ctx.heap.temporary_mark();
             ctx.heap.keep(item);
-            let equal = ctx.binary("==", item, needle)?;
-            if !ctx.truth(equal)? {
+            let matched = ctx
+                .binary("==", item, needle)
+                .and_then(|equal| ctx.truth(equal));
+            ctx.heap.release_temporaries_since(mark);
+            if !matched? {
                 continue;
             }
         }

@@ -72,6 +72,27 @@ impl Drop for Watch {
 }
 
 #[test]
+fn watch_checks_object_fallback_after_type_inference() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.py");
+    let helper = dir.path().join("helper.py");
+    fs::write(&entry, "import helper\n").unwrap();
+    // The list element hint keeps the incremental type database alive.
+    let valid = "import ast\nast.parse('1')\ndef keep(flag: bool) -> int:\n    if flag:\n        values = []\n    else:\n        values = [1]\n    return len(values)\nkeep(True)\n";
+    fs::write(&helper, valid).unwrap();
+    let watch = Watch::start("--watch", &entry, None);
+    watch.expect(&entry, None, true);
+    fs::write(
+        &helper,
+        valid.replace("return len(values)", "return 'wrong'"),
+    )
+    .unwrap();
+    watch.expect(&entry, None, false);
+    fs::write(&helper, valid).unwrap();
+    watch.expect(&entry, None, true);
+}
+
+#[test]
 fn watch_recovers_from_missing_files_and_package_shadowing() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

@@ -96,6 +96,14 @@ def exercise(path):
         print(output.write(bytearray(b"x")))
     with open(target_path, "rb") as reader:
         print(reader.read())
+    for handle in (reader, alias):
+        for invalid in (lambda: handle.flush(1, 2), lambda: handle.flush(1, unknown=True)):
+            try:
+                invalid()
+            except TypeError as error:
+                print(error.args)
+            else:
+                raise AssertionError("flush accepted extra arguments")
     try:
         open(target_path, "xb")
     except FileExistsError:
@@ -216,6 +224,17 @@ def exercise(path):
         return item
 
     print([truncate(item) for item in target], bytes(target))
+
+    with open(path, "rb") as reader:
+        reader.seek(1)
+        try:
+            reader.seek(-1)
+        except OSError as error:
+            print(error.args, getattr(error, "errno", None), reader.tell())
+
+    if sys.platform != "win32":
+        with open("/dev/null", "rb") as reader:
+            print(reader.seek(-1), reader.tell())
 
     with open(path, "rb") as reader:
         try:

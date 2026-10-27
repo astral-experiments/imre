@@ -48,7 +48,7 @@ fn option<'a>(ctx: &'a Context, value: Option<Id>, name: &str) -> Result<Option<
         .transpose()
 }
 
-fn quote(
+pub(super) fn quote(
     ctx: &mut Context,
     name: &str,
     id: Id,

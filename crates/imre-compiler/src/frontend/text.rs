@@ -41,7 +41,12 @@ impl Checker<'_> {
             } else {
                 format!("unicodedata.{name}() takes no keyword arguments")
             };
-            return self.positional_argument_error(call, &["form", "unistr"], returns, message);
+            return self.positional_argument_error(
+                call,
+                &["form", "unistr"],
+                returns,
+                unpacking::string(message),
+            );
         };
         self.graph.checked_overload(self.module, call.range());
         let mut scope = calls::ArgumentScope::default();

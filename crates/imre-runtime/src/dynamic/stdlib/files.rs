@@ -402,11 +402,32 @@ pub(super) fn call(
         let reader = slot
             .as_mut()
             .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
+        if whence == libc::SEEK_SET && offset < 0 {
+            let ReadSource::File(file) = reader else {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            };
+            // A seekable device may accept a negative absolute offset. Ask the
+            // underlying file without discarding unread buffered data on failure.
+            // SAFETY: the borrowed file keeps its descriptor open for the call.
+            let position = unsafe {
+                libc::lseek(
+                    file.get_ref().as_raw_fd(),
+                    offset as libc::off_t,
+                    libc::SEEK_SET,
+                )
+            };
+            if position < 0 {
+                return Err(os_error(std::io::Error::last_os_error()));
+            }
+            let remaining = file.buffer().len();
+            file.consume(remaining);
+            return Ok(ctx.int(position as i64));
+        }
         let pos = match whence {
-            0 => SeekFrom::Start(
-                u64::try_from(offset)
-                    .map_err(|_| Error::new("OSError", "invalid negative seek position"))?,
-            ),
+            0 => SeekFrom::Start(offset as u64),
             1 => SeekFrom::Current(offset),
             2 => SeekFrom::End(offset),
             _ => return Err(Error::new("ValueError", "invalid seek whence")),

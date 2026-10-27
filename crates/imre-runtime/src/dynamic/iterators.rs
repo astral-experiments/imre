@@ -1,5 +1,5 @@
 //! Execution state for lazily resumed generator expressions.
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, FrameOwner, Id, NONE, Result, Value};
 
 impl Context {
     /// Pull the item before reading the index, since its iterator can reenter enumerate.
@@ -43,6 +43,7 @@ impl Context {
         self.bind(scope, ".0", source);
         self.bind(scope, ".iterator", iter);
         Ok(self.alloc(Value::Generator {
+            owner: FrameOwner::Function(function),
             code,
             scope,
             iterators: Vec::new(),
@@ -54,6 +55,7 @@ impl Context {
     /// Runs the compiled body until it yields one item, returns, or raises.
     pub(super) fn next_generator_item(&mut self, generator: Id) -> Result<Option<Id>> {
         let Value::Generator {
+            owner,
             code,
             scope,
             running,
@@ -70,14 +72,19 @@ impl Context {
             return Ok(None);
         }
         *running = true;
-        let (code, scope) = (*code, *scope);
-        let result = self.execute(code, scope).map(|id| match self.heap.get(id) {
-            Value::None => None,
-            Value::Yielded(item) => Some(*item),
-            _ => unreachable!("compiled generator step result"),
-        });
+        let (code, scope, owner) = (*code, *scope, *owner);
+        let result = self
+            .execute(code, scope, owner)
+            .map(|id| match self.heap.get(id) {
+                Value::None => None,
+                Value::Yielded(item) => Some(*item),
+                _ => unreachable!("compiled generator step result"),
+            });
         let Value::Generator {
-            running, offset, ..
+            running,
+            offset,
+            owner,
+            ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
@@ -85,6 +92,7 @@ impl Context {
         *running = false;
         if !matches!(result, Ok(Some(_))) {
             *offset = None;
+            *owner = FrameOwner::Module(NONE);
         }
         result.map_err(|error| self.generator_error(error))
     }

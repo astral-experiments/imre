@@ -144,3 +144,14 @@ def current():
         link.target = target
         target = link
     print(target())
+
+    class Slotted:
+        __slots__ = ('field',)
+
+    item = Slotted()
+    item.field = 7
+    print(item.field)
+    try:
+        item.extra = 11
+    except AttributeError as error:
+        print(str(error))

@@ -1,5 +1,8 @@
 from enum import StrEnum
+import urllib.parse as urlparse
 from urllib.parse import quote, unquote, urlunsplit
+from urllib.parse import quote_from_bytes
+from urllib.parse import quote_from_bytes as escape_bytes
 
 class UrlWord(StrEnum):
     PATH = "a/b!é"
@@ -27,6 +30,26 @@ def mark(value: str) -> str:
 
 
 print(unquote(b"abc"))
+print(quote_from_bytes(b"/% \x00\xff~"))
+print(escape_bytes(safe=b"%\xff", bs=b"/% \xff"))
+print(urlparse.quote_from_bytes(b"", safe=""))
+print(urlparse.quote_from_bytes(b"=+/", safe="=é"))
+try:
+    print(escape_bytes(safe=mark("!"), bs=mark("wrong")))
+except TypeError as error:
+    print(str(error))
+try:
+    print(quote_from_bytes(b"x", encoding=mark("utf-8")))
+except TypeError as error:
+    print(str(error))
+try:
+    print(escape_bytes(b"/", saf=mark("misspelled")))
+except TypeError as error:
+    print(str(error))
+try:
+    print(escape_bytes(b"x", bs=mark("second")))
+except TypeError as error:
+    print(str(error))
 print(quote(UrlWord.PATH, safe=UrlWord.SAFE, encoding=UrlWord.CODEC, errors=UrlWord.ERROR))
 print(unquote(UrlWord.ESCAPED))
 print(enum_options(UrlWord.CODEC, UrlWord.ERROR))

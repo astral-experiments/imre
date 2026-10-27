@@ -1,5 +1,6 @@
 //! In-process execution of source received by the boxed Python runtime.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -22,6 +23,8 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     Assign(String, ast::Expr),
+    AssignItem(ast::ExprSubscript, ast::Expr),
+    AssignAttr(ast::ExprAttribute, ast::Expr),
     From(String, Vec<(String, String)>),
     Define(Rc<Program>, Box<ast::Parameters>),
     Yield(Option<ast::Expr>),
@@ -83,14 +86,22 @@ impl Program {
                     }
                     e => Instruction::Eval(e.clone()),
                 },
-                Stmt::Assign(s) => {
-                    let [ast::Expr::Name(n)] = s.targets.as_slice() else {
-                        return Err(unsupported("assignment target"));
-                    };
-                    let n = n.id.to_string();
-                    self.locals.insert(n.clone());
-                    Instruction::Assign(n, (*s.value).clone())
-                }
+                Stmt::Assign(s) => match s.targets.as_slice() {
+                    [ast::Expr::Name(n)] => {
+                        let name = n.id.to_string();
+                        self.locals.insert(name.clone());
+                        Instruction::Assign(name, (*s.value).clone())
+                    }
+                    [ast::Expr::Attribute(target)] => {
+                        Instruction::AssignAttr(target.clone(), (*s.value).clone())
+                    }
+                    [ast::Expr::Subscript(target)]
+                        if !matches!(*target.slice, ast::Expr::Slice(_)) =>
+                    {
+                        Instruction::AssignItem(target.clone(), (*s.value).clone())
+                    }
+                    _ => return Err(unsupported("assignment target")),
+                },
                 Stmt::AnnAssign(s) if function => {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
@@ -230,9 +241,18 @@ impl Context {
                 )
             });
         }
-        let source = self.str_value(source)?;
-        let filename = self.str_value(filename)?;
-        let parsed = ruff_python_parser::parse_module(source)
+        let filename_text = self.str_value(filename)?;
+        let source = match self.heap.get(self.scalar_value(source)) {
+            Value::Bytes(data) | Value::ByteArray(data) => {
+                match crate::objects::decode_compile_source(data) {
+                    Ok(text) => Cow::Owned(text),
+                    Err(error) => return Err(self.source_decode_error(error, filename)),
+                }
+            }
+            _ => Cow::Borrowed(self.str_value(source)?),
+        };
+        let filename = filename_text;
+        let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         let lines = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
@@ -240,6 +260,65 @@ impl Context {
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.lower(&parsed.syntax().body, &lines, false)?;
         Ok(self.box_source_code(Rc::new(code), None))
+    }
+
+    /// Attach the filename after tokenization, just as compile does for string input.
+    fn source_decode_error(
+        &mut self,
+        error: crate::objects::SourceDecodeError,
+        filename: Id,
+    ) -> Error {
+        use crate::objects::SourceDecodeError::*;
+        let null = matches!(error, Null);
+        let (message, range) = match error {
+            Allocation => return Error::new("MemoryError", ""),
+            Null => (
+                "source code string cannot contain null bytes".to_owned(),
+                None,
+            ),
+            Invalid(message, range) => (message, range),
+            NonText(message) => (message, None),
+            Unsupported(name) => {
+                return Error::new(
+                    "NotImplementedError",
+                    format!("compile: native source decoder for '{name}' is unavailable"),
+                );
+            }
+        };
+        let msg = self.text(&message);
+        let mut args = vec![msg];
+        let mut rendered = message;
+        if !null {
+            let lineno = range.as_ref().map_or(0, |r| r.line);
+            let name = self
+                .str_value(filename)
+                .expect("compile validated its filename");
+            let basename = name
+                .rsplit(std::path::MAIN_SEPARATOR)
+                .next()
+                .unwrap_or(name);
+            rendered = format!("{rendered} ({basename}, line {lineno})");
+            let line = self.int(lineno as i64);
+            let details = if let Some(r) = range {
+                vec![
+                    if r.tokenizer { NONE } else { filename },
+                    line,
+                    self.int(r.start as i64),
+                    self.text(r.text),
+                    line,
+                    self.int(r.end as i64),
+                ]
+            } else {
+                vec![filename, line, self.int(-1), NONE]
+            };
+            args.push(self.alloc(Value::Tuple(details)));
+        }
+        let mut error = self.exception("SyntaxError", &args);
+        error.message = rendered;
+        let args = error.args.expect("exception retains its arguments");
+        // SyntaxError's diagnostic fields survive reassignment of BaseException.args.
+        error.tracing().source_syntax = Some([if null { NONE } else { filename }, args]);
+        error
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
@@ -404,7 +483,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell { .. }) {
+            if !matches!(self.heap.get(cell), Value::Cell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -433,16 +512,7 @@ impl Context {
             dict: globals,
             builtins,
         });
-        let scope = if freevars.is_empty() {
-            scope
-        } else {
-            let captured = self.scope("", Some(scope));
-            let Value::Scope(frame) = self.heap.get_mut(captured) else {
-                unreachable!()
-            };
-            frame.closure.cells.extend(freevars.into_iter().zip(cells));
-            captured
-        };
+        let scope = self.closure_environment(scope, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
             self,
             scope,
@@ -468,7 +538,13 @@ impl Context {
         }
         let name = self.text("__name__");
         let module = self.text("builtins");
-        let dict = self.dict(vec![(name, module)]);
+        let ellipsis = self.text("Ellipsis");
+        let not_implemented = self.text("NotImplemented");
+        let dict = self.dict(vec![
+            (name, module),
+            (ellipsis, value::ELLIPSIS),
+            (not_implemented, value::NOT_IMPLEMENTED),
+        ]);
         for name in builtins::names() {
             let k = self.text(name);
             let v = self.builtin(name);
@@ -483,6 +559,7 @@ impl Context {
         source: Id,
         globals: Id,
         locals: Option<Id>,
+        function: Option<Id>,
     ) -> Result<Id> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
@@ -506,7 +583,7 @@ impl Context {
                     | Value::NamedTuple { .. }
                     | Value::Str(_)
                     | Value::Bytes(_)
-                    | Value::Range { .. }
+                    | Value::Range(_)
             )
             && self.slot(locals, "__getitem__").is_none()
         {
@@ -579,12 +656,16 @@ impl Context {
             } else {
                 scope
             };
-            self.execute(code_id, module)?;
+            let owner = function.map_or_else(
+                || FrameOwner::Module(self.function_module(scope)),
+                FrameOwner::Function,
+            );
+            self.execute(code_id, module, owner)?;
         }
         Ok(NONE)
     }
 
-    pub(super) fn call_source(&mut self, code: Id, scope: Id) -> Result<Id> {
+    pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let generator = match &self.code_object(code).body {
             Body::Source(program) => program.generator,
             Body::PendingGenerator { .. } => true,
@@ -592,6 +673,7 @@ impl Context {
         };
         if generator {
             Ok(self.alloc(Value::Generator {
+                owner,
                 code,
                 scope,
                 iterators: Vec::new(),
@@ -599,7 +681,7 @@ impl Context {
                 running: false,
             }))
         } else {
-            match self.run_source(code, scope, 0, &mut Vec::new())? {
+            match self.run_source(code, scope, owner, 0, &mut Vec::new())? {
                 Step::Return(v) => Ok(v),
                 Step::Yield(..) => unreachable!("classified generator"),
             }
@@ -639,6 +721,7 @@ impl Context {
     pub(super) fn resume_source(&mut self, id: Id) -> Result<Option<Id>> {
         self.heap.keep(id);
         let Value::Generator {
+            owner,
             code,
             scope,
             iterators,
@@ -655,16 +738,17 @@ impl Context {
             return Ok(None);
         };
         *running = true;
-        let (code, scope) = (*code, *scope);
+        let (code, scope, owner) = (*code, *scope, *owner);
         let mut active = std::mem::take(iterators);
         let result = self
             .prepare_generator(code)
-            .and_then(|()| self.run_source(code, scope, ip, &mut active))
+            .and_then(|()| self.run_source(code, scope, owner, ip, &mut active))
             .map_err(|error| self.generator_error(error));
         let Value::Generator {
             running,
             offset,
             scope,
+            owner,
             iterators,
             ..
         } = self.heap.get_mut(id)
@@ -674,6 +758,7 @@ impl Context {
         *running = false;
         if !matches!(result, Ok(Step::Yield(..))) {
             *scope = NONE;
+            *owner = FrameOwner::Module(NONE);
         }
         match result? {
             Step::Yield(value, ip) => {
@@ -690,6 +775,7 @@ impl Context {
         &mut self,
         owner: Id,
         scope: Id,
+        frame_owner: FrameOwner,
         mut ip: usize,
         iterators: &mut Vec<Id>,
     ) -> Result<Step> {
@@ -697,7 +783,7 @@ impl Context {
             unreachable!("source frame")
         };
         self.heap.keep(owner);
-        self.heap.enter(scope, owner);
+        self.heap.enter(scope, owner, frame_owner);
         let result = (|| {
             while let Some((line, op)) = code.instructions.get(ip) {
                 let loc = Location {
@@ -765,7 +851,7 @@ impl Context {
             }
             Value::Str(_) => "string indices must be integers, not 'str'",
             Value::Bytes(_) => "byte indices must be integers or slices, not str",
-            Value::Range { .. } => "range indices must be integers or slices, not str",
+            Value::Range(_) => "range indices must be integers or slices, not str",
             _ => return self.get_item(locals, key),
         };
         Err(Error::new("TypeError", indices))
@@ -799,6 +885,17 @@ impl Context {
             Instruction::Assign(n, e) => {
                 let value = eval(self, e)?;
                 self.bind_source_name(scope, n, value)?;
+            }
+            Instruction::AssignAttr(target, e) => {
+                let value = eval(self, e)?;
+                let object = eval(self, &target.value)?;
+                self.set_attr(object, target.attr.as_str(), value)?;
+            }
+            Instruction::AssignItem(target, e) => {
+                let value = eval(self, e)?;
+                let object = eval(self, &target.value)?;
+                let key = eval(self, &target.slice)?;
+                self.put_item(object, key, value)?;
             }
             Instruction::Unless(e, destination) => {
                 let value = eval(self, e)?;
@@ -976,7 +1073,7 @@ impl Context {
                 let name = n.id.as_str();
                 if code.name != "<module>"
                     && code.locals.contains(name)
-                    && !self.scope_data(scope).names.contains_key(name)
+                    && self.scope_name(scope, name).is_none()
                 {
                     return Err(Error::new(
                         "UnboundLocalError",

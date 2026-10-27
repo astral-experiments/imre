@@ -1,6 +1,62 @@
 """Compare dict subclass storage, inherited methods, and explicit base dispatch."""
 
 
+def inherited_deletion():
+    from operator import delitem
+
+    class Data(dict):
+        pass
+
+    class Child(Data):
+        pass
+
+    class Override(Data):
+        def __delitem__(self, key):
+            self.last_key = key
+            return "ignored"
+
+    data = Child(a=1, b=2, c=3)
+    print(Child.__delitem__ is dict.__delitem__)
+    print(delitem(data, "a"), dict(data))
+    del data["b"]
+    print(dict.__delitem__(data, "c"), dict(data))
+    override = Override(x=4)
+    print(delitem(override, "x"), override.last_key, dict(override))
+    print(dict.__delitem__(override, "x"), dict(override))
+
+
+def representation_descriptor():
+    class Inherited(dict):
+        pass
+
+    class Override(Inherited):
+        def __repr__(self):
+            return "custom mapping"
+
+    from collections import defaultdict
+
+    slot = dict.__repr__
+    print(type(slot).__name__, slot.__name__, slot.__qualname__, slot.__objclass__ is dict)
+    print({slot: "dictionary"}[Inherited.__repr__], slot.__get__(None, Inherited) is slot)
+    data = Override(a=1)
+    bound = slot.__get__(data, Override)
+    print(type(bound).__name__, bound.__self__ is data, bound(), repr(data))
+    data["a"] = 2
+    print(slot(data), Inherited(a=3).__repr__())
+    default = defaultdict(list)
+    default["value"] = 12
+    print(slot(default))
+    recursive = {}
+    recursive["again"] = recursive
+    print(slot(recursive))
+    for call in (lambda: slot(), lambda: slot(1), lambda: slot({}, 2),
+                 lambda: slot({}, key=2), lambda: slot.__get__(1, dict)):
+        try:
+            call()
+        except TypeError as exc:
+            print(str(exc))
+
+
 def current():
     from collections import Counter, defaultdict
     from collections import _count_elements
@@ -53,6 +109,8 @@ def current():
         collision[ClearOnCompare()] = 0
     print(len(collision))
 
+    inherited_deletion()
+    representation_descriptor()
     class Data(dict):
         pass
 
@@ -344,3 +402,49 @@ def current():
     once = Once()
     source = {once: "value"}
     print(list(dict(source).values()), once.calls)
+
+    class Late:
+        pass
+
+    retained = Late()
+    target = {retained: 7}
+    Late.__eq__ = lambda left, right: left is right
+    target[Late()] = 11
+    print(target[retained], len(target))
+
+    class Child(EqualOnly):
+        pass
+
+    del EqualOnly.__eq__
+    print(EqualOnly.__hash__ is None)
+    for key in (EqualOnly(), Child()):
+        try:
+            target[key] = 41
+        except TypeError:
+            print("implicit hash disabled")
+
+    del Colliding.__hash__
+    key = Colliding()
+    print({key: 13}[key])
+    declined_key_equality()
+
+
+def declined_key_equality():
+    calls = []
+
+    class Key:
+        def __init__(self, name):
+            self.name = name
+
+        def __hash__(self):
+            return 7
+
+        def __eq__(self, other):
+            calls.append((self.name, other.name))
+            return NotImplemented
+
+    left, right = Key("left"), Key("right")
+    for container in ({left: 1}, {left}):
+        assert right not in container
+        assert calls == [("left", "right"), ("right", "left")]
+        calls.clear()

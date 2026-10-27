@@ -44,7 +44,33 @@ class Comparable:
         return comparison_result
 
 
+def decode_allocation():
+    # Match the boxed-call allocator fixture's 113-word request.
+    padding = 113 * 8 - len(b"#\nVALUE = 7\n")
+    source = bytearray(b"#" + b"x" * padding + b"\nVALUE = 7\n")
+    marker = {}
+    marker[0] = 1
+    try:
+        compile(source, "settings.py", "exec")
+    except MemoryError as error:
+        print("caught", error.args)
+    else:
+        print("compiled")
+    config = {}
+    exec(compile(source, "settings.py", "exec"), config)
+    print(config["VALUE"])
+
+
 def current():
+    for data in (b"\xef\xbb\xbfVALUE = 61", bytearray(b"#!python\r# coding: latin-1\rVALUE = '\xe9'")):
+        config = {}
+        exec(compile(data, "settings.py", "exec"), config)
+        print(config["VALUE"])
+    for data in (b"# coding: missing-codec", b"\xef\xbb\xbf# coding: latin-1", b"VALUE = '\xff'", b"x=1\0", b"\xef\xbb\xbf\xef\xbb\xbfX=1"):
+        try:
+            compile(data, "settings.py", "exec")
+        except SyntaxError as error:
+            print(str(error), error.args, error.msg, error.filename, error.lineno, error.offset, error.text, error.end_lineno, error.end_offset)
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     namespace["left"] = Comparable()
     namespace["right"] = object()

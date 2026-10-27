@@ -86,17 +86,11 @@ pub(super) fn construct(
         "repr" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            if let Some(repr) = ctx.bound_slot(args[0], "__repr__")? {
-                let result = ctx.call(repr, Vec::new(), Vec::new())?;
-                if ctx.str_value(result).is_err() {
-                    return Err(type_error(format!(
-                        "__repr__ returned non-string (type {})",
-                        ctx.type_name(result)
-                    )));
-                }
+            if let Some(result) = ctx.repr_override(args[0])? {
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.checked_format(args[0], true)?))
+            let text = ctx.checked_format(args[0], true)?;
+            Ok(ctx.text(text))
         }
         "int" => {
             if kwargs.iter().any(|(k, _)| k != "base") {
@@ -152,6 +146,11 @@ pub(super) fn construct(
                 let decoded = decode(ctx, value, encoding, errors)?;
                 return Ok(ctx.text(decoded));
             }
+            let target = ctx.weak_proxy_target(value)?;
+            if target != value {
+                ctx.heap.keep(target);
+            }
+            let value = target;
             if matches!(ctx.heap.get(value), Value::Str(_)) {
                 return Ok(value);
             }
@@ -172,7 +171,8 @@ pub(super) fn construct(
                 }
                 return Ok(result);
             }
-            Ok(ctx.text(ctx.checked_format(value, false)?))
+            let text = ctx.checked_format(value, false)?;
+            Ok(ctx.text(text))
         }
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
@@ -262,7 +262,7 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -
         if let Value::Int(number) = ctx.heap.get(value) {
             return Ok(crate::integer_text::decimal_string(number)?.into_string());
         }
-        return Ok(ctx.display(value));
+        return ctx.checked_format(value, false);
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));
@@ -532,7 +532,7 @@ pub(in super::super) fn bytes_percent(ctx: &mut Context, format: &[u8], rhs: Id)
                 })
                 .ok_or_else(|| Error::new("ValueError", "incomplete format key"))?;
             let key = ctx.alloc(Value::Bytes(format[start + 2..end].to_vec()));
-            if matches!(ctx.heap.get(rhs), Value::List(_) | Value::Range { .. }) {
+            if matches!(ctx.heap.get(rhs), Value::List(_) | Value::Range(_)) {
                 return Err(type_error(format!(
                     "{} indices must be integers or slices, not bytes",
                     ctx.type_name(rhs)
@@ -704,8 +704,8 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     || spec.min_field_width.is_some()
                     || !spec.flags.is_empty();
                 let float_field = matches!(spec.format_type, CFormatType::Float(_));
-                let number_field = float_field
-                    || decorated && matches!(spec.format_char, 'd' | 'i' | 'u' | 'o' | 'x' | 'X');
+                let number_field =
+                    float_field || matches!(spec.format_type, CFormatType::Number(_));
                 let star_width =
                     matches!(spec.min_field_width, Some(CFormatQuantity::FromValuesTuple));
                 let star_precision = matches!(
@@ -1032,19 +1032,25 @@ pub(super) fn method(
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
-    if name == "isspace" {
+    let predicate: Option<fn(&str) -> bool> = match name {
+        "isalnum" => Some(crate::objects::python_alnum),
+        "isspace" => Some(crate::objects::python_isspace),
+        "isupper" => Some(crate::objects::python_isupper),
+        _ => None,
+    };
+    if let Some(predicate) = predicate {
         if !kwargs.is_empty() {
-            return Err(type_error("str.isspace() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "str.{name}() takes no keyword arguments"
+            )));
         }
         if !args.is_empty() {
             return Err(type_error(format!(
-                "str.isspace() takes no arguments ({} given)",
+                "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
         }
-        return Ok(boolean(crate::objects::python_isspace(
-            ctx.str_value(receiver)?,
-        )));
+        return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
     if name == "translate" {
         positional(name, kwargs)?;

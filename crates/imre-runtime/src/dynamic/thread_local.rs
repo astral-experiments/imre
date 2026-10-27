@@ -7,54 +7,42 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const CLASS: &str = "_thread._local";
 
+// Names in the two builtin dictionaries, in _thread._local and object MRO order.
+const TYPE_NAMES: &[&str] = &[
+    "__new__",
+    "__getattribute__",
+    "__setattr__",
+    "__delattr__",
+    "__doc__",
+    "__module__",
+    "__new__",
+    "__repr__",
+    "__hash__",
+    "__str__",
+    "__getattribute__",
+    "__setattr__",
+    "__delattr__",
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__init__",
+    "__reduce_ex__",
+    "__reduce__",
+    "__getstate__",
+    "__subclasshook__",
+    "__init_subclass__",
+    "__format__",
+    "__sizeof__",
+    "__dir__",
+    "__class__",
+    "__doc__",
+];
+
 pub(super) fn is_method(name: &str) -> bool {
     matches!(name, "__getattribute__" | "__setattr__" | "__delattr__")
-}
-
-/// Recognize only the three slot descriptors installed by the local type.
-pub(super) fn wrapper_name(symbol: &str) -> Option<&'static str> {
-    match symbol {
-        "_thread._local.__getattribute__" => Some("__getattribute__"),
-        "_thread._local.__setattr__" => Some("__setattr__"),
-        "_thread._local.__delattr__" => Some("__delattr__"),
-        _ => None,
-    }
-}
-
-/// Bind the slot to a local instance or return the descriptor on class access.
-pub(super) fn bind_wrapper(
-    ctx: &mut Context,
-    descriptor: Id,
-    slot: &str,
-    receiver: Id,
-) -> Result<Id> {
-    if receiver == NONE {
-        return Ok(descriptor);
-    }
-    if !matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)) {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "descriptor '{slot}' for '{CLASS}' objects doesn't apply to a '{}' object",
-                ctx.type_name(receiver)
-            ),
-        ));
-    }
-    Ok(ctx.alloc(Value::Method {
-        callable: descriptor,
-        receiver,
-        explicit: false,
-    }))
-}
-
-/// Return attributes shared by an unbound slot and its bound method wrapper.
-pub(super) fn wrapper_attribute(ctx: &mut Context, slot: &str, attr: &str) -> Option<Id> {
-    Some(match attr {
-        "__name__" => ctx.text(slot),
-        "__qualname__" => ctx.text(format!("_local.{slot}")),
-        "__objclass__" => ctx.builtin(CLASS),
-        _ => return None,
-    })
 }
 
 /// Direct slot calls can carry any Python object, including a key in the local dictionary.
@@ -98,50 +86,6 @@ impl<'a> Name<'a> {
     }
 }
 
-/// Implement the descriptor's explicit __get__ with Python's receiver and owner rules.
-fn descriptor_get(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let Some((&descriptor, arguments)) = args.split_first() else {
-        return Err(Error::new(
-            "TypeError",
-            "descriptor '__get__' of 'wrapper_descriptor' object needs an argument",
-        ));
-    };
-    let slot = match ctx.heap.get(descriptor) {
-        Value::Native(symbol) => wrapper_name(symbol),
-        _ => None,
-    }
-    .ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "descriptor '__get__' requires a 'wrapper_descriptor' object but received a '{}'",
-                ctx.type_name(descriptor)
-            ),
-        )
-    })?;
-    if !kwargs.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            "wrapper __get__() takes no keyword arguments",
-        ));
-    }
-    match *arguments {
-        [] => Err(Error::new(
-            "TypeError",
-            "__get__ expected at least 1 argument, got 0",
-        )),
-        [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
-        [receiver] | [receiver, _] => bind_wrapper(ctx, descriptor, slot, receiver),
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "__get__ expected at most 2 arguments, got {}",
-                arguments.len()
-            ),
-        )),
-    }
-}
-
 /// Apply one of the type's attribute wrappers after validating its receiver and arguments.
 pub(super) fn method(
     ctx: &mut Context,
@@ -149,9 +93,6 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if slot == "wrapper_get" {
-        return descriptor_get(ctx, args, kwargs);
-    }
     let Some((&obj, arguments)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
@@ -242,16 +183,36 @@ impl Context {
         dict
     }
 
+    /// Preserve an exception from the lookup separately from an absent key.
+    fn local_dict_value(&mut self, dict: Id, key: Id) -> Result<Option<Id>> {
+        Ok(self
+            .find_dictionary_key(dict, key, None)?
+            .1
+            .map(|index| self.dict_entries(dict).expect("thread-local dictionary")[index].1))
+    }
+
     pub(super) fn local_attribute(&mut self, obj: Id, name: Name<'_>) -> Result<Id> {
         let dict = self.local_dict(obj);
         if name.is_dict(self)? {
             return Ok(dict);
         }
         let key = name.key(self);
-        if let Some(index) = self.find_dictionary_key(dict, key, None)?.1 {
-            return Ok(self.dict_entries(dict).expect("thread-local dictionary")[index].1);
+        if let Some(value) = self.local_dict_value(dict, key)? {
+            return Ok(value);
         }
-        self.default_get_attr(obj, &name.text(self)?)
+        let text = name.text(self)?;
+        let descriptor = self.lookup_builtin_type_name(key, TYPE_NAMES);
+        if descriptor == Some("__class__") {
+            return Ok(self.builtin(CLASS));
+        }
+        // A descriptor lookup can run Python and populate the thread dictionary.
+        if let Some(value) = self.local_dict_value(dict, key)? {
+            return Ok(value);
+        }
+        match descriptor {
+            Some(slot) => self.default_get_attr(obj, slot),
+            None => Err(self.missing_attribute(obj, &text)),
+        }
     }
 
     /// The base object wrappers see the class descriptor, but no instance dictionary.
@@ -311,10 +272,10 @@ impl Context {
             ));
         }
         let text = name.text(self)?;
-        if text == "__class__" {
-            return self.update_base_local_attribute(obj, &text, value);
-        }
         let key = name.key(self);
+        if self.lookup_builtin_type_name(key, TYPE_NAMES) == Some("__class__") {
+            return self.update_base_local_attribute(obj, "__class__", value);
+        }
         let result = match value {
             Some(value) => self.put_item(dict, key, value),
             None => self.delete_item(dict, key),

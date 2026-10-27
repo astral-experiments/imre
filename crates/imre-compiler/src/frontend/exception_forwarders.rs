@@ -271,17 +271,7 @@ impl Checker<'_> {
                                 .chain(plan.parameters.iter().map(|(name, _)| name))
                                 .map(|name| unpacking::string(parameter_name(&decl.name, name)))
                                 .collect();
-                            let tuple = Expr {
-                                ty: self.types.tuple(vec![Type::Str; candidates.len()]),
-                                kind: ExprKind::Tuple(candidates),
-                            };
-                            Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Builtin(
-                                    Builtin::ExceptionKeywordSuggestion,
-                                    vec![unpacking::string(s), unpacking::string(k), tuple],
-                                ),
-                            }
+                            self.keyword_error_message(s, k, candidates)
                         }
                     };
                     let error = Expr {

@@ -1,8 +1,12 @@
 //! Non-owning handles observed by native Python code.
 use super::Context;
-use super::value::{Error, Id, NONE, Result, Value};
+use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 
 pub(super) const REFERENCE_HASH: &str = "weakref.ReferenceType.__hash__";
+pub(super) const REFERENCE_TYPE: &str = "weakref.ReferenceType";
+pub(super) const REFERENCE_METHODS: &[&str] = &[
+    "__new__", "__init__", "__call__", "__eq__", "__ne__", "__hash__",
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -14,7 +18,7 @@ pub(super) enum Kind {
 impl Kind {
     pub fn class(self) -> &'static str {
         match self {
-            Self::Reference => "weakref.ReferenceType",
+            Self::Reference => REFERENCE_TYPE,
             Self::Proxy => "weakref.ProxyType",
             Self::CallableProxy => "weakref.CallableProxyType",
         }
@@ -29,7 +33,42 @@ pub(super) struct Reference {
     pub hash: Option<i64>,
 }
 
+impl Value {
+    /// Return the reference payload for an exact ref, proxy, or Python reference subclass.
+    pub(super) fn weak_reference(&self) -> Option<&Reference> {
+        match self {
+            Self::Weak(reference) => Some(reference),
+            Self::Instance { weak_reference, .. } => weak_reference.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub(super) fn weak_reference_mut(&mut self) -> Option<&mut Reference> {
+        match self {
+            Self::Weak(reference) => Some(reference),
+            Self::Instance { weak_reference, .. } => weak_reference.as_deref_mut(),
+            _ => None,
+        }
+    }
+}
+
 impl Reference {
+    pub(super) fn call(self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "weakref() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("weakref expected 0 arguments, got {}", args.len()),
+            ));
+        }
+        Ok(self.target.unwrap_or(NONE))
+    }
+
     pub fn upgrade(self) -> Result<Id> {
         self.target.ok_or_else(|| {
             Error::new(
@@ -54,6 +93,29 @@ pub(super) fn export(ctx: &mut Context, name: &str) -> Option<Id> {
 }
 
 impl Context {
+    fn reference_target(
+        &mut self,
+        kind: Kind,
+        args: &[Id],
+        constructor: &str,
+        subclass: Option<Id>,
+    ) -> Result<Id> {
+        let (target, callback) = reference_args(constructor, args)?;
+        if !self.weakrefable(target) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "cannot create weak reference to '{}' object",
+                    self.type_name(target)
+                ),
+            ));
+        }
+        let wrapper = subclass.map(|class| self.instance(class, None));
+        Ok(self
+            .heap
+            .new_weak_reference(target, callback, kind, wrapper))
+    }
+
     #[inline]
     pub(super) fn weak_proxy_target(&self, obj: Id) -> Result<Id> {
         if self.heap.has_weak_values
@@ -78,23 +140,76 @@ impl Context {
             .chain(ancestors)
             .any(|&base| match self.heap.get(base) {
                 Value::Native(name) => matches!(name.as_str(), "set" | "frozenset"),
-                Value::Class { scope, .. } => match self.scope_name(*scope, "__slots__") {
-                    None => true,
-                    Some(slots) => match self.heap.get(slots) {
-                        Value::Str(name) => name == "__weakref__",
-                        Value::Tuple(names) | Value::List(names) => names.iter().any(|&name| {
-                            self.str_value(name).is_ok_and(|name| name == "__weakref__")
-                        }),
-                        _ => false,
-                    },
-                },
+                Value::Class { scope, .. } => self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_deref()
+                    .and_then(|namespace| namespace.slot_names.as_deref())
+                    .is_none_or(|names| names.iter().any(|name| name == "__weakref__")),
                 _ => false,
             })
+    }
+
+    /// A Python class introduces a descriptor only when it adds weak-reference storage.
+    pub(super) fn install_weakref_descriptor(&mut self, class: Id, scope: Id) {
+        if self.scope_name(scope, "__weakref__").is_some()
+            || !self.class_instances_support_weakref(class)
+        {
+            return;
+        }
+        let Value::Class { ancestors, .. } = self.heap.get(class) else {
+            return;
+        };
+        if ancestors.iter().any(|&base| self.class_instances_support_weakref(base) ||
+            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "set" | "frozenset"))) {
+            return;
+        }
+        let descriptor = self.alloc(Value::WeakrefDescriptor(class));
+        self.bind(scope, "__weakref__", descriptor);
+    }
+
+    pub(super) fn weakref_descriptor_owner(&self, owner: Id) -> &str {
+        let Value::Class { name, .. } = self.heap.get(owner) else {
+            unreachable!()
+        };
+        name
+    }
+
+    pub(super) fn readonly_weakref(&self, owner: Id) -> Error {
+        Error::new(
+            "AttributeError",
+            format!(
+                "attribute '__weakref__' of '{}' objects is not writable",
+                self.weakref_descriptor_owner(owner)
+            ),
+        )
+    }
+
+    pub(super) fn weakref_list(&self, owner: Id, receiver: Id) -> Result<Id> {
+        if !self.instance_of(receiver, owner) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__weakref__' for '{}' objects doesn't apply to a '{}' object",
+                    self.weakref_descriptor_owner(owner),
+                    self.type_name(receiver)
+                ),
+            ));
+        }
+        Ok(self
+            .heap
+            .weak_references(receiver)
+            .first()
+            .copied()
+            .unwrap_or(NONE))
     }
 
     fn weakrefable(&self, value: Id) -> bool {
         match self.heap.get(value) {
             Value::Instance { class, .. } => self.class_instances_support_weakref(*class),
+            Value::Raised(error) => error
+                .class
+                .is_some_and(|class| self.class_instances_support_weakref(class)),
             Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
@@ -114,8 +229,8 @@ impl Context {
                 "descriptor '__hash__' of 'weakref.ReferenceType' object needs an argument",
             ));
         };
-        let wr = match self.heap.get(reference) {
-            Value::Weak(wr) if wr.kind == Kind::Reference => *wr,
+        let wr = match self.heap.get(reference).weak_reference() {
+            Some(wr) if wr.kind == Kind::Reference => *wr,
             _ => {
                 return Err(Error::new(
                     "TypeError",
@@ -151,11 +266,27 @@ impl Context {
             .ok_or_else(|| Error::new("TypeError", "weak object has gone away"))?;
         self.heap.keep(target);
         let hash = self.dictionary_hash(target)?;
-        let Value::Weak(wr) = self.heap.get_mut(reference) else {
-            unreachable!()
-        };
-        wr.hash = Some(hash);
+        self.heap
+            .get_mut(reference)
+            .weak_reference_mut()
+            .unwrap()
+            .hash = Some(hash);
         Ok(hash)
+    }
+}
+
+fn reference_args(name: &str, args: &[Id]) -> Result<(Id, Id)> {
+    match args {
+        [target] => Ok((*target, NONE)),
+        [target, callback] => Ok((*target, *callback)),
+        [] => Err(Error::new(
+            "TypeError",
+            format!("{name} expected at least 1 argument, got 0"),
+        )),
+        _ => Err(Error::new(
+            "TypeError",
+            format!("{name} expected at most 2 arguments, got {}", args.len()),
+        )),
     }
 }
 
@@ -168,6 +299,158 @@ pub(super) fn call(
     let error = |s| Error::new("TypeError", s);
     match function {
         REFERENCE_HASH => ctx.reference_hash(args, kwargs),
+        "weakref.descriptor.__get__"
+        | "weakref.descriptor.__set__"
+        | "weakref.descriptor.__delete__" => {
+            let Some((&descriptor, rest)) = args.split_first() else {
+                unreachable!()
+            };
+            let Value::WeakrefDescriptor(owner) = *ctx.heap.get(descriptor) else {
+                unreachable!()
+            };
+            let name = function.rsplit('.').next().unwrap();
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("wrapper {name}() takes no keyword arguments"),
+                ));
+            }
+            match (name, rest) {
+                ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
+                ("__get__", [NONE, _]) => Ok(descriptor),
+                ("__get__", [receiver] | [receiver, _]) => ctx.weakref_list(owner, *receiver),
+                ("__set__", [receiver, _]) | ("__delete__", [receiver]) => {
+                    ctx.weakref_list(owner, *receiver)?;
+                    Err(ctx.readonly_weakref(owner))
+                }
+                _ => {
+                    let expected = match name {
+                        "__get__" if rest.is_empty() => "at least 1",
+                        "__get__" => "at most 2",
+                        "__set__" => "2",
+                        _ => "1",
+                    };
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}expected {expected} argument{}, got {}",
+                            match name {
+                                "__get__" => "__get__ ",
+                                "__set__" => "__set__ ",
+                                _ => "",
+                            },
+                            if expected.ends_with('1') { "" } else { "s" },
+                            rest.len()
+                        ),
+                    ))
+                }
+            }
+        }
+        "weakref.ReferenceType.__new__" => {
+            let Some((&class, rest)) = args.split_first() else {
+                return Err(error(
+                    "weakref.ReferenceType.__new__(): not enough arguments",
+                ));
+            };
+            let base = ctx.builtin(REFERENCE_TYPE);
+            if !ctx.subclass(class, base) {
+                if ctx.builtin_type_name(class) != Some("type") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "weakref.ReferenceType.__new__(X): X is not a type object ({})",
+                            ctx.type_name(class)
+                        ),
+                    ));
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "weakref.ReferenceType.__new__({0}): {0} is not a subtype of weakref.ReferenceType",
+                        ctx.class_name(class)
+                    ),
+                ));
+            }
+            ctx.reference_target(
+                Kind::Reference,
+                rest,
+                "__new__",
+                (class != base).then_some(class),
+            )
+        }
+        "weakref.ReferenceType.__call__"
+        | "weakref.ReferenceType.__init__"
+        | "weakref.ReferenceType.__eq__"
+        | "weakref.ReferenceType.__ne__" => {
+            let name = function.rsplit('.').next().unwrap();
+            let Some((&owner, rest)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{name}' of 'weakref.ReferenceType' object needs an argument"
+                    ),
+                ));
+            };
+            let Some(reference) = ctx
+                .heap
+                .get(owner)
+                .weak_reference()
+                .copied()
+                .filter(|r| r.kind == Kind::Reference)
+            else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{name}' requires a 'weakref.ReferenceType' object but received a '{}'",
+                        ctx.type_name(owner)
+                    ),
+                ));
+            };
+            if name == "__call__" {
+                return reference.call(rest, kwargs);
+            }
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    match name {
+                        "__init__" => "ref() takes no keyword arguments".to_owned(),
+                        _ => format!("wrapper {name}() takes no keyword arguments"),
+                    },
+                ));
+            }
+            match name {
+                "__init__" => {
+                    reference_args(name, rest)?;
+                    Ok(NONE)
+                }
+                _ => {
+                    let [other] = rest else {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("expected 1 argument, got {}", rest.len()),
+                        ));
+                    };
+                    let Some(right) = ctx
+                        .heap
+                        .get(*other)
+                        .weak_reference()
+                        .copied()
+                        .filter(|r| r.kind == Kind::Reference)
+                    else {
+                        return Ok(NOT_IMPLEMENTED);
+                    };
+                    if let (Some(a), Some(b)) = (reference.target, right.target) {
+                        ctx.binary(if name == "__eq__" { "==" } else { "!=" }, a, b)
+                    } else {
+                        Ok(if (owner == *other) == (name == "__eq__") {
+                            super::TRUE
+                        } else {
+                            super::FALSE
+                        })
+                    }
+                }
+            }
+        }
         "weakref.ReferenceType" | "_weakref.proxy" => {
             let proxy = function == "_weakref.proxy";
             let name = if proxy { "proxy" } else { "__new__" };
@@ -178,37 +461,14 @@ pub(super) fn call(
                     "ref() takes no keyword arguments"
                 }));
             }
-            let [target, rest @ ..] = args else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("{name} expected at least 1 argument, got 0"),
-                ));
-            };
-            if rest.len() > 1 {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("{name} expected at most 2 arguments, got {}", args.len()),
-                ));
-            }
-            if !ctx.weakrefable(*target) {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "cannot create weak reference to '{}' object",
-                        ctx.type_name(*target)
-                    ),
-                ));
-            }
             let kind = if !proxy {
                 Kind::Reference
-            } else if ctx.callable(*target) {
+            } else if args.first().is_some_and(|&target| ctx.callable(target)) {
                 Kind::CallableProxy
             } else {
                 Kind::Proxy
             };
-            Ok(ctx
-                .heap
-                .new_weak_reference(*target, rest.first().copied().unwrap_or(NONE), kind))
+            ctx.reference_target(kind, args, name, None)
         }
         "weakref.ProxyType" | "weakref.CallableProxyType" => Err(Error::new(
             "TypeError",
@@ -263,7 +523,7 @@ pub(super) fn call(
             };
             let entries = ctx.dict_entries(dict).expect("dict storage");
             if let Some(&(_, value)) = entries.iter().find(|(stored, _)| ctx.equal(*stored, *key)) {
-                let Value::Weak(reference) = ctx.heap.get(value) else {
+                let Some(reference) = ctx.heap.get(value).weak_reference() else {
                     return Err(error("not a weakref"));
                 };
                 if reference.target.is_none() {

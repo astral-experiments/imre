@@ -707,7 +707,7 @@ def seed(directory: Path, case: str) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
-    if case == "zipimport_resources":
+    if case in {"zipimport_resources", "boxed_zipimport_resources"}:
         for name, method in [("stored.zip", zipfile.ZIP_STORED), ("deflated.zip", zipfile.ZIP_DEFLATED)]:
             with zipfile.ZipFile(directory / name, "w") as archive:
                 archive.writestr(zipfile.ZipInfo("pkg/templates/page.html"), b"hello {{ name }}", compress_type=method)
@@ -857,7 +857,10 @@ def main() -> None:
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         for fixture in sorted((Path(__file__).parent / "fixtures/files").glob("*.py")):
-            cases.append((fixture.stem, fixture.read_text(encoding="utf-8"), None))
+            source = fixture.read_text(encoding="utf-8")
+            cases.append((fixture.stem, source, None))
+            if fixture.stem == "zipimport_resources":
+                cases.append(("boxed_zipimport_resources", source, None))
         cases += [
             (name, source, category) for name, (source, category) in ERRORS.items()
         ]
@@ -902,6 +905,7 @@ def main() -> None:
                         "--opt-level",
                         level,
                         *flags,
+                        *(["--runtime-imports"] if name == "boxed_zipimport_resources" else []),
                     ],
                     temporary,
                 )

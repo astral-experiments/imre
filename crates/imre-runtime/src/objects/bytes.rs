@@ -648,6 +648,15 @@ pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Erro
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
 pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8Error) -> Error {
+    let (range, reason, message) = utf8_error_details(&value, error);
+    Error::unicode_decode("utf-8", value, range, reason, message)
+}
+
+/// Describe invalid UTF-8 without copying the input into a Python bytes object.
+pub(super) fn utf8_error_details(
+    value: &[u8],
+    error: std::str::Utf8Error,
+) -> (std::ops::Range<usize>, &'static str, String) {
     let start = error.valid_up_to();
     let end = error
         .error_len()
@@ -664,9 +673,7 @@ pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8
     } else {
         format!("bytes in position {start}-{}", end - 1)
     };
-    Error::unicode_decode(
-        "utf-8",
-        value,
+    (
         start..end,
         reason,
         format!("'utf-8' codec can't decode {location}: {reason}"),

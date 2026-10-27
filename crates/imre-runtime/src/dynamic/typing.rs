@@ -40,24 +40,43 @@ impl AliasKind {
     pub(super) fn type_name(self) -> &'static str {
         self.class().rsplit_once('.').unwrap().1
     }
+
+    /// Parameterized aliases reject both public class checks, even as a union member.
+    pub(super) fn class_check_error(self, operation: &str) -> Error {
+        if self.is_typing_alias() {
+            Error::new(
+                "TypeError",
+                "Subscripted generics cannot be used with class and instance checks",
+            )
+        } else {
+            Error::new(
+                "TypeError",
+                format!("{operation}() argument 2 cannot be a parameterized generic"),
+            )
+        }
+    }
+}
+
+/// Render a type used in a generic alias or a union.
+pub(super) fn type_repr(ctx: &Context, id: Id) -> String {
+    match ctx.heap.get(id) {
+        Value::Ellipsis => "...".to_owned(),
+        Value::Native(name) => name.clone(),
+        Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
+        _ => ctx.repr(id),
+    }
 }
 
 impl Alias {
     pub(super) fn repr(&self, ctx: &Context) -> String {
-        let type_repr = |id| match ctx.heap.get(id) {
-            Value::Ellipsis => "...".to_owned(),
-            Value::Native(name) => name.clone(),
-            Value::Class { name, scope, .. } => format!("{}.{name}", ctx.scope_data(*scope).module),
-            _ => ctx.repr(id),
-        };
         let Value::Tuple(args) = ctx.heap.get(self.args) else {
             unreachable!()
         };
-        let mut args: Vec<_> = args.iter().map(|&id| type_repr(id)).collect();
+        let mut args: Vec<_> = args.iter().map(|&id| type_repr(ctx, id)).collect();
         let origin = if self.kind == AliasKind::Callable {
             "typing.Callable".to_owned()
         } else {
-            type_repr(self.origin)
+            type_repr(ctx, self.origin)
         };
         let params = if matches!(self.kind, AliasKind::Callable | AliasKind::AbcCallable)
             && args.first().is_none_or(|arg| arg != "...")
@@ -125,15 +144,18 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     class
 }
 
-fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
+pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     let mut vars = Vec::new();
     for &arg in args {
         let members = match ctx.heap.get(arg) {
             Value::TypeVar(_) => std::slice::from_ref(&arg),
-            Value::GenericAlias(alias) => match ctx.heap.get(alias.parameters) {
-                Value::Tuple(members) => members.as_slice(),
-                _ => unreachable!(),
-            },
+            Value::GenericAlias(Alias { parameters, .. })
+            | Value::Union(super::union::Union { parameters, .. }) => {
+                match ctx.heap.get(*parameters) {
+                    Value::Tuple(members) => members.as_slice(),
+                    _ => unreachable!(),
+                }
+            }
             _ => continue,
         };
         for &param in members {
@@ -214,6 +236,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
+        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
+            AliasKind::Builtin
+        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
@@ -674,8 +699,7 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.scope_data(ctx.heap.current_scope()).module.clone();
-    let module = ctx.text(module);
+    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
@@ -717,6 +741,7 @@ pub(super) fn call(
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::GenericAlias(a) => a.origin,
+            Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
             Value::Native(name) if name == "typing.Callable" => {
                 named_class(ctx, "collections.abc", "Callable")
@@ -740,6 +765,7 @@ pub(super) fn call(
                 }
             }
             Value::GenericAlias(a) => a.args,
+            Value::Union(u) => u.args,
             _ => ctx.alloc(Value::Tuple(vec![])),
         }),
         ("alias_mro_entries", [id, bases]) => alias_bases(ctx, *id, *bases),
@@ -798,10 +824,11 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn python_instance_check(&self, value: Id, class: Id) -> Result<bool> {
+    pub(super) fn python_instance_check(&mut self, value: Id, class: Id) -> Result<bool> {
         match self.heap.get(class) {
+            Value::Union(union) => self.python_instance_check(value, union.args),
             Value::Tuple(classes) => {
-                for &class in classes {
+                for class in classes.clone() {
                     if self.python_instance_check(value, class)? {
                         return Ok(true);
                     }
@@ -812,20 +839,17 @@ impl Context {
                 "TypeError",
                 "isinstance() arg 2 must be a type, a tuple of types, or a union",
             )),
-            Value::GenericAlias(alias) => Err(Error::new(
-                "TypeError",
-                if alias.kind.is_typing_alias() {
-                    "Subscripted generics cannot be used with class and instance checks"
-                } else {
-                    "isinstance() argument 2 cannot be a parameterized generic"
-                },
-            )),
+            Value::GenericAlias(alias) => Err(alias.kind.class_check_error("isinstance")),
             Value::Native(name) if name == "typing.Any" => Err(Error::new(
                 "TypeError",
                 "typing.Any cannot be used with isinstance()",
             )),
             Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
             _ => {
+                if let Some(check) = self.bound_slot(class, "__instancecheck__")? {
+                    let result = self.call(check, vec![value], Vec::new())?;
+                    return self.truth(result);
+                }
                 self.require_checkable_protocol(class)?;
                 Ok(self.instance_of(value, class))
             }
@@ -859,6 +883,36 @@ impl Context {
                 } => namedtuple_fields.clone(),
                 _ => None,
             })
+    }
+
+    fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
+        let Some(slots) = self.scope_name(scope, "__slots__") else {
+            return Ok(None);
+        };
+        if let Ok(name) = self.str_value(slots) {
+            return Ok(Some([name.to_owned()].into()));
+        }
+        let iterator = self.iterator(slots)?;
+        self.heap.keep(iterator);
+        let mut items = Vec::new();
+        while let Some(slot) = self.next_item(iterator)? {
+            self.heap.keep(slot);
+            items.push(slot);
+        }
+        let mut names = Vec::with_capacity(items.len());
+        for slot in items {
+            let name = self.str_value(slot).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__slots__ items must be strings, not '{}'",
+                        self.type_name(slot)
+                    ),
+                )
+            })?;
+            names.push(name.to_owned());
+        }
+        Ok(Some(names.into()))
     }
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
@@ -895,6 +949,7 @@ impl Context {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
+        let slot_names = self.declared_slot_names(scope)?;
         let namedtuple_fields = self.namedtuple_layout(&bases, &ancestors, scope);
         let class = self.alloc(Value::Class {
             namedtuple_fields,
@@ -908,7 +963,12 @@ impl Context {
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
+        // A class-body __eq__ suppresses inherited hashing at type creation.
+        if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
+            fields.names.insert("__hash__".to_owned(), NONE);
+        }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
         Ok(class)
