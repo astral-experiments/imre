@@ -214,6 +214,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
+        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
+            AliasKind::Builtin
+        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }

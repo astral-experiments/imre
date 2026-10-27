@@ -10,6 +10,7 @@ mod enums;
 mod ffi;
 mod function_fields;
 mod iterators;
+mod mapping_abc;
 mod operators;
 mod property;
 mod slice;
@@ -547,6 +548,7 @@ impl Context {
             }
             Value::Context(bindings) => Ok(bindings.keys().copied().collect()),
             Value::Range { start, stop, step } => builtins::range_items(self, start, stop, step),
+            Value::MappingView { mapping, kind } => mapping_abc::view_items(self, mapping, kind),
             Value::Str(s) => Ok(s.chars().map(|c| self.text(c.to_string())).collect()),
             Value::Bytes(s) | Value::ByteArray(s) => {
                 Ok(s.into_iter().map(|b| self.int(i64::from(b))).collect())
