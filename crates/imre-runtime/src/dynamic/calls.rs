@@ -361,12 +361,11 @@ impl Context {
                 ..
             } => Ok(self.builtin("time.struct_time")),
             Value::Raised(error) => {
+                if let Some(class) = error.class {
+                    return Ok(class);
+                }
                 let name = error.kind.clone();
-                Ok(self
-                    .classes
-                    .get(&name)
-                    .copied()
-                    .unwrap_or_else(|| self.builtin(&name)))
+                Ok(self.builtin(&name))
             }
             Value::Calendar { value, .. } => {
                 let class = format!("datetime.{}", value.class());
@@ -405,6 +404,10 @@ impl Context {
             _ => return false,
         };
         match (name, self.heap.get(value)) {
+            (_, Value::Raised(error)) => {
+                matches!(self.heap.get(class), Value::Native(name) if name == "object")
+                    || self.raised_error_matches(error, class)
+            }
             ("bytearray", Value::ByteArray(_))
             | ("object", _)
             | ("bool", Value::Bool(_))
@@ -454,7 +457,6 @@ impl Context {
                     c == value.class() || (c == "date" && value.class() == "datetime")
                 })
             }
-            (_, Value::Raised(Error { kind, .. })) => self.error_matches(kind, class),
             _ => {
                 matches!(self.heap.get(class), Value::Native(_))
                     && self.builtin_type_name(value) == Some(name)
@@ -462,8 +464,30 @@ impl Context {
         }
     }
     pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
+        self.error_kind_matches(kind, class, self.classes.get(kind).copied())
+    }
+
+    pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
         match self.heap.get(class) {
-            Value::Tuple(classes) => classes.iter().any(|&c| self.error_matches(kind, c)),
+            Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
+            _ if let Some(actual) = error.class => self.subclass(actual, class),
+            Value::Native(_) => {
+                let kind = error.kind.as_str();
+                let builtin = self.builtins.get(kind).copied();
+                if self.classes.get(kind).copied() == builtin {
+                    self.error_matches(kind, class)
+                } else {
+                    // A user class with the same name cannot change a native error's ancestry.
+                    self.error_kind_matches(kind, class, builtin)
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn error_kind_matches(&self, kind: &str, class: Id, registered: Option<Id>) -> bool {
+        match self.heap.get(class) {
+            Value::Tuple(classes) => classes.iter().any(|&c| self.error_kind_matches(kind, c, registered)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
@@ -492,10 +516,7 @@ impl Context {
                                 | "TimeoutError"
                                 | "socket.gaierror"
                         ))
-                    || self
-                        .classes
-                        .get(kind)
-                        .is_some_and(|&actual| self.subclass(actual, class))
+                    || registered.is_some_and(|actual| self.subclass(actual, class))
             }
             _ => false,
         }
@@ -514,11 +535,11 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        error.kind == kind
+        (error.class.is_none() && error.kind == kind)
             || self
                 .builtins
                 .get(kind)
-                .is_some_and(|&base| self.error_matches(&error.kind, base))
+                .is_some_and(|&base| self.raised_error_matches(error, base))
     }
 
     fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
@@ -1346,7 +1367,8 @@ impl Context {
                 if ancestors.iter().any(|&base| {
                     matches!(self.heap.get(base), Value::Native(kind) if builtins::is_exception(kind))
                 }) {
-                    let error = self.exception(&name, &args);
+                    let mut error = self.exception(&name, &args);
+                    error.class = Some(callable);
                     return Ok(self.alloc(Value::Raised(error)));
                 }
                 if let Some(names) = self.namedtuple_fields(callable) {
