@@ -15,7 +15,57 @@ pub(super) const METHODS: &[&str] = &[
     "__len__",
     "__iter__",
     "__reversed__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
 ];
+
+pub(super) enum IndexOp {
+    Get,
+    Set(Id),
+    Delete,
+}
+
+impl IndexOp {
+    /// Resolve the index before borrowing the ring so an index hook can mutate the deque.
+    /// Explicit slot calls report overflow differently from bracket syntax.
+    pub(super) fn apply(self, ctx: &mut Context, queue: Id, key: Id, explicit: bool) -> Result<Id> {
+        let index = ctx.index_value(key)?.ok_or_else(|| {
+            let kind = ctx.type_name(key);
+            let message = if explicit {
+                format!("'{kind}' object cannot be interpreted as an integer")
+            } else {
+                format!("sequence index must be integer, not '{kind}'")
+            };
+            Error::new("TypeError", message)
+        })?;
+        let index = crate::signed_index(&index).ok_or_else(|| {
+            Error::new(
+                if explicit {
+                    "OverflowError"
+                } else {
+                    "IndexError"
+                },
+                format!(
+                    "cannot fit '{}' into an index-sized integer",
+                    ctx.type_name(key)
+                ),
+            )
+        })?;
+        let Value::Deque(ring) = ctx.heap.get_mut(queue) else {
+            unreachable!()
+        };
+        let position = crate::normalized_index(index, ring.items.len())
+            .ok_or_else(|| Error::new("IndexError", "deque index out of range"))?;
+        let removed = match self {
+            Self::Get => return Ok(ring.items[position]),
+            Self::Set(value) => std::mem::replace(&mut ring.items[position], value),
+            Self::Delete => ring.remove_at(position).expect("validated deque position"),
+        };
+        ctx.heap.weak_edge_removed(removed);
+        Ok(NONE)
+    }
+}
 
 /// Capture the current length and generation for a live cursor in either direction.
 pub(super) fn iterator(deque: Id, ring: &crate::objects::DequeRing<Id>, reverse: bool) -> Value {
@@ -106,8 +156,7 @@ fn remove(ctx: &mut Context, queue: Id, value: Id) -> Result<()> {
             return Err(Error::new("IndexError", "deque mutated during iteration"));
         }
         if equal {
-            let removed = ring.items.remove(index).unwrap();
-            ring.state = ring.state.wrapping_add(1);
+            let removed = ring.remove_at(index).unwrap();
             ctx.heap.weak_edge_removed(removed);
             return Ok(());
         }
@@ -141,6 +190,26 @@ pub(super) fn method(
             "TypeError",
             format!("deque.{name}() takes no keyword arguments"),
         ));
+    }
+    match (name, rest) {
+        ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, receiver, *index, true),
+        ("__setitem__", [index, value]) => {
+            return IndexOp::Set(*value).apply(ctx, receiver, *index, true);
+        }
+        ("__delitem__", [index]) => return IndexOp::Delete.apply(ctx, receiver, *index, true),
+        ("__getitem__" | "__delitem__", _) => {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        }
+        ("__setitem__", _) => {
+            return Err(Error::new(
+                "TypeError",
+                format!("__setitem__ expected 2 arguments, got {}", rest.len()),
+            ));
+        }
+        _ => {}
     }
     if matches!(name, "append" | "appendleft" | "extend" | "remove") {
         let [item] = rest else {

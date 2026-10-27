@@ -39,6 +39,16 @@ def current():
     assert reverse.__self__ is queue and reverse() is None
     assert list(forward) == [3, 2, 1] and list(backward) == [2, 3, 4]
     assert queue.maxlen == 4 and list(queue) == [4, 3, 2, 1]
+    cursor = iter(queue)
+    queue[False] = marker
+    assert next(cursor) is marker and queue.__getitem__(-1) == 1
+    del queue[-1]
+    try:
+        next(cursor)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("deque deletion kept its cursor valid")
     backward = deque.__reversed__(queue)
     assert type(backward).__name__ == "_deque_reverse_iterator"
     assert iter(backward) is backward
