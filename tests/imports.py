@@ -368,8 +368,8 @@ ACCEPTED = {
 }
 
 
-def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=60,
+def run(command: list[str], cwd: Path, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=timeout,
                           env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"})
 
 
@@ -427,6 +427,7 @@ def main() -> None:
                 assert result.stdout == baseline.stdout, (entry, level, result.stdout, baseline.stdout)
                 checks += 1
 
+        build_timeout = 120 if args.lto_linker and not args.sanitize else 60
         for name, files in ACCEPTED.items():
             if name == "boxed_stat_shadow" and sys.platform not in ("linux", "darwin"):
                 continue
@@ -448,7 +449,7 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                require_success(run(command, temporary))
+                require_success(run(command, temporary, timeout=build_timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
