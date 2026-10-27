@@ -450,6 +450,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     pub bases: Id,
     pub mro: Id,
+    /// Backing dictionary shared by live class namespace proxies.
+    pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
@@ -853,6 +855,7 @@ impl Value {
                 if let Some(class) = &scope.class_namespace {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
