@@ -73,6 +73,21 @@ def current():
     assert pulls == ["outer"]
     assert next(values) == 1 and pulls == ["outer", 1]
     assert list(values) == [2] and pulls == ["outer", 1, 2]
+
+    saved = -1
+    assert any((saved := item) for item in [0, 4, 9]) and saved == 4
+    assert [[(saved := item) for item in row] for row in [[2, 7]]] == [[2, 7]]
+    assert saved == 7
+
+    def empty():
+        assert not any((saved := item) for item in [])
+        try:
+            return saved
+        except UnboundLocalError:
+            return "unbound"
+
+    assert empty() == "unbound"
+
     comparisons = []
     class Item:
         def __lt__(self, other):

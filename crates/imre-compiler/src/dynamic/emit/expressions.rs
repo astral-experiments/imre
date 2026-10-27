@@ -87,9 +87,12 @@ impl Function<'_, '_> {
                 self.select(&cond, |f| f.expr(&v.body), |f| f.expr(&v.orelse))
             }
             ast::Expr::Named(v) => {
+                let ast::Expr::Name(target) = &*v.target else {
+                    return self.unsupported("assignment expression target");
+                };
                 let value = self.expr(&v.value);
-                self.assign(&v.target, &value);
-                value
+                let name = self.code_name(target.id.as_str());
+                self.op("assign_expr", &[&self.scope.clone(), &name, &value])
             }
             ast::Expr::Call(v) => {
                 let callable = self.expr(&v.func);
@@ -337,7 +340,7 @@ impl Function<'_, '_> {
         }
         let output = self.op(kind, &[]);
         let first = self.expr(&generators[0].iter);
-        let scope = self.op("scope", &[&self.scope.clone()]);
+        let scope = self.op("comprehension_scope", &[&self.scope.clone()]);
         let previous = std::mem::replace(&mut self.scope, scope);
         self.comprehension_loop(generators, &first, &output, &element);
         self.scope = previous;
