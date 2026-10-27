@@ -511,7 +511,9 @@ impl Context {
             return result;
         }
         match self.heap.get(class) {
-            Value::Tuple(classes) => classes.iter().any(|&c| self.error_kind_matches(kind, c, registered)),
+            Value::Tuple(classes) => classes
+                .iter()
+                .any(|&c| self.error_kind_matches(kind, c, registered)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
