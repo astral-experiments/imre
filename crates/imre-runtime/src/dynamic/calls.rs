@@ -815,7 +815,8 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        (error.class.is_none() && error.kind == kind)
+        (error.class.is_none()
+            && builtins::exception_subclass(&error.kind, kind).unwrap_or(error.kind == kind))
             || self
                 .builtins
                 .get(kind)
