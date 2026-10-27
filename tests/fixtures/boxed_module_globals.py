@@ -43,7 +43,26 @@ def discard(assigned, child):
         del token
 
 
+def mutate_from_class(remove):
+    token = "outer"
+
+    class C:
+        nonlocal token
+        if remove:
+            del token
+        else:
+            token = "written"
+
+    had_member = hasattr(C, "token")
+    C.token = "class attribute"
+    try:
+        return token, had_member, C.token
+    except UnboundLocalError:
+        return "empty", had_member, C.token
+
+
 def current():
+    print(mutate_from_class(False), mutate_from_class(True))
     for child in (False, True):
         try:
             discard(False, child)

@@ -2873,6 +2873,14 @@ impl Context {
         else {
             return Err(Error::new("TypeError", "invalid class body"));
         };
+        #[derive(serde::Deserialize)]
+        struct ClassBindings {
+            #[serde(default)]
+            scope_nonlocals: std::collections::HashSet<String>,
+        }
+        let parameters = self.code_object(code).parameters;
+        let bindings: ClassBindings = serde_json::from_str(self.str_value(parameters)?)
+            .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_namespace = self.enum_namespace(&bases);
@@ -2882,6 +2890,7 @@ impl Context {
             unreachable!()
         };
         body_scope.class_body = Some(Vec::new());
+        body_scope.closure.nonlocals = bindings.scope_nonlocals;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         let mut globals = parent;
@@ -2899,12 +2908,19 @@ impl Context {
             self.bind(scope, "__qualname__", qualname);
         }
         let annotations = self.dict(Vec::new());
-        self.bind(scope, "__annotations__", annotations);
+        self.bind_local(scope, "__annotations__", annotations);
         self.execute(code, scope, FrameOwner::Function(body))?;
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            frame.closure.nonlocals.clear();
+        }
+        if self.scope_name(scope, "__qualname__").is_none() {
+            let qualname = self.text(&name);
+            self.bind_local(scope, "__qualname__", qualname);
+        }
         if self.scope_name(scope, "__module__").is_none() {
             let namespace = self.module_globals(parent);
             if let Some(name) = self.dict_named_item(namespace, "__name__") {
-                self.bind(scope, "__module__", name);
+                self.bind_local(scope, "__module__", name);
             }
         }
         // Inheriting a protocol creates a concrete class unless Protocol is a direct base again.
