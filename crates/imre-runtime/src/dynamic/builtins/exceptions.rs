@@ -35,9 +35,13 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
             }
         }
     }
+    let import = ctx.builtin("ImportError");
     let mut error = ctx.exception(&name, args);
     // StopIteration.__new__ retains the arguments; only its initializer sets value.
     error.set_stop_value(NONE);
+    if ctx.subclass(class, import) {
+        error.tracing().import_message = Some(NONE);
+    }
     if matches!(ctx.heap.get(class), Value::Class { .. }) {
         error.class = Some(class);
     }
@@ -67,9 +71,12 @@ pub(super) fn initialize(
         unreachable!()
     };
     let kind = error.kind.clone();
-    if !kwargs.is_empty() {
+    if owner != "ImportError" && !kwargs.is_empty() {
         return Err(type_error(format!("{kind}() takes no keyword arguments")));
     }
+    // Import failures created by the loader can still have a lazy message.
+    // BaseException.__init__ replaces only the args, even if msg was never read.
+    let _ = ctx.import_error_message(object, None);
     let initialized = ctx.exception(&kind, args);
     let Value::Raised(error) = ctx.heap.get_mut(object) else {
         unreachable!()
@@ -79,5 +86,39 @@ pub(super) fn initialize(
     }
     error.args = initialized.args;
     error.message = initialized.message;
+    if owner == "ImportError" {
+        initialize_import(error, args, kwargs)?;
+    }
     Ok(NONE)
+}
+
+/// Set ImportError's independent message and keyword fields after args is replaced.
+pub(super) fn initialize_import(
+    error: &mut Error,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<()> {
+    if kwargs.len() > IMPORT_KEYWORDS.len() {
+        return Err(type_error(format!(
+            "ImportError() takes at most 3 keyword arguments ({} given)",
+            kwargs.len()
+        )));
+    }
+    let mut names = [NONE; IMPORT_KEYWORDS.len()];
+    for (key, value) in kwargs {
+        let Some(index) = IMPORT_KEYWORDS.iter().position(|&name| name == key) else {
+            return Err(type_error(format!(
+                "ImportError() got an unexpected keyword argument '{key}'"
+            )));
+        };
+        names[index] = *value;
+    }
+    error.import = None;
+    let trace = error.tracing();
+    trace.import_message = Some(match args {
+        [one] => *one,
+        _ => NONE,
+    });
+    trace.import_names = (!kwargs.is_empty()).then_some(names);
+    Ok(())
 }

@@ -148,6 +148,17 @@ pub(super) fn is_exception(name: &str) -> bool {
     exception_kind(name).is_some()
 }
 
+pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
+
+/// Return the initializer inherited from the built-in exception class.
+pub(super) fn exception_initializer(kind: &str) -> &'static str {
+    match kind {
+        "StopIteration" => "StopIteration.__init__",
+        "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
+        _ => "BaseException.__init__",
+    }
+}
+
 /// Return the exception that declares the inherited CPython allocation slot.
 pub(super) fn exception_new_owner(name: &str) -> &str {
     match name {
@@ -710,7 +721,9 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration")) = name.strip_suffix(".__init__") {
+    if let Some(owner @ ("BaseException" | "StopIteration" | "ImportError")) =
+        name.strip_suffix(".__init__")
+    {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
     if name == "object.__init__" {
@@ -1252,6 +1265,11 @@ pub(super) fn call(
             })
         }
         "function" => ctx.construct_function(args, kwargs),
+        "ImportError" | "ModuleNotFoundError" => {
+            let mut error = ctx.exception(name, args);
+            exceptions::initialize_import(&mut error, args, kwargs)?;
+            Ok(ctx.alloc(Value::Raised(error)))
+        }
         name if is_exception(name) => {
             positional(name, kwargs)?;
             let error = ctx.exception(name, args);

@@ -289,10 +289,10 @@ impl Context {
                 if b != NONE {
                     let conv = self.str_value(b)?;
                     let s = match conv {
-                        "r" => self.repr(a),
-                        "s" => self.display(a),
+                        "r" => self.checked_format(a, true)?,
+                        "s" => self.checked_format(a, false)?,
                         "a" => self
-                            .repr(a)
+                            .checked_format(a, true)?
                             .chars()
                             .flat_map(|c| {
                                 if c.is_ascii() {
@@ -516,8 +516,23 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
                 1
             }
         },
-        Err(e) => {
-            eprintln!("{e}");
+        Err(mut error) => {
+            let current = error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.instance)
+                .and_then(|id| {
+                    if let Value::Raised(saved) = ctx.heap.get(id) {
+                        Some(saved)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(&error);
+            if current.args.is_some() {
+                error.message = ctx.exception_message(current);
+            }
+            eprintln!("{error}");
             1
         }
     }

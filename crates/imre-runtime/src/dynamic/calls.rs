@@ -32,10 +32,10 @@ impl Context {
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
                     .copied(),
-                "__init__" if kind == "StopIteration" => {
-                    self.builtins.get("StopIteration.__init__").copied()
-                }
-                "__init__" => self.builtins.get("BaseException.__init__").copied(),
+                "__init__" => self
+                    .builtins
+                    .get(builtins::exception_initializer(kind))
+                    .copied(),
                 _ => None,
             },
             Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
@@ -359,6 +359,7 @@ impl Context {
                             | "object.__delattr__"
                             | "object.__init__"
                             | "BaseException.__init__"
+                            | "ImportError.__init__"
                             | "StopIteration.__init__"
                             | "int.to_bytes"
                             | "list.index"
@@ -831,11 +832,65 @@ impl Context {
 
     /// Includes runtime-loaded subclasses of the named builtin exception.
     pub(super) fn is_builtin_error(&self, error: &Error, kind: &str) -> bool {
-        (error.class.is_none() && error.kind == kind)
+        (error.class.is_none()
+            && builtins::exception_subclass(&error.kind, kind).unwrap_or(error.kind == kind))
             || self
                 .builtins
                 .get(kind)
                 .is_some_and(|&base| self.raised_error_matches(error, base))
+    }
+
+    /// Materialize native exception arguments before their backing fields can change.
+    fn exception_argument_tuple(&mut self, obj: Id, error: Error) -> Id {
+        if let Some(args) = error.args {
+            return args;
+        }
+        let fields = if let Some(os) = error.os_args {
+            vec![self.int(os.errno), self.text(os.description)]
+        } else if error.message.is_empty() {
+            Vec::new()
+        } else {
+            vec![
+                self.import_error_message(obj, None)
+                    .unwrap_or_else(|| self.text(error.message)),
+            ]
+        };
+        let tuple = self.alloc(Value::Tuple(fields));
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.args = Some(tuple);
+        tuple
+    }
+
+    /// Preserve ImportError's original message when its arguments are replaced.
+    pub(super) fn import_error_message(&mut self, obj: Id, replacement: Option<Id>) -> Option<Id> {
+        let Value::Raised(error) = self.heap.get(obj) else {
+            return None;
+        };
+        if !self.is_builtin_error(error, "ImportError") {
+            return None;
+        }
+        let message = if let Some(message) = replacement {
+            if error.args.is_none() {
+                self.exception_argument_tuple(obj, error.clone());
+            }
+            message
+        } else {
+            if let Some(message) = error.trace.as_ref().and_then(|trace| trace.import_message) {
+                return Some(message);
+            }
+            match self.exception_arguments(error) {
+                Some([one]) => *one,
+                Some(_) => NONE,
+                None => self.text(error.message.clone()),
+            }
+        };
+        let Value::Raised(error) = self.heap.get_mut(obj) else {
+            unreachable!()
+        };
+        error.tracing().import_message = Some(message);
+        Some(message)
     }
 
     fn attribute_hook(
@@ -917,8 +972,18 @@ impl Context {
         {
             return Ok(error.stop_value());
         }
+        if matches!(name, "__new__" | "__init__") && matches!(self.heap.get(obj), Value::Raised(_))
+        {
+            let class = self.exact_type(obj)?;
+            return self.instance_attribute(obj, class, None, name);
+        }
         if name == "__class__" {
             return self.exact_type(obj);
+        }
+        if name == "msg"
+            && let Some(message) = self.import_error_message(obj, None)
+        {
+            return Ok(message);
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
@@ -1254,13 +1319,9 @@ impl Context {
             Value::Raised(Error {
                 os_args: Some(args),
                 ..
-            }) => match name {
+            }) if name != "args" => match name {
                 "errno" => return Ok(self.int(args.errno)),
                 "strerror" => return Ok(self.text(args.description)),
-                "args" => {
-                    let fields = vec![self.int(args.errno), self.text(args.description)];
-                    return Ok(self.alloc(Value::Tuple(fields)));
-                }
                 "filename" | "filename2" => {
                     if let Some([first, second]) = args.text_paths {
                         let path = if name == "filename" { first } else { second };
@@ -1270,18 +1331,17 @@ impl Context {
                 _ => {}
             },
             Value::Raised(error)
-                if matches!(error.kind.as_str(), "ImportError" | "ModuleNotFoundError")
-                    && matches!(name, "msg" | "name" | "path" | "name_from") =>
+                if let Some(index) = builtins::IMPORT_KEYWORDS
+                    .iter()
+                    .position(|&key| key == name)
+                    && self.is_builtin_error(&error, "ImportError") =>
             {
-                if name == "msg" {
-                    return Ok(match error.args.as_deref() {
-                        Some([one]) => *one,
-                        Some(_) => NONE,
-                        None => self.text(error.message),
-                    });
-                }
                 let Some(fields) = error.import else {
-                    return Ok(NONE);
+                    return Ok(error
+                        .trace
+                        .as_ref()
+                        .and_then(|trace| trace.import_names)
+                        .map_or(NONE, |names| names[index]));
                 };
                 let value = match name {
                     "name" => fields.name.as_deref(),
@@ -1291,14 +1351,7 @@ impl Context {
                 return Ok(value.map_or(NONE, |value| self.text(value)));
             }
             Value::Raised(error) if name == "args" => {
-                let args = error.args.unwrap_or_else(|| {
-                    if error.message.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![self.text(error.message)]
-                    }
-                });
-                return Ok(self.alloc(Value::Tuple(args)));
+                return Ok(self.exception_argument_tuple(obj, error));
             }
             Value::Struct { format, layout } => match name {
                 "format" => return Ok(self.text(format)),
@@ -1660,6 +1713,12 @@ impl Context {
             error.set_stop_value(NONE);
             return Ok(());
         }
+        if name == "msg" && self.import_error_message(obj, Some(NONE)).is_some() {
+            return Ok(());
+        }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            return Err(Error::new("TypeError", "args may not be deleted"));
+        }
         if name == "__class__" && member.is_none() {
             return Err(Error::new("TypeError", "can't delete __class__ attribute"));
         }
@@ -1993,6 +2052,29 @@ impl Context {
                 _ => {}
             }
         }
+        if name == "msg" && self.import_error_message(obj, Some(value)).is_some() {
+            return Ok(());
+        }
+        if name == "args" && matches!(self.heap.get(obj), Value::Raised(_)) {
+            let tuple = if matches!(self.heap.get(value), Value::Tuple(_)) {
+                value
+            } else {
+                let iter = self.iterator(value)?;
+                self.heap.keep(iter);
+                let mut items = Vec::new();
+                while let Some(item) = self.next_item(iter)? {
+                    self.heap.keep(item);
+                    items.push(item);
+                }
+                self.alloc(Value::Tuple(items))
+            };
+            let _ = self.import_error_message(obj, None);
+            let Value::Raised(error) = self.heap.get_mut(obj) else {
+                unreachable!()
+            };
+            error.args = Some(tuple);
+            return Ok(());
+        }
         if let Value::Raised(error) = self.heap.get(obj)
             && !self.native_exception_descriptor(error, name)
         {
@@ -2199,7 +2281,9 @@ impl Context {
                     || builtins::constructor_owner(&name).is_some()
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__" | "StopIteration.__init__"
+                        "BaseException.__init__"
+                            | "ImportError.__init__"
+                            | "StopIteration.__init__"
                     )
                     || !name.contains('.')
                     || matches!(
