@@ -361,6 +361,20 @@ pub(super) fn resolve_bases(ctx: &mut Context, bases: Id) -> Result<(Option<Id>,
     Ok((original, resolved))
 }
 
+/// Tuple membership and index both try identity before Python equality.
+fn base_position(ctx: &mut Context, bases: &[Id], target: Id) -> Result<Option<usize>> {
+    for (i, &base) in bases.iter().enumerate() {
+        if base == target {
+            return Ok(Some(i));
+        }
+        let equal = ctx.binary("==", base, target)?;
+        if ctx.truth(equal)? {
+            return Ok(Some(i));
+        }
+    }
+    Ok(None)
+}
+
 fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::TypeVar(_)) {
         return Err(Error::new(
@@ -372,36 +386,13 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
         let callable = named_class(ctx, "collections.abc", "Callable");
-        let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
-        let mut has_callable = false;
-        for &base in &bases {
-            if base == callable {
-                has_callable = true;
-                break;
-            }
-            let equal = ctx.binary("==", base, callable)?;
-            if ctx.truth(equal)? {
-                has_callable = true;
-                break;
-            }
-        }
-        if !has_callable {
+        if base_position(ctx, &bases, callable)?.is_none() {
             result.push(callable);
         }
-        let mut i = None;
-        for (index, &base) in bases.iter().enumerate() {
-            if base == id {
-                i = Some(index);
-                break;
-            }
-            let equal = ctx.binary("==", base, id)?;
-            if ctx.truth(equal)? {
-                i = Some(index);
-                break;
-            }
-        }
-        let i = i.ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
+        let i = base_position(ctx, &bases, id)?
+            .ok_or_else(|| Error::new("ValueError", "tuple.index(x): x not in tuple"))?;
+        let generic = named_class(ctx, "typing", "Generic");
         let mut later_generic = false;
         for &base in &bases[i + 1..] {
             if matches!(ctx.heap.get(base), Value::Native(name) if name == "typing.Callable")

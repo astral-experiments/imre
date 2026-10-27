@@ -163,6 +163,22 @@ adds_generic = AddsGeneric()
 print(t.Callable.__mro_entries__((t.Callable, adds_generic)) == (cabc.Callable,))
 
 
+class EqualToOrigin:
+    def __eq__(self, other):
+        return other is cabc.Callable
+
+
+assert t.Callable.__mro_entries__((EqualToOrigin(), t.Callable)) == (t.Generic,)
+
+
+class EqualToAlias:
+    def __eq__(self, other):
+        return other is t.Callable
+
+
+assert t.Callable.__mro_entries__((EqualToAlias(),)) == (cabc.Callable, t.Generic)
+
+
 class CallableWithHook(t.Callable, adds_generic):
     pass
 
