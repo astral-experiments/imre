@@ -185,6 +185,15 @@ def current():
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
     groups["visits"].append(1)
+    class WithFactory(defaultdict):
+        pass
+
+    derived = WithFactory(list)
+    assert derived.default_factory is list
+    derived["first"].append(2)
+    assert derived["first"] == [2]
+    assert WithFactory().default_factory is None
+
     plain_copy = dict.copy(groups)
     other = groups.copy()
     other["visits"].append(2)

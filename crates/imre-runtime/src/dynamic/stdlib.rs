@@ -654,6 +654,41 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "collections.defaultdict.__init__" {
+        let Some((&object, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__init__' of 'collections.defaultdict' object needs an argument",
+            ));
+        };
+        if ctx.defaultdict_factory(object).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__init__' requires a 'collections.defaultdict' object but received a '{}'",
+                    ctx.type_name(object)
+                ),
+            ));
+        }
+        let factory = args.first().copied().unwrap_or(NONE);
+        if factory != NONE && !ctx.callable(factory) {
+            return Err(Error::new(
+                "TypeError",
+                "first argument must be callable or None",
+            ));
+        }
+        ctx.replace_defaultdict_factory(object, factory);
+        let entries = args.get(1..).unwrap_or_default();
+        if entries.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("dict expected at most 1 argument, got {}", entries.len()),
+            ));
+        }
+        let mut values = vec![object];
+        values.extend_from_slice(entries);
+        return builtins::call(ctx, "dict.__init__", &values, kwargs);
+    }
     if matches!(name, "sys.intern" | "sys._is_interned") {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1399,20 +1434,22 @@ pub(super) fn call(
         }),
         "collections.defaultdict.copy" | "collections.defaultdict.__copy__" => {
             let receiver = argument(args, 0)?;
-            let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "defaultdict.copy requires a defaultdict",
-                ));
-            };
-            ctx.alloc(source.clone())
+            if let source @ Value::DefaultDict { .. } = ctx.heap.get(receiver) {
+                ctx.alloc(source.clone())
+            } else {
+                let factory = ctx.defaultdict_factory(receiver).ok_or_else(|| {
+                    Error::new("TypeError", "defaultdict.copy requires a defaultdict")
+                })?;
+                let class = ctx.exact_type(receiver)?;
+                ctx.call(class, vec![factory, receiver], Vec::new())?
+            }
         }
         "collections.defaultdict.__missing__" => {
             ctx.defaultdict_missing(argument(args, 0)?, argument(args, 1)?)?
         }
         "collections.defaultdict.__reduce__" => {
             let receiver = argument(args, 0)?;
-            let Value::DefaultDict { factory, .. } = *ctx.heap.get(receiver) else {
+            let Some(factory) = ctx.defaultdict_factory(receiver) else {
                 return Err(Error::new(
                     "TypeError",
                     "defaultdict.__reduce__ requires a defaultdict",
