@@ -6,6 +6,12 @@ use crate::shared::{Shared, Weak};
 pub(crate) type StrOwner = Shared<Str>;
 pub(crate) type WeakStr = Weak<Str>;
 
+impl std::borrow::Borrow<str> for StrOwner {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
