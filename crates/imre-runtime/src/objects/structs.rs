@@ -313,7 +313,7 @@ impl Rows {
                 out.len = len;
             }
         }
-        Ok(Words::from_rows(out))
+        Words::try_from_rows(out)
     }
 
     pub(super) fn repeat(&self, count: usize) -> Result<Words> {
@@ -337,7 +337,7 @@ impl Rows {
                 out.len = len;
             }
         }
-        Ok(Words::from_rows(out))
+        Words::try_from_rows(out)
     }
 
     /// # Safety

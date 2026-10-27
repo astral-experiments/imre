@@ -15,6 +15,8 @@ use super::{Bytes, Int, List, Object, Str, deferred_diff::Deferred, fail, record
 
 pub(super) const NULLABLE: u32 = 256;
 
+type RowOwner = allocator_api2::boxed::Box<super::structs::Rows>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub(super) struct WordKind(u16);
@@ -251,9 +253,19 @@ impl Words {
     }
 
     pub(super) fn from_rows(rows: super::structs::Rows) -> Self {
+        Self::with_rows(RowOwner::new(rows))
+    }
+
+    pub(super) fn try_from_rows(rows: super::structs::Rows) -> super::exceptions::Result<Self> {
+        RowOwner::try_new(rows)
+            .map(Self::with_rows)
+            .map_err(|_| super::Error::memory_error())
+    }
+
+    fn with_rows(rows: RowOwner) -> Self {
         let mut words = Self::new(6);
         words.kind = WordKind::STRUCT_ROWS;
-        words.values.push(Box::into_raw(Box::new(rows)) as usize);
+        words.values.push(RowOwner::into_raw(rows) as usize);
         words.update_header();
         words
     }
@@ -505,7 +517,7 @@ impl Drop for Words {
     fn drop(&mut self) {
         if self.kind == WordKind::STRUCT_ROWS {
             // SAFETY: the sentinel transfers the unique Rows allocation back to Box.
-            drop(unsafe { Box::from_raw(self.values[0] as *mut super::structs::Rows) });
+            drop(unsafe { RowOwner::from_raw(self.values[0] as *mut super::structs::Rows) });
             return;
         }
         if self.kind == WordKind::DEFERRED {
