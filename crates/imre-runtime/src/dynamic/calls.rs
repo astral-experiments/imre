@@ -7,12 +7,21 @@ pub(super) enum MappingOperation {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        self.find_in_mro(class, |base| self.own_class_attr(base, name))
+    }
+
+    /// Visit the class and its bases in Python's method resolution order.
+    pub(super) fn find_in_mro<T>(
+        &self,
+        class: Id,
+        mut lookup: impl FnMut(Id) -> Option<T>,
+    ) -> Option<T> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return self.own_class_attr(class, name);
+            return lookup(class);
         };
-        std::iter::once(&class)
-            .chain(ancestors)
-            .find_map(|&base| self.own_class_attr(base, name))
+        std::iter::once(class)
+            .chain(ancestors.iter().copied())
+            .find_map(lookup)
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
