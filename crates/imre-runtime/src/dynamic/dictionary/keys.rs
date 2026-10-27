@@ -312,6 +312,12 @@ impl Context {
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
         let key = self.scalar_value(key);
+        if let Value::GenericAlias(alias) = self.heap.get(key) {
+            let (origin, args) = (alias.origin, alias.args);
+            return Ok(normalized(
+                data_hash(&origin.to_ne_bytes()) ^ self.dictionary_hash(args)?,
+            ));
+        }
         if let Some(&hash) = self.heap.immutable_hashes.get(&key) {
             return Ok(hash);
         }
