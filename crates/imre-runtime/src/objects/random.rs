@@ -257,7 +257,12 @@ pub unsafe extern "C" fn imre_random_choice_index(length: usize) -> usize {
 pub unsafe extern "C" fn imre_secrets_choice_index(length: usize) -> usize {
     // SAFETY: the compiler roots the result of len().
     let length = unsafe { Int::borrow(length) };
-    integer_result(sequence_index(length.big().magnitude(), true).map(BigInt::from))
+    integer_result(secrets_choice_index(&length))
+}
+
+/// Draw a secure index for either representation of a Python sequence.
+pub(crate) fn secrets_choice_index(length: &Int) -> Result<BigInt> {
+    sequence_index(length.big().magnitude(), true).map(BigInt::from)
 }
 
 /// Select from an arithmetic progression without materializing it. A range used

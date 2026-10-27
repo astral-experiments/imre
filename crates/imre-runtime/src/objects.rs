@@ -73,7 +73,7 @@ pub(crate) use paths::{directory_entries, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
 mod random;
-pub(crate) use random::imre_random_float;
+pub(crate) use random::{imre_random_float, secrets_choice_index};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;

@@ -36,6 +36,7 @@ mod pkgutil;
 mod posixpath;
 pub(super) mod readiness;
 pub(super) mod regex;
+mod secrets;
 mod socket;
 mod structure;
 mod traceback;
@@ -88,6 +89,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "tempfile"
             | "time"
             | "random"
+            | "secrets"
             | "hashlib"
             | "hmac"
             | "re"
@@ -351,6 +353,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
@@ -611,6 +614,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
+    if name == "secrets.choice" {
+        return secrets::choice(ctx, args, kwargs);
     }
     if name == super::thread_lock::CLASS {
         return super::thread_lock::construct(ctx, args, kwargs);
