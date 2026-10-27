@@ -102,6 +102,19 @@ def exercise(path):
         stream.read(1 << 100)
     except OverflowError:
         print("closed read validates the size")
+    for operation in (
+        lambda: stream.read(0),
+        lambda: stream.readline(0),
+        lambda: next(stream, b"fallback"),
+        lambda: stream.readinto(bytearray(1)),
+        lambda: stream.seek(0),
+        lambda: stream.__enter__(),
+        lambda: stream.tell(),
+    ):
+        try:
+            operation()
+        except ValueError as error:
+            print(error.args)
     raw = RawIOBase()
     try:
         raw.readinto(b"")
