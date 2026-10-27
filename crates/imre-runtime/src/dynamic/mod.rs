@@ -71,6 +71,8 @@ pub(crate) struct Context {
     bytearray_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
+    // Container ancestors visible to a reentrant Python __repr__.
+    repr_ancestors: Vec<Id>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,

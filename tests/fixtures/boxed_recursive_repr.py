@@ -19,3 +19,39 @@ def current():
     parent = {"list": cross}
     cross.append(parent)
     print(parent, cross)
+
+    class Word(str):
+        def __repr__(self):
+            return "<word>"
+
+    word = Word("text")
+    print(repr([word, (word,), {word: word}]), [word])
+
+    class Broken:
+        def __repr__(self):
+            raise LookupError("rendered")
+
+    try:
+        repr([Broken()])
+    except LookupError as exc:
+        print(exc.args)
+
+    class Key:
+        def __repr__(self):
+            del mapping[self]
+            return repr(mapping)
+
+    key = Key()
+    mapping = {key: "saved", "next": 2}
+    print(repr(mapping))
+
+    class Member:
+        def __hash__(self):
+            return 0
+
+        def __repr__(self):
+            group.add(4)
+            return "member"
+
+    group = {Member(), 1}
+    print(repr(group), len(group))
