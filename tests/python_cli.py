@@ -415,6 +415,7 @@ def report(text):
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_codecs.py",
+            "boxed_selector_wide_fds.py",
             "boxed_urlsplit.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
