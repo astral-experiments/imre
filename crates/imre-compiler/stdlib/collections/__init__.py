@@ -2,8 +2,10 @@
 
 import operator as _operator
 from _collections import _count_elements, _ordered_dict_equal, _ordered_dict_repr, _ordered_dict_view
-from _collections_abc import MutableMapping as _MutableMapping
+from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
+
+_MutableSequence.register(deque)
 
 
 def _elements(items):

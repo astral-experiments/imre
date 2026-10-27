@@ -1602,6 +1602,14 @@ impl Context {
             Value::Class { name, scope, .. } if self.scope_data(*scope).module == "typing" => {
                 format!("<class 'typing.{name}'>")
             }
+            Value::Class { name, scope, .. }
+                if matches!(
+                    self.scope_data(*scope).module.as_str(),
+                    "_collections_abc" | "collections.abc"
+                ) =>
+            {
+                format!("<class 'collections.abc.{name}'>")
+            }
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }

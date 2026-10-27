@@ -31,6 +31,8 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     let scope = ctx.scope("collections.abc", None);
     let module = ctx.text("collections.abc");
     ctx.bind(scope, "__module__", module);
+    let qualname = ctx.text(name);
+    ctx.bind(scope, "__qualname__", qualname);
     for &method in abstract_methods {
         let function = ctx.builtin(&format!("abc.abstract.{name}.{method}"));
         ctx.bind(scope, method, function);

@@ -59,6 +59,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "threading"
             | "_thread"
             | "abc"
+            | "array"
             | "_collections"
             | "codecs"
             | "types"

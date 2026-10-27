@@ -27,6 +27,14 @@ class DictChild(dict):
 
 
 def current():
+    from array import array
+    from collections import deque
+    from collections.abc import MutableSequence, Sequence
+
+    assert (array.__module__, array.__qualname__, repr(array)) == ("array", "array", "<class 'array.array'>")
+    assert issubclass(array, MutableSequence) and issubclass(array, Sequence)
+    assert not issubclass(array, MutableMapping) and not issubclass(MutableSequence, array)
+    assert isinstance(deque(), MutableSequence) and issubclass(memoryview, Sequence)
     print(MutableMapping.__bases__ == (Mapping,), Store.__bases__ == (MutableMapping,))
     print(Store.__orig_bases__[0].__origin__ is MutableMapping)
     for value in ({}, DictChild(), [("Host", "localhost")], Store()):

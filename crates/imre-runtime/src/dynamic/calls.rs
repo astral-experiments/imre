@@ -711,6 +711,7 @@ impl Context {
                             | "operator.attrgetter"
                             | "operator.itemgetter"
                             | "collections.defaultdict"
+                            | "array.array"
                             | "itertools.count"
                             | super::deque::CLASS
                             | super::deque::ITERATOR
@@ -1207,10 +1208,9 @@ impl Context {
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(class)
-                if matches!(
-                    class.as_str(),
-                    "traceback" | "frame" | "complex" | "float" | "enumerate"
-                ) && matches!(name, "__name__" | "__qualname__" | "__module__") =>
+                if ((builtins::is_builtin_type(&class) && !class.contains('.'))
+                    || matches!(class.as_str(), "traceback" | "frame"))
+                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
@@ -1409,14 +1409,18 @@ impl Context {
             Value::Native(class)
                 if matches!(
                     class.as_str(),
-                    super::deque::CLASS | super::deque::ITERATOR | super::deque::REVERSE_ITERATOR
+                    "array.array"
+                        | super::deque::CLASS
+                        | super::deque::ITERATOR
+                        | super::deque::REVERSE_ITERATOR
                 ) =>
             {
+                let (module, short) = class.rsplit_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => {
-                        return Ok(self.text(class.rsplit_once('.').unwrap().1));
+                        return Ok(self.text(short));
                     }
-                    "__module__" => return Ok(self.text("collections")),
+                    "__module__" => return Ok(self.text(module)),
                     _ if class == super::deque::CLASS && super::deque::METHODS.contains(&name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
