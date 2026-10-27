@@ -97,6 +97,16 @@ impl Index {
 }
 
 impl Entries {
+    /// Remove all pairs and invalidate lookups suspended in a key comparison.
+    pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
+        let old = std::mem::take(self);
+        if let Some(index) = old.index {
+            let size = (self.usable + 1).next_power_of_two();
+            self.index = Some(Index::new(Vec::new(), None, size, index.generation + 1));
+        }
+        old.values
+    }
+
     fn dense(&self, position: usize) -> Option<usize> {
         if let Some(positions) = &self.positions {
             positions.binary_search(&position).ok()

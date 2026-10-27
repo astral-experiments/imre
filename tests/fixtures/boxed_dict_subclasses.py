@@ -40,6 +40,19 @@ def current():
     print(groups.clear(), groups["key"], saved)
     print(defaultdict.clear is dict.clear, dict.clear(groups), len(groups))
 
+    class ClearOnCompare:
+        def __hash__(self):
+            return 1
+
+        def __eq__(self, other):
+            collision.clear()
+            return False
+
+    collision = {}
+    for _ in range(3):
+        collision[ClearOnCompare()] = 0
+    print(len(collision))
+
     class Data(dict):
         pass
 

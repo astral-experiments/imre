@@ -414,7 +414,7 @@ pub(super) fn method(
             else {
                 unreachable!("dictionary payload")
             };
-            for (key, value) in std::mem::take(entries) {
+            for (key, value) in entries.clear() {
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
             }
