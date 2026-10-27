@@ -118,3 +118,43 @@ def current():
     for _ in range(6000):
         nested = relay(nested)
     print(next(nested), list(nested))
+
+    def reraised():
+        yield "ready"
+        raise
+
+    stream = reraised()
+    print(next(stream))
+    try:
+        raise LookupError("original")
+    except LookupError as original:
+        try:
+            next(stream)
+        except LookupError as caught:
+            frames = []
+            traceback = caught.__traceback__
+            while traceback is not None:
+                frames.append(traceback.tb_frame.f_code.co_name)
+                traceback = traceback.tb_next
+            print(caught is original, frames, next(stream, "closed"))
+
+    stream = reraised()
+    next(stream)
+    try:
+        next(stream)
+    except RuntimeError as caught:
+        print(caught.args, caught.__traceback__.tb_next.tb_frame.f_code.co_name, next(stream, "closed"))
+
+    def explicit(error):
+        yield "ready"
+        raise error
+
+    try:
+        raise LookupError("explicit")
+    except LookupError as original:
+        stream = explicit(original)
+        next(stream)
+        try:
+            next(stream)
+        except LookupError as caught:
+            print(caught is original, caught.__traceback__.tb_next.tb_frame.f_code.co_name, next(stream, "closed"))

@@ -62,12 +62,21 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
+        "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",
             concat!(
                 include_str!("../stdlib/logging/stream.py"),
                 "\n",
                 include_str!("../stdlib/logging/boxed.py"),
+            ),
+        )),
+        "platform" => Some((
+            "platform.py",
+            concat!(
+                include_str!("../stdlib/platform/version.py"),
+                "\n",
+                include_str!("../stdlib/platform/metadata.py"),
             ),
         )),
         "mimetypes" if cfg!(unix) => Some((
@@ -3102,6 +3111,14 @@ impl<'a> Loader<'a> {
             "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
             "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "platform" => Some((
+                "platform.py",
+                concat!(
+                    include_str!("../stdlib/platform/version.py"),
+                    "\n",
+                    include_str!("../stdlib/platform/typed.py"),
+                ),
+            )),
             "mimetypes" if cfg!(unix) => {
                 Some(("mimetypes.py", include_str!("../stdlib/mimetypes.py")))
             }

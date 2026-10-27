@@ -44,13 +44,31 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            Builtin::SortDetach | Builtin::SortRestore | Builtin::ListExtendUnhinted => {
+            Builtin::SortDetach
+            | Builtin::SortRestore
+            | Builtin::ListExtendBuffer
+            | Builtin::ListExtendSnapshot
+            | Builtin::ListExtendUnhinted => {
                 let list = &args[0].value;
                 let kind = representation_kind(
                     self.module.types.element(list.ty).unwrap(),
                     &self.module.types,
                 );
-                if matches!(builtin, Builtin::ListExtendUnhinted) {
+                if matches!(builtin, Builtin::ListExtendBuffer) {
+                    Value {
+                        ty: list.ty,
+                        small_integer: false,
+                        operand: self.checked_instruction(format!(
+                            "call ptr @imre_list_extend_buffer(i32 {kind})"
+                        )),
+                    }
+                } else if matches!(builtin, Builtin::ListExtendSnapshot) {
+                    self.checked_line(format!(
+                        "call void @imre_list_extend_snapshot(ptr {}, i32 {kind}, ptr {})",
+                        list.operand, args[1].value.operand
+                    ));
+                    none()
+                } else if matches!(builtin, Builtin::ListExtendUnhinted) {
                     self.line(format!(
                         "call void @imre_list_extend_unhinted(ptr {}, i32 {kind})",
                         list.operand

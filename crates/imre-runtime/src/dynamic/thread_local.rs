@@ -51,12 +51,27 @@ impl Context {
         dict
     }
 
-    pub(super) fn local_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+    /// A string subclass may compare equal to the special dictionary name or raise.
+    fn is_local_dict_name(&mut self, name: &str, original: Option<Id>) -> Result<bool> {
+        let Some(key) = original.filter(|&key| !matches!(self.heap.get(key), Value::Str(_))) else {
+            return Ok(name == "__dict__");
+        };
+        let dict_name = self.text("__dict__");
+        let equal = self.binary("==", key, dict_name)?;
+        self.truth(equal)
+    }
+
+    pub(super) fn local_attribute(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
         let dict = self.local_dict(obj);
-        if name == "__dict__" {
+        if self.is_local_dict_name(name, original)? {
             return Ok(dict);
         }
-        let key = self.text(name);
+        let key = original.unwrap_or_else(|| self.text(name));
         match self.get_item(dict, key) {
             Err(error) if error.kind == "KeyError" && name == "__class__" => {
                 Ok(self.builtin(CLASS))
@@ -96,23 +111,44 @@ impl Context {
         &mut self,
         obj: Id,
         name: &str,
+        original: Option<Id>,
         value: Option<Id>,
     ) -> Result<()> {
-        if name == "__dict__" {
+        let dict = self.local_dict(obj);
+        if self.is_local_dict_name(name, original)? {
+            let key = original.unwrap_or_else(|| self.text(name));
+            let repr = if let Some(hook) = self.bound_slot(key, "__repr__")? {
+                let value = self.call(hook, Vec::new(), Vec::new())?;
+                self.str_value(value)
+                    .map_err(|_| {
+                        Error::new(
+                            "TypeError",
+                            format!(
+                                "__repr__ returned non-string (type {})",
+                                self.type_name(value)
+                            ),
+                        )
+                    })?
+                    .to_owned()
+            } else {
+                self.repr(self.scalar_value(key))
+            };
             return Err(Error::new(
                 "AttributeError",
-                "'_thread._local' object attribute '__dict__' is read-only",
+                format!("'_thread._local' object attribute {repr} is read-only"),
             ));
         }
         if name == "__class__" {
             return self.update_base_local_attribute(obj, name, value);
         }
-        let dict = self.local_dict(obj);
+        let key = original.unwrap_or_else(|| self.text(name));
         if let Some(value) = value {
-            let key = self.text(name);
             self.put_item(dict, key, value)
         } else {
-            self.delete_dict_attribute(obj, dict, name)
+            match self.delete_item(dict, key) {
+                Err(error) if error.kind == "KeyError" => Err(self.missing_attribute(obj, name)),
+                result => result,
+            }
         }
     }
 }

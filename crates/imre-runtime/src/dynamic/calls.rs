@@ -45,8 +45,9 @@ impl Context {
     pub(super) fn for_each_mapping_item(
         &mut self,
         input: Id,
+        target: Id,
         operation: MappingOperation,
-        mut visit: impl FnMut(&mut Self, Id, Id) -> Result<()>,
+        mut visit: impl FnMut(&mut Self, Id, Id, Option<i64>) -> Result<()>,
     ) -> Result<bool> {
         // dict.update probes for keys before choosing a merge or a sequence of pairs.
         // A later mapping lookup may return a different method or raise.
@@ -62,10 +63,29 @@ impl Context {
         }
         if self.slot(input, "__iter__").is_none_or(
             |slot| matches!(self.heap.get(slot), Value::Native(name) if name == "dict.__iter__"),
-        ) && let Some(entries) = self.dict_entries(input).map(<[_]>::to_vec)
+        ) && let Some(storage) = self.dict_storage(input)
         {
-            for (key, value) in entries {
-                visit(self, key, value)?;
+            if storage == target {
+                return Ok(true);
+            }
+            let used = self
+                .dict_entries(storage)
+                .expect("dictionary storage")
+                .len();
+            let mut position = 0;
+            while let Some((current, key, value, hash)) = self.dictionary_pair(storage, position) {
+                self.heap.keep(key);
+                self.heap.keep(value);
+                visit(self, key, value, hash)?;
+                if self
+                    .dict_entries(storage)
+                    .expect("dictionary storage")
+                    .len()
+                    != used
+                {
+                    return Err(Error::new("RuntimeError", "dict mutated during update"));
+                }
+                position = current + 1;
             }
             return Ok(true);
         }
@@ -104,7 +124,7 @@ impl Context {
         while let Some(key) = self.next_item(iterator)? {
             self.heap.keep(key);
             let value = self.get_item(input, key)?;
-            visit(self, key, value)?;
+            visit(self, key, value, None)?;
         }
         Ok(true)
     }
@@ -341,6 +361,7 @@ impl Context {
             | Value::Traceback { .. }
             | Value::PythonFrame { .. }
             | Value::Code(_)
+            | Value::Cell { .. }
             | Value::Generator { .. }
             | Value::Module { .. }
             | Value::ThreadLocal(_)
@@ -381,6 +402,7 @@ impl Context {
                             | "ellipsis"
                             | "float"
                             | "code"
+                            | "cell"
                             | "function"
                             | "module"
                             | "method"
@@ -610,21 +632,38 @@ impl Context {
                 .is_some_and(|&base| self.raised_error_matches(error, base))
     }
 
-    fn attribute_hook(&mut self, hook: Id, obj: Id, class: Id, name: &str) -> Result<Id> {
+    fn attribute_hook(
+        &mut self,
+        hook: Id,
+        obj: Id,
+        class: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
         let callable = self.bind_attribute(hook, obj, class)?;
-        let key = self.text(name);
+        let key = original.unwrap_or_else(|| self.text(name));
         self.call(callable, vec![key], Vec::new())
     }
 
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
+        self.lookup_named_attr(obj, name, None)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn lookup_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<Id> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.local_attribute(obj, name);
+            return self.local_attribute(obj, name, original);
         }
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return self.default_get_attr(obj, name);
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
-            self.attribute_hook(hook, obj, class, name)
+            self.attribute_hook(hook, obj, class, name, original)
         } else {
             self.default_get_attr(obj, name)
         };
@@ -633,7 +672,7 @@ impl Context {
                 let Some(hook) = self.class_attr(class, "__getattr__") else {
                     return Err(error);
                 };
-                self.attribute_hook(hook, obj, class, name)
+                self.attribute_hook(hook, obj, class, name, original)
             }
             result => result,
         }
@@ -710,8 +749,10 @@ impl Context {
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(class)
-                if matches!(class.as_str(), "traceback" | "frame" | "complex" | "float")
-                    && matches!(name, "__name__" | "__qualname__" | "__module__") =>
+                if matches!(
+                    class.as_str(),
+                    "traceback" | "frame" | "complex" | "float" | "enumerate"
+                ) && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(class)),
@@ -763,11 +804,45 @@ impl Context {
                 "co_name" => return Ok(code.name),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
+                "co_freevars" => {
+                    if !code.closure_supported && !code.module_definition {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "code lacks closure metadata",
+                        ));
+                    }
+                    let names = code.freevars.iter().map(|name| self.text(name)).collect();
+                    return Ok(self.alloc(Value::Tuple(names)));
+                }
                 _ => {}
             },
+            Value::Cell {
+                scope,
+                name: cell_name,
+            } if name == "cell_contents" => {
+                return self
+                    .scope_name(scope, &cell_name)
+                    .ok_or_else(|| Error::new("ValueError", "Cell is empty"));
+            }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
-            Value::Function { scope, fields, .. } => {
+            Value::Function {
+                scope,
+                fields,
+                closure,
+                code,
+                ..
+            } => {
+                if name == "__closure__" {
+                    let code = self.code_object(code);
+                    if !code.closure_supported && !code.module_definition {
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "code lacks closure metadata",
+                        ));
+                    }
+                    return Ok(closure);
+                }
                 if name == "__globals__" {
                     return Ok(self.module_globals(scope));
                 }
@@ -886,6 +961,9 @@ impl Context {
             }
             Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::BufferedRandom(file) if name == "closed" => {
+                return Ok(if file.borrow().closed() { TRUE } else { FALSE });
+            }
             Value::TextFile(file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }
@@ -1126,8 +1204,18 @@ impl Context {
         Err(self.missing_attribute(obj, name))
     }
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        self.delete_named_attr(obj, name, None)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn delete_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+    ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, None);
+            return self.update_local_attribute(obj, name, original, None);
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
@@ -1135,7 +1223,7 @@ impl Context {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         if let Some(hook) = self.bound_slot(obj, "__delattr__")? {
-            let name = self.text(name);
+            let name = original.unwrap_or_else(|| self.text(name));
             self.call(hook, vec![name], Vec::new())?;
             return Ok(());
         }
@@ -1157,6 +1245,16 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Value::Cell {
+            scope,
+            name: cell_name,
+        } = self.heap.get(obj).clone()
+            && name == "cell_contents"
+        {
+            let key = self.text(&cell_name);
+            self.remove_binding(scope, &cell_name, key)?;
+            return Ok(());
+        }
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self.update_base_local_attribute(obj, name, None);
         }
@@ -1306,8 +1404,19 @@ impl Context {
     }
 
     pub(super) fn set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        self.set_named_attr(obj, name, None, value)
+    }
+
+    /// Preserve a Python name object when an attribute builtin invokes a hook.
+    pub(super) fn set_named_attr(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+        value: Id,
+    ) -> Result<()> {
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
-            return self.update_local_attribute(obj, name, Some(value));
+            return self.update_local_attribute(obj, name, original, Some(value));
         }
         if matches!(self.heap.get(obj), Value::Slice(_))
             && matches!(name, "start" | "stop" | "step")
@@ -1315,7 +1424,7 @@ impl Context {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
         if let Some(hook) = self.bound_slot(obj, "__setattr__")? {
-            let name = self.text(name);
+            let name = original.unwrap_or_else(|| self.text(name));
             self.call(hook, vec![name, value], Vec::new())?;
             return Ok(());
         }
@@ -1352,6 +1461,15 @@ impl Context {
                 name,
                 Some(value),
             );
+        }
+        if let Value::Cell {
+            scope,
+            name: cell_name,
+        } = self.heap.get(obj).clone()
+            && name == "cell_contents"
+        {
+            self.bind(scope, &cell_name, value);
+            return Ok(());
         }
         if matches!(self.heap.get(obj), Value::Function { .. }) {
             return self.set_function_attr(obj, name, value);
@@ -1819,6 +1937,15 @@ impl Context {
                         .filter_map(|n| n.as_str().map(str::to_owned))
                         .collect()
                 };
+                let locals = names("scope_locals");
+                let nonlocals = names("scope_nonlocals");
+                let Value::Scope(frame) = self.heap.get_mut(local) else {
+                    unreachable!()
+                };
+                frame.closure.declared.extend(locals);
+                frame.closure.declared_complete =
+                    sig["scope_locals_complete"].as_bool().unwrap_or(false);
+                frame.closure.nonlocals.extend(nonlocals);
                 let posonly = names("posonly");
                 let pos: Vec<_> = posonly.iter().cloned().chain(names("positional")).collect();
                 let kwonly = names("kwonly");

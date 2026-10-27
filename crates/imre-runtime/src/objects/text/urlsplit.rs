@@ -424,36 +424,39 @@ pub unsafe extern "C" fn imre_url_transcode(
     );
 }
 
+/// CPython's initial `urllib.parse.uses_netloc` list, in public iteration order.
+pub(crate) const USES_NETLOC: &[&str] = &[
+    "",
+    "ftp",
+    "http",
+    "gopher",
+    "nntp",
+    "telnet",
+    "imap",
+    "wais",
+    "file",
+    "mms",
+    "https",
+    "shttp",
+    "snews",
+    "prospero",
+    "rtsp",
+    "rtsps",
+    "rtspu",
+    "rsync",
+    "svn",
+    "svn+ssh",
+    "sftp",
+    "nfs",
+    "git",
+    "git+ssh",
+    "ws",
+    "wss",
+    "itms-services",
+];
+
 fn uses_netloc(scheme: &str) -> bool {
-    matches!(
-        scheme,
-        "ftp"
-            | "http"
-            | "gopher"
-            | "nntp"
-            | "telnet"
-            | "imap"
-            | "wais"
-            | "file"
-            | "mms"
-            | "https"
-            | "shttp"
-            | "snews"
-            | "prospero"
-            | "rtsp"
-            | "rtsps"
-            | "rtspu"
-            | "rsync"
-            | "svn"
-            | "svn+ssh"
-            | "sftp"
-            | "nfs"
-            | "git"
-            | "git+ssh"
-            | "ws"
-            | "wss"
-            | "itms-services"
-    )
+    USES_NETLOC.contains(&scheme)
 }
 
 fn unsplit(
@@ -502,10 +505,12 @@ fn unsplit(
 }
 
 /// Recombine the five public split fields, omitting empty query and fragment delimiters.
-pub(crate) fn join_fields(fields: [&str; 5]) -> Result<String> {
+pub(crate) fn join_fields(fields: [&str; 5], scheme_uses_netloc: bool) -> Result<String> {
     let [scheme, netloc, path, query, fragment] = fields;
     let netloc = (!netloc.is_empty()
-        || (uses_netloc(scheme) && (path.is_empty() || path.starts_with('/'))))
+        || (scheme_uses_netloc
+            && !scheme.is_empty()
+            && (path.is_empty() || path.starts_with('/'))))
     .then_some(netloc);
     unsplit(
         scheme,
@@ -533,7 +538,7 @@ pub unsafe extern "C" fn imre_url_geturl(
                 // SAFETY: The source has five live same-layout fields throughout reconstruction.
                 *field = unsafe { decoded(*result.add(i), is_bytes)? };
             }
-            let text = join_fields(fields)?;
+            let text = join_fields(fields, uses_netloc(fields[0]))?;
             Ok(owned(&text, is_bytes)? as *const c_void)
         })(),
         std::ptr::null(),

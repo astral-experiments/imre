@@ -1,4 +1,11 @@
 def current():
+    print(f'{2.675:.2f}', f'{-0.0:+.0%}', f'{True: .1f}', f'{-3:.2%}')
+    print(f'{float("inf"):+f}', f'{float("nan"):.2%}')
+    try:
+        print(f'{1 << 2000:.1f}')
+    except OverflowError:
+        print('integer too large to format as float')
+
     assert callable(float) and type(float) is type
     assert float.__name__ == float.__qualname__ == "float" and float.__module__ == "builtins"
     namespace = {}

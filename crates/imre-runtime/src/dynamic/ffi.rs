@@ -10,6 +10,16 @@ fn flag(v: bool) -> Id {
 }
 
 impl Context {
+    /// Instantiate exception classes used by raise and its explicit cause.
+    fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        let base = self.builtin("BaseException");
+        if self.subclass(value, base) {
+            self.call(value, Vec::new(), Vec::new())
+        } else {
+            Ok(value)
+        }
+    }
+
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
             "lookup" => {
@@ -105,14 +115,15 @@ impl Context {
             "update" | "keywords" => {
                 let mapping = self.for_each_mapping_item(
                     b,
+                    a,
                     super::calls::MappingOperation::Unpack,
-                    |ctx, key, val| {
+                    |ctx, key, val, hash| {
                         if op == "keywords" {
                             ctx.str_value(key)
                                 .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
                             ctx.op("keyword", a, key, val)?;
                         } else {
-                            ctx.put_item(a, key, val)?;
+                            ctx.set_dictionary_key(a, key, val, hash, true)?;
                         }
                         Ok(())
                     },
@@ -240,11 +251,7 @@ impl Context {
                 } else {
                     self.str_value(c)?.to_owned()
                 };
-                let s = if spec.is_empty() {
-                    self.display(value)
-                } else {
-                    builtins::format_value(self, value, &spec)?
-                };
+                let s = builtins::format_value(self, value, &spec)?;
                 Ok(self.text(s))
             }
             "take_error" => {
@@ -284,12 +291,7 @@ impl Context {
                 if op == "reraise" && a == NONE {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
-                let exception =
-                    if matches!(self.heap.get(a), Value::Native(_) | Value::Class { .. }) {
-                        self.call(a, Vec::new(), Vec::new())?
-                    } else {
-                        a
-                    };
+                let exception = self.instantiate_exception_class(a)?;
                 let Value::Raised(e) = self.heap.get(exception) else {
                     return Err(Error::new(
                         "TypeError",
@@ -305,12 +307,7 @@ impl Context {
                         trace.context = Some(active);
                     }
                     if c == TRUE {
-                        let cause =
-                            if matches!(self.heap.get(b), Value::Native(_) | Value::Class { .. }) {
-                                self.call(b, Vec::new(), Vec::new())?
-                            } else {
-                                b
-                            };
+                        let cause = self.instantiate_exception_class(b)?;
                         if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
                             return Err(Error::new(
                                 "TypeError",
@@ -557,7 +554,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_with_metadata(
         line: 1,
         span: None,
     });
-    let code = ctx.prelinked_code(code, scope, name, parameters, location);
+    let code = ctx.prelinked_code(code, scope, name, parameters, (qualname, doc), location);
     ctx.define_function(
         code,
         scope,
@@ -627,6 +624,7 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
             scope,
             name,
             parameters,
+            (qualname, doc),
             value::Location {
                 file: file.into(),
                 line: definition.first_line,
@@ -655,19 +653,65 @@ impl Context {
         scope: Id,
         name: Id,
         parameters: Id,
+        metadata_pair: (Id, Id),
         location: value::Location,
     ) -> Id {
         let filename = self.text(location.file);
+        let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
+        let metadata: serde_json::Value = self
+            .str_value(parameters)
+            .ok()
+            .and_then(|v| serde_json::from_str(v).ok())
+            .unwrap_or_default();
+        let mut closure_supported = metadata["scope_complete"].as_bool().unwrap_or(false)
+            && !metadata["class_cell"].as_bool().unwrap_or(false);
+        let mut freevars = Vec::new();
+        if closure_supported {
+            for name in metadata["scope_reads"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+            {
+                let mut cursor = Some(scope);
+                while let Some(frame_id) = cursor {
+                    let frame = self.scope_data(frame_id);
+                    if frame.parent.is_none() {
+                        break;
+                    }
+                    if frame.class_body.is_none()
+                        && (frame.closure.declared.contains(name)
+                            || frame.closure.cells.contains_key(name))
+                    {
+                        freevars.push(name.to_owned());
+                        break;
+                    }
+                    if !frame.closure.declared_complete {
+                        closure_supported = false;
+                        freevars.clear();
+                        break;
+                    }
+                    cursor = frame.parent;
+                }
+                if !closure_supported {
+                    break;
+                }
+            }
+        }
         self.alloc(Value::Code(value::CodeObject {
             body: value::Body::Native(entry),
             name,
+            qualname,
+            doc,
             parameters,
             filename,
             first_line: location.line,
             module_definition,
             coroutine: false,
             nested: Vec::new(),
+            freevars,
+            closure_supported,
         }))
     }
 
@@ -743,8 +787,40 @@ impl Context {
         } else {
             self.dict(keyword)
         };
+        let names = self.code_object(code).freevars.clone();
+        let mut cells = Vec::new();
+        for name in names {
+            let mut cursor = scope;
+            loop {
+                let frame = self.scope_data(cursor);
+                if let Some(&cell) = frame.closure.cells.get(&name) {
+                    cells.push(cell);
+                    break;
+                }
+                if frame.class_body.is_none() && frame.closure.declared.contains(&name) {
+                    let cell = self.alloc(Value::Cell {
+                        scope: cursor,
+                        name: name.clone(),
+                    });
+                    self.heap.keep(cell);
+                    let Value::Scope(frame) = self.heap.get_mut(cursor) else {
+                        unreachable!()
+                    };
+                    frame.closure.cells.insert(name.clone(), cell);
+                    cells.push(cell);
+                    break;
+                }
+                cursor = frame.parent.expect("free variable has enclosing scope");
+            }
+        }
+        let closure = if cells.is_empty() {
+            NONE
+        } else {
+            self.alloc(Value::Tuple(cells))
+        };
         self.alloc(Value::Function {
             fields,
+            closure,
             code,
             scope,
             class_cell,

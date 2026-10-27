@@ -520,6 +520,73 @@ impl Checker<'_> {
         })
     }
 
+    /// Keep every converted item private until this exact-list extension can succeed.
+    fn extend_exact_list(
+        &mut self,
+        target: Expr,
+        source: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let extend = |target, snapshot| Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::ListExtendSnapshot, vec![target, snapshot]),
+        };
+        if target.ty == source.ty {
+            return Ok(extend(target, self.list_snapshot(source)));
+        }
+        let element = self.types.element(target.ty).unwrap();
+        let saved = self.hidden(target.ty);
+        let input = self.hidden(source.ty);
+        let buffer = self.hidden(target.ty);
+        let mut convert = vec![Statement::Assign(
+            buffer,
+            Expr {
+                ty: self.locals[saved],
+                kind: ExprKind::Builtin(Builtin::ListExtendBuffer, vec![self.local(saved)]),
+            },
+        )];
+        convert.extend(self.expand_items(
+            Iteration::Container {
+                iterable: self.local(input),
+                items: false,
+                start: None,
+            },
+            node,
+            |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Append,
+                        vec![checker.local(buffer), checker.coerce(value, element, node)?],
+                    ),
+                })])
+            },
+        )?);
+        convert.push(Statement::Expr(extend(
+            self.local(saved),
+            self.local(buffer),
+        )));
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(saved, target),
+                    Statement::Assign(input, source),
+                    Statement::If(
+                        self.test_truth(self.local(input), node)?,
+                        convert,
+                        Vec::new(),
+                    ),
+                ],
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: vec![buffer, input, saved],
+            },
+        })
+    }
+
     /// Roots the receiver before its argument, and snapshots list aliases so
     /// extending a list by itself consumes only the original elements.
     pub(super) fn extend_list(
@@ -530,17 +597,23 @@ impl Checker<'_> {
         append: Builtin,
     ) -> Result<Expr, String> {
         let element = self.types.element(receiver.ty).unwrap();
-        let destination = self.hidden(receiver.ty);
         let mut input = self.expansion_input(source, Some(element))?;
         if let Iteration::Container {
             iterable,
             items: false,
             start: None,
         } = &mut input
-            && iterable.ty == receiver.ty
         {
-            *iterable = self.list_snapshot(iterable.clone());
+            if matches!(append, Builtin::Append)
+                && matches!(iterable.ty, Type::ListInt | Type::List(_))
+            {
+                return self.extend_exact_list(receiver, iterable.clone(), node);
+            }
+            if iterable.ty == receiver.ty {
+                *iterable = self.list_snapshot(iterable.clone());
+            }
         }
+        let destination = self.hidden(receiver.ty);
         let mut body = vec![Statement::Assign(destination, receiver)];
         // CPython reserves space on acquiring an iterator with no length hint,
         // even when its first pull stops or raises. A reentrant sort observes it.
@@ -548,15 +621,28 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
         });
-        let before = match &input {
+        let before = match &mut input {
             _ if !matches!(append, Builtin::Append) => Vec::new(),
             Iteration::Prepared(prepared) if let Some(list) = prepared.eager_list_at(source) => {
                 let mut eager = Vec::new();
-                if self.locals[list.value] == self.locals[destination] {
-                    eager.push(Statement::Assign(
-                        list.value,
-                        self.list_snapshot(self.local(list.value)),
-                    ));
+                if matches!(self.locals[list.value], Type::ListInt | Type::List(_)) {
+                    eager.push(Statement::Expr(self.extend_exact_list(
+                        self.local(destination),
+                        self.local(list.value),
+                        node,
+                    )?));
+                    let next = std::mem::take(&mut prepared.next);
+                    prepared.next = vec![Statement::If(
+                        self.local(list.selected),
+                        vec![Statement::Assign(
+                            prepared.ready,
+                            Expr {
+                                ty: Type::Bool,
+                                kind: ExprKind::Bool(false),
+                            },
+                        )],
+                        next,
+                    )];
                 }
                 vec![Statement::If(
                     self.local(list.selected),

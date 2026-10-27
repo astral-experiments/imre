@@ -60,3 +60,16 @@ def current():
         assert str(exc) == "readonly attribute"
     else:
         raise AssertionError("deleted a complex component")
+
+
+class TypeOwner:
+    class Invalid:
+        __module__ = "custom.module"
+
+
+try:
+    complex(0, TypeOwner.Invalid())
+except TypeError as error:
+    assert error.args == ("complex() argument 'imag' must be a real number, not custom.module.TypeOwner.Invalid",)
+else:
+    raise AssertionError("expected a type error")

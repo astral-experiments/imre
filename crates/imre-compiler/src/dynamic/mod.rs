@@ -432,6 +432,16 @@ pub(crate) fn compile(
             }
         }
     }
+    // The object runtime also exposes platform to __import__(name) when the name
+    // is supplied at runtime. Its initializer only depends on native re and sys.
+    if !seen.contains("platform") {
+        let (name, source) = crate::modules::bundled_runtime_source("platform").unwrap();
+        sources.push((
+            "platform".into(),
+            Path::new(bundled_root).join(name),
+            source.into(),
+        ));
+    }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
     let config = serde_json::json!({

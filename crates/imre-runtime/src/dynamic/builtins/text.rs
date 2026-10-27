@@ -219,42 +219,54 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// Parse the sign and bounded precision of a fixed-point or percentage field.
+fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
+    let prefix = spec.strip_suffix(['f', '%'])?;
+    let (digits, sign) = match prefix.as_bytes().first() {
+        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+        Some(b'-') => (&prefix[1..], 0),
+        _ => (prefix, 0),
+    };
+    let precision = if digits.is_empty() {
+        6
+    } else {
+        let digits = digits.strip_prefix('.')?;
+        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()?
+    };
+    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+}
+
 /// Apply a scalar format specifier used by both f-strings and str.format.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: &str) -> Result<String> {
     if spec.is_empty() {
+        if let Value::Int(number) = ctx.heap.get(value) {
+            return Ok(crate::integer_text::decimal_string(number)?.into_string());
+        }
         return Ok(ctx.display(value));
     }
     if matches!(ctx.heap.get(value), Value::Str(_)) && spec == "s" {
         return Ok(ctx.display(value));
     }
+    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+        let number = match ctx.heap.get(ctx.scalar_value(value)) {
+            Value::Float(value) => *value,
+            Value::Int(value) => crate::floats::int_to_float(value)?,
+            Value::Bool(value) => f64::from(u8::from(*value)),
+            _ => return Err(type_error(format!("unsupported format string {spec:?}"))),
+        };
+        return Ok(
+            crate::objects::format_fixed_float(number, precision, percent, sign).into_string(),
+        );
+    }
     if matches!(ctx.heap.get(value), Value::Bool(_) | Value::Int(_)) {
-        let int = ctx.as_int(value)?;
-        let int = int.big();
-        let (sign, spec) = match spec.as_bytes().first() {
-            Some(b'+' | b' ' | b'-') => (&spec[..1], &spec[1..]),
-            _ => ("", spec),
-        };
-        let digits = match spec {
-            "" | "d" => int.magnitude().to_string(),
-            "b" => format!("{:b}", int.magnitude()),
-            "o" => format!("{:o}", int.magnitude()),
-            "x" => format!("{:x}", int.magnitude()),
-            "X" => format!("{:X}", int.magnitude()),
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("unsupported integer format {spec:?}"),
-                ));
-            }
-        };
-        let sign = if int.is_negative() {
-            "-"
-        } else if sign == "-" {
-            ""
-        } else {
-            sign
-        };
-        return Ok(format!("{sign}{digits}"));
+        return Ok(crate::objects::brace_integer_field(
+            spec,
+            ctx.as_int(value)?,
+            ctx.type_name(value),
+        )?);
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
 }
@@ -431,7 +443,8 @@ fn render_percent_integer(
         ctx.index_integer(value)
     };
     let integer = convert().map_err(|error| {
-        if error.kind == "TypeError" {
+        let ty = ctx.builtin("TypeError");
+        if ctx.raised_error_matches(&error, ty) {
             let required = if decimal {
                 "a real number"
             } else {

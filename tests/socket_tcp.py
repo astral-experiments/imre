@@ -1,5 +1,6 @@
 """Compare native AF_INET sockets with CPython, one loopback connection at a time."""
 import argparse
+import os
 from contextlib import contextmanager
 from pathlib import Path
 import select
@@ -144,6 +145,25 @@ def main():
                             "--opt-level", opt, "-o", binary], check=True, timeout=180)
             actual = buffered_resets([binary])
             assert actual == reset_output, (actual, reset_output)
+            if sys.platform.startswith("linux"):
+                refusal = Path(directory) / "reader-refusal.o"
+                subprocess.run([args.clang, "-c", boxed.parent / "reader_refuse.c", "-o", refusal],
+                               check=True, timeout=TIMEOUT)
+                subprocess.run([args.compiler.resolve(), "build", boxed.parent / "reader_allocation.py",
+                                "--runtime-imports", "--no-cache", "--runtime", args.runtime.resolve(),
+                                "--clang", args.clang, "--opt-level", opt, "-o", binary,
+                                "-C", f"link-arg={refusal}",
+                                "-C", "link-arg=-Wl,--wrap=accept4,--wrap=malloc,--wrap=calloc,--wrap=realloc"],
+                               check=True, timeout=180)
+                for target in (None, "buffer", "owner"):
+                    env = os.environ.copy()
+                    env.pop("IMRE_SOCKET_READER_FAIL", None)
+                    if target:
+                        env["IMRE_SOCKET_READER_FAIL"] = target
+                    result = subprocess.run([binary], env=env, capture_output=True, timeout=TIMEOUT)
+                    assert result.returncode == 0, (target, result.stderr)
+                    assert result.stdout == (b"caught\n" if target else b"opened\n")
+                    assert result.stderr == (b"refused socket reader allocation\n" if target else b"")
             print(f"O{opt}: socket observations matched CPython", flush=True)
 
 

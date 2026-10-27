@@ -29,6 +29,7 @@ import thread_case
 from display_case import CASE_ID as DISPLAY_ID, display_observer
 from import_snapshots import check_import_snapshots
 from filesystem_case import filesystem_method
+from fixture_failures import check_body_failures
 from metadata import metadata_observer
 import module_names_case
 
@@ -286,6 +287,7 @@ def main():
                 parser.error(f"canonical Linux report requires the recorded C.UTF-8 reference settings: {config}")
         executions, frame_control, stream_controls = select(toolchain, Path(tmp), source, test_sys)
         if args.evidence:
+            check_body_failures(toolchain, Path(tmp))
             preflight = blocked_methods(toolchain, Path(tmp), source, reference, executions, test_sys)
             preflight[SYS + "test_getframemodulename", 1]["evidence"]["module_name_control"] = frame_control
             jit_case.audit_active(load_suite(MODULE), executions, preflight)

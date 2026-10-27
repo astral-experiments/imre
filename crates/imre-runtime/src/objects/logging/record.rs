@@ -562,6 +562,11 @@ pub(crate) fn percent_integer_field(field: &str, value: Int) -> Result<String> {
     percent_value(field, &owned(value.into_raw(), 2)).map(|(text, _)| text)
 }
 
+/// Apply a brace-format field to a rooted native integer.
+pub(crate) fn brace_integer_field(spec: &str, value: Int, type_name: &str) -> Result<String> {
+    super::formatter::format_specifier(&owned(value.into_raw(), 2), spec, type_name)
+}
+
 fn unpack_object(value: OwnedWord) -> OwnedWord {
     if value.kind.raw() == 5 && value.word != 0 {
         // SAFETY: a kind-five owner roots this object; clone a boxed field inside the borrow.

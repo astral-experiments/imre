@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 83 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
+**At a glance:** 84 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 41 modules with recorded suites, 112 complete test executions pass natively at both optimization levels; 15,141 of 15,288 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -18,6 +18,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `annotationlib` | Yes | `get_annotations`, `Format` and `type_repr` for supported declarations. [Evidence](../tests/fixtures/callables/annotations.py) | — | — | — |
 | `argparse` | Yes | `ArgumentParser`, typed options, subcommands and generated help. [Evidence](../benchmarks/cpython_stdlib/full/argparse/README.md) | [0 / 1,893](../benchmarks/cpython_stdlib/full/argparse/) | 5 | 925 |
 | `array` | Yes | `array.array` class identity, metadata, and virtual registration with `Sequence` and `MutableSequence`. [Evidence](../tests/fixtures/containers/array_registration.py) | — | — | — |
+| `ast` | Yes | No API example recorded. | — | — | — |
 | `asyncio` | Yes | Run subprocess tasks, wait for a task group and handle cancellation. [Evidence](../tests/fixtures/processes/async_groups.py) | — | — | — |
 | `base64` | Yes | `b64encode`, `b64decode`, alternate alphabets and strict validation for immutable inputs, plus URL-safe encoding. [Evidence](../benchmarks/cpython_stdlib/full/base64/README.md) | [1 / 41](../benchmarks/cpython_stdlib/full/base64/) | 0 | 1 |
 | `binascii` | Yes | Standard Base64 encoding, strict or permissive decoding of bytes and ASCII text, and the module exception hierarchy. [Evidence](../benchmarks/cpython_stdlib/full/binascii/README.md) | [0 / 93](../benchmarks/cpython_stdlib/full/binascii/) | 2 | 4 |
@@ -58,7 +59,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 30 | 15 |
 | `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 136 | 63 |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
-| `platform` | Yes | Report the host operating system and machine with `system()` and `machine()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
+| `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
@@ -101,7 +102,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 
 | Module |
 | --- |
-| `ast` |
 | `atexit` |
 | `bdb` |
 | `bisect` |

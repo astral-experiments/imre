@@ -2,6 +2,15 @@
 import socket
 
 
+def reject_negative_read(file, length):
+    try:
+        file.read(length)
+    except ValueError as error:
+        assert error.args == ("read length must be non-negative or -1",)
+    else:
+        raise AssertionError("invalid read consumed buffered input")
+
+
 def run():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -19,12 +28,16 @@ def run():
             assert second.closed and not file.closed and peer.fileno() == descriptor
             client.sendall(b"Header\r\n\x00\xffENDtail")
             client.shutdown(socket.SHUT_WR)
-            assert file.readline(4) == b"Head" and file.readline() == b"er\r\n"
+            for length in (-2, -9):
+                reject_negative_read(file, length)
+            assert file.readline(4) == b"Head" and file.readline(None) == b"er\r\n"
             data = bytearray(5)
             alias = data
             assert file.readinto(data) == 5 and bytes(alias) == b"\x00\xffEND"
             assert file.read(4) == b"tail" and file.readinto(data) == 0
+            assert file.read(None) == b""
             file.close()
+            reject_negative_read(file, -2)
             assert file.closed and peer.fileno() == -1
             file.close()
         with socket.socket() as client:

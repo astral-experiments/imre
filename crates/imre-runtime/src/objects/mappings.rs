@@ -873,6 +873,17 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    pub(super) fn recursive_repr(&self) -> &'static str {
+        if self.order_version.is_some() {
+            return "...";
+        }
+        match self.missing {
+            Missing::List(_) => "defaultdict(<class 'list'>, {...})",
+            Missing::NoFactory => "defaultdict(None, {...})",
+            _ => "{...}",
+        }
+    }
+
     /// Render an unquoted attribute label and borrow its value from the rooted dictionary.
     pub(super) fn namespace_repr_entry(
         &self,
