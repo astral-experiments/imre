@@ -1,24 +1,29 @@
 use super::{Context, Error, Id, Result, Value};
 use std::ops::RangeInclusive;
 
-fn check_args(args: &[Id], kwargs: &[(String, Id)], arity: RangeInclusive<usize>) -> Result<()> {
+fn check_args(
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    arity: RangeInclusive<usize>,
+) -> Result<()> {
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            "attrgetter() takes no keyword arguments",
+            format!("{name}() takes no keyword arguments"),
         ));
     }
     if !arity.contains(&args.len()) {
         return Err(Error::new(
             "TypeError",
-            format!("attrgetter expected 1 argument, got {}", args.len()),
+            format!("{name} expected 1 argument, got {}", args.len()),
         ));
     }
     Ok(())
 }
 
 pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    check_args(args, kwargs, 1..=usize::MAX)?;
+    check_args("attrgetter", args, kwargs, 1..=usize::MAX)?;
     let paths = args
         .iter()
         .map(|&id| {
@@ -31,29 +36,110 @@ pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(ctx.alloc(Value::AttrGetter(paths)))
 }
 
+pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    check_args("itemgetter", args, kwargs, 1..=usize::MAX)?;
+    let keys = ctx.alloc(Value::Tuple(args.to_vec()));
+    Ok(ctx.alloc(Value::ItemGetter(keys)))
+}
+
+/// Reconstruct the getter with the original positional key objects, including a single tuple key.
+pub(super) fn reduce_itemgetter(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&getter, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method itemgetter.__reduce__() needs an argument",
+        ));
+    };
+    let Value::ItemGetter(keys) = *ctx.heap.get(getter) else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__reduce__' for 'operator.itemgetter' objects doesn't apply to a '{}' object",
+                ctx.type_name(getter)
+            ),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "itemgetter.__reduce__() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "itemgetter.__reduce__() takes no arguments ({} given)",
+                rest.len()
+            ),
+        ));
+    }
+    let args = match *ctx.itemgetter_keys(keys) {
+        [key] => ctx.alloc(Value::Tuple(vec![key])),
+        _ => keys,
+    };
+    let class = ctx.builtin("operator.itemgetter");
+    Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+}
+
 impl Context {
+    pub(in super::super) fn itemgetter_keys(&self, keys: Id) -> &[Id] {
+        let Value::Tuple(items) = self.heap.get(keys) else {
+            unreachable!()
+        };
+        items
+    }
     pub(in super::super) fn apply_attrgetter(
         &mut self,
         paths: &[Vec<String>],
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        check_args(args, kwargs, 1..=1)?;
-        let mut lookup = |path: &[String]| {
-            let value = path
+        self.apply_getter("attrgetter", paths.len(), args, kwargs, |ctx, obj, i| {
+            paths[i]
                 .iter()
-                .try_fold(args[0], |obj, name| self.lookup_attr(obj, name))?;
-            // A later descriptor may replace an earlier result and run the collector.
-            self.heap.keep(value);
-            Ok(value)
-        };
-        if let [path] = paths {
-            return lookup(path);
+                .try_fold(obj, |obj, name| ctx.lookup_attr(obj, name))
+        })
+    }
+
+    pub(in super::super) fn apply_itemgetter(
+        &mut self,
+        keys: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        self.apply_getter(
+            "itemgetter",
+            self.itemgetter_keys(keys).len(),
+            args,
+            kwargs,
+            |ctx, obj, i| ctx.get_item(obj, ctx.itemgetter_keys(keys)[i]),
+        )
+    }
+
+    /// Retain each result across later lookups, which can run arbitrary Python.
+    fn apply_getter(
+        &mut self,
+        name: &str,
+        count: usize,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+        lookup: impl Fn(&mut Self, Id, usize) -> Result<Id>,
+    ) -> Result<Id> {
+        check_args(name, args, kwargs, 1..=1)?;
+        if count == 1 {
+            return lookup(self, args[0], 0);
         }
-        let values = paths
-            .iter()
-            .map(|path| lookup(path))
-            .collect::<Result<_>>()?;
+        let mut values = Vec::with_capacity(count);
+        for i in 0..count {
+            let value = lookup(self, args[0], i)?;
+            self.heap.keep(value);
+            values.push(value);
+        }
         Ok(self.alloc(Value::Tuple(values)))
     }
 }

@@ -21,6 +21,13 @@ def current():
             return self
 
     report = Reporter()
+    saved = report.render
+    again = report.render
+    other = Reporter().render
+    explicit = types.MethodType(Reporter.render, report)
+    methods = {saved: 7}
+    print(saved is again, saved == again, saved != other)
+    print(methods[again], methods[explicit], methods.get(other))
     samples = (
         ("NoneType", None), ("EllipsisType", ...), ("NotImplementedType", NotImplemented),
         ("BuiltinFunctionType", len), ("FunctionType", Reporter.render),

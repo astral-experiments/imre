@@ -11,14 +11,12 @@ use unicode_normalization::{
 /// Unicode 17 additions affecting normalization were unassigned starters in Unicode 16.
 /// Keep each such scalar and normalize independently on either side of it.
 fn normalize<'a, I: Iterator<Item = char>>(
-    text: &'a Str,
+    text: &'a str,
     quick: IsNormalized,
     normalized: impl Fn(&'a str) -> I,
-) -> Result<*const Str> {
+) -> Result<Option<Str>> {
     if quick == IsNormalized::Yes {
-        // SAFETY: the caller retains this string throughout the operation.
-        unsafe { StrOwner::increment_strong_count(text) };
-        return Ok(text);
+        return Ok(None);
     }
     let mut result = Str::default();
     let mut start = 0;
@@ -34,7 +32,26 @@ fn normalize<'a, I: Iterator<Item = char>>(
         }
         start = end + marker.len();
     }
-    crate::checked_owned_str(result)
+    Ok(Some(result))
+}
+
+/// Return normalized text, or `None` when the original string can be reused.
+pub(crate) fn normalize_unicode(form: &str, text: &str) -> Result<Option<Str>> {
+    if text.is_empty() {
+        // CPython returns empty strings before validating the form.
+        return Ok(None);
+    }
+    // NUL has the same quick-check and combining properties as an unassigned scalar.
+    let chars = text
+        .chars()
+        .map(|ch| if newer_printable(ch) { '\0' } else { ch });
+    match form {
+        "NFC" => normalize(text, is_nfc_quick(chars), |s| s.nfc()),
+        "NFD" => normalize(text, is_nfd_quick(chars), |s| s.nfd()),
+        "NFKC" => normalize(text, is_nfkc_quick(chars), |s| s.nfkc()),
+        "NFKD" => normalize(text, is_nfkd_quick(chars), |s| s.nfkd()),
+        _ => Err(Error::new(Kind::ValueError, "invalid normalization form")),
+    }
 }
 
 /// # Safety
@@ -43,22 +60,14 @@ fn normalize<'a, I: Iterator<Item = char>>(
 pub unsafe extern "C" fn imre_unicode_normalize(form: *const Str, text: *const Str) -> *const Str {
     // SAFETY: both arguments are immutable, rooted strings.
     let (form, text) = unsafe { (&*form, &*text) };
-    if text.is_empty() {
-        // CPython returns empty strings before validating the form.
-        // SAFETY: the input stays rooted while the returned owner is acquired.
-        unsafe { StrOwner::increment_strong_count(text) };
-        return text;
-    }
-    // NUL has the same quick-check and combining properties as an unassigned scalar.
-    let chars = text
-        .chars()
-        .map(|ch| if newer_printable(ch) { '\0' } else { ch });
-    let result = match form.as_str() {
-        "NFC" => normalize(text, is_nfc_quick(chars), |s| s.nfc()),
-        "NFD" => normalize(text, is_nfd_quick(chars), |s| s.nfd()),
-        "NFKC" => normalize(text, is_nfkc_quick(chars), |s| s.nfkc()),
-        "NFKD" => normalize(text, is_nfkd_quick(chars), |s| s.nfkd()),
-        _ => Err(Error::new(Kind::ValueError, "invalid normalization form")),
-    };
+    let result = normalize_unicode(form.as_str(), text.as_str()).and_then(|normalized| {
+        if let Some(normalized) = normalized {
+            crate::checked_owned_str(normalized)
+        } else {
+            // SAFETY: acquire a return reference while the caller retains its original.
+            unsafe { StrOwner::increment_strong_count(text) };
+            Ok(text as *const Str)
+        }
+    });
     finish(result, std::ptr::null())
 }
