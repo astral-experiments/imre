@@ -21,18 +21,26 @@ def _compare_counts(left, right, compare):
     return True
 
 
-def _combine_counts(left, right, combine):
+def _combine_counts(left, right, op):
     if not isinstance(right, Counter):
         return NotImplemented
     result = Counter()
     for key, count in left.items():
-        value = combine(count, right[key])
+        other = right[key]
+        if op == "+":
+            value = count + other
+        elif op == "-":
+            value = count - other
+        elif op == "|":
+            value = other if count < other else count
+        else:
+            value = count if count < other else other
         if value > 0:
             result[key] = value
-    if combine is not min:
+    if op != "&":
         for key, count in right.items():
             if key not in left:
-                value = 0 - count if combine is _operator.sub else count
+                value = 0 - count if op == "-" else count
                 if value > 0:
                     result[key] = value
     return result
@@ -225,16 +233,16 @@ class Counter(dict):
         return Counter({key: 0 - count for key, count in self.items() if count < 0})
 
     def __add__(self, other):
-        return _combine_counts(self, other, _operator.add)
+        return _combine_counts(self, other, "+")
 
     def __sub__(self, other):
-        return _combine_counts(self, other, _operator.sub)
+        return _combine_counts(self, other, "-")
 
     def __or__(self, other):
-        return _combine_counts(self, other, max)
+        return _combine_counts(self, other, "|")
 
     def __and__(self, other):
-        return _combine_counts(self, other, min)
+        return _combine_counts(self, other, "&")
 
     def _keep_positive(self):
         for key in [key for key, count in self.items() if not count > 0]:
