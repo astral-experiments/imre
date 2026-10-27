@@ -9,6 +9,7 @@ mod dictionary;
 mod enums;
 mod ffi;
 mod function_fields;
+mod importlib;
 mod iterators;
 mod operators;
 mod property;
@@ -994,46 +995,7 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            let mut selected = None;
-            let mut namespace = None;
-            // A bundled package contributes its own __path__. A first-party
-            // regular package can never acquire one of its children implicitly.
-            let search = self.items(search)?;
-            let bundle = self.config["bundled_root"]
-                .as_str()
-                .map(std::path::Path::new);
-            let roots = search
-                .iter()
-                .filter_map(|&id| self.str_value(id).ok().map(std::path::Path::new));
-            for root in roots.chain(bundle.filter(|_| parent.is_none())) {
-                let root = if root.as_os_str().is_empty() {
-                    std::env::current_dir()
-                } else if bundle.is_some_and(|dir| root.starts_with(dir)) {
-                    Ok(root.to_owned())
-                } else {
-                    std::path::absolute(root)
-                };
-                let Ok(root) = root else { continue };
-                let stem = root.join(child);
-                let Some(choices) = self.sources.get(name) else {
-                    continue;
-                };
-                if let Some(module) = choices.iter().find(|m| {
-                    m.path == stem.join("__init__.py") || m.path == stem.with_extension("py")
-                }) {
-                    locations.clear();
-                    if module.path.ends_with("__init__.py") {
-                        locations.push(stem);
-                    }
-                    selected = Some((module.path.clone(), module.code));
-                    break;
-                }
-                if let Some(module) = choices.iter().find(|m| m.path == stem) {
-                    locations.push(stem);
-                    namespace.get_or_insert((module.path.clone(), module.code));
-                }
-            }
-            selected.or(namespace)
+            self.registered_source(name, child, search, parent.is_none(), &mut locations)?
         };
         if source.is_none() && !stdlib::is_module(name) {
             return Err(Error::new(
@@ -1101,6 +1063,10 @@ impl Context {
                 self.bind(scope, "path", path);
                 self.modules.insert("os.path".to_owned(), path);
             }
+            "_frozen_importlib" => {
+                let external = self.module("_frozen_importlib_external")?;
+                self.bind(scope, "_bootstrap_external", external);
+            }
             "io" => stdlib::io::install(self, scope),
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => {
@@ -1131,23 +1097,17 @@ impl Context {
             _ => {}
         }
         if let Some((path, entry)) = source {
-            let filename = self.text(path.to_string_lossy());
-            let name_id = self.text("<module>");
-            let code = self.alloc(Value::Code(value::CodeObject {
-                body: value::Body::Native(entry),
-                parameters: NONE,
-                nested: Vec::new(),
-                freevars: Vec::new(),
-                closure_supported: false,
-                name: name_id,
-                qualname: name_id,
-                doc: NONE,
-                filename,
-                first_line: 1,
-                module_definition: true,
-                coroutine: false,
-            }));
-            let result = self.execute(code, scope);
+            let result = if let Some(origin) = origin
+                && name != "__main__"
+                && !stdlib::is_module(name)
+                && self.sources.contains_key("importlib")
+                && path.is_absolute()
+            {
+                self.initialize_source(module, scope, name_id, origin)
+            } else {
+                let code = self.module_code(entry, &path);
+                self.execute(code, scope)
+            };
             let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
                 unreachable!()
             };

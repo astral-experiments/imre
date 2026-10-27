@@ -218,6 +218,17 @@ def exercise(path):
     print([truncate(item) for item in target], bytes(target))
 
     with open(path, "rb") as reader:
+        reader.seek(1)
+        try:
+            reader.seek(-1)
+        except OSError as error:
+            print(error.args, getattr(error, "errno", None), reader.tell())
+
+    if sys.platform != "win32":
+        with open("/dev/null", "rb") as reader:
+            print(reader.seek(-1), reader.tell())
+
+    with open(path, "rb") as reader:
         try:
             reader.seek(ClosingOffset(reader))
         except ValueError as error:

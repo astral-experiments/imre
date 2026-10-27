@@ -128,6 +128,20 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "registered_source_spec": {
+        "main.py": (
+            "from importlib.util import find_spec\nfrom importlib import import_module\n"
+            "first = find_spec('orchard.leaf')\nsecond = find_spec('.leaf', 'orchard')\n"
+            "print(first == second, first is second, first.parent, first.loader.is_package(first.name))\n"
+            "leaf = import_module('orchard.leaf')\npackage = import_module('orchard')\n"
+            "print(leaf.marker, find_spec(first.name) is leaf.__spec__, leaf.__spec__.loader is leaf.__loader__)\n"
+            "print(package.__path__ is package.__spec__.submodule_search_locations, "
+            "leaf.__file__ == first.origin, find_spec('orchard.missing') is None)\n"
+            "leaf.__spec__ = 'app spec'\nprint(find_spec('.leaf', 'orchard'))\n"
+        ),
+        "orchard/__init__.py": "print('parent init')\n",
+        "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
+    },
     "conditional_function_export": {
         "main.py": (
             "from helper import selected as chosen\nimport helper\n"

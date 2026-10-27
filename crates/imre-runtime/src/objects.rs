@@ -115,6 +115,32 @@ use super::{
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 
+/// Methods inherited from the native object type.
+pub(crate) const OBJECT_METHODS: &[&str] = &[
+    "__new__",
+    "__repr__",
+    "__getattribute__",
+    "__init__",
+    "__dir__",
+    "__hash__",
+    "__str__",
+    "__setattr__",
+    "__delattr__",
+    "__lt__",
+    "__le__",
+    "__eq__",
+    "__ne__",
+    "__gt__",
+    "__ge__",
+    "__reduce_ex__",
+    "__reduce__",
+    "__getstate__",
+    "__subclasshook__",
+    "__init_subclass__",
+    "__format__",
+    "__sizeof__",
+];
+
 /// Literal constructors share the same empty and Latin-1 owners as chr and indexing.
 pub(crate) fn literal_string(text: &str) -> StrOwner {
     self::text::owned_string(text)

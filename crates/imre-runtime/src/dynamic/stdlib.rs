@@ -93,6 +93,10 @@ pub(super) fn is_module(name: &str) -> bool {
             | "re"
             | "importlib"
             | "importlib.machinery"
+            | "importlib.util"
+            | "_frozen_importlib"
+            | "_frozen_importlib_external"
+            | "_imre_importlib"
             | "functools"
             | "_string"
             | "inspect"
@@ -284,8 +288,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
-        ("secrets", "choice") => ctx.builtin("secrets.choice"),
-        ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
+        ("_imre_importlib", "find_spec" | "get_code" | "loader_fields")
+        | ("_imre_dataclasses", "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -346,6 +350,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 })?;
             ctx.int(i64::from(value))
         }
+        ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
@@ -701,6 +706,33 @@ pub(super) fn call(
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_imre_importlib.") {
+        match (method, args, kwargs) {
+            ("find_spec", [fullname, original], []) => {
+                let fullname = ctx.str_value(*fullname)?.to_owned();
+                let original = ctx.str_value(*original)?.to_owned();
+                return ctx.find_spec(&fullname, &original);
+            }
+            ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
+            ("loader_fields", [object], []) => {
+                if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
+                    let fields = fields
+                        .clone()
+                        .into_iter()
+                        .map(|(key, value)| (ctx.text(key), value))
+                        .collect();
+                    return Ok(ctx.dict(fields));
+                }
+                return Err(Error::new("TypeError", "expected a source loader"));
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("invalid arguments to {name}"),
+                ));
+            }
+        }
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {

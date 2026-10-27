@@ -4,6 +4,7 @@ use super::Context;
 use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
 
 mod collections;
+mod dir;
 mod exceptions;
 mod float;
 pub(super) use float::from_numeric;
@@ -81,6 +82,7 @@ exception_kinds!(
 const FUNCTIONS: &[&str] = &[
     "len",
     "reversed",
+    "dir",
     "sorted",
     "ord",
     "chr",
@@ -833,6 +835,14 @@ pub(super) fn call(
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
+                Value::Complex(number) => {
+                    let magnitude = number.real.hypot(number.imag);
+                    if magnitude.is_infinite() && number.real.is_finite() && number.imag.is_finite()
+                    {
+                        return Err(Error::new("OverflowError", "absolute value too large"));
+                    }
+                    Ok(ctx.alloc(Value::Float(magnitude)))
+                }
                 Value::Bool(value) => Ok(ctx.int(i64::from(*value))),
                 Value::Int(number) => {
                     let zero = crate::Int::from(0);
@@ -962,6 +972,7 @@ pub(super) fn call(
             }
         }
         "pow" => power(ctx, args, kwargs),
+        "dir" => dir::call(ctx, args, kwargs),
         "sorted" => collections::sorted(ctx, args, kwargs),
         "enumerate" => {
             let [iterable, start] = bind(name, args, kwargs, ["iterable", "start"])?;
