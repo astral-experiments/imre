@@ -1086,9 +1086,16 @@ pub(super) fn call(
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
         "all" | "any" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let iter = ctx.iterator(args[0])?;
+            if !kwargs.is_empty() {
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
+            }
+            let [iterable] = args else {
+                return Err(type_error(format!(
+                    "{name}() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            let iter = ctx.iterator(*iterable)?;
             let stop_value = name == "any";
             while let Some(item) = ctx.next_item(iter)? {
                 if ctx.truth(item)? == stop_value {

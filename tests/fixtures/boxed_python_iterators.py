@@ -56,6 +56,11 @@ class FailedCursor:
 def current():
     values = iter([1, 0, 7])
     print(all([]), all(values), next(values))
+    for call in (lambda: all(), lambda: any([], []), lambda: all(iterable=[])):
+        try:
+            call()
+        except TypeError as error:
+            print(error.args)
 
 
     for source in (FailedIterable(), FailedCursor()):
