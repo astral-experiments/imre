@@ -65,7 +65,7 @@ fn isfile(ctx: &mut Context, path: Id) -> Result<bool> {
                 )
             })?;
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // fstat initializes the buffer only on success and never takes ownership of fd.
+        // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
         return Ok(unsafe {
             libc::fstat(fd, stat.as_mut_ptr()) == 0
                 && stat.assume_init().st_mode & libc::S_IFMT == libc::S_IFREG
