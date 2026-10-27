@@ -289,8 +289,14 @@ impl Context {
             Value::Raised(error) => &error.kind,
             Value::Traceback { .. } => "traceback",
             Value::PythonFrame { .. } => "frame",
-            Value::Module { .. } => "module",
-            Value::Instance { class, .. } => match self.heap.get(*class) {
+            Value::Module {
+                constructor: None, ..
+            } => "module",
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => match self.heap.get(*class) {
                 Value::Class { name, .. } | Value::Native(name) => name,
                 _ => "object",
             },
@@ -488,6 +494,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Imported modules are resolved separately from independently constructed ones.
+        constructor: Option<Id>,
     },
     Function {
         fields: super::function_fields::FunctionFields,
@@ -651,6 +659,14 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    pub(super) fn instance_class(&self) -> Option<Id> {
+        match self {
+            Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
+            _ => None,
+        }
+    }
+
     fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut Vec<Id>) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
@@ -754,9 +770,15 @@ impl Value {
                 receiver,
                 owner,
             } => visit.extend([*start, *receiver, *owner]),
-            Self::Module { scope, origin, .. } => {
+            Self::Module {
+                scope,
+                origin,
+                constructor,
+                ..
+            } => {
                 visit.push(*scope);
                 visit.extend(origin);
+                visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
             Self::Function {

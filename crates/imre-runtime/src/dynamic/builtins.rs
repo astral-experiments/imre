@@ -736,6 +736,7 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "module" => ctx.module_method(method, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -806,6 +807,12 @@ pub(super) fn call(
                 receiver,
                 explicit: true,
             }))
+        }
+        "module" => {
+            let class = ctx.builtin("module");
+            let instance = ctx.allocate_module(class);
+            ctx.init_module(instance, args, kwargs)?;
+            Ok(instance)
         }
         "object" => {
             if !args.is_empty() || !kwargs.is_empty() {

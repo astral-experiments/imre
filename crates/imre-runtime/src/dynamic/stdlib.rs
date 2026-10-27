@@ -304,6 +304,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("traceback", "format_exc" | "format_exception" | "print_exc" | "print_exception") => {
             ctx.builtin(&format!("traceback.{name}"))
         }
+        ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "TracebackType") => ctx.builtin("traceback"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "FrameType") => ctx.builtin("frame"),

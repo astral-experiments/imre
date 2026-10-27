@@ -38,7 +38,12 @@ impl Context {
                     .copied(),
                 _ => None,
             },
-            Value::Native(kind) if matches!(kind.as_str(), "dict" | "int" | "str" | "property") => {
+            Value::Native(kind)
+                if matches!(
+                    kind.as_str(),
+                    "dict" | "int" | "str" | "property" | "module"
+                ) =>
+            {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             _ => None,
@@ -178,10 +183,7 @@ impl Context {
 
     /// Special methods are looked up on the type, even if the instance shadows them.
     pub(super) fn slot(&self, object: Id, name: &str) -> Option<Id> {
-        let Value::Instance { class, .. } = self.heap.get(object) else {
-            return None;
-        };
-        self.class_attr(*class, name)
+        self.class_attr(self.heap.get(object).instance_class()?, name)
     }
 
     /// Dict copying uses raw entries for a dict with its original iterator.
@@ -275,7 +277,11 @@ impl Context {
 
     pub(super) fn bound_slot(&mut self, object: Id, name: &str) -> Result<Option<Id>> {
         let class = match self.heap.get(object) {
-            Value::Instance { class, .. } => *class,
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => *class,
             Value::Raised(Error {
                 class: Some(class), ..
             }) if matches!(name, "__dir__" | "__str__") => *class,
@@ -361,6 +367,7 @@ impl Context {
                             | "BaseException.__init__"
                             | "ImportError.__init__"
                             | "StopIteration.__init__"
+                            | "module.__init__"
                             | "int.to_bytes"
                             | "list.index"
                             | "list.pop"
@@ -390,7 +397,7 @@ impl Context {
         Ok(value)
     }
 
-    fn instance_attribute(
+    pub(super) fn instance_attribute(
         &mut self,
         object: Id,
         class: Id,
@@ -640,7 +647,11 @@ impl Context {
     /// Return the actual class independently of an instance's Python-level __class__ attribute.
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
-            Value::Instance { class, .. } => Ok(*class),
+            Value::Instance { class, .. }
+            | Value::Module {
+                constructor: Some(class),
+                ..
+            } => Ok(*class),
             Value::NamedTuple {
                 class: Some("time.struct_time"),
                 ..
@@ -686,8 +697,8 @@ impl Context {
         {
             return true;
         }
-        if let Value::Instance { class: actual, .. } = self.heap.get(value)
-            && self.subclass(*actual, class)
+        if let Some(actual) = self.heap.get(value).instance_class()
+            && self.subclass(actual, class)
         {
             return true;
         }
@@ -1066,6 +1077,13 @@ impl Context {
                     _ => 2,
                 }]);
             }
+            Value::Native(ref class) if class == "module" => match name {
+                "__doc__" => return Ok(self.text(module_type::DOC)),
+                "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
+                "__name__" | "__qualname__" => return Ok(self.text("module")),
+                "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
             Value::WeakrefDescriptor(owner) => match name {
                 "__objclass__" => return Ok(owner),
                 "__name__" => return Ok(self.text("__weakref__")),
@@ -1502,10 +1520,17 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Ok(self.module_globals(scope));
+                }
+                if name == "__class__" {
+                    return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
+                }
+                if let Some(class) = constructor {
+                    return self.module_instance_attribute(obj, class, scope, name);
                 }
                 if let Some(value) = self.scope_name(scope, name) {
                     return Ok(value);
@@ -1750,7 +1775,12 @@ impl Context {
             Value::StaticMethod { dictionary, .. } => {
                 super::static_method::update_attribute(self, obj, dictionary, name, None)
             }
-            Value::Module { scope, .. } => {
+            Value::Module {
+                scope, constructor, ..
+            } => {
+                if constructor.is_some() {
+                    self.update_module_annotations(scope, name, None)?;
+                }
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
@@ -2098,15 +2128,19 @@ impl Context {
             Value::Module {
                 name: module,
                 scope,
+                constructor,
                 ..
             } => {
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
-                if module == "sys" && name == "path" {
+                if constructor.is_none() && module == "sys" && name == "path" {
                     self.sys_path = value;
                 }
                 let scope = *scope;
+                if constructor.is_some() {
+                    self.update_module_annotations(scope, name, Some(value))?;
+                }
                 self.bind(scope, name, value);
             }
             Value::Instance { class, fields, .. } if Some(*class) != object_class => {
@@ -2301,6 +2335,7 @@ impl Context {
                                 | "bytes"
                                 | "bytearray"
                                 | "range"
+                                | "module"
                                 | "slice"
                                 | "function"
                                 | "method"
@@ -2497,6 +2532,8 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
+                } else if self.has_base(callable, "module") {
+                    self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
                     self.new_string(kind, callable, &args, &kwargs)?
                 } else if float_subclass {
